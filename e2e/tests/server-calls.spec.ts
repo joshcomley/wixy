@@ -281,3 +281,48 @@ test("microphone rejection explains setup failure on both devices with safe copy
     await expect(b.locator(".wx-srv-call-notice")).toBeHidden();
   } finally { await Promise.all([caller.close(), callee.close()]); }
 });
+
+test("a ringing call keeps both chats unlocked, then the idle countdown restarts when the ring ends", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pa.locator(".wx-srv-call")).toContainText("Calling");
+    // No activity on either device for longer than the 10 s idle lock: the ring pauses it.
+    await pa.waitForTimeout(12_000);
+    for (const page of [pa, pb]) await expect(page.locator(".wx-srv-thread")).toBeVisible();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pb.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true })).toBeVisible();
+    await pb.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true }).click();
+    await expect(pa.locator(".wx-srv-call")).toContainText("Call ended");
+    await expect(pa.locator(".wx-srv-thread")).toBeVisible(); // a FRESH countdown, not an instant lock
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0, { timeout: 14_000 }); // the untouched device idle-locks
+  } finally { await Promise.all([a.close(), b.close()]); }
+});
+
+test("Escape during a ring still locks at once and ends the call", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await pb.keyboard.press("Escape");
+    await expect(pb.locator(".wx-srv-thread")).toHaveCount(0);
+    await expect(pa.locator(".wx-srv-call")).toContainText(/ended|disconnected|unavailable/i);
+    await pa.keyboard.press("Escape");
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0);
+  } finally { await Promise.all([a.close(), b.close()]); }
+});

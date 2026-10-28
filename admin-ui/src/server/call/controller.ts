@@ -102,6 +102,7 @@ export function createCallController(deps: CallDeps) {
     dialog.hidden = true;
     if (!activateAudio()) return;
     deps.onBusy(true);
+    holdCall(); // Pause the idle countdown from the moment the invite goes out (Inv 55).
     outgoingRequest = crypto.randomUUID();
     if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: selectedTarget })) {
       end("The call couldn't be sent. Please try again.", true);
@@ -164,6 +165,10 @@ export function createCallController(deps: CallDeps) {
   let availablePeers: { id: string; label: string }[] = [];
   let callUntil = 0;
 
+  /** The one `voiceCall` idle pause for this call attempt: taken when an invite is sent or an incoming
+   * call is shown, kept through ringing, connecting and connected, released only by `teardownCall`
+   * (every end, failure, socket loss, detach). The server bounds the attempt (30 s ring, 20 s setup). */
+  function holdCall(): void { releaseCall ??= hooks.suspend("voiceCall"); }
   function clearFailure(): void {
     noticeEpoch++;
     noticeText.textContent = "";
@@ -457,6 +462,7 @@ export function createCallController(deps: CallDeps) {
       } else outgoingRequest = null;
       callId = m["callId"];
       state = m["type"];
+      holdCall(); // A ringing call (either side) keeps the chat unlocked until it is answered or ends.
       clearFailure();
       if (state === "incoming") diagnostics.reset();
       diagnostics.record({ step: state === "incoming" ? "incoming" : "outgoing" });
@@ -484,7 +490,7 @@ export function createCallController(deps: CallDeps) {
       lastPulse = win.performance.now();
       callUntil = win.performance.now() + 7_200_000;
       audio.start();
-      releaseCall = hooks.suspend("voiceCall");
+      holdCall(); // Already held since the invite/ring; a no-op here, so there is no gap.
       status.textContent = "On a voice call";
       pulse();
     } else if (m["type"] === "capture" && typeof m["lease"] === "number" && state === "connected") {

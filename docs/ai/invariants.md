@@ -131,9 +131,11 @@ contains no audio/content, identities, labels, connection/call IDs, credentials,
 URLs or exception messages/stacks, is never automatically uploaded/persisted by
 the app, and resets on new consent or detach. This is not a call-history store.
 
-Connected calls, including silence/mute, hold one `voiceCall` idle suspension. Ending
-releases it exactly once and restarts the full idle countdown. Ringing does not hold
-it. Manual/actual lock, shield detach and disposal synchronously stop local capture
+A call attempt, from invite sent / incoming call shown through ringing, connecting and
+connected (including silence/mute), holds one `voiceCall` idle suspension with no gap
+(decisions/00197). Any end releases it exactly once and restarts the full idle countdown.
+Only the idle countdown is paused: Escape, panic, multi-tap, tab/screen policies, token
+expiry and 401 still lock at once. Manual/actual lock, shield detach and disposal synchronously stop local capture
 and playback, even if permission resolves later. Existing tab/screen policies remain
 authoritative. Reconnection and token replacement never resume a call without consent.
 Remote stop across a network partition is bounded by leases/liveness, not instantaneous.
