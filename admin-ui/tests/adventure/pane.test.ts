@@ -4,6 +4,7 @@ import { ServerLockedError } from "../../src/server/api/http";
 import type { Message } from "../../src/server/api/messages";
 import { createGameTabs, type GameTabs } from "../../src/server/gameTabs";
 import type { ItemChat } from "../../src/server/itemChat";
+import type { GameFloat } from "../../src/server/gameFloat";
 import type { LockCause } from "../../src/server/types";
 import type { AdventureLiveFrame, AdventureOutcome, AdventureView, SettingsResult } from "../../src/server/adventure/api";
 import {
@@ -82,7 +83,8 @@ interface Rig {
   renderers: StubRenderer[];
   startNext: ReturnType<typeof vi.fn>;
   openBank: ReturnType<typeof vi.fn>;
-  strip: { element: HTMLElement; draw: ReturnType<typeof vi.fn> };
+  /** The chat overlay the pane embeds (a stub of gameFloat.ts) and the options it was created with. */
+  overlay: { element: HTMLElement; options: () => { fabLabel: string; popupTitle: string; item(): number | null } };
   clock: { t: number };
   names: { viewer: string | null; partner: string | null };
   messages: Map<number, Message>;
@@ -122,10 +124,17 @@ function rig(options: { viewer?: string | null; loadWorld?: () => Promise<World>
   const renderers: StubRenderer[] = [];
   const messages = new Map<number, Message>();
   const names = { viewer: options.viewer === undefined ? "Ann" : options.viewer, partner: "Bea" as string | null };
-  const strip = { element: document.createElement("div"), draw: vi.fn() };
+  const overlayElement = document.createElement("div");
+  overlayElement.className = "wx-srv-float";
+  let overlayOptions: { fabLabel: string; popupTitle: string; item(): number | null } | null = null;
+  const float = {
+    createOverlay: (options: { fabLabel: string; popupTitle: string; item(): number | null }) => {
+      overlayOptions = options;
+      return overlayElement;
+    },
+  } as unknown as GameFloat;
   const itemChat: ItemChat = {
     popup: document.createElement("div"),
-    createStrip: () => strip,
     openPopup: vi.fn(),
     closePopup: vi.fn(),
     isPopupOpen: () => false,
@@ -158,7 +167,7 @@ function rig(options: { viewer?: string | null; loadWorld?: () => Promise<World>
     win: window,
     model,
     tabs,
-    itemChat,
+    float,
     hooks,
     api,
     loadWorld: options.loadWorld ?? (() => Promise.resolve(world)),
@@ -229,7 +238,7 @@ function rig(options: { viewer?: string | null; loadWorld?: () => Promise<World>
     renderers,
     startNext,
     openBank,
-    strip,
+    overlay: { element: overlayElement, options: () => overlayOptions! },
     clock,
     names,
     messages,
@@ -332,7 +341,10 @@ describe("adventure pane: registration and the first draw", () => {
     expect(r.fact("phase")).toBe("idle");
     expect(r.text(".wx-srv-adv-hint-main")).toBe("Swipe sideways to spin");
     expect(r.text(".wx-srv-adv-hint-sub")).toBe("Your turn");
-    expect(r.strip.draw).toHaveBeenCalledWith(7);
+    // The pane embeds the chat overlay over the scrolling column, aimed at the open round.
+    expect(r.overlay.element.parentElement).toBe(r.q(".wx-srv-adv-body"));
+    expect(r.overlay.options().item()).toBe(7);
+    expect(r.overlay.options().fabLabel).toBe("Open this destination's chat");
   });
 
   it("a map that cannot be loaded says so and a tap on the message tries again", async () => {
@@ -719,7 +731,7 @@ describe("adventure pane: the place and the holiday pack", () => {
     expect(r.q(".wx-srv-adv-card").getAttribute("data-pack")).toBe("pending");
   });
 
-  it("says holiday packs are unavailable on this server, and Bank / No thanks still work", async () => {
+  it("says holiday packs are unavailable on this server, and Yay / Nay still work", async () => {
     const r = rig();
     r.api.decide.mockResolvedValue({ ok: false, kind: "unavailable" });
     await r.open(chosen({ pack: { state: "unavailable", data: null, error: null, canRetry: false, images: "none", pictures: null } }));
@@ -729,24 +741,33 @@ describe("adventure pane: the place and the holiday pack", () => {
     expect(r.api.decide).toHaveBeenCalledWith(7, "bank");
   });
 
-  it("'Bank this ✓' banks; the pane then shows the outcome and Play again", async () => {
+  it("'Yay' banks; the pane then shows the outcome and Play again", async () => {
     const r = rig();
     r.api.decide.mockImplementation(async (seq, decision) => ({ ok: true, view: chosen({ seq, rev: 9, decidedBy: "Ann" }, decision === "bank" ? "banked" : "rejected") }) as AdventureOutcome);
     await r.open(chosen({ pack: readyPack() }));
     r.advance(50);
-    expect(r.text(".wx-srv-adv-bank-this")).toBe("Bank this ✓");
+    // The decision lives on the LEFT of the title row (no title text, no big dock buttons).
+    expect(r.text(".wx-srv-adv-bank-this")).toBe("Yay");
+    expect(r.q(".wx-srv-adv-bank-this").getAttribute("aria-label")).toBe("Yay: bank this trip");
+    expect(r.q(".wx-srv-adv-pass").getAttribute("aria-label")).toBe("Nay: not this one");
+    expect(r.text(".wx-srv-adv-pass")).toBe("Nay");
+    expect(r.q(".wx-srv-adv-bar-decide").hidden).toBe(false);
+    expect(r.q(".wx-srv-adv-bar .wx-srv-adv-bank-this")).toBeTruthy();
+    expect(r.q(".wx-srv-adv-bar").textContent).not.toContain("Adventure Time");
+    expect(r.q(".wx-srv-adv-dock").querySelector(".wx-srv-adv-bank-this, .wx-srv-adv-pass")).toBeNull();
     r.q(".wx-srv-adv-bank-this").click();
     expect(r.q<HTMLButtonElement>(".wx-srv-adv-bank-this").disabled).toBe(true); // while it is being sent
     await flush();
     r.advance(50);
     expect(r.fact("state")).toBe("banked");
+    expect(r.q(".wx-srv-adv-bar-decide").hidden).toBe(true); // nothing left to decide: the row is just the right-hand buttons
     expect(r.q(".wx-srv-adv-card").getAttribute("data-action")).toBe("again");
     expect(r.text(".wx-srv-adv-outcome")).toBe("You banked Alpha: it's in your Holiday bank.");
     r.q(".wx-srv-adv-again").click();
     expect(r.startNext).toHaveBeenCalledTimes(1);
   });
 
-  it("'No thanks' asks once; 'Keep it' backs out, 'Never show again' rejects the place", async () => {
+  it("'Nay' asks once; 'Keep it' backs out, 'Never show again' rejects the place", async () => {
     const r = rig();
     r.api.decide.mockImplementation(async (seq) => ({ ok: true, view: chosen({ seq, rev: 9, decidedBy: "Ann" }, "rejected") }) as AdventureOutcome);
     await r.open(chosen({ pack: readyPack() }));
@@ -754,6 +775,7 @@ describe("adventure pane: the place and the holiday pack", () => {
     r.q(".wx-srv-adv-pass").click();
     r.advance(50);
     expect(r.q(".wx-srv-adv-card").getAttribute("data-action")).toBe("ask");
+    expect(r.q(".wx-srv-adv-bar-decide").hidden).toBe(true); // the question replaces Yay / Nay while it is open
     expect(r.text(".wx-srv-adv-ask")).toBe("Never show Alpha again?");
     expect(r.api.decide).not.toHaveBeenCalled();
     r.q(".wx-srv-adv-keep").click();

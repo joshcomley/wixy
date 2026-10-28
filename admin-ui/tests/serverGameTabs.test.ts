@@ -564,7 +564,6 @@ describe("game tabs with the real item chat", () => {
     const layout = vi.fn();
     const itemChat = createItemChat({
       document,
-      isMine: () => false,
       gameMessages: () => [],
       gameEchoes: () => [],
       renderBubble: () => document.createElement("div"),

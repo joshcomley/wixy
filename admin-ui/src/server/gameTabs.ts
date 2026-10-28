@@ -1,11 +1,15 @@
 // The game TABS of the Server chat (spec/server-chat/08-adventure-time.md §5.1; extracted from
 // wyrGame.ts, workspace 00045, decisions/00184). When a game is opened the chat gets a tab bar at
 // the bottom — "Chat" plus one tab per OPEN game, in registration order — and the active game's
-// pane takes the thread's place:
+// pane takes the thread's place, FULL SCREEN (decisions/00194):
 //
-//   [ the game's pane, full height ]
-//   [ the chat composer — the ordinary one, now sending into this game's item ]
+//   [ the game's pane, from the very top of the chat view to the tab bar ]
 //   [ Chat | WYR | Adventure ]                      <- this bar
+//
+// While a game tab shows, the chat header and the chat composer are hidden (the thread does this on
+// every layout change, keyed on `activeTab()`): the conversation is reached through the pane's chat
+// FAB, floating message and quick reply (`gameFloat.ts`) and the pop-up item chat (`itemChat.ts`).
+// The one exception is a call that is not idle, whose controls live in that header (Inv 55).
 //
 // With only the Chat tab left (no game open) the bar disappears. ONE GAME AT A TIME (operator,
 // 2026-10-28: "it would replace the Would You Rather tab… there's only ever two tabs at the bottom"):
@@ -53,6 +57,8 @@ export interface GameTabsDeps {
   readonly itemChat: Pick<ItemChat, "isPopupOpen" | "popupSeq" | "closePopup" | "refresh">;
   /** The visible tab, or whether a game is open, changed: the thread adjusts its own layout. */
   onLayoutChange(): void;
+  /** Data changed and the visible pane was redrawn: the chat FAB and floating message follow. */
+  onRefresh?(): void;
 }
 
 export interface GameTabs {
@@ -74,7 +80,8 @@ export interface GameTabs {
   /** The open item of the game, or null. */
   seqOf(key: GameKey): number | null;
   /** The item a message sent right now belongs to: the active game's item while a game tab is
-   * showing, else the pop-up's item while the pop-up is open, else null (the main chat). */
+   * showing, else the pop-up's item while the pop-up is open, else null (the main chat). The quick
+   * reply (`gameFloat.ts`) overrides this for as long as it is open — the thread asks it first. */
   chatTarget(): number | null;
   /** The main chat got a message while a game tab is showing: dot the Chat tab. */
   noteChatActivity(): void;
@@ -298,6 +305,7 @@ export function createGameTabs(deps: GameTabsDeps): GameTabs {
     const current = activeEntry();
     if (current !== undefined && current.seq !== null) current.game.refresh(current.seq);
     itemChat.refresh();
+    deps.onRefresh?.();
   }
 
   return {

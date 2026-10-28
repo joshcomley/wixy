@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Message, SendMessageResult } from "../src/server/api/messages";
 import type { ServerIdentity } from "../src/server/identity";
@@ -379,7 +382,9 @@ describe("adventure: the game chat", () => {
     send(thread, "about the trip");
     await flush();
     expect(sendMessage.mock.calls[0]![1]).toMatchObject({ text: "about the trip", wyrSeq: 9 });
-    expect(thread.element.querySelector(".wx-srv-adv .wx-srv-game-mini")!.textContent).toContain("hi"); // the shared mini chat
+    // The destination chat is the FAB's pop-up now (the strip is gone).
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-adv .wx-srv-float-fab")!.click();
+    expect(thread.element.querySelector(".wx-srv-gamepop")!.textContent).toContain("hi");
     thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
     sendMessage.mockClear();
     sendMessage.mockResolvedValue({ ok: true, message: chatMessage(21, null, "hello", null, "Josh") } satisfies SendMessageResult);
@@ -456,7 +461,8 @@ describe("adventure: the Holiday bank", () => {
     expect(getHistory).toHaveBeenCalledTimes(2);
     expect(getHistory.mock.calls[1]![1]).toMatchObject({ before: 60 });
     expect(tabs(thread)).toEqual(["Chat", "Adventure Time game"]);
-    expect(thread.element.querySelector(".wx-srv-adv .wx-srv-game-mini")!.textContent).toContain("about that trip");
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-adv .wx-srv-float-fab")!.click();
+    expect(thread.element.querySelector(".wx-srv-gamepop")!.textContent).toContain("about that trip");
     thread.teardown();
   });
 
@@ -553,3 +559,100 @@ describe("adventure: live trail, lock and wipe", () => {
 
 void decideAdventure;
 void wire;
+
+describe("game mode: full screen, floating message and quick reply", () => {
+  const chatCss = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "src", "server", "chat.css"), "utf-8").replace(/\/\*[\s\S]*?\*\//g, "");
+
+  async function inGame() {
+    createAdventure.mockResolvedValue({ ok: true, message: adventureMessage(9) });
+    getAdventure.mockResolvedValue(answer(view("spin_lng", { seq: 9 })));
+    const mounted = await mount();
+    startAdventure(mounted.thread);
+    await flush();
+    return mounted;
+  }
+  const fab = (thread: ServerThreadView) => thread.element.querySelector<HTMLButtonElement>(".wx-srv-adv .wx-srv-float-fab")!;
+  const bubble = (thread: ServerThreadView) => thread.element.querySelector<HTMLElement>(".wx-srv-adv .wx-srv-float-bubble")!;
+  const quick = (thread: ServerThreadView) => thread.element.querySelector<HTMLElement>(".wx-srv-quick")!;
+
+  it("a game tab puts the thread in game mode (header and composer hidden by CSS); the Chat tab takes it back", async () => {
+    const { thread } = await inGame();
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(true);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(false);
+    // jsdom lays nothing out, so the rule itself is what is guarded: header, reply bar and a composer that is at home.
+    expect(chatCss).toMatch(/\.wx-srv-in-game > \.wx-srv-thread-header,\s*\.wx-srv-in-game > \.wx-srv-reply-bar,\s*\.wx-srv-in-game > \.wx-chat-composer \{\s*display: none;/);
+    thread.teardown();
+  });
+
+  it("a call that is not idle keeps the header (and its call controls) in game mode; idle gives it up again", async () => {
+    const { thread } = await inGame();
+    expect(thread.element.classList.contains("wx-srv-call-live")).toBe(false);
+    thread.setCallLive(true);
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(true);
+    expect(thread.element.classList.contains("wx-srv-call-live")).toBe(true);
+    expect(chatCss).toMatch(/\.wx-srv-in-game\.wx-srv-call-live > \.wx-srv-thread-header \{\s*display: flex;/);
+    // The header that holds the call controls is the same element the CSS rule keeps visible.
+    expect(thread.element.querySelector(".wx-srv-thread-header")).not.toBeNull();
+    thread.setCallLive(false);
+    expect(thread.element.classList.contains("wx-srv-call-live")).toBe(false);
+    thread.teardown();
+  });
+
+  it("the other person's message in the destination chat floats, dots the FAB, and a tap opens the quick reply that sends into the destination", async () => {
+    const { thread } = await inGame();
+    sendMessage.mockResolvedValue({ ok: true, message: chatMessage(31, 9, "on my way", "adventure", "Josh") } satisfies SendMessageResult);
+    thread.handleStreamEvent({ type: "message", message: chatMessage(30, 9, "where to?", "adventure", "Rose") });
+    expect(bubble(thread).hidden).toBe(false);
+    expect(bubble(thread).textContent).toContain("where to?");
+    expect(fab(thread).getAttribute("aria-label")).toContain("new message");
+    bubble(thread).querySelector<HTMLButtonElement>(".wx-srv-float-open")!.click();
+    expect(quick(thread).hidden).toBe(false);
+    expect(quick(thread).querySelector(".wx-srv-quick-composer textarea")).not.toBeNull(); // the ONE composer moved in
+    send(thread, "on my way");
+    await flush();
+    expect(sendMessage.mock.calls[0]![1]).toMatchObject({ text: "on my way", wyrSeq: 9 });
+    expect(quick(thread).hidden).toBe(true); // a successful send closes it
+    expect(fab(thread).getAttribute("aria-label")).not.toContain("new message");
+    thread.teardown();
+  });
+
+  it("a main-chat message floats (with the Chat label) and its quick reply goes to the main chat", async () => {
+    const { thread } = await inGame();
+    sendMessage.mockResolvedValue({ ok: true, message: chatMessage(33, null, "yes!", null, "Josh") } satisfies SendMessageResult);
+    thread.handleStreamEvent({ type: "message", message: chatMessage(32, null, "dinner at 8?", null, "Rose") });
+    expect(bubble(thread).hidden).toBe(false);
+    expect(bubble(thread).querySelector<HTMLElement>(".wx-srv-float-tag")!.hidden).toBe(false);
+    expect(fab(thread).getAttribute("aria-label")).not.toContain("new message"); // the FAB's dot is for the destination's chat
+    bubble(thread).querySelector<HTMLButtonElement>(".wx-srv-float-open")!.click();
+    send(thread, "yes!");
+    await flush();
+    expect(sendMessage.mock.calls[0]![1]).not.toHaveProperty("wyrSeq");
+    expect(quick(thread).hidden).toBe(true);
+    thread.teardown();
+  });
+
+  it("my own message never floats, and the FAB opens the destination's pop-up chat", async () => {
+    const { thread } = await inGame();
+    thread.handleStreamEvent({ type: "message", message: chatMessage(34, 9, "mine", "adventure", "Josh") });
+    expect(bubble(thread).hidden).toBe(true);
+    fab(thread).click();
+    expect(thread.element.querySelector<HTMLElement>(".wx-srv-gamepop")!.hidden).toBe(false);
+    expect(thread.element.querySelector(".wx-srv-gamepop-title")!.textContent).toBe("Adventure chat");
+    thread.teardown();
+  });
+
+  it("nothing floats on the Chat tab, and locking clears the floating message and the quick reply", async () => {
+    const { thread } = await inGame();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    thread.handleStreamEvent({ type: "message", message: chatMessage(35, null, "hello", null, "Rose") });
+    expect(bubble(thread)?.hidden ?? true).toBe(true);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-adventure")!.click();
+    thread.handleStreamEvent({ type: "message", message: chatMessage(36, 9, "hi", "adventure", "Rose") });
+    bubble(thread).querySelector<HTMLButtonElement>(".wx-srv-float-open")!.click();
+    expect(quick(thread).hidden).toBe(false);
+    thread.detach();
+    expect(quick(thread).hidden).toBe(true);
+    thread.teardown();
+  });
+});
