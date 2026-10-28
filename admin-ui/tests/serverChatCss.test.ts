@@ -68,6 +68,8 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-adv-viewer",
   "wx-srv-adv-viewer-prev",
   "wx-srv-adv-viewer-next",
+  "wx-srv-adv-viewer-img",
+  "wx-srv-adv-viewer-tile",
   "wx-srv-adv-pk-thumb",
   "wx-srv-adv-hero-pic",
   "wx-srv-adv-mcard-map",

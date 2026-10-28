@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parsePack, type PackPicture, type PackView } from "../../src/server/adventure/api";
 import { createPackPanel, type PackPanel, type PackPanelDeps } from "../../src/server/adventure/packView";
-import { DEST_A, NO_PACK, readyPack } from "./adventureFixtures";
+import { DEST_A, NO_PACK, dishesPack, readyPack } from "./adventureFixtures";
 
 function pic(name: string, over: Partial<PackPicture> = {}): PackPicture {
   return { thumbUrl: `/m/${name}-t.jpg`, fullUrl: `/m/${name}.jpg`, credit: `${name} / CC BY`, page: `https://commons.example/${name}`, caption: `The ${name}`, ...over };
@@ -34,7 +34,7 @@ describe("the holiday pack panel", () => {
     expect(root.querySelector(".wx-srv-adv-pk-place")?.textContent).toBe("Alpha, Aland");
     expect(root.querySelector(".wx-srv-adv-pk-headline")?.textContent).toBe("Sun and tiles");
     expect(root.querySelector(".wx-srv-adv-pk-summary")?.textContent).toBe("A warm place.");
-    expect([...root.querySelectorAll(".wx-srv-adv-pk-title")].map((n) => n.textContent)).toEqual(["Food", "Best time to go", "Getting there", "Travel advice", "Sources"]);
+    expect([...root.querySelectorAll(".wx-srv-adv-pk-title")].map((n) => n.textContent)).toEqual(["Where to eat", "Best time to go", "Getting there", "Travel advice", "Sources"]);
     expect(root.querySelector(".wx-srv-adv-pk-item-name")?.textContent).toBe("Tarts");
     expect(root.querySelector(".wx-srv-adv-pk-item-detail")?.textContent).toBe("Custard.");
     expect(root.querySelector(".wx-srv-adv-pk-food")).not.toBeNull();
@@ -280,5 +280,203 @@ describe("the full-screen photo viewer", () => {
     panel.reset();
     expect(panel.isViewerOpen()).toBe(false);
     expect(panel.element.textContent).toBe("");
+  });
+});
+
+describe("Local food to try: the dishes grid", () => {
+  const dishPic = (name: string): PackPicture => pic(name, { caption: `The ${name}`, credit: `${name} / CC BY-SA` });
+  /** Photos for dishes 0, 1 and 3; dishes 2 and 4 have none. */
+  const photos = (images: PackView["images"] = "done"): PackView =>
+    dishesPack({
+      images,
+      pictures: {
+        hero: [pic("bay")],
+        items: new Map([
+          ["dishes:0", dishPic("pastel")],
+          ["dishes:1", dishPic("caldo")],
+          ["dishes:3", dishPic("ginjinha")],
+        ]),
+      },
+    });
+  const tiles = (panel: PackPanel): HTMLElement[] => [...panel.element.querySelectorAll<HTMLElement>(".wx-srv-adv-dish")];
+
+  it("comes straight after the hero carousel and the summary, before every other section; food is 'Where to eat'", () => {
+    const { panel } = make();
+    render(panel, photos());
+    const content = panel.element.firstElementChild!;
+    const order = [...content.children].map((c) => c.className.split(" ")[0]);
+    expect(order.slice(0, 5)).toEqual(["wx-srv-adv-hero", "wx-srv-adv-pk-place", "wx-srv-adv-pk-headline", "wx-srv-adv-pk-summary", "wx-srv-adv-dishes"]);
+    expect([...panel.element.querySelectorAll(".wx-srv-adv-pk-title")].map((n) => n.textContent)).toEqual([
+      "Local food to try",
+      "Where to eat",
+      "Best time to go",
+      "Getting there",
+      "Travel advice",
+      "Sources",
+    ]);
+    // The dishes are not ALSO drawn as a list card.
+    expect(panel.element.querySelector(".wx-srv-adv-pk-dishes")).toBeNull();
+  });
+
+  it("is shown first even when the section is not first in the list, and exactly once", () => {
+    const { panel } = make();
+    const pack = dishesPack();
+    const data = pack.data!;
+    const [dishes, ...rest] = data.sections;
+    render(panel, { ...pack, data: { ...data, sections: [...rest, dishes!] } });
+    expect(panel.element.querySelectorAll(".wx-srv-adv-dishes")).toHaveLength(1);
+    expect(panel.element.querySelector(".wx-srv-adv-summary + .wx-srv-adv-dishes, .wx-srv-adv-pk-summary + .wx-srv-adv-dishes")).not.toBeNull();
+  });
+
+  it("is a photo-forward grid: a square photo, the dish's name and one line of what it is, per dish", () => {
+    const { panel } = make();
+    render(panel, photos());
+    const all = tiles(panel);
+    expect(all).toHaveLength(5);
+    expect(panel.element.querySelector(".wx-srv-adv-dish-grid")).not.toBeNull();
+    const first = all[0]!;
+    expect(first.querySelector(".wx-srv-adv-dish-frame img")?.getAttribute("src")).toBe("/m/pastel-t.jpg"); // the small rendition
+    expect(first.querySelector(".wx-srv-adv-dish-name")?.textContent).toBe("Pastel de nata");
+    expect(first.querySelector(".wx-srv-adv-dish-detail")?.textContent).toBe("A custard tart with a blistered top, best warm with cinnamon.");
+    expect(first.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    expect(first.getAttribute("aria-label")).toContain("Pastel de nata");
+    expect(first.classList.contains("wx-srv-adv-dish-nophoto")).toBe(false);
+  });
+
+  it("a dish with no photo is a tasteful text tile in the same grid (name below, its description on the tile)", () => {
+    const { panel } = make();
+    render(panel, photos("done"));
+    const bacalhau = tiles(panel)[2]!;
+    expect(bacalhau.classList.contains("wx-srv-adv-dish-nophoto")).toBe(true);
+    expect(bacalhau.querySelector(".wx-srv-adv-dish-frame")?.classList.contains("wx-srv-adv-dish-text")).toBe(true);
+    expect(bacalhau.querySelector("img")).toBeNull();
+    expect(bacalhau.querySelector(".wx-srv-adv-dish-blurb")?.textContent).toBe("Salt cod baked in a creamy sauce.");
+    expect(bacalhau.querySelector(".wx-srv-adv-dish-name")?.textContent).toBe("Bacalhau com natas");
+    // The grid keeps its place: the five tiles are all there, in the server's order.
+    expect(tiles(panel).map((t) => t.querySelector(".wx-srv-adv-dish-name")?.textContent)).toEqual(["Pastel de nata", "Caldo verde", "Bacalhau com natas", "Ginjinha", "Bifana"]);
+  });
+
+  it("while the server is still finding photos a dish without one shimmers (not the text tile yet)", () => {
+    const { panel } = make();
+    render(panel, photos("pending"));
+    const bacalhau = tiles(panel)[2]!;
+    expect(bacalhau.classList.contains("wx-srv-adv-dish-pending")).toBe(true);
+    expect(bacalhau.querySelector(".wx-srv-adv-pic-pending")).not.toBeNull();
+    expect(bacalhau.querySelector(".wx-srv-adv-dish-blurb")).toBeNull();
+    expect(bacalhau.querySelector(".wx-srv-adv-dish-name")?.textContent).toBe("Bacalhau com natas"); // the words are already readable
+    // A dish that has its photo already shows it.
+    expect(tiles(panel)[0]!.querySelector("img")).not.toBeNull();
+    // With the search finished the shimmer becomes the text tile.
+    render(panel, photos("done"));
+    expect(tiles(panel)[2]!.classList.contains("wx-srv-adv-dish-nophoto")).toBe(true);
+  });
+
+  it("lays out with no pictures at all (an older server): every dish is a text tile", () => {
+    const { panel } = make();
+    render(panel, dishesPack({ images: "none", pictures: null }));
+    expect(tiles(panel)).toHaveLength(5);
+    expect(tiles(panel).every((t) => t.classList.contains("wx-srv-adv-dish-nophoto"))).toBe(true);
+  });
+
+  it("a pack without a dishes section is still valid and shows none of this", () => {
+    const { panel } = make();
+    render(panel, readyPack());
+    expect(panel.element.querySelector(".wx-srv-adv-dishes")).toBeNull();
+    expect(panel.element.querySelector(".wx-srv-adv-pk-headline")?.textContent).toBe("Sun and tiles");
+  });
+
+  it("a photo that fails to load turns its dish into the text tile, not a hole", () => {
+    const { panel } = make();
+    render(panel, photos());
+    const first = tiles(panel)[0]!;
+    first.querySelector("img")?.dispatchEvent(new Event("error"));
+    expect(first.classList.contains("wx-srv-adv-dish-nophoto")).toBe(true);
+    expect(first.querySelector("img")).toBeNull();
+    expect(first.querySelector(".wx-srv-adv-dish-blurb")?.textContent).toContain("custard tart");
+  });
+
+  it("a tap opens the full-screen viewer on that dish: the photo, its credit and the dish's whole description", () => {
+    const { panel } = make();
+    render(panel, photos());
+    tiles(panel)[1]!.click();
+    expect(panel.isViewerOpen()).toBe(true);
+    expect(panel.viewer.querySelector("img")?.getAttribute("src")).toBe("/m/caldo.jpg"); // the large rendition
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-img")?.hidden).toBe(false);
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-tile")?.hidden).toBe(true);
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-caption")?.textContent).toBe("Caldo verde");
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-detail")?.textContent).toBe("Kale and potato soup with a slice of chorizo.");
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-credit-line")?.textContent).toContain("Photo: caldo / CC BY-SA");
+    const source = panel.viewer.querySelector<HTMLAnchorElement>(".wx-srv-adv-viewer-source");
+    expect(source?.href).toBe("https://commons.example/caldo");
+    expect(source?.rel).toContain("noopener");
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-count")?.textContent).toBe("2 / 5");
+  });
+
+  it("a dish with no photo opens the same viewer on a tile, with its description", () => {
+    const { panel } = make();
+    render(panel, photos());
+    tiles(panel)[2]!.click();
+    expect(panel.isViewerOpen()).toBe(true);
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-img")?.hidden).toBe(true);
+    expect(panel.viewer.querySelector("img")?.hasAttribute("src")).toBe(false);
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-tile")?.hidden).toBe(false);
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-caption")?.textContent).toBe("Bacalhau com natas");
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-detail")?.textContent).toBe("Salt cod baked in a creamy sauce.");
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-credit-line")).toBeNull(); // nothing to credit
+  });
+
+  it("Next and Previous walk the dishes, photo or not, and wrap around", () => {
+    const { panel } = make();
+    render(panel, photos());
+    tiles(panel)[0]!.click();
+    const next = panel.viewer.querySelector<HTMLButtonElement>(".wx-srv-adv-viewer-next")!;
+    const prev = panel.viewer.querySelector<HTMLButtonElement>(".wx-srv-adv-viewer-prev")!;
+    const caption = (): string | null | undefined => panel.viewer.querySelector(".wx-srv-adv-viewer-caption")?.textContent;
+    next.click();
+    next.click(); // dish 2, no photo
+    expect(caption()).toBe("Bacalhau com natas");
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-tile")?.hidden).toBe(false);
+    next.click(); // dish 3, a photo again: the picture comes back
+    expect(caption()).toBe("Ginjinha");
+    expect(panel.viewer.querySelector("img")?.getAttribute("src")).toBe("/m/ginjinha.jpg");
+    expect(panel.viewer.querySelector<HTMLElement>(".wx-srv-adv-viewer-tile")?.hidden).toBe(true);
+    next.click();
+    next.click(); // wrapped to dish 0
+    expect(caption()).toBe("Pastel de nata");
+    prev.click(); // and back to the last
+    expect(caption()).toBe("Bifana");
+  });
+
+  it("the dishes' viewer is its own group: the hero photos and the other sections' photos are not in it", () => {
+    const { panel } = make();
+    render(panel, photos());
+    panel.element.querySelector<HTMLButtonElement>(".wx-srv-adv-hero-pic")?.click();
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-count")?.textContent).toBe(""); // one hero photo only
+    panel.closeViewer();
+    tiles(panel)[0]!.click();
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-count")?.textContent).toBe("1 / 5");
+  });
+
+  it("keeps an open viewer when the pictures arrive (the same round is redrawn, not reset)", () => {
+    const { panel } = make();
+    render(panel, dishesPack({ images: "pending", pictures: { hero: [], items: new Map([["dishes:0", dishPic("pastel")]]) } }));
+    tiles(panel)[0]!.click();
+    render(panel, photos("done"));
+    expect(panel.isViewerOpen()).toBe(true);
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-caption")?.textContent).toBe("Pastel de nata");
+  });
+
+  it("sets dish text as text, never as markup", () => {
+    const { panel } = make();
+    const hostile = dishesPack();
+    const data = hostile.data!;
+    const [dishes, ...rest] = data.sections;
+    const evil = { ...dishes!, items: [{ index: 0, name: "<img src=x onerror=\"window.__dish=1\">Nata", detail: "<script>window.__dish=2</script>", url: null }] };
+    render(panel, { ...hostile, data: { ...data, sections: [evil, ...rest] } });
+    expect(panel.element.querySelectorAll(".wx-srv-adv-dish img, script")).toHaveLength(0);
+    tiles(panel)[0]!.click();
+    expect(panel.viewer.querySelectorAll("script")).toHaveLength(0);
+    expect(panel.viewer.querySelector(".wx-srv-adv-viewer-caption")?.textContent).toContain("<img src=x");
+    expect((window as unknown as { __dish?: number }).__dish).toBeUndefined();
   });
 });

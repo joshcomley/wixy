@@ -217,7 +217,9 @@ mock keeps as an unhandled error. `e2e/tests/server-adventure.spec.ts` plays the
 Classic map (a flat map keeps frames fast, so a flick's timing holds on a software-GL runner): a slow part a watcher sees as a live
 finger, then a quick flick; both Stops (what is lit when Stop is pressed is what both screens settle on), the fake cmd's canned pack, the
 destination's mini chat and pop-up, the bank and its screen, reject + "never again", Adventure and Would you rather replacing each
-other, the Options switch, and 360 px and desktop layouts. It reads the pane's `data-*` facts (a canvas has no DOM to assert on) and
+other, the Options switch, the "Local food to try" grid (the canned pack's `dishes` section, inserted by `e2e/fixture_server.py`, with
+four dishes pictured from the fake Wikipedia and Bifana left text-only: the tile geometry, a dish opening in the viewer, the card's dish
+photo; it needs the server's dishes pipeline, spec §4.3b), and 360 px and desktop layouts. It reads the pane's `data-*` facts (a canvas has no DOM to assert on) and
 keeps both pages awake with a Shift key press (a mouse move would disturb a drag). Set `WIXY_E2E_SHOTS=<dir>` to run the main flow on
 the real Satellite map, flicking with timestamped in-page pointer events, and save 390 px screenshots.
 `serverThread.test.ts` holds the reaction rendering and the in-place-patch tests (a playing

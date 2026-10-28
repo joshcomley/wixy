@@ -10,10 +10,30 @@
 // contacts a third-party image host from a private chat. While the server is still finding pictures
 // (`images: "pending"`) placeholders hold their places; a pack without pictures lays out as plain text.
 //
+// "Local food to try" (spec §4.3b, the operator's "food is essential"): the pack's `dishes` section is shown
+// straight after the summary as a photo-forward grid, a square photo with the dish's name and one line of what
+// it is (two columns on a phone, three on a desktop). A dish with no photo gets a tasteful text tile in the same
+// grid (a wrong photo is worse than none, so the server leaves a dish text-only when nothing qualifies); while the
+// server is still finding photos a dish without one shows a shimmer. A tap opens the full-screen viewer on that
+// dish: the photo, its credit and the dish's whole description, swiping through every dish of the pack.
+//
 // The panel redraws only when what it shows changed (its `key`), so scrolling, a half-swiped carousel
 // and an open viewer survive the frequent view refreshes of a busy round.
 
-import { pictureKey, type AdventureDest, type Pack, type PackPicture, type PackView } from "./api";
+import { DISHES_SECTION, pictureKey, type AdventureDest, type PackItem, type PackPicture, type PackSection, type PackView } from "./api";
+
+/** What the full-screen viewer shows: a photo (or, for a dish with none, a text tile) and its words. */
+interface ViewerEntry {
+  readonly picture: PackPicture | null;
+  readonly title: string;
+  readonly detail: string;
+}
+
+/** The section key of the dishes and the title it is shown under. */
+export const DISHES_KEY = DISHES_SECTION;
+export const DISHES_TITLE = "Local food to try";
+/** The `food` section is the PLACES to eat (the dishes have their own section now). */
+export const FOOD_TITLE = "Where to eat";
 
 export interface PackPanelInput {
   readonly seq: number;
@@ -86,6 +106,12 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
   const viewerImg = doc.createElement("img");
   viewerImg.className = "wx-srv-adv-viewer-img";
   viewerImg.alt = "";
+  // A dish with no photo opens on this tile instead (its words are below, as for every entry).
+  const viewerTile = el("div", "wx-srv-adv-viewer-tile");
+  viewerTile.hidden = true;
+  const viewerTileGlyph = el("span", "wx-srv-adv-viewer-tile-glyph", "🍽");
+  viewerTileGlyph.setAttribute("aria-hidden", "true");
+  viewerTile.append(viewerTileGlyph);
   const viewerCredit = el("div", "wx-srv-adv-viewer-credit");
   const viewerCount = el("span", "wx-srv-adv-viewer-count");
   const viewerClose = button("wx-srv-adv-viewer-close", "Close the photo", "✕", () => closeViewer());
@@ -93,7 +119,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
   const viewerNext = button("wx-srv-adv-viewer-next", "Next photo", "›", () => step(1));
   const viewerStage = el("div", "wx-srv-adv-viewer-stage");
   viewerStage.setAttribute("data-srv-gesture-boundary", "");
-  viewerStage.append(viewerImg);
+  viewerStage.append(viewerImg, viewerTile);
   viewer.append(viewerStage, viewerClose, viewerPrev, viewerNext, viewerCount, viewerCredit);
   // Tapping the dark around the picture closes it; a swipe goes to the next one. (Escape is deliberately
   // NOT a way to close it: in this chat Escape is the panic key and locks everything.)
@@ -113,20 +139,29 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
     swipeStartX = null;
   });
 
-  let gallery: readonly PackPicture[] = [];
+  let gallery: readonly ViewerEntry[] = [];
   let galleryIndex = 0;
 
   function showViewerPicture(): void {
-    const picture = gallery[galleryIndex];
-    if (picture === undefined) {
+    const entry = gallery[galleryIndex];
+    if (entry === undefined) {
       closeViewer();
       return;
     }
-    if (viewerImg.getAttribute("src") !== picture.fullUrl) viewerImg.src = picture.fullUrl;
-    viewerImg.alt = picture.caption;
+    const picture = entry.picture;
+    if (picture !== null) {
+      if (viewerImg.getAttribute("src") !== picture.fullUrl) viewerImg.src = picture.fullUrl;
+      viewerImg.alt = entry.title;
+    } else {
+      viewerImg.removeAttribute("src");
+      viewerImg.alt = "";
+    }
+    viewerImg.hidden = picture === null;
+    viewerTile.hidden = picture !== null;
     viewerCredit.replaceChildren();
-    if (picture.caption !== "") viewerCredit.append(el("div", "wx-srv-adv-viewer-caption", picture.caption));
-    if (picture.credit !== "") {
+    if (entry.title !== "") viewerCredit.append(el("div", "wx-srv-adv-viewer-caption", entry.title));
+    if (entry.detail !== "") viewerCredit.append(el("div", "wx-srv-adv-viewer-detail", entry.detail));
+    if (picture !== null && picture.credit !== "") {
       const credit = el("div", "wx-srv-adv-viewer-credit-line");
       const text = el("span", "", `Photo: ${picture.credit}`);
       const a = link(picture.page, "Source", "wx-srv-adv-viewer-source");
@@ -139,10 +174,10 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
     viewerNext.hidden = gallery.length < 2;
   }
 
-  function openViewer(pictures: readonly PackPicture[], index: number): void {
-    if (pictures.length === 0) return;
-    gallery = pictures;
-    galleryIndex = Math.max(0, Math.min(pictures.length - 1, index));
+  function openViewer(entries: readonly ViewerEntry[], index: number): void {
+    if (entries.length === 0) return;
+    gallery = entries;
+    galleryIndex = Math.max(0, Math.min(entries.length - 1, index));
     viewer.hidden = false;
     showViewerPicture();
     viewerClose.focus();
@@ -187,6 +222,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
 
   function heroCarousel(place: AdventureDest, pack: PackView): HTMLElement | null {
     const pictures = pack.pictures?.hero ?? [];
+    const entries: ViewerEntry[] = pictures.map((p) => ({ picture: p, title: p.caption, detail: "" }));
     const waiting = pack.images === "pending";
     if (pictures.length === 0 && !waiting) return null;
     const wrap = el("div", "wx-srv-adv-hero");
@@ -196,7 +232,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
     pictures.forEach((picture, index) => {
       const slide = el("figure", "wx-srv-adv-hero-slide");
       slide.append(
-        pictureButton("wx-srv-adv-hero-pic", picture, picture.caption !== "" ? picture.caption : place.name, () => openViewer(pictures, index), index === 0),
+        pictureButton("wx-srv-adv-hero-pic", picture, picture.caption !== "" ? picture.caption : place.name, () => openViewer(entries, index), index === 0),
       );
       const cap = el("figcaption", "wx-srv-adv-hero-credit");
       if (picture.credit !== "") {
@@ -236,7 +272,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
     return wrap;
   }
 
-  function itemList(section: Pack["sections"][number], pack: PackView, allPictures: PackPicture[]): HTMLElement {
+  function itemList(section: PackSection, pack: PackView, allPictures: ViewerEntry[]): HTMLElement {
     const list = el("ul", "wx-srv-adv-pk-items");
     const waiting = pack.images === "pending";
     for (const item of section.items) {
@@ -244,7 +280,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
       const picture = pack.pictures?.items.get(pictureKey(section, item)) ?? null;
       if (picture !== null) {
         const index = allPictures.length;
-        allPictures.push(picture);
+        allPictures.push({ picture, title: picture.caption !== "" ? picture.caption : item.name, detail: "" });
         li.classList.add("wx-srv-adv-pk-item-pic");
         li.append(pictureButton("wx-srv-adv-pk-thumb", picture, item.name, () => openViewer(allPictures, index), false));
       } else if (waiting) {
@@ -267,6 +303,63 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
       list.append(li);
     }
     return list;
+  }
+
+  /** One dish of the "Local food to try" grid: a square photo (or a text tile), its name, one line of detail. */
+  function dishTile(item: PackItem, picture: PackPicture | null, waiting: boolean, open: () => void): HTMLElement {
+    const b = el("button", "wx-srv-adv-dish");
+    b.type = "button";
+    b.setAttribute("data-srv-gesture-boundary", "");
+    b.dataset["dish"] = String(item.index);
+    b.setAttribute("aria-label", `${item.name}: open the photo and the description`);
+    const frame = el("span", "wx-srv-adv-dish-frame");
+    const tile = (): void => {
+      frame.className = "wx-srv-adv-dish-frame wx-srv-adv-dish-text";
+      frame.replaceChildren();
+      const glyph = el("span", "wx-srv-adv-dish-glyph", "🍽");
+      glyph.setAttribute("aria-hidden", "true");
+      frame.append(glyph);
+      if (item.detail !== "") frame.append(el("span", "wx-srv-adv-dish-blurb", item.detail));
+      b.classList.add("wx-srv-adv-dish-nophoto");
+    };
+    if (picture !== null) {
+      const img = doc.createElement("img");
+      img.src = picture.thumbUrl;
+      img.alt = "";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.draggable = false;
+      // A photo that will not load becomes the text tile rather than a hole.
+      img.addEventListener("error", tile);
+      frame.append(img);
+    } else if (waiting) {
+      frame.classList.add("wx-srv-adv-pic-pending");
+      b.classList.add("wx-srv-adv-dish-pending");
+    } else {
+      tile();
+    }
+    b.append(frame, el("span", "wx-srv-adv-dish-name", item.name));
+    if (item.detail !== "") b.append(el("span", "wx-srv-adv-dish-detail", item.detail));
+    b.addEventListener("click", open);
+    return b;
+  }
+
+  /** The "Local food to try" section as a photo-forward grid. */
+  function dishesGrid(section: PackSection, pack: PackView): HTMLElement {
+    const waiting = pack.images === "pending";
+    const wrap = el("section", "wx-srv-adv-dishes");
+    wrap.append(el("h3", "wx-srv-adv-pk-title", section.title !== "" ? section.title : DISHES_TITLE));
+    const entries: ViewerEntry[] = section.items.map((item) => ({
+      picture: pack.pictures?.items.get(pictureKey(section, item)) ?? null,
+      title: item.name,
+      detail: item.detail,
+    }));
+    const grid = el("div", "wx-srv-adv-dish-grid");
+    section.items.forEach((item, position) => {
+      grid.append(dishTile(item, entries[position]?.picture ?? null, waiting, () => openViewer(entries, position)));
+    });
+    wrap.append(grid);
+    return wrap;
   }
 
   function message(text: string, withRetry: boolean): HTMLElement {
@@ -299,16 +392,22 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
       content.append(message("The holiday pack couldn't be read.", false));
       return content;
     }
-    const allPictures: PackPicture[] = [];
+    const allPictures: ViewerEntry[] = [];
     const hero = heroCarousel(place, pack);
     if (hero !== null) content.append(hero);
     content.append(el("div", "wx-srv-adv-pk-place", [place.name, unitName].filter((s) => s !== "").join(", ")));
     if (data.headline !== "") content.append(el("h2", "wx-srv-adv-pk-headline", data.headline));
     if (data.summary !== "") content.append(el("p", "wx-srv-adv-pk-summary", data.summary));
+    // The dishes come straight after the summary, whichever place the section holds in the list.
+    const dishes = data.sections.find((section) => section.key === DISHES_KEY);
+    if (dishes !== undefined) content.append(dishesGrid(dishes, pack));
     for (const section of data.sections) {
+      if (section.key === DISHES_KEY) continue;
       const safeKey = section.key.replace(/[^a-z0-9_-]/gi, "").slice(0, 16);
       const card = el("section", `wx-srv-adv-pk-card wx-srv-adv-pk-${safeKey}`);
-      card.append(el("h3", "wx-srv-adv-pk-title", section.title), itemList(section, pack, allPictures));
+      // The food section is the PLACES to eat; the dishes have their own section above.
+      const title = section.key === "food" ? FOOD_TITLE : section.title;
+      card.append(el("h3", "wx-srv-adv-pk-title", title), itemList(section, pack, allPictures));
       content.append(card);
     }
     const facts: ReadonlyArray<readonly [string, string]> = [

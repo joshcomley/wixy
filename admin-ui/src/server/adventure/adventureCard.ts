@@ -8,7 +8,7 @@
 
 import { geoOrthographic, geoPath } from "d3-geo";
 import type { Message } from "../api/messages";
-import type { AdventureView, PackState } from "./api";
+import { firstDishPicture, type AdventureView, type PackState } from "./api";
 import { angularDistanceDeg, clampViewRadius, scaleFor, type Camera } from "./camera";
 import { cameraForUnit } from "./land";
 import type { AdventureModel } from "./model";
@@ -195,6 +195,25 @@ export function createAdventureCards(deps: AdventureCardDeps): AdventureCards {
       text.append(open);
     }
 
+    // The pictures, in one column beside the words: the dish photo first (the food is what the operator is
+    // looking forward to; it is shown once the pack has one), then the little map of the country.
+    const media = el("div", "wx-srv-adv-mcard-media");
+    const dish = view === undefined ? null : firstDishPicture(view.pack);
+    if (dish !== null) {
+      const img = doc.createElement("img");
+      img.className = "wx-srv-adv-mcard-dish";
+      img.src = dish.thumbUrl;
+      img.alt = "A dish to try";
+      img.loading = "lazy";
+      img.decoding = "async";
+      img.draggable = false;
+      img.width = MAP_W;
+      img.height = MAP_H;
+      // A photo that will not load leaves the card as it was before (the map and the words).
+      img.addEventListener("error", () => img.remove());
+      media.append(img);
+    }
+
     const unitId = view?.country?.chosen?.id ?? view?.landing?.landUnit ?? null;
     if (unitId !== null) {
       const dest = view?.destination?.chosen ?? null;
@@ -206,13 +225,15 @@ export function createAdventureCards(deps: AdventureCardDeps): AdventureCards {
       map.style.width = `${MAP_W}px`;
       map.style.height = `${MAP_H}px`;
       map.hidden = true;
-      container.append(map, text);
+      media.append(map);
+      container.append(media, text);
       whenWorld(() => {
         // (A canvas that is not in the page yet keeps what is painted on it: no `isConnected` check.)
         if (world === null) return;
         if (drawUnitMap(map, world, unitId, dot, doc.defaultView?.devicePixelRatio ?? 1)) map.hidden = false;
       });
     } else {
+      if (media.childElementCount > 0) container.append(media);
       container.append(text);
     }
   }

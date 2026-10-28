@@ -2356,9 +2356,23 @@ basemap/globe.ts`, spec §3) and the shared game frame (§20).
   interpolating the rotation between frames and moving each finger point onto the fading stroke when the buffer reaches it,
   back-dated), so ~20 Hz unevenly arriving frames drive a smooth globe and a stroke that keeps the finger's own pace. A finished
   drag's last rotation is held (8 s) for the committed spin to take over; a silent finger is dropped after 5 s.
-- **The card** (`adventureCard.ts`): a 96×72 map of the country (d3 orthographic over the unit's `detail` shape, widened to hold a
-  far destination) with the destination dot once known, one line of status per state (text first; the map appears when the world has
-  loaded), and Play / Open. **The Holiday bank** (`holidayBank.ts`, `GET /adventure/bank`): a full-height screen like Links/Gallery
+- **Local food to try** (spec §4.3b, operator 2026-10-28: "food is essential"; `packView.ts`). The pack's `dishes` section (items
+  `{name, detail, wikipedia}`; pictures `pack.pictures.items["dishes:0".."dishes:5"]`) is drawn straight after the hero carousel and
+  the summary as a photo-forward grid, wherever the section sits in the list and exactly once: two columns on a phone, three from
+  720 px; each dish is a square photo (the `thumbUrl`), its name and one line of detail. A dish with no photo — the server leaves a
+  dish text-only when nothing qualifies, a wrong photo being worse than none — is a text tile in the same grid (🍽 and its description
+  on the pane's own gradient); while `images` is `pending` a dish without a photo shimmers instead; a photo that will not load
+  becomes the text tile. A tap opens the SAME full-screen viewer as the other photos, on that dish: the photo (the `fullUrl`) or, for a
+  dish with none, a tile, then the dish's name, its WHOLE description and the photo's credit + source link, with Next/Previous/swipe
+  walking every dish of the pack (photo or not) and wrapping. The viewer's layout is a column (photo above, words below in a
+  scrolling area), so a 400-character description never pushes the controls off a 360 px phone. The `food` section is now "Where to
+  eat" (the client retitles it whatever the pack calls it). A pack with no `dishes` section is still valid and shows none of this.
+  `api.ts`'s `firstDishPicture(pack)` (the lowest-indexed dish with a photo — never a hero or another section's picture) feeds the
+  card.
+- **The card** (`adventureCard.ts`): a column of pictures beside the words — the first dish photo (96×72, once the pack has one; the
+  food is the first thing to see), then a 96×72 map of the country (d3 orthographic over the unit's `detail` shape, widened to hold a
+  far destination) with the destination dot once known — one line of status per state (text first; the pictures appear when
+  they have loaded; a dish photo that will not load simply disappears), and Play / Open. **The Holiday bank** (`holidayBank.ts`, `GET /adventure/bank`): a full-height screen like Links/Gallery
   (under the header, closed by every lock and wipe), newest first; a tap closes it and opens that trip — `thread.ts`
   `openAdventureTrip` first pages older history in until the trip's message is loaded (a trip may be months back), so its card and
   its whole chat are there.

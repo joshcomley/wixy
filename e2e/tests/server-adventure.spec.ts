@@ -391,6 +391,78 @@ test.describe("Adventure Time", () => {
     await humanPause(a);
     await a.locator(".wx-srv-adv-viewer-close").click();
     await expect(a.locator(".wx-srv-adv-viewer")).toBeHidden();
+    await humanPause(a);
+
+    // "Local food to try" (spec §4.3b): a photo-forward grid straight after the summary, before the places
+    // to eat. Four dishes have a photo from the fake Wikipedia; Bifana has none and is a text tile.
+    const dishes = a.locator(".wx-srv-adv-dishes");
+    await expect(dishes.locator(".wx-srv-adv-pk-title")).toHaveText("Local food to try");
+    await expect(dishes.locator(".wx-srv-adv-dish")).toHaveCount(5);
+    await expect(a.locator(".wx-srv-adv-pk-summary + .wx-srv-adv-dishes")).toHaveCount(1);
+    await expect(a.locator(".wx-srv-adv-pk-food .wx-srv-adv-pk-title")).toHaveText("Where to eat");
+    expect(
+      await a.evaluate(() => {
+        const grid = document.querySelector(".wx-srv-adv-dishes")!;
+        const food = document.querySelector(".wx-srv-adv-pk-food")!;
+        return Boolean(grid.compareDocumentPosition(food) & Node.DOCUMENT_POSITION_FOLLOWING);
+      }),
+    ).toBe(true);
+    await eventually(pages, async () => (await dishes.locator(".wx-srv-adv-dish-frame img").count()) === 4, "four dish photos arrive", 30_000);
+    // The photos load lazily as the grid scrolls into view: bring it to the top of the pack panel first.
+    await dishes.scrollIntoViewIfNeeded();
+    await a.evaluate(() => document.querySelector(".wx-srv-adv-dishes")?.scrollIntoView({ block: "start" }));
+    for (const img of await dishes.locator(".wx-srv-adv-dish-frame img").all()) {
+      await eventually(pages, async () => await img.evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0), "a dish photo loads", 15_000);
+    }
+    await expect(dishes.locator(".wx-srv-adv-dish").nth(0)).toContainText("Pastel de nata");
+    await expect(dishes.locator(".wx-srv-adv-dish-nophoto")).toHaveCount(1);
+    await expect(dishes.locator(".wx-srv-adv-dish-nophoto")).toContainText("Bifana");
+    // The grid is two columns on this 390 px phone, and every photo is a square.
+    const boxes = await dishes.locator(".wx-srv-adv-dish-frame").evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })));
+    expect(boxes[1]!.y).toBeCloseTo(boxes[0]!.y, 0);
+    expect(boxes[2]!.y).toBeGreaterThan(boxes[0]!.y + boxes[0]!.h - 1);
+    expect(boxes[1]!.x).toBeGreaterThan(boxes[0]!.x + boxes[0]!.w - 1);
+    for (const b of boxes) expect(Math.abs(b.w - b.h)).toBeLessThan(1.5);
+    // Two screenshots of the grid (the pack panel is a short scroller on a phone: a row is about one panel tall).
+    await a.evaluate(() => {
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      const grid = document.querySelector<HTMLElement>(".wx-srv-adv-dishes")!;
+      host.scrollTop += grid.getBoundingClientRect().top - host.getBoundingClientRect().top + 26; // past the title: row one, photos and names
+    });
+    await shot(a, "05c-food-grid");
+    await a.evaluate(() => {
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      host.scrollTop += 210; // row two
+    });
+    await shot(a, "05c2-food-grid-more");
+    await a.evaluate(() => {
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      host.scrollTop += 205; // row three: the dish with no photo is a text tile
+    });
+    await shot(a, "05c3-food-grid-text-tile");
+    // A tap on a dish with a photo opens the viewer on it: the photo, its credit and the whole description.
+    await humanPause(a);
+    await dishes.locator(".wx-srv-adv-dish").nth(1).click();
+    await expect(a.locator(".wx-srv-adv-viewer")).toBeVisible();
+    await expect(a.locator(".wx-srv-adv-viewer-caption")).toHaveText("Caldo verde");
+    await expect(a.locator(".wx-srv-adv-viewer-detail")).toHaveText("Kale and potato soup with a slice of chorizo.");
+    await expect(a.locator(".wx-srv-adv-viewer-credit-line")).toContainText("Photo:");
+    await expect(a.locator(".wx-srv-adv-viewer-count")).toHaveText("2 / 5");
+    expect(await a.locator(".wx-srv-adv-viewer-img").evaluate((el) => new URL((el as HTMLImageElement).src).origin)).toBe(origin);
+    expect(await a.locator(".wx-srv-adv-viewer-img").evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0)).toBe(true);
+    await shot(a, "05d-dish-viewer");
+    // The next dishes in the same viewer: Bacalhau (a photo), Ginjinha, then Bifana, which has none: a tile.
+    for (const [name, hasPhoto] of [["Bacalhau com natas", true], ["Ginjinha", true], ["Bifana", false]] as const) {
+      await humanPause(a);
+      await a.locator(".wx-srv-adv-viewer-next").click();
+      await expect(a.locator(".wx-srv-adv-viewer-caption")).toHaveText(name);
+      await expect(a.locator(".wx-srv-adv-viewer-img")).toBeVisible({ visible: hasPhoto });
+      await expect(a.locator(".wx-srv-adv-viewer-tile")).toBeVisible({ visible: !hasPhoto });
+    }
+    await expect(a.locator(".wx-srv-adv-viewer-credit-line")).toHaveCount(0);
+    await humanPause(a);
+    await a.locator(".wx-srv-adv-viewer-close").click();
+    await expect(a.locator(".wx-srv-adv-viewer")).toBeHidden();
     expect(requestedExternally).toEqual([]);
     await humanPause(a);
 
@@ -419,6 +491,10 @@ test.describe("Adventure Time", () => {
     const card = a.locator(`.wx-srv-bubble-adv[data-message-seq="${seq}"]`);
     await expect(card.locator(".wx-srv-adv-mcard-status")).toContainText(CANNED_HEADLINE);
     await expect(a.locator('.wx-srv-bubble-gametag[data-game="adventure"]')).toHaveCount(2);
+    // The card shows the first dish photo now that the pack has one (same origin, loaded) above the little map.
+    const dishPhoto = card.locator("img.wx-srv-adv-mcard-dish");
+    await expect(dishPhoto).toBeVisible();
+    expect(await dishPhoto.evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0 && new URL((el as HTMLImageElement).src).origin === location.origin)).toBe(true);
     await card.scrollIntoViewIfNeeded();
     await shot(a, "06-card-in-main-chat");
 
@@ -578,6 +654,60 @@ test.describe("Adventure Time", () => {
     await bAdvised.evaluate((el) => (el as HTMLInputElement).click());
     await expect(bAdvised).toBeEnabled();
     expect(await bAdvised.isChecked()).toBe(false);
+    await closeAll(contextA, contextB);
+  });
+
+  test("the food grid fits a 360 px phone: two columns, square photos, nothing sideways, the viewer is on screen", async ({ browser }) => {
+    // (A 360 px viewport, mouse input: the globe is flicked with the real mouse like in the other tests.)
+    const small = { viewport: { width: 360, height: 780 }, deviceScaleFactor: 2 } as const;
+    const contextA = await newGameContext(browser, small);
+    const contextB = await newGameContext(browser);
+    const a = await contextA.newPage();
+    const b = await contextB.newPage();
+    await unlockServer(a, "Alice");
+    await unlockServer(b, "Bob");
+    const pages = [a, b];
+    const stopAwake = keepAwake(pages);
+    await playToChosen(a, b);
+    await waitFact(pages, "pack-state", "ready", 60_000);
+    const dishes = a.locator(".wx-srv-adv-dishes");
+    await expect(dishes.locator(".wx-srv-adv-dish")).toHaveCount(5);
+    await eventually(pages, async () => (await dishes.locator(".wx-srv-adv-dish-frame img").count()) === 4, "dish photos", 30_000);
+    await dishes.scrollIntoViewIfNeeded();
+    await a.evaluate(() => document.querySelector(".wx-srv-adv-dishes")?.scrollIntoView({ block: "start" }));
+    await a.screenshot({ path: test.info().outputPath("phone-360-food-grid.png") });
+
+    const frames = await dishes.locator(".wx-srv-adv-dish-frame").evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, y: r.y, w: r.width, h: r.height })));
+    expect(frames[1]!.y).toBeCloseTo(frames[0]!.y, 0); // two to a row
+    expect(frames[2]!.x).toBeCloseTo(frames[0]!.x, 0);
+    for (const f of frames) {
+      expect(Math.abs(f.w - f.h)).toBeLessThan(1.5);
+      expect(f.x).toBeGreaterThanOrEqual(0);
+      expect(f.x + f.w).toBeLessThanOrEqual(360.5);
+    }
+    expect(frames[0]!.w).toBeGreaterThan(120); // a real photo, not a thumbnail
+    // Nothing overflows sideways, in the page or in the pack panel; the tiles are proper tap targets.
+    expect(await a.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBeLessThanOrEqual(1);
+    const host = await a.locator(".wx-srv-adv-pk-host").evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
+    expect(host.scroll).toBeLessThanOrEqual(host.client + 1);
+    for (const tile of await dishes.locator(".wx-srv-adv-dish").all()) {
+      const box = (await tile.boundingBox())!;
+      expect(box.height).toBeGreaterThanOrEqual(43.5);
+      expect(box.x + box.width).toBeLessThanOrEqual(360.5);
+    }
+    // A long description does not push the viewer's controls off the phone.
+    await humanPause(a);
+    await dishes.locator(".wx-srv-adv-dish").nth(0).click();
+    await expect(a.locator(".wx-srv-adv-viewer")).toBeVisible();
+    for (const selector of [".wx-srv-adv-viewer-close", ".wx-srv-adv-viewer-next", ".wx-srv-adv-viewer-detail", ".wx-srv-adv-viewer-credit"]) {
+      const box = (await a.locator(selector).boundingBox())!;
+      expect(box, selector).not.toBeNull();
+      expect(box.x, `${selector} left`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(360.5);
+      expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(780.5);
+    }
+    await a.screenshot({ path: test.info().outputPath("phone-360-dish-viewer.png") });
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
