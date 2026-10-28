@@ -21,7 +21,9 @@ the call socket correctly rejects an email-bound token and locks those tests.
 Production never imports this middleware. The call browser scenario checks the
 phone icon right of ⋯, no header select, an in-viewport recipient picker and a
 separate confirmation before invitation/audio, then the existing duplex/cleanup
-gates. CI's image proof falls back from a failed ECR pull to the same official
+gates. Setup keeps the Caller and Receiver active (mouse moves) until both are muted: a ringing
+call does not pause the 10 s idle lock, so an untouched device on a loaded machine locks and
+leaves the picker (decisions/00196); the muted-idle phase then stops that activity. CI's image proof falls back from a failed ECR pull to the same official
 Python tag on Docker Hub before building; it never ignores build/boot failures.
 
 Live-call focused loop: `pytest wixy_server/tests/test_livechat_calls.py -n 0` (signed
@@ -95,7 +97,7 @@ never "auto"; `1` reproduces the old fully serial run for debugging) and `WIXY_E
 `python3`; on Windows use the real interpreter, bare `python` is the Store stub). Do not add a
 shared `webServer` or a fixed port back: that is what forced `workers: 1`.
 
-**Every test starts from a pristine Server chat** (decisions/00193). A worker's one fixture server
+**Every test starts from a pristine Server chat** (decisions/00195). A worker's one fixture server
 holds one Server chat that its tests share in sequence, and which tests share a worker varies run to
 run, so a test used to inherit earlier tests' messages, game rounds (Adventure Time's unfinished
 rounds are OFFERED as a tab and their cards carry a Play button), device grants, call state and

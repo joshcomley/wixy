@@ -1125,13 +1125,21 @@ button.wx-srv-wyr-countdown {
 
 .wx-srv-tabs {
   display: flex;
-  margin: 0 0 4px;
+  /* DOCKED: bleeds through `.wx-main`'s gutter to the left, right and bottom screen edges (the
+     thread does the same); the home-indicator inset is padding INSIDE the bar. */
+  margin: 0 calc(-1 * var(--wx-srv-gutter)) calc(-1 * var(--wx-srv-gutter));
+  padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--wx-border);
   background: var(--wx-surface);
 }
 
 .wx-srv-tabs[hidden] {
   display: none;
+}
+
+/* The bar carries the bottom inset itself, so the view adds none below it. */
+.wx-srv-thread-view:has(> .wx-srv-tabs:not([hidden])) {
+  padding-bottom: 0;
 }
 
 .wx-srv-tab {
