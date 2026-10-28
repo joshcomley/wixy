@@ -147,15 +147,14 @@ async function shot(page: Page, name: string): Promise<void> {
   await page.screenshot({ path: join(shotDir, `${name}.png`) });
 }
 
-/** The screenshot run (WIXY_E2E_SHOTS) plays on the real satellite map, whose software-GL frames are
- * too slow for a mouse flick to keep its timing: it flicks with in-page pointer events instead. */
+/** The screenshot run (WIXY_E2E_SHOTS) plays on the real satellite map. */
 function shotsRun(): boolean {
   const dir = process.env["WIXY_E2E_SHOTS"];
   return dir !== undefined && dir !== "";
 }
 
-/** A browser context that plays on the flat Classic map (fast to draw, so the timing of a real mouse
- * flick holds even on a software-GL CI runner), unless this is the screenshot run. */
+/** A browser context that plays on the flat Classic map (fast to draw on a software-GL CI runner),
+ * unless this is the screenshot run. */
 async function newGameContext(browser: Browser, options: BrowserContextOptions = PHONE): Promise<BrowserContext> {
   const context = await browser.newContext(options);
   if (!shotsRun()) {
@@ -172,8 +171,15 @@ async function newGameContext(browser: Browser, options: BrowserContextOptions =
 
 /**
  * A drag on the globe: a slow part (so a watcher can see the finger move), then a quick flick and the
- * release. `axis` lng drags sideways, lat drags up. With a REAL mouse (`page.mouse`), except in the
- * screenshot run.
+ * release. `axis` lng drags sideways, lat drags up.
+ *
+ * In-page pointer events with EXPLICIT timestamps, never `page.mouse`: a flick's speed comes from the
+ * time between its last samples, and `page.mouse` stamps each event when the browser gets round to the
+ * command, so on a loaded machine (CI's 4-core runner, four workers, two software-GL pages per test) a
+ * 14 ms flick arrives stretched into a slow swipe that is not a spin. A real finger's events carry the
+ * time the finger moved, which is exactly what these do. Measured 2026-10-28: with Chrome's CPU
+ * throttled 6x, the `page.mouse` flick failed all four attempts in 2 of 2 runs ("the lng flick never
+ * turned into a spin", as on CI), and this one spun on the first flick, both axes, in 2 of 2 runs.
  */
 async function dragGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () => Promise<void>): Promise<void> {
   const box = (await page.locator(".wx-srv-adv-globe").boundingBox())!;
@@ -186,75 +192,56 @@ async function dragGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () =
       : { x: cx + r * 0.15, y: cy + r * 0.6 - r * 1.2 * t };
   const slow = [1, 2, 3, 4, 5, 6].map((i) => at((0.4 * i) / 6));
   const fast = [1, 2, 3, 4].map((i) => at(0.4 + (0.6 * i) / 4));
-  if (shotsRun()) {
-    // In-page pointer events with EXPLICIT timestamps (a flick's speed comes from the time between its
-    // last samples, and software-GL frames would stretch real timing): the same finger, exactly timed.
-    await page.evaluate(
-      async ({ start, moves }) => {
-        const canvas = document.querySelector(".wx-srv-adv-globe")!;
-        const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
-          const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
-          Object.defineProperty(event, "timeStamp", { value: timeStamp });
-          canvas.dispatchEvent(event);
-        };
-        fire("pointerdown", start, performance.now());
-        for (const p of moves) {
-          fire("pointermove", p, performance.now());
-          await new Promise((resolve) => setTimeout(resolve, 90));
-        }
-      },
-      { start: at(0), moves: slow },
-    );
-    if (whileFingerDown !== undefined) await whileFingerDown();
-    await page.evaluate(
-      ({ moves }) => {
-        const canvas = document.querySelector(".wx-srv-adv-globe")!;
-        const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
-          const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
-          Object.defineProperty(event, "timeStamp", { value: timeStamp });
-          canvas.dispatchEvent(event);
-        };
-        const t0 = performance.now();
-        moves.forEach((p, i) => fire("pointermove", p, t0 + i * 14));
-        fire("pointerup", moves[moves.length - 1]!, t0 + (moves.length - 1) * 14 + 4);
-      },
-      { moves: fast },
-    );
-    return;
-  }
-  await page.mouse.move(at(0).x, at(0).y);
-  await page.mouse.down();
-  for (const p of slow) {
-    await page.mouse.move(p.x, p.y);
-    await page.waitForTimeout(90);
-  }
+  await page.evaluate(
+    async ({ start, moves }) => {
+      const canvas = document.querySelector(".wx-srv-adv-globe")!;
+      const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
+        const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
+        Object.defineProperty(event, "timeStamp", { value: timeStamp });
+        canvas.dispatchEvent(event);
+      };
+      fire("pointerdown", start, performance.now());
+      for (const p of moves) {
+        fire("pointermove", p, performance.now());
+        await new Promise((resolve) => setTimeout(resolve, 90));
+      }
+    },
+    { start: at(0), moves: slow },
+  );
   if (whileFingerDown !== undefined) await whileFingerDown();
-  // No wait after the last move: a finger that rests for more than 60 ms before it lifts is not a flick.
-  for (const [i, p] of fast.entries()) {
-    await page.mouse.move(p.x, p.y);
-    if (i < fast.length - 1) await page.waitForTimeout(14);
-  }
-  await page.mouse.up();
+  await page.evaluate(
+    ({ moves }) => {
+      const canvas = document.querySelector(".wx-srv-adv-globe")!;
+      const fire = (type: string, p: { x: number; y: number }, timeStamp: number): void => {
+        const event = new PointerEvent(type, { pointerId: 7, pointerType: "mouse", isPrimary: true, button: 0, buttons: type === "pointerup" ? 0 : 1, clientX: p.x, clientY: p.y, bubbles: true, cancelable: true });
+        Object.defineProperty(event, "timeStamp", { value: timeStamp });
+        canvas.dispatchEvent(event);
+      };
+      const t0 = performance.now();
+      moves.forEach((p, i) => fire("pointermove", p, t0 + i * 14));
+      fire("pointerup", moves[moves.length - 1]!, t0 + (moves.length - 1) * 14 + 4);
+    },
+    { moves: fast },
+  );
 }
 
 /**
- * A drag that MUST turn into a spin: a real mouse flick's speed comes from the time between its last
- * events, and on a busy machine one of those can arrive late and make it a weak swipe ("Flick it
- * harder!"). A person would simply flick again, and so does this: up to four attempts, the finger-down
- * hook only on the first.
+ * A flick that MUST turn into a spin, first time. `dragGlobe`'s events carry their own timestamps, so
+ * the flick the game measures is the same on any machine: no retry, because one would only hide a real
+ * defect (an earlier version flicked up to four times with `page.mouse`, whose late events made weak
+ * swipes on a busy CI runner). The wait is generous because the phase changes once the spin's request
+ * has been answered, which a loaded machine slows down.
  */
 async function flickGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () => Promise<void>): Promise<void> {
-  for (let attempt = 1; attempt <= 4; attempt += 1) {
-    await dragGlobe(page, axis, attempt === 1 ? whileFingerDown : undefined);
-    const turned = Date.now() + 1500;
-    while (Date.now() < turned) {
-      const phase = await fact(page, "phase");
-      if (phase === "spin1" || phase === "spin2") return;
-      await page.waitForTimeout(60);
-    }
-    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100); // (a person's pause; and no accidental multi-tap)
+  await dragGlobe(page, axis, whileFingerDown);
+  const deadline = Date.now() + 10_000;
+  let phase = "";
+  while (Date.now() < deadline) {
+    phase = await fact(page, "phase");
+    if (phase === "spin1" || phase === "spin2") return;
+    await page.waitForTimeout(60);
   }
-  throw new Error(`the ${axis} flick never turned into a spin`);
+  throw new Error(`the ${axis} flick never turned into a spin (phase stayed "${phase}")`);
 }
 
 /** Remembers which item was lit the instant Stop is pressed (what you see is what you get). */
