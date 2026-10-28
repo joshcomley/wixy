@@ -777,7 +777,7 @@ export class AdventureScene {
     this.stepRoulettes(tS, phase);
 
     const frame = this.buildFrame(tS, nowMs, phase, lambda, phi, camera);
-    const hud = this.buildHud(tS, nowMs, phase, camera);
+    const hud = this.buildHud(tS, phase, camera);
     return { frame, hud };
   }
 
@@ -981,7 +981,7 @@ export class AdventureScene {
     return this.side(by) === "me" ? "" : `${by} ${verb}`;
   }
 
-  private buildHud(tS: number, nowMs: number, phase: ScenePhase, camera: Camera | null): Hud {
+  private buildHud(tS: number, phase: ScenePhase, camera: Camera | null): Hud {
     const v = this.view;
     let hint = "";
     let sub = "";

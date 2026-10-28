@@ -31,7 +31,6 @@ import type { GameTabs } from "../gameTabs";
 import type { ItemChat } from "../itemChat";
 import type { LockHooks } from "../types";
 import {
-  type AdventureAxis,
   type AdventureLiveFrame,
   type AdventureOutcome,
   type AdventureSettings,
@@ -504,7 +503,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     const { frame, hud } = scene.update(nowMs);
     lastFrame = frame;
     renderer?.draw(frame, nowMs);
-    applyHud(hud, nowMs);
+    applyHud(hud);
     syncSuspension(hud, nowMs);
     ensureLoop();
   }
@@ -551,12 +550,14 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
   }
 
-  function applyHud(hud: Hud, nowMs: number): void {
+  function applyHud(hud: Hud): void {
     lastHud = hud;
-    setText("hint", hintMain, hud.hint);
+    // No round view yet (it is being read): say so rather than show an empty globe.
+    const hintText = hud.phase === "none" ? "Loading…" : hud.hint;
+    setText("hint", hintMain, hintText);
     setText("sub", hintSub, hud.sub);
     hintSub.hidden = hud.sub === "";
-    setAttr("hintShow", hint, "data-show", hud.hint === "" ? "0" : "1");
+    setAttr("hintShow", hint, "data-show", hintText === "" ? "0" : "1");
     setText("toast", toast, hud.toast ?? "");
     setAttr("toastShow", toast, "data-show", hud.toast === null ? "0" : "1");
     setText("nearest", nearest, hud.nearest ?? "");
@@ -613,7 +614,6 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     setAttr("packState", pane, "data-pack-state", view?.pack.state ?? "");
     setAttr("remote", pane, "data-remote", hud.remote ? "1" : "0");
     setAttr("map", pane, "data-map", renderer === null ? "" : `${renderer.mapStyle}${renderer.textured ? "-textured" : ""}`);
-    void nowMs;
   }
 
   // -- Feeding the scene -----------------------------------------------------------------------------------------
@@ -783,7 +783,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       outcome = await guarded(() => deps.api.spin(seq, input));
       if (started !== generation) return;
       // Replaying the same move is idempotent on the server, so a lost answer is safe to ask again.
-      if (outcome.ok || outcome.kind !== "unavailable") break;
+      if (outcome.ok || outcome.kind !== "unavailable" || attempt === SPIN_POST_ATTEMPTS - 1) break;
       await new Promise<void>((resolve) => {
         spinRetryTimer = clock.setTimeout(() => {
           spinRetryTimer = null;
@@ -863,12 +863,12 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   function askReject(): void {
     rejectPending = true;
-    if (lastHud !== null) applyHud(lastHud, clock.now());
+    if (lastHud !== null) applyHud(lastHud);
   }
 
   function cancelReject(): void {
     rejectPending = false;
-    if (lastHud !== null) applyHud(lastHud, clock.now());
+    if (lastHud !== null) applyHud(lastHud);
   }
 
   function toggleExplore(): void {

@@ -1,5 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { cameraFromRotation, type Camera } from "../../src/server/adventure/camera";
+import { type Camera } from "../../src/server/adventure/camera";
 import { prepareLanding } from "../../src/server/adventure/land";
 import { MIN_VIEW_RADIUS_DEG } from "../../src/server/adventure/camera";
 import { dragDeltaDeg, spinAngleAt } from "../../src/server/adventure/physics";

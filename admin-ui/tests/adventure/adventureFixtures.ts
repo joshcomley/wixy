@@ -10,16 +10,23 @@ import type {
   DestinationStage,
   PackView,
 } from "../../src/server/adventure/api";
-import { makeWorld } from "../fixtures/adventureWorld";
+import { makeTopology, makeWorld, type UnitSpec } from "../fixtures/adventureWorld";
 import type { World } from "../../src/server/adventure/world";
 
 /** Three squares: AAA and BBB side by side (the landing is in AAA), CCC well to the east. */
+const TEST_UNITS: readonly UnitSpec[] = [
+  { id: "AAA", name: "Aland", rects: [[0, 0, 10, 10]] },
+  { id: "BBB", name: "Bland", rects: [[12, 0, 22, 10]] },
+  { id: "CCC", name: "Cland", rects: [[30, -10, 40, 0]] },
+];
+
 export function testWorld(): World {
-  return makeWorld([
-    { id: "AAA", name: "Aland", rects: [[0, 0, 10, 10]] },
-    { id: "BBB", name: "Bland", rects: [[12, 0, 22, 10]] },
-    { id: "CCC", name: "Cland", rects: [[30, -10, 40, 0]] },
-  ]);
+  return makeWorld(TEST_UNITS);
+}
+
+/** The same world as the TopoJSON file the game fetches. */
+export function testTopology(): Record<string, unknown> {
+  return makeTopology(TEST_UNITS);
 }
 
 export const NOW = 1_800_000_000;
