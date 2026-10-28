@@ -5,7 +5,7 @@
 //
 //   [ the game's pane, full height ]
 //   [ the chat composer — the ordinary one, now sending into this game's item ]
-//   [ Chat | WYR | Adventure ]                      <- this bar
+//   [ Chat | WYR | Adventure | Cookout ]            <- this bar (holding Chat + ONE game)
 //
 // With only the Chat tab left (no game open) the bar disappears. ONE GAME AT A TIME (operator,
 // 2026-10-28: "it would replace the Would You Rather tab… there's only ever two tabs at the bottom"):
@@ -19,7 +19,7 @@
 
 import type { ItemChat } from "./itemChat";
 
-export type GameKey = "wyr" | "adventure";
+export type GameKey = "wyr" | "adventure" | "cookout";
 export type GameTab = "chat" | GameKey;
 
 export interface GameRegistration {
