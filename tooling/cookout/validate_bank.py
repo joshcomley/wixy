@@ -22,6 +22,9 @@ import unicodedata
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from normalise_names import PHRASES, PROPER_NOUNS  # noqa: E402
+
 REPO = Path(__file__).resolve().parents[2]
 BANK = REPO / "wixy_server" / "livechat" / "cookout_ingredients.json"
 
@@ -59,6 +62,20 @@ def _squash(name: str) -> str:
         if key.endswith(suffix) and len(key) > len(suffix) + 3:
             return key[: -len(suffix)] + ("y" if suffix == "ies" else "")
     return key
+
+
+def _case_problems(where: str, name: str) -> list[str]:
+    """Names are sentence case: only the first word and listed proper nouns carry capitals."""
+    if name in PHRASES.values():
+        return []
+    bad = [
+        w
+        for w in name.split(" ")[1:]
+        if w not in PROPER_NOUNS and not w.isupper() and w != w.lower()
+    ]
+    if bad:
+        return [f"{where}: name {name!r} is not sentence case (capitalised: {bad})"]
+    return []
 
 
 def _is_text(value: object, maximum: int) -> bool:
@@ -138,6 +155,8 @@ def validate(path: Path = BANK) -> list[str]:
                     f"{where}: near-duplicate of {squashed[sq]!r} (plural/punctuation only)"
                 )
             squashed.setdefault(sq, iid)
+        if _is_text(item["name"], 70):
+            problems.extend(_case_problems(where, str(item["name"])))
         if item["category"] not in CATEGORY_IDS:
             problems.append(f"{where}: unknown category {item['category']!r}")
         if item["role"] not in ROLES:
@@ -151,6 +170,8 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append(f"{where}: bad blurb (1-90 plain chars)")
         elif re.search(r"[<>*_`#|]", str(item["blurb"])):
             problems.append(f"{where}: blurb contains markup")
+        elif str(item["blurb"]).endswith(".") or not str(item["blurb"])[0].isupper():
+            problems.append(f"{where}: blurb must start capitalised and have no trailing full stop")
         al = item["aliases"]
         if not isinstance(al, list) or len(al) > 4 or not all(_is_text(a, 70) for a in al):
             problems.append(f"{where}: aliases must be 0-4 trimmed strings")

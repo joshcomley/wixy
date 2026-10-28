@@ -208,6 +208,27 @@ def test_validator_flags_plural_near_duplicates(raw_bank: dict[str, Any], tmp_pa
     assert any("near-duplicate" in p for p in validator.validate(path))
 
 
+def test_names_are_sentence_case_and_blurbs_have_no_full_stop(raw_bank: dict[str, Any]) -> None:
+    items = {i["id"]: i for i in raw_bank["ingredients"]}
+    assert items["maris-piper-potato"]["name"] == "Maris Piper potato"
+    assert items["whole-milk"]["name"] == "Whole milk"
+    assert all(not i["blurb"].endswith(".") for i in items.values())
+
+
+def test_validator_flags_title_case_and_full_stops(
+    raw_bank: dict[str, Any], tmp_path: Path
+) -> None:
+    def damage(d: dict[str, Any]) -> None:
+        _ingredient(d, "whole-milk").update(name="Whole Milk")
+        _ingredient(d, "butter").update(blurb="Ends with a stop.")
+
+    path = tmp_path / "case.json"
+    path.write_text(json.dumps(_mutated(raw_bank, damage)), encoding="utf-8")
+    problems = validator.validate(path)
+    assert any("not sentence case" in p for p in problems)
+    assert any("full stop" in p for p in problems)
+
+
 # -- the safe loader ---------------------------------------------------------------------------
 
 

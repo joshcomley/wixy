@@ -1,341 +1,341 @@
 # meat-poultry
-Beef Fillet | beef tenderloin | protein | beef-fillet | uncommon | The most tender cut; sear hard and rest, or slice for Wellington.
-Chateaubriand | | protein | beef-fillet | exotic | Thick centre-cut fillet roasted for two, carved in slices.
-Fillet Steak | filet mignon | protein | beef-fillet | uncommon | Small, buttery tender steak that wants a hot pan and a knob of butter.
-Beef Sirloin Steak | sirloin | protein | beef-sirloin | everyday | Good beefy flavour with a rim of fat; grill or pan-fry medium-rare.
-Rump Steak | | protein | beef-rump | everyday | Full-flavoured and slightly chewy; slice thinly across the grain.
-Beef Ribeye Steak | ribeye; rib-eye | protein | beef-ribeye | uncommon | Marbled and rich; renders gloriously in a screaming hot pan.
-Côte de Boeuf | cote de boeuf | protein | beef-ribeye | exotic | Bone-in rib steak cut thick for sharing, charred and carved.
-Forerib of Beef | rib of beef; standing rib roast | protein | beef-ribeye | uncommon | The classic Sunday roast joint on the bone, crusty and juicy.
-T-Bone Steak | | protein | beef-tbone | uncommon | Sirloin and fillet either side of the bone; a feast on the grill.
-Porterhouse Steak | | protein | beef-tbone | exotic | Generous T-bone with a large fillet side, best grilled thick.
-Flat Iron Steak | feather blade steak | protein | beef-blade | uncommon | Tender shoulder steak with a clean flavour, cooked quickly and sliced.
-Beef Skirt | skirt steak | protein | beef-skirt | uncommon | Loose-grained and deeply beefy; marinate, sear fast, slice across.
-Bavette | flank steak | protein | beef-flank | uncommon | Lean, open-textured steak that loves a marinade and a hot grill.
-Onglet | hanger steak | protein | beef-hanger | uncommon | Butcher's cut with intense, almost mineral flavour; cook rare.
-Beef Brisket | brisket | protein | beef-brisket | everyday | Tough cut that turns meltingly tender after long, slow cooking.
-Salt Beef | corned beef brisket | protein | beef-cured | uncommon | Brined brisket, simmered until tender for sandwiches and hash.
-Beef Short Rib | short ribs | protein | beef-rib | uncommon | Fatty, bone-in ribs braised until the meat slumps off the bone.
-Beef Shin | shin of beef | protein | beef-shin | everyday | Gelatinous and cheap; braise slowly for rich stews.
-Beef Cheek | ox cheek | protein | beef-cheek | uncommon | Dense, lean muscle that braises to silky richness.
-Oxtail | | protein | beef-oxtail | uncommon | Bony, gelatinous tail that gives soups and stews deep body.
-Chuck Steak | braising steak | protein | beef-chuck | everyday | Well-flavoured shoulder meat for pies, stews and casseroles.
-Beef Silverside | silverside | protein | beef-silverside | everyday | Lean leg joint for pot-roasting or salting and boiling.
-Beef Topside | topside | protein | beef-topside | everyday | Lean roasting joint that slices neatly when cooked medium.
-Beef Thick Flank | thick flank; top rump | protein | beef-topside | uncommon | Lean, economical joint for slow roasting or thin slicing.
-Beef Neck | neck of beef | protein | beef-neck | uncommon | Cheap, sinewy and flavourful; made for long-simmered stews.
-Beef Clod | | protein | beef-chuck | uncommon | Shoulder muscle that shreds beautifully after hours of braising.
-Tri-Tip | triangle roast | protein | beef-tritip | exotic | Triangular bottom-sirloin roast, smoky and tender when sliced thin.
-Picanha | rump cap | protein | beef-rump | exotic | Brazilian-style rump cap with a fat cap, skewered and grilled.
-Tomahawk Steak | tomahawk | protein | beef-ribeye | exotic | Show-stopping ribeye with a long frenched bone, finished with butter.
-Minute Steak | | protein | beef-minute | everyday | Thin beaten steak that cooks in a minute either side.
-Beef Mince | minced beef; ground beef | protein | beef-mince | everyday | Versatile base for ragu, burgers, chilli and cottage pie.
-Lean Beef Mince | extra-lean minced beef | protein | beef-mince | everyday | Low-fat mince that suits quick sauces and stuffed vegetables.
-Beef Burger Patty | | protein | beef-mince | everyday | Seasoned beef shaped for the grill or griddle.
-Diced Beef | stewing beef | protein | beef-diced | everyday | Cubes of shoulder or shin ready for stews and pies.
-Beef Stir-Fry Strips | | protein | beef-diced | everyday | Thin strips for quick wok cooking with soy and ginger.
-Beef Jerky | | protein | beef-cured | uncommon | Chewy dried and spiced strips; a salty snack or soup booster.
-Bresaola | | protein | beef-cured | exotic | Air-dried salted beef, sliced paper-thin with lemon and rocket.
-Pastrami | | protein | beef-cured | uncommon | Peppery, smoked salted beef, perfect piled on rye.
-Biltong | | protein | beef-cured | uncommon | South African air-dried beef, spiced with coriander and vinegar.
-Bone Marrow | marrow bones | protein | beef-bone | uncommon | Spoon out the roasted marrow and spread on toast with parsley salad.
-Wagyu Beef | wagyu | protein | beef-wagyu | exotic | Intensely marbled Japanese beef that melts when seared briefly.
-Dry-Aged Beef | | protein | beef-aged | exotic | Hung for weeks for a nutty, concentrated depth.
-Rolled Beef Joint | | protein | beef-roast | everyday | Tied roast ready for the oven, easy to carve into neat slices.
-Beef Fillet Tail | | protein | beef-fillet | uncommon | Tapered end of the fillet, good for stroganoff and stir-fries.
-Veal Escalope | veal cutlet | protein | veal | uncommon | Thin, tender slice beaten flat for schnitzel or piccata.
-Veal Shin | osso buco | protein | veal | uncommon | Cross-cut shin braised with wine, tomato and gremolata.
-Veal Chop | | protein | veal | exotic | Pale, delicate chop to pan-roast with sage and butter.
-Veal Mince | minced veal | protein | veal | uncommon | Delicate mince that makes soft meatballs and light ragu.
-Veal Breast | | protein | veal | exotic | Economical cut for stuffing and slow roasting.
-Veal Fillet | | protein | veal | exotic | Lean and tender, sliced into medallions for quick sautes.
-Veal Sweetbreads | | protein | offal-sweetbread | exotic | Delicately creamy offal, poached then crisped in butter.
-Calf's Liver | | protein | offal-liver | uncommon | Sweet and tender liver, seared pink with onions and bacon.
-Cumberland Sausage | | protein | sausage-fresh | everyday | Peppery coiled pork sausage from Cumbria.
-Lincolnshire Sausage | | protein | sausage-fresh | everyday | Sage-flecked pork sausage with a coarse, herby bite.
-Pork Sausage | bangers | protein | sausage-fresh | everyday | Classic British banger for toad in the hole or a fry-up.
-Beef Sausage | | protein | sausage-fresh | everyday | Firm, savoury sausage for the grill.
-Lamb Sausage | | protein | sausage-fresh | uncommon | Mint or harissa spiced sausage with a rich flavour.
-Chipolata | chipolatas | protein | sausage-fresh | everyday | Thin little sausages, ideal wrapped in bacon.
-Toulouse Sausage | | protein | sausage-fresh | uncommon | Coarse French pork sausage, essential to cassoulet.
-Italian Sausage | salsiccia | protein | sausage-fresh | uncommon | Fennel-scented pork sausage for pasta, pizza and braises.
-Merguez | | protein | sausage-fresh | uncommon | Spicy North African lamb sausage with harissa and cumin.
-Bratwurst | | protein | sausage-fresh | uncommon | German pork sausage with mild nutmeg and marjoram.
-Weisswurst | | protein | sausage-fresh | exotic | Bavarian white veal sausage, gently poached with sweet mustard.
-Frankfurter | hot dog sausage | protein | sausage-smoked | everyday | Smoked, pre-cooked sausage for hot dogs and soups.
-Knackwurst | | protein | sausage-smoked | exotic | Plump, garlicky German sausage that snaps when heated.
-Kielbasa | Polish sausage | protein | sausage-smoked | uncommon | Garlicky smoked sausage, good with sauerkraut or in stews.
-Lorne Sausage | square sausage | protein | sausage-fresh | uncommon | Scottish square sausage slice, fried for breakfast rolls.
-Longaniza | | protein | sausage-fresh | exotic | Long Spanish or Filipino pork sausage, aniseed or garlic spiced.
-Chorizo | | protein | sausage-cured | everyday | Smoky paprika-rich pork sausage that stains dishes red.
-Chorizo Picante | | protein | sausage-cured | uncommon | Hot-paprika chorizo with a fiery kick.
-Fresh Chorizo | Mexican chorizo | protein | sausage-fresh | uncommon | Raw spiced pork to crumble and fry in tacos and eggs.
-Cooking Chorizo | | protein | sausage-cured | everyday | Soft chorizo that releases red oil for stews and rice.
-Sobrasada | | protein | sausage-cured | exotic | Spreadable Mallorcan paprika sausage, delicious on toast with honey.
-Nduja | 'nduja | protein | sausage-cured | uncommon | Fiery spreadable Calabrian salami that melts into sauces.
-Salami Milano | Milano salami | protein | salami | everyday | Finely ground, mild salami for sandwiches and pizza.
-Genoa Salami | | protein | salami | uncommon | Garlic and wine seasoned salami with a tangy flavour.
-Felino Salami | | protein | salami | exotic | Fine-textured Italian salami, delicately seasoned.
-Finocchiona | | protein | salami | exotic | Tuscan fennel-seed salami with a sweet, aromatic note.
-Soppressata | | protein | salami | uncommon | Coarse Italian salami, sometimes spiced with chilli.
-Pepperoni | | protein | salami | everyday | Paprika-spiced salami that curls and crisps on pizza.
-Spianata Piccante | | protein | salami | uncommon | Flat, hot Calabrian salami for pizza and antipasti.
-Saucisson Sec | | protein | salami | uncommon | French dry-cured sausage, sliced for the picnic board.
-Fuet | | protein | salami | uncommon | Slim Catalan dry sausage with a white mould coat.
-Salchichon | | protein | salami | uncommon | Spanish peppercorn-studded dry sausage, mild and sliceable.
-Mortadella | | protein | sausage-cooked | uncommon | Smooth Bolognese pork cold cut studded with pistachios.
-Cervelat | | protein | sausage-cooked | exotic | Swiss cooked sausage, scored and grilled as a cheerful snack.
-Liver Sausage | leberwurst | protein | sausage-cooked | uncommon | Smooth spreadable sausage of pork liver and spices.
-Chistorra | | protein | sausage-cured | exotic | Thin, fast-cured Basque sausage, fried in a flash.
-Lap Cheong | Chinese sausage | protein | sausage-cured | uncommon | Sweet, dense dried pork sausage for fried rice and claypots.
-Sai Ua | | protein | sausage-fresh | exotic | Northern Thai herb sausage with lemongrass and galangal.
-Streaky Bacon | | protein | bacon | everyday | Fatty rashers that fry up crisp for rolls and garnish.
-Back Bacon | | protein | bacon | everyday | Lean loin rashers with a ribbon of fat; the classic British rasher.
-Smoked Bacon | | protein | bacon | everyday | Wood-smoked rashers with deeper aroma.
-Unsmoked Bacon | green bacon | protein | bacon | everyday | Milder cured bacon with clean porky sweetness.
-Middle Bacon | | protein | bacon | uncommon | Streaky and back combined in one long rasher.
-Bacon Lardons | lardons | protein | bacon | everyday | Fat cubes of bacon to render for salads and coq au vin.
-Bacon Bits | | protein | bacon | uncommon | Crisp crumbled bacon to scatter over dishes.
-Bacon Joint | | protein | bacon | uncommon | Cured pork joint to boil or roast and slice.
-Thick-Cut Bacon | | protein | bacon | uncommon | Chunky rashers that stay meaty when crisped.
-Canadian Bacon | | protein | bacon | exotic | Lean, round cured loin slices for breakfast muffins.
-Pancetta | | protein | pancetta | uncommon | Salt-cured pork belly, sliced or diced for pasta sauces.
-Pancetta Arrotolata | rolled pancetta | protein | pancetta | exotic | Rolled spiced belly sliced into spirals.
-Guanciale | | protein | pancetta | exotic | Cured pork cheek, the soul of carbonara.
-Lardo | lardo di colonnata | protein | pork-fat | exotic | Herb-cured pork back fat sliced translucent over warm toast.
-Speck | | protein | ham-cured | exotic | Juniper-scented smoked ham from the Alps.
-Prosciutto di Parma | Parma ham | protein | ham-cured | uncommon | Sweet air-dried ham, sliced wafer thin.
-Prosciutto di San Daniele | San Daniele ham | protein | ham-cured | exotic | Delicate air-dried ham with fine marbling.
-Jamon Iberico | iberico ham | protein | ham-cured | exotic | Acorn-fed pig ham with nutty, melting fat.
-Jamon Serrano | Serrano ham | protein | ham-cured | uncommon | Spanish dry-cured ham, a tapas staple.
-Bayonne Ham | | protein | ham-cured | exotic | French air-dried ham with a delicate salty sweetness.
-Westphalian Ham | | protein | ham-cured | exotic | German smoked ham with a dark crust.
-Coppa | capocollo | protein | ham-cured | uncommon | Cured pork neck, spiced and marbled.
-Culatello | | protein | ham-cured | exotic | Aged heart of the ham, prized for sweet softness.
-Honey Roast Ham | | protein | ham-cooked | everyday | Sweet-glazed sliced ham for sandwiches and platters.
-Wiltshire Ham | | protein | ham-cooked | uncommon | Mildly cured British ham, sliced from the bone.
-York Ham | | protein | ham-cooked | uncommon | Delicately sweet cooked ham carved thick or thin.
-Smoked Ham Hock | | protein | pork-hock | uncommon | Smoky joint that perfumes pea soup and terrines.
-Cooked Ham | | protein | ham-cooked | everyday | Sliced everyday ham for sandwiches and salads.
-Gammon Hock | | protein | pork-hock | uncommon | Cured hock for boiling, then pulling for pies.
-Ham on the Bone | | protein | ham-cooked | uncommon | Whole cooked ham, glazed and carved for feasts.
-Black Forest Ham | | protein | ham-cured | uncommon | Smoky German ham, dark-rinded and subtly spiced.
-Rabbit | wild rabbit | protein | rabbit | uncommon | Lean, delicate meat; braise with mustard or cider.
-Farmed Rabbit | | protein | rabbit | uncommon | Mild and tender rabbit for quick roasting.
-Rabbit Saddle | | protein | rabbit | exotic | The prized loin of the rabbit, quickly roasted.
-Rabbit Legs | | protein | rabbit | uncommon | Braise or confit for a gentle, sweet meat.
-Hare | | protein | hare | exotic | Dark, strongly flavoured game, classic in jugged hare.
-Hare Saddle | | protein | hare | exotic | Tender back of hare, roasted pink.
-Venison Haunch | | protein | venison | uncommon | Lean roasting joint, best with juniper and red wine.
-Venison Loin | venison saddle | protein | venison | exotic | Tender and lean; sear and rest pink.
-Venison Steak | | protein | venison | uncommon | Lean, rich steak that wants only brief cooking.
-Venison Haunch Steak | | protein | venison | uncommon | Slice from the haunch, quick-fry then rest.
-Venison Shoulder | | protein | venison | uncommon | Diced for stews and ragu where slow cooking mellows it.
-Venison Shank | | protein | venison | exotic | Gelatinous shank that braises tender in red wine.
-Venison Mince | minced venison | protein | venison | uncommon | Lean game mince for burgers and chilli.
-Venison Sausage | | protein | venison | uncommon | Rich game sausage, often with red wine or juniper.
-Venison Haunch Roast | | protein | venison | exotic | Whole roast with a gamey depth; keep it rare.
-Venison Rack | | protein | venison | exotic | Elegant ribs roasted pink with a berry sauce.
-Venison Medallions | | protein | venison | exotic | Neat rounds of fillet, seared fast.
-Venison Burger | | protein | venison | uncommon | Lean, deeply flavoured patty, best with a little added fat.
-Roe Deer Fillet | roe venison | protein | venison | exotic | Delicate, fine-grained venison from small roe deer.
-Fallow Deer Haunch | | protein | venison | exotic | Sweet, fine-grained venison with a mild gamey note.
-Red Deer Haunch | | protein | venison | exotic | Full-flavoured, lean venison from wild red deer.
-Muntjac | | protein | venison | exotic | Small deer with sweet, tender meat, quick to cook.
-Wild Boar | boar | protein | wild-boar | exotic | Dark, rich pork-like game for slow braising.
-Wild Boar Sausage | | protein | wild-boar | exotic | Gamey sausage often spiced with juniper or chestnut.
-Wild Boar Haunch | | protein | wild-boar | exotic | Lean joint to marinate and slow-roast.
-Bison | buffalo meat | protein | bison | exotic | Lean, sweet red meat, best cooked medium-rare.
-Bison Burger | | protein | bison | exotic | Lean patty that needs gentle cooking.
-Kangaroo Fillet | | protein | kangaroo | exotic | Very lean, rich red meat; sear rare and rest.
-Ostrich Fillet | | protein | ostrich | exotic | Lean red meat that cooks quickly and tastes like beef.
-Camel Meat | | protein | camel | exotic | Lean and slightly sweet, slow-cooked in North African stews.
-Horse Fillet | | protein | horse | exotic | Lean, sweet red meat eaten in parts of Europe.
-Crocodile Tail | | protein | crocodile | exotic | Mild, white meat, grilled or stir-fried.
-Whole Chicken | roasting chicken | protein | chicken-whole | everyday | The Sunday roast; rub with butter and lemon.
-Free-Range Chicken | | protein | chicken-whole | uncommon | Slower-grown bird with firmer, more flavourful meat.
-Corn-Fed Chicken | | protein | chicken-whole | uncommon | Golden-skinned bird with rich flavour.
-Poussin | spring chicken | protein | chicken-whole | uncommon | Tiny young chicken, one per person; spatchcock and grill.
-Spatchcock Chicken | butterflied chicken | protein | chicken-whole | uncommon | Flattened bird that roasts or grills quickly and evenly.
-Chicken Breast | chicken breast fillet | protein | chicken-breast | everyday | Lean and versatile; do not overcook.
-Chicken Breast on the Bone | | protein | chicken-breast | uncommon | Skin-on supreme with wing bone for juicy roasting.
-Chicken Supreme | | protein | chicken-breast | uncommon | Skin-on breast with the wing bone attached, for pan-roasting.
-Chicken Mini Fillets | chicken tenders | protein | chicken-breast | everyday | Tender strips for quick frying, goujons and skewers.
-Chicken Thigh | | protein | chicken-thigh | everyday | Juicy, forgiving dark meat that loves a long braise.
-Boneless Chicken Thigh | | protein | chicken-thigh | everyday | Skinless or skin-on fillets for curries, kebabs and tray bakes.
-Chicken Drumstick | drumsticks | protein | chicken-drumstick | everyday | Sticky finger-food, great barbecued or roasted.
-Chicken Leg | chicken leg quarter | protein | chicken-thigh | everyday | Thigh and drumstick together, ideal for braising.
-Chicken Wings | | protein | chicken-wing | everyday | Crisp-skinned and sticky with a glaze.
-Chicken Wing Tips | | protein | chicken-wing | uncommon | Bony tips for stock or crisp frying.
-Chicken Winglets | | protein | chicken-wing | uncommon | Middle joint wing pieces, perfect for buffalo style.
-Chicken Oysters | | protein | chicken-thigh | exotic | Small tender morsels from the back, the cook's treat.
-Chicken Carcass | | protein | chicken-bone | everyday | Roasted bones for rich homemade stock.
-Chicken Feet | | protein | chicken-bone | exotic | Gelatinous feet for dim sum and silky broths.
-Chicken Necks | | protein | chicken-bone | uncommon | Cheap, flavourful bones for stock and gravy.
-Chicken Mince | minced chicken | protein | chicken-mince | everyday | Light mince for burgers, meatballs and dumplings.
-Chicken Livers | | protein | offal-liver | everyday | Creamy when pink; fry quickly or blend into pâté.
-Chicken Hearts | | protein | offal-heart | uncommon | Skewer and grill for a rich, chewy bite.
-Chicken Gizzards | | protein | offal-gizzard | exotic | Chewy muscle that braises or fries into a savoury treat.
-Chicken Skin | | protein | chicken-skin | uncommon | Crisp it in the oven for a crunchy, salty snack.
-Chicken Sausage | | protein | sausage-fresh | uncommon | Lighter sausage seasoned with herbs.
-Chicken Kyiv | | protein | chicken-prepared | uncommon | Breast stuffed with garlic butter, breaded and baked.
-Chicken Goujons | | protein | chicken-prepared | everyday | Strips of breaded chicken for dipping.
-Chicken Schnitzel | | protein | chicken-prepared | uncommon | Flattened, breaded and fried breast.
-Chicken Kebab Meat | | protein | chicken-prepared | uncommon | Marinated sliced chicken thigh carved from a spit.
-Roast Chicken | cooked chicken | protein | chicken-prepared | everyday | Leftover roast for sandwiches, salads and pies.
-Rotisserie Chicken | | protein | chicken-prepared | everyday | Spit-roasted, well-seasoned bird ready to shred.
-Chicken Karaage | | protein | chicken-prepared | exotic | Japanese marinated chicken, dusted and double-fried.
-Capon | | protein | chicken-whole | exotic | Large, tender castrated cockerel for festive roasts.
-Boiling Fowl | stewing hen | protein | chicken-whole | exotic | Old hen with deep flavour for soups and broths.
-Bresse Chicken | | protein | chicken-whole | exotic | French poultry prized for its firm, flavourful flesh.
-Whole Turkey | | protein | turkey | everyday | The Christmas centrepiece; brine for juicy results.
-Turkey Crown | | protein | turkey | uncommon | Boneless breast joint for smaller festive meals.
-Turkey Breast Steak | turkey steak | protein | turkey | everyday | Lean, quick-cooking steak for escalopes and stir-fries.
-Turkey Thigh | | protein | turkey | uncommon | Dark, juicy meat that braises well.
-Turkey Drumstick | | protein | turkey | uncommon | Giant, meaty leg that slow-roasts or smokes beautifully.
-Turkey Mince | minced turkey | protein | turkey | everyday | Lean mince for burgers, chilli and lasagne.
-Turkey Wings | | protein | turkey | uncommon | Collagen-rich wings for roasting and gravy.
-Smoked Turkey Breast | | protein | turkey | uncommon | Deli-style smoked slices for sandwiches.
-Turkey Bacon | | protein | turkey | uncommon | Thin cured turkey rashers that crisp up leanly.
-Turkey Giblets | | protein | offal-giblets | uncommon | Neck, heart and gizzard for gravy and stuffing stock.
-Whole Duck | | protein | duck | uncommon | Fatty bird; prick the skin and roast high for crisp skin.
-Duck Breast | magret | protein | duck | uncommon | Score the skin, render slowly, serve pink.
-Duck Leg | | protein | duck | uncommon | Confit or roast until crisp and tender.
-Duck Confit | | protein | duck | exotic | Legs slow-cooked in their own fat, then crisped.
-Duck Wings | | protein | duck | uncommon | Fatty wings for roasting and Chinese-style glazes.
-Duck Fat | | protein | duck | uncommon | Golden fat for the crispiest roast potatoes.
-Duck Liver | | protein | offal-liver | exotic | Rich liver for terrines and parfaits.
-Foie Gras | | protein | offal-liver | exotic | Luxury fattened duck or goose liver, seared or terrined.
-Duck Gizzards | | protein | offal-gizzard | exotic | Slow-cooked gizzards that crown a salade landaise.
-Crispy Aromatic Duck | | protein | duck | uncommon | Shredded roast duck for pancakes with hoisin and cucumber.
-Peking Duck | | protein | duck | exotic | Lacquered, air-dried duck with glassy skin.
-Barbary Duck | Barbarie duck | protein | duck | exotic | Lean, large duck with meaty breast.
-Gressingham Duck | | protein | duck | uncommon | Lean British duck breed with rich dark meat.
-Muscovy Duck | | protein | duck | exotic | Lean, gamey duck with large breasts.
-Whole Goose | | protein | goose | exotic | Rich festive bird that gives you generous goose fat.
-Goose Breast | | protein | goose | exotic | Dark, rich breast; roast pink like duck.
-Goose Leg | | protein | goose | exotic | Fatty leg for confit or slow roasting.
-Goose Fat | | protein | goose | uncommon | Prized fat for roast potatoes and pastry.
-Whole Quail | quail | protein | quail | uncommon | Tiny bird, grilled whole with sage or honey.
-Boneless Quail | | protein | quail | exotic | Stuffed or flattened for quick grilling.
-Quail Breast | | protein | quail | exotic | Delicate and lean; sear and rest briefly.
-Pheasant | | protein | game-bird | uncommon | Lean game bird; wrap in bacon to keep moist.
-Pheasant Breast | | protein | game-bird | uncommon | Mild, lean breast for pan-frying with cream and apple.
-Partridge | | protein | game-bird | exotic | Delicate game bird, roasted young with butter.
-Grouse | red grouse | protein | game-bird | exotic | Intensely flavoured moorland bird, roasted pink.
-Woodcock | | protein | game-bird | exotic | Prized game bird traditionally cooked with its offal intact.
-Snipe | | protein | game-bird | exotic | Tiny game bird, roasted quickly on toast.
-Wood Pigeon | pigeon | protein | game-bird | uncommon | Dark, rich breast; quick-fry rare with berries.
-Squab | squab pigeon | protein | game-bird | exotic | Farmed young pigeon with tender, succulent meat.
-Guinea Fowl | | protein | game-bird | uncommon | Mild, gamey bird between chicken and pheasant.
-Guinea Fowl Breast | | protein | game-bird | uncommon | Lean and flavourful; pan-roast with its skin on.
-Mallard | wild duck | protein | game-bird | exotic | Wild duck with dark, lean meat; roast fast.
-Teal | | protein | game-bird | exotic | Small wild duck, roasted quickly for a sweet, rich flavour.
-Wild Goose | | protein | game-bird | exotic | Lean and gamey; braise or roast with fruit.
-Emu Fillet | | protein | emu | exotic | Very lean, tender red meat.
-Pigeon Breast | | protein | game-bird | uncommon | Dark, tender breast, seared rare.
-Ox Liver | beef liver | protein | offal-liver | uncommon | Strong, iron-rich liver; soak in milk and fry.
-Ox Kidney | beef kidney | protein | offal-kidney | uncommon | Classic steak and kidney pudding ingredient.
-Ox Heart | beef heart | protein | offal-heart | exotic | Lean, dense muscle; slice thin and grill or braise.
-Ox Tongue | beef tongue | protein | offal-tongue | uncommon | Braised until tender, peeled and sliced for sandwiches.
-Beef Tripe | tripe | protein | offal-tripe | exotic | Honeycomb stomach lining, slow-cooked in onions or tomato.
-Honeycomb Tripe | | protein | offal-tripe | exotic | Textured tripe for soups and Mediterranean stews.
-Beef Spleen | | protein | offal-spleen | exotic | Sicilian street-food offal, simmered then fried.
-Beef Dripping | dripping | protein | beef-fat | uncommon | Rendered beef fat for chips and Yorkshire puddings.
-Tallow | | protein | beef-fat | exotic | Rendered beef fat for frying with a savoury flavour.
-Veal Bones | | protein | veal | uncommon | Pale gelatinous bones for classic stock and demi-glace.
-Pig's Blood | | protein | offal-blood | exotic | Used to make black pudding and rich sauces.
-Chicken Liver Pâté | | protein | offal-pate | uncommon | Smooth spread of livers, butter and brandy.
-Pork Liver Pâté | | protein | offal-pate | uncommon | Rustic coarse pâté with herbs.
-Pâté de Campagne | country pâté | protein | offal-pate | uncommon | Coarse French pork pâté studded with herbs and brandy.
-Terrine de Campagne | | protein | offal-pate | exotic | Sliceable country terrine with pistachios and ham.
-Rillettes | pork rillettes | protein | offal-pate | uncommon | Shredded pork cooked and potted in fat for spreading.
-Brawn | head cheese | protein | offal-pate | exotic | Jellied pork head meat, sliced cold with mustard.
-Faggots | | protein | offal-pate | uncommon | Savoury offal meatballs wrapped in caul fat.
-Scotch Egg Sausagemeat | sausagemeat | protein | pork-mince | uncommon | Seasoned pork for wrapping eggs and stuffing.
-Pork Meatballs | | protein | pork-mince | everyday | Herbed pork mince rolled for sauces and soups.
-Beef Meatballs | | protein | beef-mince | everyday | Tender meatballs for spaghetti and sauces.
-Lamb Koftas | | protein | lamb-mince | uncommon | Spiced lamb mince moulded onto skewers.
-Beef and Pork Mince | | protein | beef-mince | everyday | Mixed mince for juicy meatballs and meatloaf.
-Pork and Veal Mince | | protein | pork-mince | uncommon | Classic meatball blend for soft texture.
-Kangaroo Mince | | protein | kangaroo | exotic | Very lean mince that needs added fat.
-Beef Carpaccio Fillet | carpaccio | protein | beef-fillet | exotic | Raw fillet sliced paper-thin with lemon and Parmesan.
-Beef Tartare | steak tartare | protein | beef-fillet | exotic | Raw chopped beef with capers, shallot and egg yolk.
-Teriyaki Beef Slices | | protein | beef-diced | uncommon | Thin sliced beef for hot pots and rice bowls.
-Shabu-Shabu Beef | | protein | beef-diced | exotic | Paper-thin beef for swishing through simmering broth.
-Yakiniku Beef | | protein | beef-diced | exotic | Thin-cut marbled beef for tabletop grilling.
-Bulgogi Beef | | protein | beef-diced | uncommon | Thinly sliced beef ready to marinate in soy and pear.
-Galbi Short Ribs | | protein | beef-rib | exotic | Flanken-cut short ribs for Korean barbecue.
-Lamb Leg | leg of lamb | protein | lamb-leg | everyday | Classic roast, studded with garlic and rosemary.
-Butterflied Leg of Lamb | | protein | lamb-leg | uncommon | Boned and opened flat for quick grilling or barbecuing.
-Lamb Shank | lamb shanks | protein | lamb-shank | everyday | Braised until the meat falls from the bone in a rich sauce.
-Lamb Shoulder | shoulder of lamb | protein | lamb-shoulder | everyday | Fatty and flavourful; slow-roast until it pulls apart.
-Rack of Lamb | | protein | lamb-rack | uncommon | Elegant ribs with a herb crust, roasted pink.
-Lamb Cutlets | | protein | lamb-rack | uncommon | Small, tender chops cut from the rack; fry or grill quickly.
-Lamb Loin Chops | | protein | lamb-loin | everyday | Mini T-bones with a fat edge; grill with mint and garlic.
-Lamb Chump Chop | chump chops | protein | lamb-loin | everyday | Meaty, economical chop good for grilling or pan-frying.
-Lamb Noisettes | | protein | lamb-loin | uncommon | Neat boneless rounds of loin, tied and pan-seared.
-Saddle of Lamb | | protein | lamb-loin | exotic | Whole double loin, roasted for a special occasion.
-Lamb Neck Fillet | | protein | lamb-neck | uncommon | Long, tender cut that is lovely marinated and grilled.
-Scrag End of Lamb | scrag end | protein | lamb-neck | uncommon | Bony, cheap stewing cut, essential to Irish stew.
-Middle Neck of Lamb | | protein | lamb-neck | uncommon | Bone-in slices that give stews and hotpots rich flavour.
-Lamb Breast | breast of lamb | protein | lamb-breast | uncommon | Fatty cut best rolled, stuffed and slowly roasted.
-Lamb Rump | | protein | lamb-rump | uncommon | Tender, lean cap of the leg; roast whole and slice pink.
-Lamb Mince | minced lamb | protein | lamb-mince | everyday | For koftas, shepherd's pie and moussaka.
-Diced Lamb | lamb leg chunks | protein | lamb-diced | everyday | Cubes for kebabs, tagines and curries.
-Lamb Ribs | | protein | lamb-rib | uncommon | Fatty ribs that crisp up when baked low and slow then glazed.
-Lamb Kidneys | | protein | offal-kidney | uncommon | Mild, tender offal; devil with mustard and cayenne.
-Lamb's Liver | | protein | offal-liver | everyday | Delicate and sweet liver for frying with onions.
-Lamb's Heart | | protein | offal-heart | exotic | Lean, dense muscle that stuffs and braises well.
-Lamb's Tongue | | protein | offal-tongue | exotic | Slow-cooked, peeled and sliced for a tender, rich bite.
-Lamb Sweetbreads | | protein | offal-sweetbread | exotic | Creamy offal, blanched and then fried until golden.
-Mutton Leg | leg of mutton | protein | mutton | exotic | Mature sheep with deep flavour, needs slow cooking.
-Mutton Shoulder | | protein | mutton | exotic | Strongly flavoured, ideal for curries and long braises.
-Hogget | | protein | mutton | exotic | Second-year lamb with more depth than lamb and less than mutton.
-Goat Meat | | protein | goat | exotic | Lean and gamey; braise in curries and stews.
-Kid Goat Leg | | protein | goat | exotic | Young goat leg, mild and tender when slow-roasted.
-Pork Loin | loin of pork | protein | pork-loin | everyday | Lean roasting joint, best with crackling.
-Pork Loin Chop | pork chop | protein | pork-loin | everyday | Classic chop with a fat edge; pan-fry with apple.
-Pork Cutlet | | protein | pork-loin | everyday | Boneless cut from the loin, good for schnitzel.
-Pork Tenderloin | pork fillet | protein | pork-tenderloin | everyday | Lean, tender and quick to cook; roast whole or slice into medallions.
-Pork Belly | belly pork | protein | pork-belly | everyday | Layers of fat and meat; roast for crisp crackling.
-Pork Belly Strips | | protein | pork-belly | everyday | Thin slices for grilling, braising or barbecuing.
-Pork Shoulder | hand of pork | protein | pork-shoulder | everyday | Marbled joint that shreds after slow roasting.
-Pork Collar | collar of pork | protein | pork-shoulder | uncommon | Well-marbled neck cut, tender and juicy when grilled or roasted.
-Pork Neck Fillet | | protein | pork-shoulder | uncommon | Fatty and flavourful boneless cut for the barbecue.
-Pork Leg | leg of pork | protein | pork-leg | everyday | Big roast with crisp crackling and plenty to share.
-Gammon Joint | | protein | pork-cured | everyday | Cured leg of pork, boiled or baked and glazed.
-Gammon Steak | | protein | pork-cured | everyday | Salty cured slice, grilled and served with egg and pineapple.
-Pork Spare Ribs | spare ribs | protein | pork-ribs | everyday | Sticky ribs with deep flavour after slow cooking.
-Baby Back Ribs | | protein | pork-ribs | uncommon | Smaller, meatier loin ribs; tender and quick to cook.
-Pork Cheek | | protein | pork-cheek | uncommon | Rich, gelatinous cheek that braises beautifully.
-Pig's Trotter | trotter | protein | pork-trotter | uncommon | Sticky, gelatinous trotters thicken stocks and stews.
-Pork Hock | ham hock; knuckle of pork | protein | pork-hock | uncommon | Smoky or fresh, braised until the meat falls away.
-Pork Mince | minced pork; ground pork | protein | pork-mince | everyday | For dumplings, meatballs and sausage fillings.
-Diced Pork | pork cubes | protein | pork-diced | everyday | Shoulder cubes for casseroles, curries and kebabs.
-Pork Escalope | | protein | pork-loin | everyday | Thin beaten pork, breaded and fried.
-Pork Chump | | protein | pork-leg | uncommon | Meaty rump-end chop that roasts or pan-fries well.
-Rack of Pork | | protein | pork-loin | uncommon | Bone-in roasting joint with a crackling crown.
-Suckling Pig | | protein | pork-whole | exotic | Whole young pig roasted until the skin shatters.
-Pork Crackling | | protein | pork-skin | uncommon | Salted, blistered pork skin; crunchy and rich.
-Pork Rind | pork skin | protein | pork-skin | uncommon | Raw skin to score, salt and crisp in the oven.
-Pork Fat Back | fatback | protein | pork-fat | uncommon | Firm white fat for larding, lardo and sausages.
-Pork Caul Fat | caul | protein | pork-fat | exotic | Lacy membrane used to wrap faggots and pâtés.
-Pig's Liver | | protein | offal-liver | uncommon | Strong liver for pâtés and faggots.
-Pig's Kidney | | protein | offal-kidney | uncommon | Robust offal; soak, then fry or add to steak and kidney pie.
-Pig's Heart | | protein | offal-heart | exotic | Lean organ meat for slow braising or stuffing.
-Pig's Tongue | | protein | offal-tongue | exotic | Poached until tender, then peeled and sliced.
-Pig's Ear | | protein | offal-ear | exotic | Crisp cartilage and skin, braised then fried for crunch.
-Pork Medallions | | protein | pork-tenderloin | uncommon | Round slices of tenderloin for quick pan-sauces.
-Pork Tomahawk | | protein | pork-loin | exotic | Long-boned pork chop that looks dramatic and stays juicy.
-Iberico Secreto | | protein | pork-iberico | exotic | Marbled cut from Iberian pig, seared pink and sliced.
-Iberico Presa | | protein | pork-iberico | exotic | Richly marbled shoulder steak, almost beef-like in flavour.
-Iberico Pluma | | protein | pork-iberico | exotic | Tender, fatty cut from the loin end with nutty flavour.
-Black Pudding | blood sausage | protein | pudding-black | everyday | Rich blood sausage with oats; fry until crisp.
-White Pudding | | protein | pudding-white | uncommon | Pork and oatmeal sausage with a mild peppery taste.
-Haggis | | protein | pudding-haggis | uncommon | Spiced offal and oats, traditionally served with neeps and tatties.
-Boudin Noir | | protein | pudding-black | exotic | French blood sausage with apple and onion.
-Boudin Blanc | | protein | pudding-white | exotic | Delicate French white sausage of pork or chicken with milk.
-Morcilla | | protein | pudding-black | exotic | Spanish blood sausage with rice, onion and paprika.
-Andouille Sausage | andouille | protein | sausage-smoked | exotic | Smoky, coarse sausage with Cajun heat.
-Andouillette | | protein | sausage-offal | exotic | Pungent French sausage of tripe and chitterlings.
+Beef fillet | beef tenderloin | protein | beef-fillet | uncommon | The most tender cut; sear hard and rest, or slice for Wellington
+Chateaubriand |  | protein | beef-fillet | exotic | Thick centre-cut fillet roasted for two, carved in slices
+Fillet steak | filet mignon | protein | beef-fillet | uncommon | Small, buttery tender steak that wants a hot pan and a knob of butter
+Beef sirloin steak | sirloin | protein | beef-sirloin | everyday | Good beefy flavour with a rim of fat; grill or pan-fry medium-rare
+Rump steak |  | protein | beef-rump | everyday | Full-flavoured and slightly chewy; slice thinly across the grain
+Beef ribeye steak | ribeye; rib-eye | protein | beef-ribeye | uncommon | Marbled and rich; renders gloriously in a screaming hot pan
+Côte de boeuf | cote de boeuf | protein | beef-ribeye | exotic | Bone-in rib steak cut thick for sharing, charred and carved
+Forerib of beef | rib of beef; standing rib roast | protein | beef-ribeye | uncommon | The classic Sunday roast joint on the bone, crusty and juicy
+T-Bone steak |  | protein | beef-tbone | uncommon | Sirloin and fillet either side of the bone; a feast on the grill
+Porterhouse steak |  | protein | beef-tbone | exotic | Generous T-bone with a large fillet side, best grilled thick
+Flat iron steak | feather blade steak | protein | beef-blade | uncommon | Tender shoulder steak with a clean flavour, cooked quickly and sliced
+Beef skirt | skirt steak | protein | beef-skirt | uncommon | Loose-grained and deeply beefy; marinate, sear fast, slice across
+Bavette | flank steak | protein | beef-flank | uncommon | Lean, open-textured steak that loves a marinade and a hot grill
+Onglet | hanger steak | protein | beef-hanger | uncommon | Butcher's cut with intense, almost mineral flavour; cook rare
+Beef brisket | brisket | protein | beef-brisket | everyday | Tough cut that turns meltingly tender after long, slow cooking
+Salt beef | corned beef brisket | protein | beef-cured | uncommon | Brined brisket, simmered until tender for sandwiches and hash
+Beef short rib | short ribs | protein | beef-rib | uncommon | Fatty, bone-in ribs braised until the meat slumps off the bone
+Beef shin | shin of beef | protein | beef-shin | everyday | Gelatinous and cheap; braise slowly for rich stews
+Beef cheek | ox cheek | protein | beef-cheek | uncommon | Dense, lean muscle that braises to silky richness
+Oxtail |  | protein | beef-oxtail | uncommon | Bony, gelatinous tail that gives soups and stews deep body
+Chuck steak | braising steak | protein | beef-chuck | everyday | Well-flavoured shoulder meat for pies, stews and casseroles
+Beef silverside | silverside | protein | beef-silverside | everyday | Lean leg joint for pot-roasting or salting and boiling
+Beef topside | topside | protein | beef-topside | everyday | Lean roasting joint that slices neatly when cooked medium
+Beef thick flank | thick flank; top rump | protein | beef-topside | uncommon | Lean, economical joint for slow roasting or thin slicing
+Beef neck | neck of beef | protein | beef-neck | uncommon | Cheap, sinewy and flavourful; made for long-simmered stews
+Beef clod |  | protein | beef-chuck | uncommon | Shoulder muscle that shreds beautifully after hours of braising
+Tri-Tip | triangle roast | protein | beef-tritip | exotic | Triangular bottom-sirloin roast, smoky and tender when sliced thin
+Picanha | rump cap | protein | beef-rump | exotic | Brazilian-style rump cap with a fat cap, skewered and grilled
+Tomahawk steak | tomahawk | protein | beef-ribeye | exotic | Show-stopping ribeye with a long frenched bone, finished with butter
+Minute steak |  | protein | beef-minute | everyday | Thin beaten steak that cooks in a minute either side
+Beef mince | minced beef; ground beef | protein | beef-mince | everyday | Versatile base for ragu, burgers, chilli and cottage pie
+Lean beef mince | extra-lean minced beef | protein | beef-mince | everyday | Low-fat mince that suits quick sauces and stuffed vegetables
+Beef burger patty |  | protein | beef-mince | everyday | Seasoned beef shaped for the grill or griddle
+Diced beef | stewing beef | protein | beef-diced | everyday | Cubes of shoulder or shin ready for stews and pies
+Beef stir-fry strips |  | protein | beef-diced | everyday | Thin strips for quick wok cooking with soy and ginger
+Beef jerky |  | protein | beef-cured | uncommon | Chewy dried and spiced strips; a salty snack or soup booster
+Bresaola |  | protein | beef-cured | exotic | Air-dried salted beef, sliced paper-thin with lemon and rocket
+Pastrami |  | protein | beef-cured | uncommon | Peppery, smoked salted beef, perfect piled on rye
+Biltong |  | protein | beef-cured | uncommon | South African air-dried beef, spiced with coriander and vinegar
+Bone marrow | marrow bones | protein | beef-bone | uncommon | Spoon out the roasted marrow and spread on toast with parsley salad
+Wagyu beef | wagyu | protein | beef-wagyu | exotic | Intensely marbled Japanese beef that melts when seared briefly
+Dry-Aged beef |  | protein | beef-aged | exotic | Hung for weeks for a nutty, concentrated depth
+Rolled beef joint |  | protein | beef-roast | everyday | Tied roast ready for the oven, easy to carve into neat slices
+Beef fillet tail |  | protein | beef-fillet | uncommon | Tapered end of the fillet, good for stroganoff and stir-fries
+Veal escalope | veal cutlet | protein | veal | uncommon | Thin, tender slice beaten flat for schnitzel or piccata
+Veal shin | osso buco | protein | veal | uncommon | Cross-cut shin braised with wine, tomato and gremolata
+Veal chop |  | protein | veal | exotic | Pale, delicate chop to pan-roast with sage and butter
+Veal mince | minced veal | protein | veal | uncommon | Delicate mince that makes soft meatballs and light ragu
+Veal breast |  | protein | veal | exotic | Economical cut for stuffing and slow roasting
+Veal fillet |  | protein | veal | exotic | Lean and tender, sliced into medallions for quick sautes
+Veal sweetbreads |  | protein | offal-sweetbread | exotic | Delicately creamy offal, poached then crisped in butter
+Calf's liver |  | protein | offal-liver | uncommon | Sweet and tender liver, seared pink with onions and bacon
+Cumberland sausage |  | protein | sausage-fresh | everyday | Peppery coiled pork sausage from Cumbria
+Lincolnshire sausage |  | protein | sausage-fresh | everyday | Sage-flecked pork sausage with a coarse, herby bite
+Pork sausage | bangers | protein | sausage-fresh | everyday | Classic British banger for toad in the hole or a fry-up
+Beef sausage |  | protein | sausage-fresh | everyday | Firm, savoury sausage for the grill
+Lamb sausage |  | protein | sausage-fresh | uncommon | Mint or harissa spiced sausage with a rich flavour
+Chipolata | chipolatas | protein | sausage-fresh | everyday | Thin little sausages, ideal wrapped in bacon
+Toulouse sausage |  | protein | sausage-fresh | uncommon | Coarse French pork sausage, essential to cassoulet
+Italian sausage | salsiccia | protein | sausage-fresh | uncommon | Fennel-scented pork sausage for pasta, pizza and braises
+Merguez |  | protein | sausage-fresh | uncommon | Spicy North African lamb sausage with harissa and cumin
+Bratwurst |  | protein | sausage-fresh | uncommon | German pork sausage with mild nutmeg and marjoram
+Weisswurst |  | protein | sausage-fresh | exotic | Bavarian white veal sausage, gently poached with sweet mustard
+Frankfurter | hot dog sausage | protein | sausage-smoked | everyday | Smoked, pre-cooked sausage for hot dogs and soups
+Knackwurst |  | protein | sausage-smoked | exotic | Plump, garlicky German sausage that snaps when heated
+Kielbasa | Polish sausage | protein | sausage-smoked | uncommon | Garlicky smoked sausage, good with sauerkraut or in stews
+Lorne sausage | square sausage | protein | sausage-fresh | uncommon | Scottish square sausage slice, fried for breakfast rolls
+Longaniza |  | protein | sausage-fresh | exotic | Long Spanish or Filipino pork sausage, aniseed or garlic spiced
+Chorizo |  | protein | sausage-cured | everyday | Smoky paprika-rich pork sausage that stains dishes red
+Chorizo picante |  | protein | sausage-cured | uncommon | Hot-paprika chorizo with a fiery kick
+Fresh chorizo | Mexican chorizo | protein | sausage-fresh | uncommon | Raw spiced pork to crumble and fry in tacos and eggs
+Cooking chorizo |  | protein | sausage-cured | everyday | Soft chorizo that releases red oil for stews and rice
+Sobrasada |  | protein | sausage-cured | exotic | Spreadable Mallorcan paprika sausage, delicious on toast with honey
+Nduja | 'nduja | protein | sausage-cured | uncommon | Fiery spreadable Calabrian salami that melts into sauces
+Salami Milano | Milano salami | protein | salami | everyday | Finely ground, mild salami for sandwiches and pizza
+Genoa salami |  | protein | salami | uncommon | Garlic and wine seasoned salami with a tangy flavour
+Felino salami |  | protein | salami | exotic | Fine-textured Italian salami, delicately seasoned
+Finocchiona |  | protein | salami | exotic | Tuscan fennel-seed salami with a sweet, aromatic note
+Soppressata |  | protein | salami | uncommon | Coarse Italian salami, sometimes spiced with chilli
+Pepperoni |  | protein | salami | everyday | Paprika-spiced salami that curls and crisps on pizza
+Spianata piccante |  | protein | salami | uncommon | Flat, hot Calabrian salami for pizza and antipasti
+Saucisson sec |  | protein | salami | uncommon | French dry-cured sausage, sliced for the picnic board
+Fuet |  | protein | salami | uncommon | Slim Catalan dry sausage with a white mould coat
+Salchichon |  | protein | salami | uncommon | Spanish peppercorn-studded dry sausage, mild and sliceable
+Mortadella |  | protein | sausage-cooked | uncommon | Smooth Bolognese pork cold cut studded with pistachios
+Cervelat |  | protein | sausage-cooked | exotic | Swiss cooked sausage, scored and grilled as a cheerful snack
+Liver sausage | leberwurst | protein | sausage-cooked | uncommon | Smooth spreadable sausage of pork liver and spices
+Chistorra |  | protein | sausage-cured | exotic | Thin, fast-cured Basque sausage, fried in a flash
+Lap cheong | Chinese sausage | protein | sausage-cured | uncommon | Sweet, dense dried pork sausage for fried rice and claypots
+Sai ua |  | protein | sausage-fresh | exotic | Northern Thai herb sausage with lemongrass and galangal
+Streaky bacon |  | protein | bacon | everyday | Fatty rashers that fry up crisp for rolls and garnish
+Back bacon |  | protein | bacon | everyday | Lean loin rashers with a ribbon of fat; the classic British rasher
+Smoked bacon |  | protein | bacon | everyday | Wood-smoked rashers with deeper aroma
+Unsmoked bacon | green bacon | protein | bacon | everyday | Milder cured bacon with clean porky sweetness
+Middle bacon |  | protein | bacon | uncommon | Streaky and back combined in one long rasher
+Bacon lardons | lardons | protein | bacon | everyday | Fat cubes of bacon to render for salads and coq au vin
+Bacon bits |  | protein | bacon | uncommon | Crisp crumbled bacon to scatter over dishes
+Bacon joint |  | protein | bacon | uncommon | Cured pork joint to boil or roast and slice
+Thick-Cut bacon |  | protein | bacon | uncommon | Chunky rashers that stay meaty when crisped
+Canadian bacon |  | protein | bacon | exotic | Lean, round cured loin slices for breakfast muffins
+Pancetta |  | protein | pancetta | uncommon | Salt-cured pork belly, sliced or diced for pasta sauces
+Pancetta arrotolata | rolled pancetta | protein | pancetta | exotic | Rolled spiced belly sliced into spirals
+Guanciale |  | protein | pancetta | exotic | Cured pork cheek, the soul of carbonara
+Lardo | lardo di colonnata | protein | pork-fat | exotic | Herb-cured pork back fat sliced translucent over warm toast
+Speck |  | protein | ham-cured | exotic | Juniper-scented smoked ham from the Alps
+Prosciutto di Parma | Parma ham | protein | ham-cured | uncommon | Sweet air-dried ham, sliced wafer thin
+Prosciutto di San Daniele | San Daniele ham | protein | ham-cured | exotic | Delicate air-dried ham with fine marbling
+Jamon Iberico | iberico ham | protein | ham-cured | exotic | Acorn-fed pig ham with nutty, melting fat
+Jamon Serrano | Serrano ham | protein | ham-cured | uncommon | Spanish dry-cured ham, a tapas staple
+Bayonne ham |  | protein | ham-cured | exotic | French air-dried ham with a delicate salty sweetness
+Westphalian ham |  | protein | ham-cured | exotic | German smoked ham with a dark crust
+Coppa | capocollo | protein | ham-cured | uncommon | Cured pork neck, spiced and marbled
+Culatello |  | protein | ham-cured | exotic | Aged heart of the ham, prized for sweet softness
+Honey roast ham |  | protein | ham-cooked | everyday | Sweet-glazed sliced ham for sandwiches and platters
+Wiltshire ham |  | protein | ham-cooked | uncommon | Mildly cured British ham, sliced from the bone
+York ham |  | protein | ham-cooked | uncommon | Delicately sweet cooked ham carved thick or thin
+Smoked ham hock |  | protein | pork-hock | uncommon | Smoky joint that perfumes pea soup and terrines
+Cooked ham |  | protein | ham-cooked | everyday | Sliced everyday ham for sandwiches and salads
+Gammon hock |  | protein | pork-hock | uncommon | Cured hock for boiling, then pulling for pies
+Ham on the bone |  | protein | ham-cooked | uncommon | Whole cooked ham, glazed and carved for feasts
+Black Forest ham |  | protein | ham-cured | uncommon | Smoky German ham, dark-rinded and subtly spiced
+Rabbit | wild rabbit | protein | rabbit | uncommon | Lean, delicate meat; braise with mustard or cider
+Farmed rabbit |  | protein | rabbit | uncommon | Mild and tender rabbit for quick roasting
+Rabbit saddle |  | protein | rabbit | exotic | The prized loin of the rabbit, quickly roasted
+Rabbit legs |  | protein | rabbit | uncommon | Braise or confit for a gentle, sweet meat
+Hare |  | protein | hare | exotic | Dark, strongly flavoured game, classic in jugged hare
+Hare saddle |  | protein | hare | exotic | Tender back of hare, roasted pink
+Venison haunch |  | protein | venison | uncommon | Lean roasting joint, best with juniper and red wine
+Venison loin | venison saddle | protein | venison | exotic | Tender and lean; sear and rest pink
+Venison steak |  | protein | venison | uncommon | Lean, rich steak that wants only brief cooking
+Venison haunch steak |  | protein | venison | uncommon | Slice from the haunch, quick-fry then rest
+Venison shoulder |  | protein | venison | uncommon | Diced for stews and ragu where slow cooking mellows it
+Venison shank |  | protein | venison | exotic | Gelatinous shank that braises tender in red wine
+Venison mince | minced venison | protein | venison | uncommon | Lean game mince for burgers and chilli
+Venison sausage |  | protein | venison | uncommon | Rich game sausage, often with red wine or juniper
+Venison haunch roast |  | protein | venison | exotic | Whole roast with a gamey depth; keep it rare
+Venison rack |  | protein | venison | exotic | Elegant ribs roasted pink with a berry sauce
+Venison medallions |  | protein | venison | exotic | Neat rounds of fillet, seared fast
+Venison burger |  | protein | venison | uncommon | Lean, deeply flavoured patty, best with a little added fat
+Roe deer fillet | roe venison | protein | venison | exotic | Delicate, fine-grained venison from small roe deer
+Fallow deer haunch |  | protein | venison | exotic | Sweet, fine-grained venison with a mild gamey note
+Red deer haunch |  | protein | venison | exotic | Full-flavoured, lean venison from wild red deer
+Muntjac |  | protein | venison | exotic | Small deer with sweet, tender meat, quick to cook
+Wild boar | boar | protein | wild-boar | exotic | Dark, rich pork-like game for slow braising
+Wild boar sausage |  | protein | wild-boar | exotic | Gamey sausage often spiced with juniper or chestnut
+Wild boar haunch |  | protein | wild-boar | exotic | Lean joint to marinate and slow-roast
+Bison | buffalo meat | protein | bison | exotic | Lean, sweet red meat, best cooked medium-rare
+Bison burger |  | protein | bison | exotic | Lean patty that needs gentle cooking
+Kangaroo fillet |  | protein | kangaroo | exotic | Very lean, rich red meat; sear rare and rest
+Ostrich fillet |  | protein | ostrich | exotic | Lean red meat that cooks quickly and tastes like beef
+Camel meat |  | protein | camel | exotic | Lean and slightly sweet, slow-cooked in North African stews
+Horse fillet |  | protein | horse | exotic | Lean, sweet red meat eaten in parts of Europe
+Crocodile tail |  | protein | crocodile | exotic | Mild, white meat, grilled or stir-fried
+Whole chicken | roasting chicken | protein | chicken-whole | everyday | The Sunday roast; rub with butter and lemon
+Free-Range chicken |  | protein | chicken-whole | uncommon | Slower-grown bird with firmer, more flavourful meat
+Corn-Fed chicken |  | protein | chicken-whole | uncommon | Golden-skinned bird with rich flavour
+Poussin | spring chicken | protein | chicken-whole | uncommon | Tiny young chicken, one per person; spatchcock and grill
+Spatchcock chicken | butterflied chicken | protein | chicken-whole | uncommon | Flattened bird that roasts or grills quickly and evenly
+Chicken breast | chicken breast fillet | protein | chicken-breast | everyday | Lean and versatile; do not overcook
+Chicken breast on the bone |  | protein | chicken-breast | uncommon | Skin-on supreme with wing bone for juicy roasting
+Chicken supreme |  | protein | chicken-breast | uncommon | Skin-on breast with the wing bone attached, for pan-roasting
+Chicken mini fillets | chicken tenders | protein | chicken-breast | everyday | Tender strips for quick frying, goujons and skewers
+Chicken thigh |  | protein | chicken-thigh | everyday | Juicy, forgiving dark meat that loves a long braise
+Boneless chicken thigh |  | protein | chicken-thigh | everyday | Skinless or skin-on fillets for curries, kebabs and tray bakes
+Chicken drumstick | drumsticks | protein | chicken-drumstick | everyday | Sticky finger-food, great barbecued or roasted
+Chicken leg | chicken leg quarter | protein | chicken-thigh | everyday | Thigh and drumstick together, ideal for braising
+Chicken wings |  | protein | chicken-wing | everyday | Crisp-skinned and sticky with a glaze
+Chicken wing tips |  | protein | chicken-wing | uncommon | Bony tips for stock or crisp frying
+Chicken winglets |  | protein | chicken-wing | uncommon | Middle joint wing pieces, perfect for buffalo style
+Chicken oysters |  | protein | chicken-thigh | exotic | Small tender morsels from the back, the cook's treat
+Chicken carcass |  | protein | chicken-bone | everyday | Roasted bones for rich homemade stock
+Chicken feet |  | protein | chicken-bone | exotic | Gelatinous feet for dim sum and silky broths
+Chicken necks |  | protein | chicken-bone | uncommon | Cheap, flavourful bones for stock and gravy
+Chicken mince | minced chicken | protein | chicken-mince | everyday | Light mince for burgers, meatballs and dumplings
+Chicken livers |  | protein | offal-liver | everyday | Creamy when pink; fry quickly or blend into pâté
+Chicken hearts |  | protein | offal-heart | uncommon | Skewer and grill for a rich, chewy bite
+Chicken gizzards |  | protein | offal-gizzard | exotic | Chewy muscle that braises or fries into a savoury treat
+Chicken skin |  | protein | chicken-skin | uncommon | Crisp it in the oven for a crunchy, salty snack
+Chicken sausage |  | protein | sausage-fresh | uncommon | Lighter sausage seasoned with herbs
+Chicken Kyiv |  | protein | chicken-prepared | uncommon | Breast stuffed with garlic butter, breaded and baked
+Chicken goujons |  | protein | chicken-prepared | everyday | Strips of breaded chicken for dipping
+Chicken schnitzel |  | protein | chicken-prepared | uncommon | Flattened, breaded and fried breast
+Chicken kebab meat |  | protein | chicken-prepared | uncommon | Marinated sliced chicken thigh carved from a spit
+Roast chicken | cooked chicken | protein | chicken-prepared | everyday | Leftover roast for sandwiches, salads and pies
+Rotisserie chicken |  | protein | chicken-prepared | everyday | Spit-roasted, well-seasoned bird ready to shred
+Chicken karaage |  | protein | chicken-prepared | exotic | Japanese marinated chicken, dusted and double-fried
+Capon |  | protein | chicken-whole | exotic | Large, tender castrated cockerel for festive roasts
+Boiling fowl | stewing hen | protein | chicken-whole | exotic | Old hen with deep flavour for soups and broths
+Bresse chicken |  | protein | chicken-whole | exotic | French poultry prized for its firm, flavourful flesh
+Whole turkey |  | protein | turkey | everyday | The Christmas centrepiece; brine for juicy results
+Turkey crown |  | protein | turkey | uncommon | Boneless breast joint for smaller festive meals
+Turkey breast steak | turkey steak | protein | turkey | everyday | Lean, quick-cooking steak for escalopes and stir-fries
+Turkey thigh |  | protein | turkey | uncommon | Dark, juicy meat that braises well
+Turkey drumstick |  | protein | turkey | uncommon | Giant, meaty leg that slow-roasts or smokes beautifully
+Turkey mince | minced turkey | protein | turkey | everyday | Lean mince for burgers, chilli and lasagne
+Turkey wings |  | protein | turkey | uncommon | Collagen-rich wings for roasting and gravy
+Smoked turkey breast |  | protein | turkey | uncommon | Deli-style smoked slices for sandwiches
+Turkey bacon |  | protein | turkey | uncommon | Thin cured turkey rashers that crisp up leanly
+Turkey giblets |  | protein | offal-giblets | uncommon | Neck, heart and gizzard for gravy and stuffing stock
+Whole duck |  | protein | duck | uncommon | Fatty bird; prick the skin and roast high for crisp skin
+Duck breast | magret | protein | duck | uncommon | Score the skin, render slowly, serve pink
+Duck leg |  | protein | duck | uncommon | Confit or roast until crisp and tender
+Duck confit |  | protein | duck | exotic | Legs slow-cooked in their own fat, then crisped
+Duck wings |  | protein | duck | uncommon | Fatty wings for roasting and Chinese-style glazes
+Duck fat |  | protein | duck | uncommon | Golden fat for the crispiest roast potatoes
+Duck liver |  | protein | offal-liver | exotic | Rich liver for terrines and parfaits
+Foie gras |  | protein | offal-liver | exotic | Luxury fattened duck or goose liver, seared or terrined
+Duck gizzards |  | protein | offal-gizzard | exotic | Slow-cooked gizzards that crown a salade landaise
+Crispy aromatic duck |  | protein | duck | uncommon | Shredded roast duck for pancakes with hoisin and cucumber
+Peking duck |  | protein | duck | exotic | Lacquered, air-dried duck with glassy skin
+Barbary duck | Barbarie duck | protein | duck | exotic | Lean, large duck with meaty breast
+Gressingham duck |  | protein | duck | uncommon | Lean British duck breed with rich dark meat
+Muscovy duck |  | protein | duck | exotic | Lean, gamey duck with large breasts
+Whole goose |  | protein | goose | exotic | Rich festive bird that gives you generous goose fat
+Goose breast |  | protein | goose | exotic | Dark, rich breast; roast pink like duck
+Goose leg |  | protein | goose | exotic | Fatty leg for confit or slow roasting
+Goose fat |  | protein | goose | uncommon | Prized fat for roast potatoes and pastry
+Whole quail | quail | protein | quail | uncommon | Tiny bird, grilled whole with sage or honey
+Boneless quail |  | protein | quail | exotic | Stuffed or flattened for quick grilling
+Quail breast |  | protein | quail | exotic | Delicate and lean; sear and rest briefly
+Pheasant |  | protein | game-bird | uncommon | Lean game bird; wrap in bacon to keep moist
+Pheasant breast |  | protein | game-bird | uncommon | Mild, lean breast for pan-frying with cream and apple
+Partridge |  | protein | game-bird | exotic | Delicate game bird, roasted young with butter
+Grouse | red grouse | protein | game-bird | exotic | Intensely flavoured moorland bird, roasted pink
+Woodcock |  | protein | game-bird | exotic | Prized game bird traditionally cooked with its offal intact
+Snipe |  | protein | game-bird | exotic | Tiny game bird, roasted quickly on toast
+Wood pigeon | pigeon | protein | game-bird | uncommon | Dark, rich breast; quick-fry rare with berries
+Squab | squab pigeon | protein | game-bird | exotic | Farmed young pigeon with tender, succulent meat
+Guinea fowl |  | protein | game-bird | uncommon | Mild, gamey bird between chicken and pheasant
+Guinea fowl breast |  | protein | game-bird | uncommon | Lean and flavourful; pan-roast with its skin on
+Mallard | wild duck | protein | game-bird | exotic | Wild duck with dark, lean meat; roast fast
+Teal |  | protein | game-bird | exotic | Small wild duck, roasted quickly for a sweet, rich flavour
+Wild goose |  | protein | game-bird | exotic | Lean and gamey; braise or roast with fruit
+Emu fillet |  | protein | emu | exotic | Very lean, tender red meat
+Pigeon breast |  | protein | game-bird | uncommon | Dark, tender breast, seared rare
+Ox liver | beef liver | protein | offal-liver | uncommon | Strong, iron-rich liver; soak in milk and fry
+Ox kidney | beef kidney | protein | offal-kidney | uncommon | Classic steak and kidney pudding ingredient
+Ox heart | beef heart | protein | offal-heart | exotic | Lean, dense muscle; slice thin and grill or braise
+Ox tongue | beef tongue | protein | offal-tongue | uncommon | Braised until tender, peeled and sliced for sandwiches
+Beef tripe | tripe | protein | offal-tripe | exotic | Honeycomb stomach lining, slow-cooked in onions or tomato
+Honeycomb tripe |  | protein | offal-tripe | exotic | Textured tripe for soups and Mediterranean stews
+Beef spleen |  | protein | offal-spleen | exotic | Sicilian street-food offal, simmered then fried
+Beef dripping | dripping | protein | beef-fat | uncommon | Rendered beef fat for chips and Yorkshire puddings
+Tallow |  | protein | beef-fat | exotic | Rendered beef fat for frying with a savoury flavour
+Veal bones |  | protein | veal | uncommon | Pale gelatinous bones for classic stock and demi-glace
+Pig's blood |  | protein | offal-blood | exotic | Used to make black pudding and rich sauces
+Chicken liver pâté |  | protein | offal-pate | uncommon | Smooth spread of livers, butter and brandy
+Pork liver pâté |  | protein | offal-pate | uncommon | Rustic coarse pâté with herbs
+Pâté de campagne | country pâté | protein | offal-pate | uncommon | Coarse French pork pâté studded with herbs and brandy
+Terrine de campagne |  | protein | offal-pate | exotic | Sliceable country terrine with pistachios and ham
+Rillettes | pork rillettes | protein | offal-pate | uncommon | Shredded pork cooked and potted in fat for spreading
+Brawn | head cheese | protein | offal-pate | exotic | Jellied pork head meat, sliced cold with mustard
+Faggots |  | protein | offal-pate | uncommon | Savoury offal meatballs wrapped in caul fat
+Scotch egg sausagemeat | sausagemeat | protein | pork-mince | uncommon | Seasoned pork for wrapping eggs and stuffing
+Pork meatballs |  | protein | pork-mince | everyday | Herbed pork mince rolled for sauces and soups
+Beef meatballs |  | protein | beef-mince | everyday | Tender meatballs for spaghetti and sauces
+Lamb koftas |  | protein | lamb-mince | uncommon | Spiced lamb mince moulded onto skewers
+Beef and pork mince |  | protein | beef-mince | everyday | Mixed mince for juicy meatballs and meatloaf
+Pork and veal mince |  | protein | pork-mince | uncommon | Classic meatball blend for soft texture
+Kangaroo mince |  | protein | kangaroo | exotic | Very lean mince that needs added fat
+Beef carpaccio fillet | carpaccio | protein | beef-fillet | exotic | Raw fillet sliced paper-thin with lemon and Parmesan
+Beef tartare | steak tartare | protein | beef-fillet | exotic | Raw chopped beef with capers, shallot and egg yolk
+Teriyaki beef slices |  | protein | beef-diced | uncommon | Thin sliced beef for hot pots and rice bowls
+Shabu-Shabu beef |  | protein | beef-diced | exotic | Paper-thin beef for swishing through simmering broth
+Yakiniku beef |  | protein | beef-diced | exotic | Thin-cut marbled beef for tabletop grilling
+Bulgogi beef |  | protein | beef-diced | uncommon | Thinly sliced beef ready to marinate in soy and pear
+Galbi short ribs |  | protein | beef-rib | exotic | Flanken-cut short ribs for Korean barbecue
+Lamb leg | leg of lamb | protein | lamb-leg | everyday | Classic roast, studded with garlic and rosemary
+Butterflied leg of lamb |  | protein | lamb-leg | uncommon | Boned and opened flat for quick grilling or barbecuing
+Lamb shank | lamb shanks | protein | lamb-shank | everyday | Braised until the meat falls from the bone in a rich sauce
+Lamb shoulder | shoulder of lamb | protein | lamb-shoulder | everyday | Fatty and flavourful; slow-roast until it pulls apart
+Rack of lamb |  | protein | lamb-rack | uncommon | Elegant ribs with a herb crust, roasted pink
+Lamb cutlets |  | protein | lamb-rack | uncommon | Small, tender chops cut from the rack; fry or grill quickly
+Lamb loin chops |  | protein | lamb-loin | everyday | Mini T-bones with a fat edge; grill with mint and garlic
+Lamb chump chop | chump chops | protein | lamb-loin | everyday | Meaty, economical chop good for grilling or pan-frying
+Lamb noisettes |  | protein | lamb-loin | uncommon | Neat boneless rounds of loin, tied and pan-seared
+Saddle of lamb |  | protein | lamb-loin | exotic | Whole double loin, roasted for a special occasion
+Lamb neck fillet |  | protein | lamb-neck | uncommon | Long, tender cut that is lovely marinated and grilled
+Scrag end of lamb | scrag end | protein | lamb-neck | uncommon | Bony, cheap stewing cut, essential to Irish stew
+Middle neck of lamb |  | protein | lamb-neck | uncommon | Bone-in slices that give stews and hotpots rich flavour
+Lamb breast | breast of lamb | protein | lamb-breast | uncommon | Fatty cut best rolled, stuffed and slowly roasted
+Lamb rump |  | protein | lamb-rump | uncommon | Tender, lean cap of the leg; roast whole and slice pink
+Lamb mince | minced lamb | protein | lamb-mince | everyday | For koftas, shepherd's pie and moussaka
+Diced lamb | lamb leg chunks | protein | lamb-diced | everyday | Cubes for kebabs, tagines and curries
+Lamb ribs |  | protein | lamb-rib | uncommon | Fatty ribs that crisp up when baked low and slow then glazed
+Lamb kidneys |  | protein | offal-kidney | uncommon | Mild, tender offal; devil with mustard and cayenne
+Lamb's liver |  | protein | offal-liver | everyday | Delicate and sweet liver for frying with onions
+Lamb's heart |  | protein | offal-heart | exotic | Lean, dense muscle that stuffs and braises well
+Lamb's tongue |  | protein | offal-tongue | exotic | Slow-cooked, peeled and sliced for a tender, rich bite
+Lamb sweetbreads |  | protein | offal-sweetbread | exotic | Creamy offal, blanched and then fried until golden
+Mutton leg | leg of mutton | protein | mutton | exotic | Mature sheep with deep flavour, needs slow cooking
+Mutton shoulder |  | protein | mutton | exotic | Strongly flavoured, ideal for curries and long braises
+Hogget |  | protein | mutton | exotic | Second-year lamb with more depth than lamb and less than mutton
+Goat meat |  | protein | goat | exotic | Lean and gamey; braise in curries and stews
+Kid goat leg |  | protein | goat | exotic | Young goat leg, mild and tender when slow-roasted
+Pork loin | loin of pork | protein | pork-loin | everyday | Lean roasting joint, best with crackling
+Pork loin chop | pork chop | protein | pork-loin | everyday | Classic chop with a fat edge; pan-fry with apple
+Pork cutlet |  | protein | pork-loin | everyday | Boneless cut from the loin, good for schnitzel
+Pork tenderloin | pork fillet | protein | pork-tenderloin | everyday | Lean, tender and quick to cook; roast whole or slice into medallions
+Pork belly | belly pork | protein | pork-belly | everyday | Layers of fat and meat; roast for crisp crackling
+Pork belly strips |  | protein | pork-belly | everyday | Thin slices for grilling, braising or barbecuing
+Pork shoulder | hand of pork | protein | pork-shoulder | everyday | Marbled joint that shreds after slow roasting
+Pork collar | collar of pork | protein | pork-shoulder | uncommon | Well-marbled neck cut, tender and juicy when grilled or roasted
+Pork neck fillet |  | protein | pork-shoulder | uncommon | Fatty and flavourful boneless cut for the barbecue
+Pork leg | leg of pork | protein | pork-leg | everyday | Big roast with crisp crackling and plenty to share
+Gammon joint |  | protein | pork-cured | everyday | Cured leg of pork, boiled or baked and glazed
+Gammon steak |  | protein | pork-cured | everyday | Salty cured slice, grilled and served with egg and pineapple
+Pork spare ribs | spare ribs | protein | pork-ribs | everyday | Sticky ribs with deep flavour after slow cooking
+Baby back ribs |  | protein | pork-ribs | uncommon | Smaller, meatier loin ribs; tender and quick to cook
+Pork cheek |  | protein | pork-cheek | uncommon | Rich, gelatinous cheek that braises beautifully
+Pig's trotter | trotter | protein | pork-trotter | uncommon | Sticky, gelatinous trotters thicken stocks and stews
+Pork hock | ham hock; knuckle of pork | protein | pork-hock | uncommon | Smoky or fresh, braised until the meat falls away
+Pork mince | minced pork; ground pork | protein | pork-mince | everyday | For dumplings, meatballs and sausage fillings
+Diced pork | pork cubes | protein | pork-diced | everyday | Shoulder cubes for casseroles, curries and kebabs
+Pork escalope |  | protein | pork-loin | everyday | Thin beaten pork, breaded and fried
+Pork chump |  | protein | pork-leg | uncommon | Meaty rump-end chop that roasts or pan-fries well
+Rack of pork |  | protein | pork-loin | uncommon | Bone-in roasting joint with a crackling crown
+Suckling pig |  | protein | pork-whole | exotic | Whole young pig roasted until the skin shatters
+Pork crackling |  | protein | pork-skin | uncommon | Salted, blistered pork skin; crunchy and rich
+Pork rind | pork skin | protein | pork-skin | uncommon | Raw skin to score, salt and crisp in the oven
+Pork fat back | fatback | protein | pork-fat | uncommon | Firm white fat for larding, lardo and sausages
+Pork caul fat | caul | protein | pork-fat | exotic | Lacy membrane used to wrap faggots and pâtés
+Pig's liver |  | protein | offal-liver | uncommon | Strong liver for pâtés and faggots
+Pig's kidney |  | protein | offal-kidney | uncommon | Robust offal; soak, then fry or add to steak and kidney pie
+Pig's heart |  | protein | offal-heart | exotic | Lean organ meat for slow braising or stuffing
+Pig's tongue |  | protein | offal-tongue | exotic | Poached until tender, then peeled and sliced
+Pig's ear |  | protein | offal-ear | exotic | Crisp cartilage and skin, braised then fried for crunch
+Pork medallions |  | protein | pork-tenderloin | uncommon | Round slices of tenderloin for quick pan-sauces
+Pork tomahawk |  | protein | pork-loin | exotic | Long-boned pork chop that looks dramatic and stays juicy
+Iberico secreto |  | protein | pork-iberico | exotic | Marbled cut from Iberian pig, seared pink and sliced
+Iberico presa |  | protein | pork-iberico | exotic | Richly marbled shoulder steak, almost beef-like in flavour
+Iberico pluma |  | protein | pork-iberico | exotic | Tender, fatty cut from the loin end with nutty flavour
+Black pudding | blood sausage | protein | pudding-black | everyday | Rich blood sausage with oats; fry until crisp
+White pudding |  | protein | pudding-white | uncommon | Pork and oatmeal sausage with a mild peppery taste
+Haggis |  | protein | pudding-haggis | uncommon | Spiced offal and oats, traditionally served with neeps and tatties
+Boudin Noir |  | protein | pudding-black | exotic | French blood sausage with apple and onion
+Boudin Blanc |  | protein | pudding-white | exotic | Delicate French white sausage of pork or chicken with milk
+Morcilla |  | protein | pudding-black | exotic | Spanish blood sausage with rice, onion and paprika
+Andouille sausage | andouille | protein | sausage-smoked | exotic | Smoky, coarse sausage with Cajun heat
+Andouillette |  | protein | sausage-offal | exotic | Pungent French sausage of tripe and chitterlings
