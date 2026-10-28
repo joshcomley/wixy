@@ -102,6 +102,10 @@ class FakeFile:
     image: bytes | None = None
     """Served as-is when set (to test a hostile or broken file)."""
     content_type: str = "image/jpeg"
+    categories: str = ""
+    """Commons categories, `|`-separated, as the API's extmetadata `Categories` gives them."""
+    description: str = ""
+    """The file's own `ImageDescription` (HTML allowed)."""
 
     @property
     def title(self) -> str:
@@ -185,6 +189,8 @@ class FakeOpenWeb:
             "extmetadata": {
                 "Artist": {"value": file.artist_html, "source": "commons-desc-page"},
                 "LicenseShortName": {"value": file.licence, "source": "commons-desc-page"},
+                "Categories": {"value": file.categories, "source": "commons-categories"},
+                "ImageDescription": {"value": file.description, "source": "commons-desc-page"},
             },
         }
 
@@ -236,6 +242,7 @@ class FakeOpenWeb:
         description: str | None = "A place",
         kind: str = "standard",
         local_upload: bool = False,
+        extract: str | None = None,
     ) -> None:
         """An article whose REST summary names `file` as its lead image in the REAL shape (a
         `thumb.wikimedia.org` thumb URL with `?utm_...`). `local_upload` makes the image a local
@@ -244,6 +251,8 @@ class FakeOpenWeb:
         body: dict[str, object] = {"type": kind, "title": title}
         if description is not None:
             body["description"] = description
+        if extract is not None:
+            body["extract"] = extract
         if file is not None:
             a, ab = file.hash_dirs
             project = "en" if local_upload else "commons"

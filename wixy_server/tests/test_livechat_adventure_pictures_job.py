@@ -1044,6 +1044,28 @@ class TestThroughTheApp:
                 view["pack"]["state"] == "ready" and view["pack"]["data"]["wikipedia"] == "Lisbon"
             )
 
+    def test_dish_pictures_are_keyed_dishes_i_like_every_other_item(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        finder = FakePictureFinder(sample_pictures(5, hero=2, item_section="dishes"))
+        with unlocked_client(storage_root, wixy_repo_root, pin_verifier, picture_finder=finder) as (
+            client,
+            h,
+        ):
+            seq = create_round(client, h).json()["message"]["seq"]
+            route_to_chosen(client, h, seq)
+            view = wait_for_pictures(client, h, seq, count=5)
+            pictures = view["pack"]["pictures"]
+            assert len(pictures["hero"]) == 2
+            assert sorted(pictures["items"]) == ["dishes:0", "dishes:1", "dishes:2"]
+            assert set(pictures["items"]["dishes:0"]) == {
+                "thumbUrl",
+                "fullUrl",
+                "credit",
+                "page",
+                "caption",
+            }
+
     def test_pictures_are_not_sent_media_they_stay_out_of_the_gallery(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:

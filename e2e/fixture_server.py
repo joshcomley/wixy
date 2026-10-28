@@ -473,6 +473,49 @@ def main() -> None:
         (("Pastel de nata", "Fixture Pastel.jpg"), ("Belém Tower", "Fixture Tower.jpg")), start=2
     ):
         open_web.add_article(title, open_web.add_file(FakeFile(file_name, 3000, 2000, seed=seed)))
+    # Local food to try (spec §4.3b): two dishes whose article reads as food (the lead image), one
+    # found by a Commons search whose title AND categories pass, and one with nothing at all — a
+    # text-only card. A moth-named "dish" is rejected by both checks, as on the real Wikipedia.
+    for seed, (title, file_name, description) in enumerate(
+        (
+            ("Ginjinha", "Fixture Ginjinha.jpg", "Portuguese cherry liqueur"),
+            ("Caldo verde", "Fixture Caldo verde.jpg", "Portuguese soup of kale and potato"),
+        ),
+        start=40,
+    ):
+        open_web.add_article(
+            title,
+            open_web.add_file(FakeFile(file_name, 3000, 2000, seed=seed)),
+            description=description,
+        )
+    moth = open_web.add_file(
+        FakeFile(
+            "Fixture Buzara moth.jpg",
+            3000,
+            2000,
+            seed=45,
+            categories="Moths of Africa|Erebidae",
+            description="A moth",
+        )
+    )
+    open_web.add_article(
+        "Buzara", moth, description="Genus of moths", extract="Buzara is a genus of moths."
+    )
+    open_web.add_search(
+        "Bacalhau",
+        [
+            open_web.add_file(
+                FakeFile(
+                    "Fixture Bacalhau a Bras.jpg",
+                    4000,
+                    2667,
+                    seed=46,
+                    categories="Bacalhau dishes|Food of Portugal",
+                    description="Bacalhau à Brás",
+                )
+            ).title
+        ],
+    )
     open_web.add_search(
         "",
         [
@@ -485,6 +528,45 @@ def main() -> None:
     )
     fixture_pack = json.loads(json.dumps(CANNED_ADVENTURE_PACK))
     fixture_pack["sections"][1]["items"][0]["url"] = f"http://alfama.fake.test:{fake_web_port}/stay"
+    fixture_pack["sections"].insert(
+        0,
+        {
+            "key": "dishes",
+            "title": "Local food to try",
+            "items": [
+                {
+                    "name": "Ginjinha",
+                    "detail": "A cherry liqueur sipped from a tiny cup, often with a cherry in it.",
+                    "url": None,
+                    "wikipedia": "Ginjinha",
+                },
+                {
+                    "name": "Caldo verde",
+                    "detail": "Kale and potato soup with a slice of chouriço.",
+                    "url": None,
+                    "wikipedia": "Caldo verde",
+                },
+                {
+                    "name": "Bacalhau à Brás",
+                    "detail": "Salt cod with eggs, onions and crisp potato.",
+                    "url": None,
+                    "wikipedia": None,
+                },
+                {
+                    "name": "Buzara",
+                    "detail": "Shellfish stew in white wine and garlic.",
+                    "url": None,
+                    "wikipedia": "Buzara",
+                },
+                {
+                    "name": "Arroz de lingueirão",
+                    "detail": "Razor-clam rice, a Lisbon favourite.",
+                    "url": None,
+                    "wikipedia": None,
+                },
+            ],
+        },
+    )
     fake_cmd_state.chat_spawn_response_text = json.dumps(fixture_pack)
     adventure_picture_finder = WebPictureFinder(
         local_fetcher(fake_web_port), endpoints=open_web.endpoints

@@ -52,6 +52,13 @@ from PIL import Image
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import processing
 from wixy_server.livechat.adventure_bank import AdventureBank
+from wixy_server.livechat.adventure_dishes import (
+    dish_search_name,
+    dish_tokens,
+    has_food_term,
+    summary_reads_as_food,
+    title_names_dish,
+)
 from wixy_server.livechat.adventure_game import pack_data
 from wixy_server.livechat.adventure_pack import clean_url, clean_wikipedia_title
 from wixy_server.livechat.models import AdventureRoundRow
@@ -69,13 +76,20 @@ from wixy_server.storage import ProjectPaths
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_PICTURES: Final = 16
-"""At most this many pictures per pack (hero + items)."""
+MAX_PICTURES: Final = 22
+"""At most this many pictures per pack: the hero (at most `HERO_MAX`), the local dishes (at most
+`MAX_DISH_PICTURES`) and every other item (at most `MAX_OTHER_PICTURES`)."""
+MAX_DISH_PICTURES: Final = 6
+MAX_OTHER_PICTURES: Final = 10
+DISH_SLOTS_MAX: Final = 6
+"""How many `dishes` items are planned (the sanitiser keeps at most six per section)."""
+DISH_DOWNLOAD_ATTEMPTS: Final = 3
+"""How many Commons search hits are downloaded for ONE dish before giving up on it."""
 HERO_TARGET: Final = 5
 """The hero is the destination article's lead image plus Commons-search photos up to this many."""
 HERO_MAX: Final = 6
 ITEM_SLOT_ATTEMPTS: Final = 20
-"""How many item slots are tried (the pack can name up to 36 items; only ~11 pictures fit)."""
+"""How many NON-dish item slots are tried (the pack can name 36 items; only 10 pictures fit)."""
 MAX_FETCHED_PIXELS: Final = min(processing.PHOTO_PIXEL_CAP, 16_000_000)
 """A fetched picture may declare at most this many pixels (4000 x 4000), read from the file's own
 header and checked BEFORE `Image.open`. Far tighter than the chat's 80 MP photo cap on purpose: this
@@ -106,8 +120,12 @@ HOST_STRIKES: Final = 3
 COMMONS_THUMB_WIDTH: Final = 1600
 _STANDARD_THUMB_STEPS: Final = (1280, 960, 500)
 LEAD_MIMES: Final = frozenset({"image/jpeg", "image/png", "image/webp"})
-ITEM_SECTION_ORDER: Final = ("sights", "food", "stay", "culture", "do")
-"""Which sections get pictures, and the order they are served in (round-robin by item index)."""
+ITEM_SECTION_ORDER: Final = ("dishes", "sights", "food", "stay", "culture", "do")
+"""Which sections get pictures, and the order they are served in (round-robin by item index; the
+local dishes come first in every round)."""
+EXTMETADATA_FILTER: Final = "Artist|LicenseShortName|Categories|ImageDescription"
+"""What the Commons API is asked of each file: the credit, and the two fields a dish photo must pass
+the food-term check on."""
 _AVOID_TITLE_WORDS_RE = re.compile(
     r"\b(map|flag|logo|coat of arms|locator|diagram|chart|poster|banner|stamp|icon|plan)\b",
     re.IGNORECASE,
@@ -152,6 +170,11 @@ class PictureSlot:
     search: bool
     """A Commons search may be tried when nothing else finds a picture (the sights)."""
 
+    @property
+    def is_dish(self) -> bool:
+        """A local dish or drink (`dishes` section): its picture must pass the food checks."""
+        return self.section == "dishes"
+
 
 @dataclass(frozen=True, slots=True)
 class PicturePlan:
@@ -192,8 +215,10 @@ def plan_pictures(
     pack: Mapping[str, object], *, destination_name: str, unit_name: str
 ) -> PicturePlan:
     """The slots a pack offers pictures for, from its already-sanitised JSON. Items are served
-    round-robin across `ITEM_SECTION_ORDER` by position so every section gets a look-in; an item
-    qualifies with an article title, a site, or (for the sights) just a name to search for."""
+    round-robin across `ITEM_SECTION_ORDER` by position so every section gets a look-in, the local
+    dishes first. A dish always qualifies (its picture comes from its article or a vetted Commons
+    photo, never from a site: any `url` is ignored); any other item qualifies with an article
+    title, a site, or (for the sights) just a name to search for."""
     sections: dict[str, list[object]] = {}
     raw_sections = pack.get("sections")
     if isinstance(raw_sections, list):
@@ -203,6 +228,7 @@ def plan_pictures(
                 if isinstance(items, list):
                     sections.setdefault(str(section["key"]), list(items))
     slots: list[PictureSlot] = []
+    dish_slots = other_slots = 0
     longest = max((len(items) for items in sections.values()), default=0)
     for index in range(longest):
         for key in ITEM_SECTION_ORDER:
@@ -216,6 +242,23 @@ def plan_pictures(
             if not isinstance(name, str) or not name:
                 continue
             wikipedia = clean_wikipedia_title(item.get("wikipedia"))
+            if key == "dishes":
+                if dish_slots == DISH_SLOTS_MAX:
+                    continue
+                dish_slots += 1
+                slots.append(
+                    PictureSlot(
+                        key=f"{key}:{index}",
+                        section=key,
+                        name=name,
+                        wikipedia=wikipedia,
+                        url=None,
+                        search=False,
+                    )
+                )
+                continue
+            if other_slots == ITEM_SLOT_ATTEMPTS:
+                continue
             url = clean_url(item.get("url"))
             if url is not None and is_wikimedia_host(_url_host(url)):
                 # A link to a Wikipedia / Commons page is an article reference, not a venue's own
@@ -226,6 +269,7 @@ def plan_pictures(
             search = key == "sights"
             if wikipedia is None and url is None and not search:
                 continue
+            other_slots += 1
             slots.append(
                 PictureSlot(
                     key=f"{key}:{index}",
@@ -236,10 +280,6 @@ def plan_pictures(
                     search=search,
                 )
             )
-            if len(slots) == ITEM_SLOT_ATTEMPTS:
-                break
-        if len(slots) == ITEM_SLOT_ATTEMPTS:
-            break
     return PicturePlan(
         destination=destination_name,
         unit=unit_name,
@@ -561,6 +601,10 @@ class CommonsFile:
     artist: str
     licence: str
     index: int
+    categories: str = ""
+    """The file's Commons categories, `|`-separated (extmetadata `Categories`)."""
+    description: str = ""
+    """The file's own description as plain text (extmetadata `ImageDescription`)."""
 
     @property
     def key(self) -> str:
@@ -655,9 +699,15 @@ def parse_commons_pages(data: object, thumb_hosts: frozenset[str]) -> list[Commo
                 artist=plain_text(_value("Artist"), MAX_CREDIT),
                 licence=plain_text(_value("LicenseShortName"), 40),
                 index=_int(page.get("index")),
+                categories=_text_value(_value("Categories"), 2000),
+                description=plain_text(_value("ImageDescription"), 600),
             )
         )
     return sorted(files, key=lambda f: f.index)
+
+
+def _text_value(value: object, limit: int) -> str:
+    return value[:limit] if isinstance(value, str) else ""
 
 
 def _credit_line(file: CommonsFile) -> str:
@@ -769,17 +819,19 @@ class WebPictureFinder:
                     "prop": "imageinfo",
                     "iiprop": "url|size|mime|extmetadata",
                     "iiurlwidth": str(width),
-                    "iiextmetadatafilter": "Artist|LicenseShortName",
+                    "iiextmetadatafilter": EXTMETADATA_FILTER,
                 }
             )
         )
         files = await self.parse_pages(data)
         return files[0] if files else None
 
-    async def commons_search(self, query: str, *, min_short_side: int) -> list[CommonsFile]:
-        """JPEG photographs for `query`, best match first but landscape before portrait, every one
-        with a real thumbnail URL (never an original), a short side of at least `min_short_side`
-        and no map / flag / logo style title."""
+    async def commons_search(
+        self, query: str, *, min_short_side: int, landscape_first: bool = True
+    ) -> list[CommonsFile]:
+        """JPEG photographs for `query`, best match first (landscape before portrait unless
+        `landscape_first` is off), every one with a real thumbnail URL (never an original), a short
+        side of at least `min_short_side` and no map / flag / logo style title."""
         data = await self.json_get(
             self._api_url(
                 {
@@ -793,7 +845,7 @@ class WebPictureFinder:
                     "prop": "imageinfo",
                     "iiprop": "url|size|mime|extmetadata",
                     "iiurlwidth": str(COMMONS_THUMB_WIDTH),
-                    "iiextmetadatafilter": "Artist|LicenseShortName",
+                    "iiextmetadatafilter": EXTMETADATA_FILTER,
                 }
             )
         )
@@ -806,6 +858,8 @@ class WebPictureFinder:
             and _is_thumbnail_path(f.thumb_url)
             and not _AVOID_TITLE_WORDS_RE.search(f.title)
         ]
+        if not landscape_first:
+            return good
         return sorted(good, key=lambda f: f.width < f.height)  # stable: rank kept within a class
 
     async def commons_picture(
@@ -825,12 +879,21 @@ class WebPictureFinder:
             keys=frozenset({file.key, f"sha256:{digest}"}),
         )
 
-    async def wikipedia_picture(self, title: str) -> FoundPicture | None:
-        """Source 1: the article's lead image, as its Commons thumbnail."""
+    async def wikipedia_picture(
+        self, title: str, *, require_food: bool = False
+    ) -> FoundPicture | None:
+        """Source 1: the article's lead image, as its Commons thumbnail. For a dish
+        (`require_food`) the image is taken ONLY when the article's short description or the first
+        sentence of its extract reads as food or drink (spec 4.3b): "Buzara" is a genus of moths on
+        English Wikipedia, and its photo must never stand in for the stew."""
         summary = await self.json_get(
             self._endpoints.summary_base + quote(title.replace(" ", "_"), safe="")
         )
         if not isinstance(summary, dict) or summary.get("type") == "disambiguation":
+            return None
+        if require_food and not summary_reads_as_food(
+            summary.get("description"), summary.get("extract")
+        ):
             return None
         image = summary.get("originalimage")
         if not isinstance(image, dict):
@@ -842,6 +905,51 @@ class WebPictureFinder:
             plain_text, summary.get("description"), MAX_CAPTION
         )
         return await self.commons_thumbnail_picture(name, caption=caption)
+
+    async def dish_search_picture(
+        self, slot: PictureSlot, unit: str, *, avoid: frozenset[str]
+    ) -> FoundPicture | None:
+        """A Commons photo of a local dish, found by searching for `"<dish>"` and then
+        `<dish> <unit>` (spec 4.3b). A hit is taken ONLY when its own title contains a significant
+        token of the dish name (accent-folded, at least 4 letters) AND its Commons categories or
+        description mention food or drink — both, because each alone is fooled (a moth titled
+        "Buzara" is categorised "Moths"; a fish market is categorised "Fish" but is not the stew).
+        JPEG, short side at least 480; a file already used (`avoid`) is skipped; at most
+        `DISH_DOWNLOAD_ATTEMPTS` hits are downloaded. There is no fallback to "other images of the
+        article". Raises `SafeFetchError` only when the host is rate-limiting."""
+        dish = dish_search_name(slot.name)
+        tokens = dish_tokens(slot.name, slot.wikipedia)
+        if not dish or not tokens:
+            return None
+        downloads = 0
+        for query in (f'"{dish}"', f"{dish} {unit}".strip()):
+            try:
+                files = await self.commons_search(
+                    query, min_short_side=MIN_SHORT_SIDE, landscape_first=False
+                )
+            except PictureRejected:
+                continue
+            for file in files:
+                if file.key in avoid or not title_names_dish(file.title, tokens):
+                    continue
+                if not (has_food_term(file.categories) or has_food_term(file.description)):
+                    continue
+                if downloads >= DISH_DOWNLOAD_ATTEMPTS:
+                    return None
+                downloads += 1
+                try:
+                    picture = await self.commons_picture(
+                        file, caption=None, min_short_side=MIN_SHORT_SIDE
+                    )
+                except PictureRejected:
+                    continue
+                except SafeFetchError as exc:
+                    if exc.reason == FetchFailure.RATE_LIMITED:
+                        raise
+                    continue
+                if not (picture.keys & avoid):
+                    return picture
+        return None
 
     async def commons_thumbnail_picture(
         self, name: str, *, caption: str | None
@@ -939,6 +1047,8 @@ class _Hunt:
         """The destination article's lead image: hero number one."""
         self._more_hero: list[FoundPicture] = []
         self._slots: dict[str, FoundPicture] = {}
+        self._lost: set[str] = set()
+        """Slots whose picture was a file another slot kept (they try their fallbacks again)."""
         self._strikes: dict[str, int] = {}
 
     async def go(self) -> None:
@@ -953,6 +1063,7 @@ class _Hunt:
         self._drop_duplicates()
         await self._fill_hero()
         await self._search_sights()
+        await self._retry_lost_dishes()
 
     def _drop_duplicates(self) -> None:
         """Settle which slot keeps a file two slots both found (the destination's lead image, then
@@ -965,6 +1076,7 @@ class _Hunt:
                 continue
             if picture.keys & seen:
                 del self._slots[slot.key]
+                self._lost.add(slot.key)
             else:
                 seen |= picture.keys
 
@@ -1010,9 +1122,34 @@ class _Hunt:
                 lambda: self._finder.wikipedia_picture(title),
             )
 
+    async def _dish_picture(self, slot: PictureSlot, *, lead: bool) -> FoundPicture | None:
+        """A local dish's picture: its article's lead image when the article reads as food
+        (`lead`), else a vetted Commons photo — never an article's other images."""
+        picture: FoundPicture | None = None
+        if lead and slot.wikipedia is not None:
+            title = slot.wikipedia
+            picture = await self._attempt(
+                f"{slot.key} article",
+                "wikipedia",
+                lambda: self._finder.wikipedia_picture(title, require_food=True),
+            )
+        if picture is None:
+            avoid = frozenset(self._used())
+            picture = await self._attempt(
+                f"{slot.key} search",
+                "commons",
+                lambda: self._finder.dish_search_picture(slot, self._plan.unit, avoid=avoid),
+            )
+        return picture
+
     async def _slot_task(self, slot: PictureSlot, limiter: anyio.CapacityLimiter) -> None:
         async with limiter:
             if not await self._still_wanted():
+                return
+            if slot.is_dish:
+                found = await self._dish_picture(slot, lead=True)
+                if found is not None:
+                    self._slots[slot.key] = dataclasses.replace(found, slot=slot.key)
                 return
             picture: FoundPicture | None = None
             if slot.wikipedia is not None:
@@ -1094,11 +1231,24 @@ class _Hunt:
                     self._slots[slot.key] = dataclasses.replace(picture, slot=slot.key)
                     break
 
+    # -- phase 4: a dish that lost its photo to another slot looks again -------------------------
+
+    async def _retry_lost_dishes(self) -> None:
+        for slot in self._plan.slots:
+            if not slot.is_dish or slot.key not in self._lost or slot.key in self._slots:
+                continue
+            if not await self._still_wanted():
+                return
+            found = await self._dish_picture(slot, lead=False)
+            if found is not None and not (found.keys & self._used()):
+                self._slots[slot.key] = dataclasses.replace(found, slot=slot.key)
+
     # -- the result ------------------------------------------------------------------------------
 
     def assemble(self) -> list[FoundPicture]:
-        """Hero first, then items in plan order; a file already used (by Commons title or content
-        digest) is dropped; at most `MAX_PICTURES`."""
+        """Hero first (at most `HERO_MAX`), then items in plan order (the dishes first; at most
+        `MAX_DISH_PICTURES` dishes and `MAX_OTHER_PICTURES` other items); a file already used (by
+        Commons title or content digest) is dropped; at most `MAX_PICTURES` in all."""
         seen: set[str] = set()
         out: list[FoundPicture] = []
         for picture in self._hero_pictures():
@@ -1108,10 +1258,19 @@ class _Hunt:
             out.append(dataclasses.replace(picture, slot=f"hero:{len(out)}"))
             if len(out) == HERO_MAX:
                 break
+        dishes = others = 0
         for slot in self._plan.slots:
             picture_or_none = self._slots.get(slot.key)
             if picture_or_none is None or picture_or_none.keys & seen:
                 continue
+            if slot.is_dish:
+                if dishes == MAX_DISH_PICTURES:
+                    continue
+                dishes += 1
+            else:
+                if others == MAX_OTHER_PICTURES:
+                    continue
+                others += 1
             seen |= picture_or_none.keys
             out.append(picture_or_none)
         return out[:MAX_PICTURES]

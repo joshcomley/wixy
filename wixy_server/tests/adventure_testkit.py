@@ -162,11 +162,14 @@ class FakePictureFinder:
         return list(self.pictures)
 
 
-def sample_pictures(count: int, *, hero: int = 2, label: str = "Photo") -> list[FoundPicture]:
-    """`count` finished pictures: the first `hero` are `hero:N`, the rest `food:N` item slots."""
+def sample_pictures(
+    count: int, *, hero: int = 2, label: str = "Photo", item_section: str = "food"
+) -> list[FoundPicture]:
+    """`count` finished pictures: the first `hero` are `hero:N`, the rest `<item_section>:N` item
+    slots (`food` unless told otherwise; `dishes` for the local-food pictures)."""
     pictures: list[FoundPicture] = []
     for index in range(count):
-        slot = f"hero:{index}" if index < hero else f"food:{index - hero}"
+        slot = f"hero:{index}" if index < hero else f"{item_section}:{index - hero}"
         pictures.append(
             FoundPicture(
                 slot=slot,

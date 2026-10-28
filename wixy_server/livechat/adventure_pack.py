@@ -79,9 +79,12 @@ DISALLOWED_TOOLS: Final = (
 
 # -- the pack schema (spec §4.3) ----------------------------------------------------------------
 
-SECTION_KEYS: Final = ("food", "stay", "culture", "sights", "do", "practical")
+SECTION_KEYS: Final = ("dishes", "food", "stay", "culture", "sights", "do", "practical")
+"""`dishes` (spec §4.3b: the local dishes and drinks themselves, FIRST in the pack) and `food`
+(where to eat) are separate sections; a pack with no `dishes` section is still valid."""
 SECTION_DEFAULT_TITLES: Final = {
-    "food": "Food",
+    "dishes": "Local food to try",
+    "food": "Where to eat",
     "stay": "Where to stay",
     "culture": "Culture",
     "sights": "Sights",
@@ -90,7 +93,7 @@ SECTION_DEFAULT_TITLES: Final = {
 }
 MAX_HEADLINE: Final = 140
 MAX_SUMMARY: Final = 700
-MAX_SECTIONS: Final = 6
+MAX_SECTIONS: Final = 7
 MAX_SECTION_TITLE: Final = 60
 MAX_ITEMS: Final = 6
 MAX_ITEM_NAME: Final = 90
@@ -235,6 +238,10 @@ def _sanitise_section(raw: object) -> JsonObject | None:
                 break
     if not items:
         return None
+    if key == "dishes":
+        # A dish is the dish itself, not a venue: it has no site of its own to link (its picture
+        # comes from the dish's Wikipedia article or a vetted Commons photo — spec §4.3b).
+        items = [{**item, "url": None} for item in items if isinstance(item, dict)]
     title = _line(raw.get("title"), MAX_SECTION_TITLE) or SECTION_DEFAULT_TITLES[key]
     return {"key": key, "title": title, "items": items}
 
@@ -270,6 +277,11 @@ def sanitise_pack(raw: object) -> JsonObject | None:
                 break
     if not sections:
         return None
+    # `dishes` is always the first section whatever order the model wrote them in; the rest keep
+    # the model's order.
+    sections.sort(
+        key=lambda section: not (isinstance(section, dict) and section["key"] == "dishes")
+    )
     sources: list[JsonValue] = []
     raw_sources = raw.get("sources")
     if isinstance(raw_sources, list):
@@ -346,7 +358,12 @@ yourself, your searches or your sources in the text; if you could not confirm so
 out.
 
 Cover:
-- food: the dishes and drinks the area is known for, plus 2-4 specific places to eat or drink.
+- dishes (put this section FIRST): 4-6 signature local dishes and drinks the area is known for \
+- the dish or drink ITSELF, never a restaurant. For each: what it is, how it tastes, where or \
+when to try it. Give "wikipedia" as the exact English Wikipedia article title OF THE DISH when \
+that article exists (check it exists and is about the dish: a name shared with an animal, a \
+place or a person is not it); otherwise null. "url" is null for a dish.
+- food: 2-4 specific places to eat or drink (titled "Where to eat").
 - stay: 2-4 specific villas, or characterful places to stay, each with a link to its page.
 - culture: theatre, music, festivals, museums and local customs worth knowing.
 - sights: the main things to see.
@@ -359,7 +376,7 @@ and no markdown fences. Use exactly these keys and respect these limits (charact
 {{"headline": string (max {MAX_HEADLINE}),
  "summary": string (max {MAX_SUMMARY}),
  "wikipedia": string | null,
- "sections": [ {{"key": "food" | "stay" | "culture" | "sights" | "do" | "practical",
+ "sections": [ {{"key": "dishes" | "food" | "stay" | "culture" | "sights" | "do" | "practical",
                 "title": string (max {MAX_SECTION_TITLE}),
                 "items": [ {{"name": string (max {MAX_ITEM_NAME}), "detail": string \
 (max {MAX_ITEM_DETAIL}), "url": string | null, "wikipedia": string | null}} ]  (at most \

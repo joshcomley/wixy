@@ -24,6 +24,8 @@ from wixy_server.livechat.adventure_pictures import (
     HERO_MAX,
     HERO_TARGET,
     ITEM_SLOT_ATTEMPTS,
+    MAX_DISH_PICTURES,
+    MAX_OTHER_PICTURES,
     MAX_PICTURES,
     FoundPicture,
     PicturePlan,
@@ -1303,7 +1305,7 @@ class TestAssembly:
         )
         assert [p.slot for p in run_find(configure, plan)[0]] == ["food:0"]
 
-    def test_at_most_sixteen_pictures_with_the_hero_first(self) -> None:
+    def test_other_items_are_capped_at_ten_and_the_hero_comes_first(self) -> None:
         def configure(w: FakeOpenWeb) -> None:
             lead = w.add_file(FakeFile("Kotor Lead.jpg", 4256, 2832, seed=1))
             w.add_article("Kotor", lead)
@@ -1328,11 +1330,13 @@ class TestAssembly:
             }
         )
         pictures = run_find(configure, plan)[0]
-        assert len(pictures) == MAX_PICTURES == 16
+        # 14 venues all have a usable picture; only MAX_OTHER_PICTURES (10) are kept.
+        assert MAX_PICTURES == 22 == HERO_MAX + MAX_DISH_PICTURES + MAX_OTHER_PICTURES
         slots = [p.slot for p in pictures]
+        assert len(pictures) == HERO_TARGET + MAX_OTHER_PICTURES
         assert slots[:HERO_TARGET] == [f"hero:{i}" for i in range(HERO_TARGET)]
         assert all(not s.startswith("hero:") for s in slots[HERO_TARGET:])
-        assert len(set(slots)) == 16
+        assert len(set(slots)) == len(slots)
 
     def test_the_hero_is_capped_at_six(self) -> None:
         # The search can supply more than the target, but the loop stops at it.
