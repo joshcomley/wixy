@@ -39,6 +39,8 @@ import {
   type SettingsResult,
   type SpinInput,
 } from "./api";
+import { MIN_VIEW_RADIUS_DEG, MIN_VIEW_RADIUS_TEXTURED_DEG } from "./camera";
+import { MAP_STYLES, readMapStyle, writeMapStyle, type MapStyle } from "./imagery";
 import { createPackPanel, type PackPanel } from "./packView";
 import { prepareLanding } from "./land";
 import { createGlobeRenderer, type GlobeRenderer } from "./globe";
@@ -271,7 +273,33 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const advisedList = el("p", "wx-srv-adv-opt-list");
   const optionsStatus = el("p", "wx-srv-adv-opt-status");
   optionsStatus.setAttribute("role", "status");
-  sheetCard.append(sheetHead, advisedRow, advisedList, optionsStatus);
+  // Map style (per device, never the server's): a satellite photo, a shaded-relief atlas, or the flat
+  // illustrated map. The renderer remembers the choice itself (`imagery.writeMapStyle`).
+  const styleRow = el("div", "wx-srv-adv-opt-block");
+  styleRow.setAttribute("role", "group");
+  styleRow.setAttribute("aria-label", "Map style");
+  styleRow.append(
+    el("div", "wx-srv-adv-opt-title", "Map style"),
+    el("div", "wx-srv-adv-opt-help", "Kept on this device only. A photo of the Earth, a shaded-relief atlas, or the classic illustrated map."),
+  );
+  const styleButtons = new Map<MapStyle, HTMLButtonElement>();
+  const styleSeg = el("div", "wx-srv-adv-seg");
+  const STYLE_LABELS: Readonly<Record<MapStyle, string>> = { satellite: "Satellite", atlas: "Atlas", classic: "Classic" };
+  for (const mapStyle of MAP_STYLES) {
+    const b = button("wx-srv-adv-seg-button", `${STYLE_LABELS[mapStyle]} map`, STYLE_LABELS[mapStyle], () => chooseMapStyle(mapStyle));
+    b.dataset["mapStyle"] = mapStyle;
+    b.setAttribute("aria-pressed", "false");
+    styleButtons.set(mapStyle, b);
+    styleSeg.append(b);
+  }
+  const styleNote = el("p", "wx-srv-adv-opt-list");
+  styleRow.append(styleSeg, styleNote);
+  const imageryCredit = el(
+    "p",
+    "wx-srv-adv-opt-credit",
+    "Map imagery: NASA Visible Earth, Blue Marble Next Generation (July); Natural Earth II shaded relief",
+  );
+  sheetCard.append(sheetHead, advisedRow, advisedList, styleRow, imageryCredit, optionsStatus);
   optionsSheet.append(sheetCard);
   optionsSheet.addEventListener("pointerdown", (event) => {
     if (event.target === optionsSheet) closeOptions();
@@ -350,36 +378,61 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
         worldPromise = null;
         prepareLanding(loaded);
         world = loaded;
-        try {
-          renderer = (deps.createRenderer ?? createGlobeRenderer)(canvas, loaded);
-        } catch {
-          renderer = null;
-        }
-        scene = new AdventureScene({
-          world: loaded,
-          reducedMotion,
-          vibrate: (ms) => {
-            try {
-              if (typeof win.navigator.vibrate === "function") win.navigator.vibrate(ms);
-            } catch {
-              // unsupported (iOS Safari): the flicker is still visible
-            }
-          },
-          serverNowS: () => deps.model.serverNowS(),
-          random,
-          viewer: deps.viewer,
-          partner: deps.partner,
-        });
-        setNote(null);
-        measureStage(true);
-        if (drawnSeq !== null) feedView(drawnSeq);
-        ensureLoop();
+        buildStage();
       })
       .catch(() => {
         worldPromise = null;
         worldFailed = true;
         setNote("Couldn't load the map. Tap here to try again.");
       });
+  }
+
+  /**
+   * Builds the renderer and the scene over the loaded world. The renderer is destroyed again when the
+   * game closes or the chat locks (it holds a WebGL context and, with imagery, a few hundred MB of
+   * texture on the GPU), so opening the game later builds it afresh; the world itself is cached.
+   */
+  function buildStage(): void {
+    const loaded = world;
+    if (loaded === null || scene !== null) return;
+    if (canvas.parentElement === null) stage.prepend(canvas);
+    try {
+      // The imagery layer is a sibling the renderer inserts under the 2D canvas, inside the stage
+      // (which is positioned). It follows this device's saved map style, satellite by default.
+      renderer = (deps.createRenderer ?? createGlobeRenderer)(canvas, loaded);
+    } catch {
+      renderer = null;
+    }
+    scene = new AdventureScene({
+      world: loaded,
+      reducedMotion,
+      vibrate: (ms) => {
+        try {
+          if (typeof win.navigator.vibrate === "function") win.navigator.vibrate(ms);
+        } catch {
+          // unsupported (iOS Safari): the flicker is still visible
+        }
+      },
+      serverNowS: () => deps.model.serverNowS(),
+      random,
+      viewer: deps.viewer,
+      partner: deps.partner,
+    });
+    setNote(null);
+    measureStage(true);
+    if (drawnSeq !== null) feedView(drawnSeq);
+    drawMapStyle();
+    ensureLoop();
+  }
+
+  function destroyStage(): void {
+    stopLoop();
+    renderer?.destroy();
+    renderer = null;
+    scene = null;
+    canvas.remove();
+    stageW = 0;
+    stageH = 0;
   }
 
   note.addEventListener("click", () => {
@@ -445,6 +498,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       swipe = null;
     }
     scene.setRemote(swipe, receiver.trail);
+    scene.minViewRadiusDeg = renderer?.textured === true ? MIN_VIEW_RADIUS_TEXTURED_DEG : MIN_VIEW_RADIUS_DEG;
     const { frame, hud } = scene.update(nowMs);
     lastFrame = frame;
     renderer?.draw(frame, nowMs);
@@ -835,8 +889,28 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     }
   }
 
+  /** Marks the map style in use (the renderer's, or this device's saved one before it exists). */
+  function drawMapStyle(): void {
+    const current: MapStyle = renderer?.mapStyle ?? readMapStyle();
+    const noImagery = renderer !== null && !renderer.imageryAvailable;
+    for (const [mapStyle, b] of styleButtons) {
+      const on = mapStyle === (noImagery ? "classic" : current);
+      b.classList.toggle("wx-srv-adv-seg-on", on);
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      b.disabled = noImagery && mapStyle !== "classic";
+    }
+    styleNote.textContent = noImagery ? "This browser can't show map pictures, so the classic map is used." : "";
+  }
+
+  function chooseMapStyle(next: MapStyle): void {
+    if (renderer !== null) renderer.setMapStyle(next);
+    else writeMapStyle(next);
+    drawMapStyle();
+  }
+
   async function openOptions(): Promise<void> {
     optionsSheet.hidden = false;
+    drawMapStyle();
     optionsStatus.textContent = "Loading…";
     advisedInput.disabled = true;
     const started = generation;
@@ -927,7 +1001,8 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       drawnSeq = seq;
       strip.draw(seq);
     }
-    ensureWorld();
+    if (world !== null) buildStage();
+    else ensureWorld();
     if (typeof ResizeObserver === "function" && resizeObserver === null) {
       resizeObserver = new ResizeObserver(() => measureStage());
       resizeObserver.observe(stage);
@@ -950,9 +1025,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     strip.draw(null);
     packPanel.closeViewer();
     setNote(null);
-    canvas.remove();
-    stageW = 0;
-    stageH = 0;
+    destroyStage();
   }
 
   function close(): void {

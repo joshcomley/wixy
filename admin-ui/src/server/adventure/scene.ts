@@ -28,6 +28,7 @@
 // hundred milliseconds instead of jumping.
 
 import {
+  MIN_VIEW_RADIUS_DEG,
   cameraAt,
   cameraFromRotation,
   fitCamera,
@@ -245,6 +246,8 @@ export class AdventureScene {
   private litDest = -1;
   private lastUpdateMs = -1;
   private cameraMoving = false;
+  /** How far the explorable map may zoom in: tighter while satellite imagery shows (it turns soft). */
+  minViewRadiusDeg = MIN_VIEW_RADIUS_DEG;
 
   constructor(private readonly deps: SceneDeps) {
     this.idleLambda = deps.random() * 360 - 180;
@@ -557,7 +560,7 @@ export class AdventureScene {
   exploreZoom(factor: number): void {
     const cam = this.currentExploreCamera();
     if (cam === null || !this.canExplore || !(factor > 0)) return;
-    this.explore = { ...cam, viewRadiusDeg: Math.max(0.3, Math.min(90, cam.viewRadiusDeg / factor)) };
+    this.explore = { ...cam, viewRadiusDeg: Math.max(this.minViewRadiusDeg, Math.min(90, cam.viewRadiusDeg / factor)) };
     this.exploreTween = null;
   }
 

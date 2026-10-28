@@ -59,6 +59,21 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-game-controls",
   "wx-srv-gamepop",
   "wx-srv-gamepop-empty",
+  // Adventure Time (adventure/*.ts; workspace 00056): the game pane's own toggled parts, the
+  // main-chat card's map and the Holiday bank screen.
+  "wx-srv-adv-back",
+  "wx-srv-adv-note",
+  "wx-srv-adv-lit-sub",
+  "wx-srv-adv-sheet",
+  "wx-srv-adv-viewer",
+  "wx-srv-adv-viewer-prev",
+  "wx-srv-adv-viewer-next",
+  "wx-srv-adv-pk-thumb",
+  "wx-srv-adv-hero-pic",
+  "wx-srv-adv-mcard-map",
+  "wx-srv-bank-view",
+  "wx-srv-bank-error",
+  "wx-srv-bank-retry",
   // The media gallery (gallery.ts; workspace 00046).
   "wx-srv-gallery-view",
   "wx-srv-gallery-cancel",
