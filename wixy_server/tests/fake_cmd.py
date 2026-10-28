@@ -199,53 +199,80 @@ def _join_names(names: list[str]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
+_CHALLENGE_NOTES = {
+    "one-pan": "Everything cooks together in one single pan.",
+    "no-oven": "Made entirely on the hob or under the grill.",
+    "thirty-minutes": "Ready from start to table in half an hour.",
+    "six-steps": "A short method of just a few easy steps.",
+}
+"""The fake chef's `challengeNote` per challenge id (duplicated on purpose, like the markers; no
+food word and no oven word, so it passes every deterministic check)."""
+
+
 def canned_cookout_concepts(prompt: str) -> dict[str, Any] | None:
-    """A valid Stage-1 answer for the ten-ingredient basket in `prompt`: three concepts using
-    ids[0:8], ids[2:10] and ids[0:7] (so every pick is used, one concept uses 8, each uses 7+) with
-    three distinct (dishType, technique) pairs, naming only foods the concept uses."""
+    """A valid Stage-1 answer for the ten- or eleven-ingredient basket in `prompt`: three concepts
+    using ids[0:8], ids[N-8:N] and ids[0:7] (so every pick is used, one concept uses 8, each uses
+    7+) with three distinct (dishType, technique) pairs, naming only foods the concept uses. The
+    prompt's `twists` object (if any) is honoured: every star is used in every concept (its name is
+    in the description), the wildcard in the first two, and each challenge's rule is kept."""
     basket = _marked_json(prompt, BASKET_MARKER)
     if basket is None:
         return None
     raw = basket.get("ingredients")
-    if not isinstance(raw, list) or len(raw) != 10:
+    if not isinstance(raw, list) or len(raw) not in (10, 11):
         return None
     records = [r for r in raw if isinstance(r, dict)]
     ids = [str(r["id"]) for r in records]
     names = {str(r["id"]): str(r["name"]) for r in records}
+    twists = basket.get("twists")
+    twists = twists if isinstance(twists, dict) else {}
+    stars = [str(i) for i in twists.get("stars") or []]
+    wildcard = twists.get("wildcard")
+    challenge = twists.get("challenge")
+    last = ("bake", "roast", "Golden")
+    if challenge == "no-oven":
+        last = ("rice", "pan-fry", "Crisp")
     plan = [
-        ("a", 0, 8, "Sunday Supper", "stew", "simmer", "Slow-simmered"),
-        ("b", 2, 10, "Fresh and Light", "salad", "no-cook", "Bright"),
-        ("c", 0, 7, "Weeknight Comfort", "bake", "roast", "Golden"),
+        ("a", ids[0:8], "Sunday Supper", "stew", "simmer", "Slow-simmered"),
+        ("b", ids[len(ids) - 8 :], "Fresh and Light", "salad", "no-cook", "Bright"),
+        ("c", ids[0:7], "Weeknight Comfort", last[0], last[1], last[2]),
     ]
     concepts: list[dict[str, Any]] = []
-    for cid, low, high, vibe, dish_type, technique, adjective in plan:
-        used = ids[low:high]
+    for position, (cid, window, vibe, dish_type, technique, adjective) in enumerate(plan):
+        wanted = set(window) | set(stars)
+        if isinstance(wildcard, str) and position < 2:
+            wanted.add(wildcard)
+        used = [i for i in ids if i in wanted]
         omitted = [i for i in ids if i not in used]
         lead = [names[i] for i in used[:2]]
-        concepts.append(
-            {
-                "id": cid,
-                "title": f"{adjective} {_join_names(lead)} {dish_type.capitalize()}",
-                "vibe": vibe,
-                "dishType": dish_type,
-                "technique": technique,
-                "description": (
-                    f"A simple supper for two built around {_join_names([names[i] for i in used])}"
-                    ", finished with a pinch of salt and black pepper."
-                ),
-                "pickedIngredientIds": list(used),
-                "stapleIds": ["salt", "black-pepper"],
-                "omitted": [
-                    {"id": i, "reason": "Saved for another night so this dish stays focused."}
-                    for i in omitted
-                ],
-            }
-        )
+        concept: dict[str, Any] = {
+            "id": cid,
+            "title": f"{adjective} {_join_names(lead)} {dish_type.capitalize()}",
+            "vibe": vibe,
+            "dishType": dish_type,
+            "technique": technique,
+            "description": (
+                f"A simple supper for two built around {_join_names([names[i] for i in used])}"
+                ", finished with a pinch of salt and black pepper."
+            ),
+            "pickedIngredientIds": list(used),
+            "stapleIds": ["salt", "black-pepper"],
+            "omitted": [
+                {"id": i, "reason": "Saved for another night so this dish stays focused."}
+                for i in omitted
+            ],
+        }
+        if isinstance(challenge, str):
+            concept["challengeNote"] = _CHALLENGE_NOTES.get(challenge, "Keeps to the rule.")
+            if challenge == "thirty-minutes":
+                concept["totalMinutes"] = 25
+        concepts.append(concept)
     return {"concepts": concepts}
 
 
 def canned_cookout_recipe(prompt: str) -> dict[str, Any] | None:
-    """A valid Stage-2 answer covering exactly the manifest in `prompt`."""
+    """A valid Stage-2 answer covering exactly the manifest in `prompt` (and, when the prompt's
+    `twists` object names a challenge, a `cookware` list and a method that keeps the rule)."""
     concept = _marked_json(prompt, CONCEPT_MARKER)
     manifest = concept.get("manifest") if concept is not None else None
     if not isinstance(manifest, dict):
@@ -271,7 +298,7 @@ def canned_cookout_recipe(prompt: str) -> dict[str, Any] | None:
         }
         for group in (first, second)
     ]
-    return {
+    recipe: dict[str, Any] = {
         "serves": 2,
         "prepMinutes": 10,
         "cookMinutes": 20,
@@ -279,6 +306,17 @@ def canned_cookout_recipe(prompt: str) -> dict[str, Any] | None:
         "steps": steps,
         "tips": ["Taste as you go and adjust the seasoning at the end."],
     }
+    twists = concept.get("twists") if concept is not None else None
+    if isinstance(twists, dict) and twists.get("challenge"):
+        recipe["cookware"] = (
+            ["Large pan"]
+            if twists["challenge"] == "one-pan"
+            else [
+                "Large pan",
+                "Chopping board",
+            ]
+        )
+    return recipe
 
 
 def canned_cookout_response(caller: object, prompt: object) -> str | None:
