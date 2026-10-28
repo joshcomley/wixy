@@ -168,6 +168,21 @@ class TestParseUrl:
         assert parse_fetch_url("http://example.com./").host == "example.com"
 
     @pytest.mark.parametrize(
+        "raw",
+        [
+            "http://example.com/\ud800",  # a lone surrogate cannot be percent-encoded
+            "http://example.com/?q=\udfff",
+            "http://exa℀mple.com/",  # NFKC-normalises to something containing "/"
+            "http://example.com:99999999999999999999/",
+            "http://[::1/",
+        ],
+    )
+    def test_the_standard_librarys_value_errors_become_url_failures(self, raw: str) -> None:
+        with pytest.raises(SafeFetchError) as caught:
+            parse_fetch_url(raw)  # SafeFetchError and nothing else
+        assert caught.value.reason in (FetchFailure.URL, FetchFailure.HOST, FetchFailure.PORT)
+
+    @pytest.mark.parametrize(
         ("raw", "reason"),
         [
             ("", FetchFailure.URL),
@@ -223,9 +238,45 @@ class TestRetryAfter:
         assert parse_retry_after("Wed, 21 Oct 2015 07:28:05 GMT", now=1445412481) == 4.0
         assert parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT", now=1445412580) == 0.0
 
-    @pytest.mark.parametrize("value", [None, "", "soon", "-5", "1.5", "99999999999999"])
-    def test_unreadable_values_are_none(self, value: str | None) -> None:
+    @pytest.mark.parametrize(
+        "value",
+        [
+            None,
+            "",
+            "soon",
+            "-5",
+            "1.5",
+            "99999999999999",
+            "²",  # U+00B2: str.isdigit() is True for it, int() raises ValueError
+            "³4",
+            "٣",  # Arabic-Indic digit three
+            "１２",  # full-width digits
+            "Mon, 01 Jan 0001 00:00:00 GMT",  # a year the platform cannot take a timestamp of
+            "Fri, 31 Dec 9999 23:59:59 GMT",
+            "Mon, 99 Foo 2020 99:99:99 GMT",
+        ],
+    )
+    def test_unreadable_values_are_none_and_never_raise(self, value: str | None) -> None:
+        result = parse_retry_after(value)
+        assert result is None or result >= 0.0
+
+    @pytest.mark.parametrize("value", ["²", "٣", "１２", "³4"])
+    def test_non_ascii_digits_are_not_a_delay(self, value: str) -> None:
         assert parse_retry_after(value) is None
+
+    def test_a_429_with_a_non_ascii_digit_retry_after_is_a_clean_rate_limit(self) -> None:
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            with pytest.raises(SafeFetchError) as caught:  # SafeFetchError, never ValueError
+                await fetcher.get(url(web, "rl.test", "/"), max_bytes=100, accept=IMAGE)
+            assert caught.value.reason == FetchFailure.RATE_LIMITED
+            assert len(web.requests) == 1  # an unreadable Retry-After is not retried
+
+        with_web(
+            body,
+            setup=lambda web: web.add(
+                "rl.test", "/", Reply(status=429, headers={"Retry-After": "²"})
+            ),
+        )
 
 
 def test_system_resolver_resolves_a_literal_without_the_network() -> None:
@@ -536,6 +587,97 @@ class TestRedirects:
             assert caught.value.reason == FetchFailure.REDIRECT
 
         with_web(body, setup=lambda web: web.add("r.test", "/go", Reply(status=302)))
+
+    @pytest.mark.parametrize(
+        "location",
+        ["http://[x", "http://[::1", "http://[evil/x", "//[x/y", "http://exa]mple.test/"],
+    )
+    def test_a_malformed_location_is_a_clean_redirect_failure(self, location: str) -> None:
+        """`urljoin` raises a plain `ValueError` for these; `get()` must still raise only
+        `SafeFetchError`."""
+
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            with pytest.raises(SafeFetchError) as caught:
+                await fetcher.get(url(web, "r.test", "/go"), max_bytes=100, accept=IMAGE)
+            assert caught.value.reason in (FetchFailure.REDIRECT, FetchFailure.URL)
+            assert [r.host for r in web.requests] == ["r.test"]
+
+        with_web(
+            body,
+            setup=lambda web: web.add(
+                "r.test", "/go", Reply(status=302, headers={"Location": location})
+            ),
+        )
+
+
+class TestRefusedHosts:
+    """`get(refuse_host_suffixes=...)`: domains no hop may touch (the picture finder keeps Wikimedia
+    originals out of a venue's image fetch with it)."""
+
+    def test_the_url_itself_on_a_refused_domain_is_refused_with_no_connection(self) -> None:
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            for host in ("upload.wikimedia.test", "wikimedia.test", "A.B.Wikimedia.test"):
+                with pytest.raises(SafeFetchError) as caught:
+                    await fetcher.get(
+                        url(web, host, "/x"),
+                        max_bytes=100,
+                        accept=IMAGE,
+                        refuse_host_suffixes=("wikimedia.test",),
+                    )
+                assert caught.value.reason == FetchFailure.HOST
+            assert web.requests == []
+
+        with_web(body)
+
+    def test_a_redirect_onto_a_refused_domain_is_refused_before_it_is_followed(self) -> None:
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            with pytest.raises(SafeFetchError) as caught:
+                await fetcher.get(
+                    url(web, "cdn.test", "/img"),
+                    max_bytes=100,
+                    accept=IMAGE,
+                    refuse_host_suffixes=("wikimedia.test",),
+                )
+            assert caught.value.reason == FetchFailure.HOST
+            assert [r.host for r in web.requests] == ["cdn.test"]
+
+        def setup(web: FakeWeb) -> None:
+            target = url(web, "upload.wikimedia.test", "/original.jpg")
+            web.add("cdn.test", "/img", Reply(status=301, headers={"Location": target}))
+            web.add("upload.wikimedia.test", "/original.jpg", Reply(body=b"x"))
+
+        with_web(body, setup=setup)
+
+    def test_a_lookalike_domain_is_not_refused(self) -> None:
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            response = await fetcher.get(
+                url(web, "notwikimedia.test", "/x"),
+                max_bytes=100,
+                accept=IMAGE,
+                refuse_host_suffixes=("wikimedia.test",),
+            )
+            assert response.body == b"ok"
+
+        with_web(
+            body,
+            setup=lambda web: web.add(
+                "notwikimedia.test", "/x", Reply(body=b"ok", content_type="image/png")
+            ),
+        )
+
+    def test_nothing_is_refused_by_default(self) -> None:
+        async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
+            response = await fetcher.get(
+                url(web, "upload.wikimedia.test", "/x"), max_bytes=100, accept=IMAGE
+            )
+            assert response.body == b"ok"
+
+        with_web(
+            body,
+            setup=lambda web: web.add(
+                "upload.wikimedia.test", "/x", Reply(body=b"ok", content_type="image/png")
+            ),
+        )
 
 
 # -- what comes back -----------------------------------------------------------------------------

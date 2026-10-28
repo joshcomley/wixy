@@ -213,7 +213,24 @@ class ParsedUrl:
 
 
 def parse_fetch_url(raw: str, allowed_ports: Iterable[int] = ALLOWED_PORTS) -> ParsedUrl:
-    """Validate `raw` and take it apart. Raises `SafeFetchError` (`URL`/`SCHEME`/`PORT`/`HOST`)."""
+    """Validate `raw` and take it apart. Raises `SafeFetchError` (`URL`/`SCHEME`/`PORT`/`HOST`) and
+    nothing else: a `ValueError` from the standard library (a lone surrogate that cannot be
+    percent-encoded, a malformed bracket) is a `URL` failure."""
+    try:
+        return _parse_fetch_url(raw, allowed_ports)
+    except SafeFetchError:
+        raise
+    except ValueError as exc:  # includes UnicodeError
+        raise SafeFetchError(FetchFailure.URL, "malformed") from exc
+
+
+def _refuse_hosts(target: ParsedUrl, suffixes: Sequence[str]) -> None:
+    for suffix in suffixes:
+        if target.host == suffix or target.host.endswith("." + suffix):
+            raise SafeFetchError(FetchFailure.HOST, f"{target.host} is not allowed here")
+
+
+def _parse_fetch_url(raw: str, allowed_ports: Iterable[int]) -> ParsedUrl:
     if not isinstance(raw, str) or not raw or len(raw) > MAX_URL_CHARS:
         raise SafeFetchError(FetchFailure.URL, "empty or too long")
     if _URL_BAD_CHARS_RE.search(raw):
@@ -389,13 +406,15 @@ def parse_retry_after(value: str | None, *, now: float | None = None) -> float |
     text = value.strip()
     if not text:
         return None
-    if text.isdigit():
+    if (
+        text.isascii() and text.isdigit()
+    ):  # `str.isdigit` is also true for "²" and Arabic-Indic digits
         return float(int(text)) if len(text) < 9 else None
     try:
         when = email.utils.parsedate_to_datetime(text)
-    except TypeError, ValueError:
+        seconds = when.timestamp() - (time.time() if now is None else now)
+    except TypeError, ValueError, OverflowError, OSError:  # incl. a year the platform cannot hold
         return None
-    seconds = when.timestamp() - (time.time() if now is None else now)
     return max(0.0, seconds)
 
 
@@ -538,11 +557,21 @@ class SafeFetcher:
             self._limiter = anyio.CapacityLimiter(self._max_parallel_hosts)
         return self._limiter
 
-    async def get(self, url: str, *, max_bytes: int, accept: Sequence[str]) -> FetchResponse:
+    async def get(
+        self,
+        url: str,
+        *,
+        max_bytes: int,
+        accept: Sequence[str],
+        refuse_host_suffixes: Sequence[str] = (),
+    ) -> FetchResponse:
         """GET `url` and return the completed response. `accept` lists the acceptable media types
-        (`"image/"` = any image type); anything else is refused BEFORE the body is read. Raises
-        `SafeFetchError` for every refusal and failure."""
+        (`"image/"` = any image type); anything else is refused BEFORE the body is read.
+        `refuse_host_suffixes` names domains no hop may touch — the URL itself or any redirect
+        target on (or under) one is refused with `HOST` before a connection is made. Raises
+        `SafeFetchError` for every refusal and failure, and nothing else."""
         target = parse_fetch_url(url, self._allowed_ports)
+        _refuse_hosts(target, refuse_host_suffixes)
         deadline_at: float | None = None
         redirects = 0
         while True:
@@ -554,9 +583,15 @@ class SafeFetcher:
             redirects += 1
             if redirects > MAX_REDIRECTS:
                 raise SafeFetchError(FetchFailure.TOO_MANY_REDIRECTS, str(MAX_REDIRECTS))
-            following = parse_fetch_url(urljoin(target.url, outcome.location), self._allowed_ports)
+            try:
+                following = parse_fetch_url(
+                    urljoin(target.url, outcome.location), self._allowed_ports
+                )
+            except ValueError as exc:  # urljoin: "Invalid IPv6 URL", a netloc failing NFKC, ...
+                raise SafeFetchError(FetchFailure.REDIRECT, "malformed Location") from exc
             if target.scheme == "https" and following.scheme == "http":
                 raise SafeFetchError(FetchFailure.REDIRECT, "https to http downgrade")
+            _refuse_hosts(following, refuse_host_suffixes)
             target = following
 
     async def _hop(
@@ -646,9 +681,11 @@ class SafeFetcher:
                 media_type, charset = _media_type(fields.get("content-type", ""))
                 if not _accepts(media_type, accept):
                     raise SafeFetchError(FetchFailure.CONTENT_TYPE, media_type or "none")
-                length = fields.get("content-length", "")
-                if length.isdigit() and int(length) > max_bytes:
-                    raise SafeFetchError(FetchFailure.TOO_LARGE, f"content-length {length}")
+                length = fields.get("content-length", "").strip()
+                if length.isascii() and length.isdigit():
+                    # (more than 15 digits is over any cap, and `int` refuses thousands of them)
+                    if len(length) > 15 or int(length) > max_bytes:
+                        raise SafeFetchError(FetchFailure.TOO_LARGE, "content-length over the cap")
                 body = bytearray()
                 async for chunk in response.aiter_stream():
                     body += chunk
