@@ -46,11 +46,6 @@ export type LockCause =
    * it is intentionally absent from `pausesGrant`'s list. */
   | "grantOff";
 
-/** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
- * anything it in turn mounts — uploader, recorder, media renderer) so those
- * modules can pause the idle timer around their own async gaps and force an
- * instant lock (e.g. the chat view's own panic ✕, or a 401 from `serverFetch`
- * turned into `lockNow("unauthorized")`). */
 /** A suspension held by something with a running JS tick (the voice-call controller). The holder
  * calls `touch()` from its own tick so the panel can tell a LIVE hold from one stranded by a
  * frozen page (a phone that locked mid-ring suspends JS, so nothing ever released it): a hold not
@@ -65,6 +60,11 @@ export interface LiveSuspension {
   release(): void;
 }
 
+/** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
+ * anything it in turn mounts — uploader, recorder, media renderer) so those
+ * modules can pause the idle timer around their own async gaps and force an
+ * instant lock (e.g. the chat view's own panic ✕, or a 401 from `serverFetch`
+ * turned into `lockNow("unauthorized")`). */
 export interface LockHooks {
   /** Pauses the idle timer for `reason`. Idempotent: calling it again for a
    * reason already active is a harmless no-op that returns its own release
