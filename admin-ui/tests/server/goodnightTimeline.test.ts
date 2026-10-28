@@ -62,17 +62,30 @@ describe("timeline determinism", () => {
   });
 
   it("only ever emits integer positions and valid frames, at every size", () => {
+    // Tens of thousands of draw ops: check them in plain code and assert ONCE. An `expect` per op
+    // (about 150,000 calls) took 1.3 s alone and over vitest's 5 s timeout on a loaded CI runner.
+    const frameNames = new Map<string, ReadonlySet<string>>();
+    const problems: string[] = [];
     for (const size of SIZES) {
       for (let ms = 0; ms <= TIMELINE.endMs + 2000; ms += 113) {
         for (const op of ops(ms, size, 3)) {
-          expect(Number.isInteger(op.x)).toBe(true);
-          expect(Number.isInteger(op.y)).toBe(true);
-          expect(op.opacity).toBeGreaterThan(0);
-          expect(op.opacity).toBeLessThanOrEqual(1);
-          expect(SPRITES[op.sprite].frames.some((f) => f.name === op.frame)).toBe(true);
+          let frames = frameNames.get(op.sprite);
+          if (frames === undefined) {
+            frames = new Set(SPRITES[op.sprite].frames.map((f) => f.name));
+            frameNames.set(op.sprite, frames);
+          }
+          if (
+            !Number.isInteger(op.x) ||
+            !Number.isInteger(op.y) ||
+            !(op.opacity > 0 && op.opacity <= 1) ||
+            !frames.has(op.frame)
+          ) {
+            problems.push(`${size.w}x${size.h} @${ms}ms ${op.sprite}/${op.frame} at (${op.x}, ${op.y}) opacity ${op.opacity}`);
+          }
         }
       }
     }
+    expect(problems).toEqual([]);
   });
 });
 

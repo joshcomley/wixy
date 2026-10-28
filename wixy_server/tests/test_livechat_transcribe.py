@@ -13,8 +13,10 @@ import pytest
 
 from wixy_server.livechat.processing import VOICE_DURATION_CAP_S
 from wixy_server.livechat.transcribe import (
+    LAST_GOOD_GRACE_S,
     MAX_TRANSCRIPT_CHARS,
     PROBE_TTL_S,
+    TRANSIENT_RETRY_S,
     CmdTranscriber,
 )
 from wixy_server.livechat.transcription import SlidingWindowRateLimiter, transcribe_timeout_s
@@ -94,6 +96,113 @@ class TestProbe:
         now[0] = 61.0
         assert await transcriber.available() is True
         assert state.transcribe_probe_count == 2
+        await transcriber.aclose()
+
+
+class _FlakyCmd:
+    """A capabilities route that answers from a script: `"timeout"`, `"refuse"`, `"500"`, or a
+    bool for a definitive answer. The last entry repeats."""
+
+    def __init__(self, script: list[bool | str]) -> None:
+        self.script = script
+        self.calls = 0
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        step = self.script[min(self.calls, len(self.script) - 1)]
+        self.calls += 1
+        if step == "timeout":
+            raise httpx.ReadTimeout("slow", request=request)
+        if step == "refuse":
+            raise httpx.ConnectError("refused", request=request)
+        if step == "500":
+            return httpx.Response(500)
+        return httpx.Response(200, json={"private": step is True})
+
+
+def _flaky(script: list[bool | str], now: list[float]) -> tuple[CmdTranscriber, _FlakyCmd]:
+    cmd = _FlakyCmd(script)
+    transcriber = CmdTranscriber(transport=httpx.MockTransport(cmd), clock=lambda: now[0])
+    return transcriber, cmd
+
+
+class TestTransientProbe:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("blip", ["timeout", "refuse", "500"])
+    async def test_a_non_answer_after_a_yes_keeps_the_button_and_rechecks_soon(
+        self, blip: str
+    ) -> None:
+        now = [0.0]
+        transcriber, cmd = _flaky([True, blip, True], now)
+        assert await transcriber.available() is True
+        now[0] = 61.0
+        assert await transcriber.available() is True  # cmd gave no answer: the last yes stands
+        assert cmd.calls == 2
+        now[0] = 61.0 + TRANSIENT_RETRY_S - 1
+        assert await transcriber.available() is True
+        assert cmd.calls == 2  # not hammered
+        now[0] = 61.0 + TRANSIENT_RETRY_S + 1
+        assert await transcriber.available() is True
+        assert cmd.calls == 3  # re-asked within seconds, not a minute
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_a_non_answer_with_no_prior_yes_is_no_but_only_briefly_cached(self) -> None:
+        now = [0.0]
+        transcriber, cmd = _flaky(["timeout", True], now)
+        assert await transcriber.available() is False
+        now[0] = TRANSIENT_RETRY_S + 1
+        assert await transcriber.available() is True  # not stuck "off" for 60 s
+        assert cmd.calls == 2
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_the_last_yes_is_only_trusted_for_the_grace_window(self) -> None:
+        now = [0.0]
+        transcriber, _ = _flaky([True, "timeout"], now)
+        assert await transcriber.available() is True
+        now[0] = LAST_GOOD_GRACE_S + 1
+        assert await transcriber.available() is False
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_a_definitive_no_is_never_softened_by_the_grace(self) -> None:
+        now = [0.0]
+        transcriber, _ = _flaky([True, False], now)
+        assert await transcriber.available() is True
+        now[0] = 61.0
+        assert await transcriber.available() is False
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_fresh_retries_a_non_answer_then_gets_the_yes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.transcribe as transcribe_module
+
+        monkeypatch.setattr(transcribe_module, "FRESH_PROBE_RETRY_DELAY_S", 0.0)
+        transcriber, cmd = _flaky(["timeout", "500", True], [0.0])
+        assert await transcriber.available(fresh=True) is True
+        assert cmd.calls == 3
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_fresh_gives_up_after_its_attempts_and_ignores_the_last_yes(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.transcribe as transcribe_module
+
+        monkeypatch.setattr(transcribe_module, "FRESH_PROBE_RETRY_DELAY_S", 0.0)
+        transcriber, cmd = _flaky([True, "timeout"], [0.0])
+        assert await transcriber.available() is True
+        assert await transcriber.available(fresh=True) is False  # no audio would be sent
+        assert cmd.calls == 1 + transcribe_module.FRESH_PROBE_ATTEMPTS
+        await transcriber.aclose()
+
+    @pytest.mark.asyncio
+    async def test_fresh_does_not_retry_a_definitive_no(self) -> None:
+        transcriber, cmd = _flaky([False], [0.0])
+        assert await transcriber.available(fresh=True) is False
+        assert cmd.calls == 1
         await transcriber.aclose()
 
 
