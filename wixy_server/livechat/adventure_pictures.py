@@ -56,6 +56,7 @@ from wixy_server.livechat.adventure_dishes import (
     dish_search_name,
     dish_tokens,
     has_food_term,
+    place_tokens,
     summary_reads_as_food,
     title_names_dish,
 )
@@ -907,7 +908,7 @@ class WebPictureFinder:
         return await self.commons_thumbnail_picture(name, caption=caption)
 
     async def dish_search_picture(
-        self, slot: PictureSlot, unit: str, *, avoid: frozenset[str]
+        self, slot: PictureSlot, unit: str, *, avoid: frozenset[str], destination: str = ""
     ) -> FoundPicture | None:
         """A Commons photo of a local dish, found by searching for `"<dish>"` and then
         `<dish> <unit>` (spec 4.3b). A hit is taken ONLY when its own title contains a significant
@@ -918,7 +919,7 @@ class WebPictureFinder:
         `DISH_DOWNLOAD_ATTEMPTS` hits are downloaded. There is no fallback to "other images of the
         article". Raises `SafeFetchError` only when the host is rate-limiting."""
         dish = dish_search_name(slot.name)
-        tokens = dish_tokens(slot.name, slot.wikipedia)
+        tokens = dish_tokens(slot.name, slot.wikipedia, places=place_tokens(destination, unit))
         if not dish or not tokens:
             return None
         downloads = 0
@@ -1138,7 +1139,9 @@ class _Hunt:
             picture = await self._attempt(
                 f"{slot.key} search",
                 "commons",
-                lambda: self._finder.dish_search_picture(slot, self._plan.unit, avoid=avoid),
+                lambda: self._finder.dish_search_picture(
+                    slot, self._plan.unit, avoid=avoid, destination=self._plan.destination
+                ),
             )
         return picture
 

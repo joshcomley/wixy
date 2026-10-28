@@ -169,3 +169,16 @@ thumbnails all loaded. Fetching each item's linked page for `og:image` worked fo
   external; `test_livechat_adventure_pictures.py` encodes the measured shapes.
 - The client must not draw the anchor message's photo attachments as a normal photo strip (they are
   the pack's pictures).
+
+# Audit round 4 follow-ups (lows)
+- **F6 — a dish's title check never rests on a place or a generic word.** `dish_tokens` no longer
+  falls back to generic words when a dish name has no significant token: such a dish ("Montenegrin
+  smoked ham") gets no Commons search and stays text-only, because a title match on a place or a
+  cooking method plus a food word in the description is exactly how a village "famous for its
+  smoked ham" passed as the dish. The pack's own place words (destination + unit, via
+  `place_tokens`) and their forms (`_same_stem`: "montenegrin"/"montenegro", "dalmatian"/"dalmatia",
+  "greek"/"greece") never count as naming a dish; irregular nationalities that share no stem with
+  their country ("french", "spanish", ...) are listed in `DEMONYMS`. Red/green: two finder tests
+  fail on the previous rule and pass now.
+- **F7 — stale limits in the docs** (testing.md, spec §4.3a) now say 16 MP header-checked and the
+  22-picture budget.

@@ -22,6 +22,7 @@ from wixy_server.livechat.adventure_dishes import (
     first_sentence,
     fold,
     has_food_term,
+    place_tokens,
     summary_reads_as_food,
     title_names_dish,
 )
@@ -153,8 +154,8 @@ class TestDishNames:
             (("Buzara",), ("buzara",)),
             (("Ćevapčići", "Ćevapi"), ("cevapcici", "cevapi")),
             (("Fish stew", "Brodet"), ("fish", "stew", "brodet")),
-            # every long word is generic: the plain 4-letter words are used rather than nothing
-            (("Montenegrin smoked ham",), ("montenegrin", "smoked")),
+            # every long word is generic: NO fallback, so the dish is never searched (audit F6)
+            (("Smoked dried ham",), ()),
             (("Red wine",), ("wine",)),
             (("Kačamak", None), ("kacamak",)),
             (("Raki", "Rakia"), ("raki", "rakia")),
@@ -165,6 +166,28 @@ class TestDishNames:
         self, names: tuple[str | None, ...], tokens: tuple[str, ...]
     ) -> None:
         assert dish_tokens(*names) == tokens
+
+    @pytest.mark.parametrize(
+        ("names", "places", "tokens"),
+        [
+            # a form of the pack's own place never names the dish (audit F6)
+            (("Montenegrin smoked ham",), ("Kotor", "Montenegro"), ()),
+            (("Dalmatian pasticada",), ("Split", "Croatia", "Dalmatia"), ("pasticada",)),
+            (("Lisbon-style sardines",), ("Lisbon", "Portugal"), ("sardines",)),
+            (("Portuguese custard tart",), ("Lisbon", "Portugal"), ("custard", "tart")),
+            (("Greek salad",), ("Athens", "Greece"), ("salad",)),
+            (("Kotor mussels",), ("Kotor", "Montenegro"), ("mussels",)),
+            # irregular nationalities are listed, since no stem rule can catch them
+            (("French onion soup",), ("Paris", "France"), ("onion", "soup")),
+            (("Spanish omelette",), ("Seville", "Spain"), ("omelette",)),
+            # an unrelated word sharing only a short prefix with a place is kept
+            (("Pasticada",), ("Pasman",), ("pasticada",)),
+        ],
+    )
+    def test_place_and_nationality_words_never_name_the_dish(
+        self, names: tuple[str, ...], places: tuple[str, ...], tokens: tuple[str, ...]
+    ) -> None:
+        assert dish_tokens(*names, places=place_tokens(*places)) == tokens
 
     @pytest.mark.parametrize(
         ("title", "tokens", "named"),
@@ -516,6 +539,43 @@ class TestDishCommonsSearch:
 
         pictures, web, _ = run_find(configure, dish_plan(("Priganice", None)))
         assert pictures == [] and web.seen(THUMB_HOST) == []  # refused before any download
+
+    def test_a_dish_with_no_significant_word_is_never_searched(self) -> None:
+        # Audit F6: "Montenegrin smoked ham" used to fall back to its generic words, so a village
+        # photo described as "famous for its smoked ham" passed both checks.
+        def configure(w: FakeOpenWeb) -> None:
+            f = w.add_file(
+                FakeFile(
+                    "Montenegrin village Njegusi.jpg",
+                    4000,
+                    2667,
+                    categories="Villages of Montenegro",
+                    description="A Montenegrin village famous for its smoked ham",
+                )
+            )
+            w.add_search("Montenegrin smoked ham", [f.title])
+            w.add_search("Montenegrin smoked ham Montenegro", [f.title])
+
+        pictures, web, open_web = run_find(configure, dish_plan(("Montenegrin smoked ham", None)))
+        assert pictures == [] and dish_queries(open_web) == [] and web.seen(THUMB_HOST) == []
+
+    def test_a_place_word_in_the_dish_name_does_not_match_a_photo_of_the_place(self) -> None:
+        # Audit F6: the place token alone used to satisfy the title check.
+        def configure(w: FakeOpenWeb) -> None:
+            f = w.add_file(
+                FakeFile(
+                    "Kotor old town.jpg",
+                    4000,
+                    2667,
+                    categories="Kotor|Street food",
+                    description="Grilled mussels on sale in the old town",
+                )
+            )
+            w.add_search("Kotor mussels", [f.title])
+            w.add_search("Kotor mussels Montenegro", [f.title])
+
+        pictures, web, _ = run_find(configure, dish_plan(("Kotor mussels", None)))
+        assert pictures == [] and web.seen(THUMB_HOST) == []
 
     def test_the_phrase_search_comes_first_then_the_dish_with_the_country(self) -> None:
         def configure(w: FakeOpenWeb) -> None:

@@ -384,10 +384,13 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   (IPv4 and IPv6, including IPv4-mapped), connecting to the vetted address itself (no second DNS
   lookup — rebinding); every redirect re-vetted, at most 3; 15 s per fetch, ≤ 8 MB body
   (streamed, aborted beyond); `Content-Type` image/* AND the bytes sniffed as JPEG/PNG/WebP;
-  decoded with Pillow under the existing decompression-bomb limit; refused if the short side is
-  < 480 px or the aspect ratio is beyond 3:1 (icons, banners); re-encoded to JPEG (metadata
-  stripped, Inv 16/44) at ≤ 1600 px plus a 480 px thumb; at most 16 pictures per pack, 4 fetches
-  in parallel; no cookies, a plain descriptive User-Agent.
+  the declared size read from the format's own header (PNG IHDR, JPEG SOF, WebP VP8X/VP8/VP8L)
+  and anything over 16 MP refused BEFORE Pillow opens it (security audit F1, decision 00191 has
+  the measured worst cases); refused if the short side is < 480 px or the aspect ratio is beyond
+  3:1 (icons, banners); shrunk first, then re-encoded to JPEG (metadata stripped, Inv 16/44) at
+  ≤ 1600 px plus a 480 px thumb, one decode at a time; at most 22 pictures per pack (the §4.3b
+  budget: hero 6, dishes 6, other items 10), 4 hosts fetched in parallel; no cookies, a plain
+  descriptive User-Agent.
 - **Measured 2026-10-28 on real Kotor runs** (why the sources below): asked to find pictures
   itself, the AI supplied only 9 picture URLs for 24 items AND dropped almost every item link
   (vs. a link on every item without the picture ask); its URLs were Wikimedia originals up to

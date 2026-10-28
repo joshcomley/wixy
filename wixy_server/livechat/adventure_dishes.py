@@ -192,11 +192,49 @@ GENERIC_DISH_WORDS: Final = frozenset(
         "hot",
         "cold",
         "mixed",
-        "montenegrin",
     }
 )
-"""Words that name a colour, a method or a nationality rather than the dish: a file titled for
-"Black Mountain" must not match "Black risotto"."""
+"""Words that name a colour or a method rather than the dish: a file titled for "Black Mountain"
+must not match "Black risotto"."""
+
+DEMONYMS: Final = frozenset(
+    {
+        "american",
+        "british",
+        "chinese",
+        "czech",
+        "danish",
+        "dutch",
+        "english",
+        "filipino",
+        "finnish",
+        "flemish",
+        "french",
+        "german",
+        "hungarian",
+        "icelandic",
+        "indian",
+        "irish",
+        "japanese",
+        "korean",
+        "malay",
+        "mexican",
+        "polish",
+        "scottish",
+        "spanish",
+        "swedish",
+        "swiss",
+        "thai",
+        "turkish",
+        "vietnamese",
+        "welsh",
+    }
+)
+"""Nationality adjectives whose spelling does not share a stem with the country's name, so the
+place-stem rule (`place_tokens` + `_same_stem`) cannot catch them ("French"/"France",
+"Spanish"/"Spain"). Regular ones ("Montenegrin"/"Montenegro", "Dalmatian"/"Dalmatia",
+"Portuguese"/"Portugal", "Greek"/"Greece") are caught by the stem rule against the pack's own
+destination and unit names instead of being listed here."""
 
 _FOLD_EXTRA: Final = str.maketrans(
     {"đ": "d", "ł": "l", "ø": "o", "æ": "ae", "œ": "oe", "ß": "ss", "ı": "i", "ð": "d", "þ": "th"}
@@ -245,17 +283,49 @@ def dish_search_name(name: str) -> str:
     return plain or " ".join(name.split())
 
 
-def dish_tokens(*names: str | None) -> tuple[str, ...]:
-    """The significant, accent-folded tokens (at least 4 letters, not a generic word) of a dish's
-    names — its menu name and its Wikipedia title. If every token is generic the plain 4-letter
-    tokens are used instead, so a dish is never left with nothing to match."""
+def place_tokens(*places: str | None) -> tuple[str, ...]:
+    """The accent-folded words (at least 4 letters) of the pack's place names — the destination,
+    its region, the unit — which must never count as naming a dish."""
+    words: list[str] = []
+    for place in places:
+        if place:
+            words += _WORD_RE.findall(fold(place))
+    return tuple(w for w in dict.fromkeys(words) if len(w) >= MIN_TOKEN_LETTERS)
+
+
+def _same_stem(a: str, b: str) -> bool:
+    """Whether two words are the same place word in different forms: they share a prefix of at
+    least 4 letters that is at most 3 letters short of the shorter word ("montenegrin" /
+    "montenegro", "dalmatian" / "dalmatia", "greek" / "greece", "lisbon" / "lisbon")."""
+    shared = 0
+    for x, y in zip(a, b, strict=False):
+        if x != y:
+            break
+        shared += 1
+    return shared >= max(MIN_TOKEN_LETTERS, min(len(a), len(b)) - 3)
+
+
+def dish_tokens(*names: str | None, places: Iterable[str] = ()) -> tuple[str, ...]:
+    """The significant, accent-folded tokens of a dish's names — its menu name and its Wikipedia
+    title: at least 4 letters, not a generic colour/method word, not a nationality, and not a
+    form of one of `places` (see `place_tokens`). There is deliberately NO fallback: a dish whose
+    name has no significant token ("Montenegrin smoked ham") gets no Commons search at all and
+    stays text-only, because the title check is then only a place or a cooking method and the
+    food-term check alone is fooled by any photo of the place that mentions a food (spec 4.3b: a
+    wrong photo is worse than none)."""
     words: list[str] = []
     for name in names:
         if name:
             words += _WORD_RE.findall(fold(dish_search_name(name)))
-    plain = [w for w in dict.fromkeys(words) if len(w) >= MIN_TOKEN_LETTERS]
-    significant = [w for w in plain if w not in GENERIC_DISH_WORDS]
-    return tuple(significant or plain)
+    place_words = tuple(places)
+    return tuple(
+        w
+        for w in dict.fromkeys(words)
+        if len(w) >= MIN_TOKEN_LETTERS
+        and w not in GENERIC_DISH_WORDS
+        and w not in DEMONYMS
+        and not any(_same_stem(w, p) for p in place_words)
+    )
 
 
 def title_names_dish(title: str, tokens: Iterable[str]) -> bool:
