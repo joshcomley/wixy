@@ -511,9 +511,22 @@ export function initOverlay(win: Window = window): () => void {
   let hoveredItem: Element | null = null;
   let itemToolbar: HTMLElement | null = null;
 
-  function buildItemToolbar(): HTMLElement {
+  function buildItemToolbar(item: Element): HTMLElement {
     const toolbar = document.createElement("div");
     toolbar.className = "wx-item-toolbar";
+    // Which item this toolbar belongs to. The toolbar is ONE floating element that is torn down
+    // and rebuilt for whatever item the pointer is over, so after a preview re-render a click aimed
+    // at "the toolbar" can land on the toolbar of a DIFFERENT item (a footer link under the pointer
+    // — measured in a loaded e2e run). Naming the owner lets a caller check it before pressing a
+    // button; the buttons themselves always act on the item the toolbar was built for.
+    const listEl = item.closest("[data-wx-list]");
+    const listKey = listEl?.getAttribute("data-wx-list");
+    if (listEl !== null && listKey !== null && listKey !== undefined) {
+      toolbar.dataset["wxToolbarList"] = listKey;
+      toolbar.dataset["wxToolbarIndex"] = String(
+        Array.from(listEl.querySelectorAll(":scope > [data-wx-list-item]")).indexOf(item),
+      );
+    }
     const actions: [string, string][] = [
       ["moveUp", "↑"],
       ["moveDown", "↓"],
@@ -555,7 +568,7 @@ export function initOverlay(win: Window = window): () => void {
     if (item === hoveredItem) return;
     clearItemToolbar();
     hoveredItem = item;
-    itemToolbar = buildItemToolbar();
+    itemToolbar = buildItemToolbar(item);
     document.body.appendChild(itemToolbar);
     // Document-anchored like the hover chip (decisions/00086) — it belongs to
     // the item and must follow it when the page scrolls.
