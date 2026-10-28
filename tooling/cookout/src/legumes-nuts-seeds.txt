@@ -1,145 +1,145 @@
 # legumes-nuts-seeds
-Chickpeas | garbanzo beans | protein | chickpea | everyday | Nutty, firm pulses for curries, stews and roasting until crunchy.
-Dried Chickpeas | | protein | chickpea | everyday | Soak overnight and simmer for the creamiest, most flavourful chickpeas.
-Black Chickpeas | kala chana | protein | chickpea | exotic | Small, earthy dark chickpeas used in Indian curries and snacks.
-Kidney Beans | red kidney beans | protein | kidney-bean | everyday | Robust red beans for chilli, rice and bean stews.
-Dried Kidney Beans | | protein | kidney-bean | everyday | Soak and boil hard before simmering for hearty chilli.
-White Kidney Beans | cannellini beans | protein | white-bean | everyday | Creamy Italian white beans for soups, salads and stews.
-Dried Cannellini Beans | | protein | white-bean | uncommon | Slow-simmered Tuscan beans that turn velvety and rich.
-Butter Beans | lima beans | protein | white-bean | everyday | Large, buttery beans for stews, bakes and creamy mash.
-Dried Butter Beans | | protein | white-bean | uncommon | Big soaked beans with an almost melting texture.
-Haricot Beans | navy beans | protein | white-bean | everyday | Small white beans, the heart of baked beans and cassoulet.
-Baked Beans | | protein | white-bean | everyday | Haricot beans in sweet tomato sauce, a breakfast and toast classic.
-Great Northern Beans | | protein | white-bean | uncommon | Mild, medium white beans that hold shape in soups.
-Flageolet Beans | | protein | white-bean | uncommon | Delicate pale green French beans, a classic with lamb.
-Tinned Borlotti Beans | | protein | borlotti | uncommon | Ready-cooked speckled beans for pasta e fagioli.
-Pinto Beans | | protein | pinto | everyday | Earthy, creamy beans for refried beans and burritos.
-Tinned Pinto Beans | | protein | pinto | everyday | Cooked pintos ready to mash into refried beans.
-Refried Beans | | protein | pinto | uncommon | Mashed, fried beans spread into tortillas and tacos.
-Black Beans | turtle beans | protein | black-bean | everyday | Glossy, earthy beans for burritos, soups and rice.
-Dried Black Beans | | protein | black-bean | uncommon | Slow-simmered black beans with deep, almost meaty flavour.
-Black-Eyed Peas | black-eyed beans | protein | cowpea | uncommon | Cream beans with a black dot, creamy in Southern stews.
-Cowpeas | | protein | cowpea | exotic | Hardy African and Southern American bean with an earthy flavour.
-Adzuki Beans | aduki beans | protein | adzuki | uncommon | Small red Japanese beans simmered for sweet paste and rice.
-Sweet Red Bean Paste | anko | accent | adzuki | uncommon | Sweetened adzuki paste for buns, mochi and dorayaki.
-Mung Beans | | protein | mung-bean | uncommon | Small green beans for dal, sprouts and sweet soups.
-Split Mung Beans | moong dal | protein | mung-bean | uncommon | Quick-cooking yellow split beans for light, soothing dal.
-Black Gram | urad dal | protein | gram | exotic | Earthy black lentil-bean for creamy dal makhani.
-Split Black Gram | split urad | protein | gram | exotic | Hulled and split gram used in dosa batter and dal.
-Moth Beans | matki | protein | gram | exotic | Small brown Indian beans, sprouted for spicy misal.
-Horse Gram | | protein | gram | exotic | Earthy, dark southern Indian legume simmered into soups.
-Fava Beans | broad beans | protein | fava | everyday | Fresh, green beans with a creamy, slightly sweet taste.
-Dried Fava Beans | | protein | fava | uncommon | Hearty dried broad beans simmered for Egyptian ful medames.
-Ful Medames | | protein | fava | uncommon | Mashed fava beans with lemon, garlic and olive oil.
-Tinned Broad Beans | | protein | fava | uncommon | Ready-cooked broad beans for dips and stews.
-Soya Beans | soybeans | protein | soy | uncommon | Protein-rich beans that become tofu, tempeh and miso.
-Shelled Edamame | | protein | soy | uncommon | Bright green soya beans, ready to toss into salads and rice.
-Soya Mince | textured vegetable protein | protein | soy | uncommon | Dried soya granules that soak up flavour in bolognese and chilli.
-Soya Chunks | | protein | soy | uncommon | Dried meaty soya pieces for curries and stir-fries.
-Tofu | bean curd | protein | tofu | everyday | Mild pressed soya curd that absorbs marinades and sauces.
-Firm Tofu | | protein | tofu | everyday | Pressed tofu that holds its shape for frying and baking.
-Extra-Firm Tofu | | protein | tofu | uncommon | Dense, low-moisture tofu for grilling and crisping.
-Silken Tofu | | protein | tofu | uncommon | Smooth custard-like tofu for miso soup, desserts and sauces.
-Smoked Tofu | | protein | tofu | uncommon | Firm tofu with a smoky, savoury flavour.
-Fried Tofu | tofu puffs | protein | tofu | uncommon | Crisp, golden tofu cubes with airy centres for soups and curries.
-Tofu Skin | yuba | protein | tofu | exotic | Delicate soya milk skin, silky when fresh and chewy when dried.
-Stinky Tofu | | protein | tofu | exotic | Fermented, deep-fried tofu with a famous aroma and crisp shell.
-Aburaage | | protein | tofu | exotic | Thin fried tofu pouches for inari sushi and miso soup.
-Agedashi Tofu | | protein | tofu | uncommon | Lightly fried tofu cubes in savoury dashi broth.
-Seitan | | protein | seitan | uncommon | Chewy wheat gluten, seasoned and sliced like meat.
-Red Lentils | | protein | lentil | everyday | Quick-cooking split lentils that melt into soups and dal.
-Green Lentils | | protein | lentil | everyday | Firm, peppery lentils that hold their shape in salads and stews.
-Brown Lentils | | protein | lentil | everyday | Earthy everyday lentils for soups, bolognese and shepherd's pie.
-Puy Lentils | french green lentils | protein | lentil | uncommon | Peppery, slate-green French lentils with a firm, nutty bite.
-Beluga Lentils | black lentils | protein | lentil | uncommon | Tiny glossy black lentils that look like caviar.
-Yellow Split Peas | | protein | pea | everyday | Sweet, creamy split peas for soups and pease pudding.
-Green Split Peas | | protein | pea | everyday | Dried peas that cook down into thick soups.
-Toor Dal | | protein | lentil | uncommon | Yellow split pigeon peas, the base of sambar and everyday dal.
-Chana Dal | split chickpeas | protein | chickpea | uncommon | Nutty split chickpeas that keep their texture in curries.
-Masoor Dal | | protein | lentil | uncommon | Red split lentils that cook to a golden purée.
-Lentil Pasta | | base | lentil | uncommon | Pasta made from lentil flour, earthy and filling.
-Green Peas | | protein | pea | everyday | Sweet garden peas, popped from pod or frozen.
-Pease Pudding | | protein | pea | uncommon | Boiled and mashed split peas with ham, a northern classic.
-Lupini Beans | | protein | lupin | exotic | Brined yellow beans served as a Mediterranean snack.
-Pigeon Peas | gandules | protein | lentil | exotic | Nutty beans used in Caribbean rice and Indian curries.
-Guar Beans | cluster beans | produce | green-bean | exotic | Angular Indian beans stir-fried with spices.
-Falafel Mix | | protein | chickpea | uncommon | Dried chickpea and herb mix, fried into crisp falafel.
-Jackfruit Seeds | | protein | exotic-seed | exotic | Starchy boiled seeds with a chestnut-like taste.
-Carob | | accent | exotic-seed | exotic | Cocoa-like sweet pods ground into flour or syrup.
-Peanuts | groundnuts | accent | peanut | everyday | Crunchy roasted legume-nuts for snacking and satay.
-Roasted Peanuts | | accent | peanut | everyday | Salty, crisp roasted peanuts for stir-fries and noodles.
-Raw Peanuts | | accent | peanut | uncommon | Unroasted peanuts for boiling or roasting yourself.
-Boiled Peanuts | | accent | peanut | exotic | Soft, salty boiled peanuts, a Southern American snack.
-Peanut Butter | | accent | nut-butter | everyday | Creamy, toasty spread for sandwiches and satay sauce.
-Crunchy Peanut Butter | | accent | nut-butter | everyday | Peanut butter studded with crunchy roasted nuts.
-Almonds | | accent | almond | everyday | Sweet crunchy nuts for baking, salads and granola.
-Flaked Almonds | | accent | almond | everyday | Thin almond slivers toasted over salads and tarts.
-Ground Almonds | almond flour | accent | almond | everyday | Fine almond meal for cakes, frangipane and macarons.
-Blanched Almonds | | accent | almond | uncommon | Skinless almonds for marzipan-style pastes and smooth cakes.
-Smoked Almonds | | accent | almond | uncommon | Crunchy almonds roasted with a smoky edge.
-Marcona Almonds | | accent | almond | exotic | Plump, tender Spanish almonds fried in olive oil.
-Almond Butter | | accent | nut-butter | uncommon | Smooth, mildly sweet spread of ground almonds.
-Cashews | | accent | cashew | everyday | Creamy, curved nuts for stir-fries and nut curries.
-Cashew Butter | | accent | nut-butter | uncommon | Mellow, smooth, buttery nut spread.
-Hazelnuts | cobnuts | accent | hazelnut | everyday | Sweet, toasty nuts for chocolate, praline and salads.
-Chopped Hazelnuts | | accent | hazelnut | everyday | Roasted hazelnut pieces for crumbles and toppings.
-Hazelnut Butter | | accent | nut-butter | uncommon | Rich, roasted hazelnut spread for toast.
-Hazelnut Flour | | accent | hazelnut | exotic | Finely ground nuts for rich cakes and biscuits.
-Walnuts | | accent | walnut | everyday | Bittersweet, crinkled nuts for cakes, salads and pesto.
-Walnut Halves | | accent | walnut | everyday | Whole walnut halves to top cakes and salads.
-Black Walnuts | | accent | walnut | exotic | American walnuts with a bold, earthy flavour.
-Pecans | | accent | pecan | everyday | Buttery, sweet nuts for pie, praline and baking.
-Pecan Halves | | accent | pecan | everyday | Whole pecans to crown pies and brownies.
-Pistachios | | accent | pistachio | everyday | Bright green nuts with a delicate sweet flavour.
-Shelled Pistachios | | accent | pistachio | uncommon | Unsalted green pistachio kernels for baking and ice cream.
-Pistachio Paste | | accent | pistachio | exotic | Intense green nut paste for desserts and ice cream.
-Brazil Nuts | | accent | brazil-nut | uncommon | Big, creamy, rich nuts from the Amazon.
-Macadamia Nuts | | accent | macadamia | uncommon | Buttery, luxurious nuts from Australia.
-Pine Nuts | pine kernels | accent | pine-nut | everyday | Tiny soft, resinous nuts for pesto and salads.
-Chestnuts | | accent | chestnut | uncommon | Sweet, floury nuts roasted over embers or in stuffing.
-Roasted Chestnuts | | accent | chestnut | uncommon | Warm, smoky-sweet nuts, a winter street treat.
-Vacuum-Packed Chestnuts | | accent | chestnut | uncommon | Peeled cooked chestnuts for stuffings and soups.
-Chestnut Purée | chestnut puree | accent | chestnut | exotic | Smooth sweet paste of cooked chestnuts for desserts.
-Chestnut Flour | | base | chestnut | exotic | Sweet flour for Italian cakes and polenta.
-Mixed Nuts | | accent | mixed-nuts | everyday | Salted assortment of roasted nuts for snacking.
-Nut Mix | | accent | mixed-nuts | everyday | Assorted crunchy nuts for baking and sprinkling.
-Trail Mix | | accent | mixed-nuts | everyday | Nuts, seeds and dried fruit for munching on the go.
-Pralines | | accent | mixed-nuts | uncommon | Caramelised nuts crushed into crunchy toppings.
-Candied Nuts | | accent | mixed-nuts | uncommon | Sugar-glazed nuts for salads and cheese boards.
-Kola Nuts | | accent | exotic-seed | exotic | Bitter West African nuts chewed for caffeine.
-Pili Nuts | | accent | exotic-seed | exotic | Creamy Philippine nuts with a buttery, mild taste.
-Tiger Nuts | | accent | exotic-seed | exotic | Chewy tubers with a nutty sweetness, used for horchata.
-Ginkgo Nuts | | accent | exotic-seed | exotic | Soft, jade-green nuts in Asian congee and chawanmushi.
-Candlenuts | kemiri | accent | exotic-seed | exotic | Waxy nuts that thicken Southeast Asian curry pastes.
-Pecan Butter | | accent | nut-butter | exotic | Buttery, sweet spread with a maple edge.
-Pumpkin Seeds | pepitas | accent | seed | everyday | Green, chewy seeds for salads, granola and soups.
-Roasted Pumpkin Seeds | | accent | seed | uncommon | Crunchy, salted seeds scooped from the pumpkin.
-Sunflower Seeds | | accent | seed | everyday | Mild, nutty seeds for bread, granola and salads.
-Sunflower Seed Butter | | accent | nut-butter | uncommon | Earthy, smooth spread for nut-free sandwiches.
-Sesame Seeds | | accent | seed | everyday | Tiny nutty seeds for bread, stir-fries and dressings.
-Black Sesame Seeds | | accent | seed | uncommon | Dark, intense seeds for Japanese cooking and desserts.
-Toasted Sesame Seeds | | accent | seed | everyday | Golden seeds with a deep nutty aroma.
-Tahini | | accent | seed-paste | uncommon | Smooth, nutty sesame paste for hummus and dressings.
-Black Sesame Paste | | accent | seed-paste | exotic | Dark, nutty paste used in Chinese and Japanese sweets.
-Gomashio | | accent | seed | exotic | Japanese blend of toasted sesame and salt.
-Poppy Seeds | | accent | seed | uncommon | Tiny blue-grey seeds for cakes, bagels and bread.
-Linseed | flaxseed | accent | seed | uncommon | Nutty seeds, golden or brown, for bread and porridge.
-Chia Seeds | | accent | seed | uncommon | Tiny seeds that swell into a pudding gel.
-Hemp Seeds | hemp hearts | accent | seed | uncommon | Soft, nutty seeds for sprinkling on salad and yoghurt.
-Psyllium Husk | | accent | seed | exotic | Fibre husks that give gluten-free bread its structure.
-Caraway Seeds | | accent | spice-seed | uncommon | Anise-like seeds for rye bread and sauerkraut.
-Basil Seeds | sabja | accent | seed | exotic | Tiny seeds that swell in drinks and desserts.
-Watermelon Seeds | | accent | seed | exotic | Crunchy salted seeds, a favourite snack in Asia.
-Melon Seeds | | accent | seed | exotic | Flat white seeds for sweets and soups.
-Lotus Seeds | | accent | seed | exotic | Starchy, chewy seeds for Chinese soups and sweets.
-Pumpkin Seed Oil | | accent | seed-oil | exotic | Dark green Austrian oil with a nutty, intense flavour.
-Roasted Seed Mix | | accent | seed | everyday | Sunflower, pumpkin and sesame seeds toasted for salads.
-Nut Flour | | base | nut-flour | uncommon | Fine ground nuts for grain-free baking.
-Coconut Flour | | base | nut-flour | uncommon | Soft, absorbent flour from dried coconut.
-Peanut Flour | | base | nut-flour | exotic | Roasted ground peanut powder for baking and sauces.
-Popcorn | | accent | popcorn | everyday | Light, crunchy puffed corn tossed with butter, salt or caramel.
-Caramel Popcorn | | accent | popcorn | uncommon | Crunchy puffed corn in a sticky caramel coat.
-Roasted Chickpeas | | accent | chickpea | uncommon | Crunchy spiced chickpeas for snacking and soup toppings.
-Chocolate Hazelnut Spread | | accent | nut-butter | everyday | Sweet hazelnut and chocolate spread for crepes and toast.
-Pecan Pralines | | accent | mixed-nuts | exotic | Creamy Southern sweets of pecans and brown sugar.
-Dukkah | | accent | mixed-nuts | uncommon | Egyptian blend of nuts, seeds and spices for dipping with bread.
+Chickpeas | garbanzo beans | protein | chickpea | everyday | Nutty, firm pulses for curries, stews and roasting until crunchy
+Dried chickpeas |  | protein | chickpea | everyday | Soak overnight and simmer for the creamiest, most flavourful chickpeas
+Black chickpeas | kala chana | protein | chickpea | exotic | Small, earthy dark chickpeas used in Indian curries and snacks
+Kidney beans | red kidney beans | protein | kidney-bean | everyday | Robust red beans for chilli, rice and bean stews
+Dried kidney beans |  | protein | kidney-bean | everyday | Soak and boil hard before simmering for hearty chilli
+White kidney beans | cannellini beans | protein | white-bean | everyday | Creamy Italian white beans for soups, salads and stews
+Dried cannellini beans |  | protein | white-bean | uncommon | Slow-simmered Tuscan beans that turn velvety and rich
+Butter beans | lima beans | protein | white-bean | everyday | Large, buttery beans for stews, bakes and creamy mash
+Dried butter beans |  | protein | white-bean | uncommon | Big soaked beans with an almost melting texture
+Haricot beans | navy beans | protein | white-bean | everyday | Small white beans, the heart of baked beans and cassoulet
+Baked beans |  | protein | white-bean | everyday | Haricot beans in sweet tomato sauce, a breakfast and toast classic
+Great Northern beans |  | protein | white-bean | uncommon | Mild, medium white beans that hold shape in soups
+Flageolet beans |  | protein | white-bean | uncommon | Delicate pale green French beans, a classic with lamb
+Tinned borlotti beans |  | protein | borlotti | uncommon | Ready-cooked speckled beans for pasta e fagioli
+Pinto beans |  | protein | pinto | everyday | Earthy, creamy beans for refried beans and burritos
+Tinned pinto beans |  | protein | pinto | everyday | Cooked pintos ready to mash into refried beans
+Refried beans |  | protein | pinto | uncommon | Mashed, fried beans spread into tortillas and tacos
+Black beans | turtle beans | protein | black-bean | everyday | Glossy, earthy beans for burritos, soups and rice
+Dried black beans |  | protein | black-bean | uncommon | Slow-simmered black beans with deep, almost meaty flavour
+Black-Eyed peas | black-eyed beans | protein | cowpea | uncommon | Cream beans with a black dot, creamy in Southern stews
+Cowpeas |  | protein | cowpea | exotic | Hardy African and Southern American bean with an earthy flavour
+Adzuki beans | aduki beans | protein | adzuki | uncommon | Small red Japanese beans simmered for sweet paste and rice
+Sweet red bean paste | anko | accent | adzuki | uncommon | Sweetened adzuki paste for buns, mochi and dorayaki
+Mung beans |  | protein | mung-bean | uncommon | Small green beans for dal, sprouts and sweet soups
+Split mung beans | moong dal | protein | mung-bean | uncommon | Quick-cooking yellow split beans for light, soothing dal
+Black gram | urad dal | protein | gram | exotic | Earthy black lentil-bean for creamy dal makhani
+Split black gram | split urad | protein | gram | exotic | Hulled and split gram used in dosa batter and dal
+Moth beans | matki | protein | gram | exotic | Small brown Indian beans, sprouted for spicy misal
+Horse gram |  | protein | gram | exotic | Earthy, dark southern Indian legume simmered into soups
+Fava beans | broad beans | protein | fava | everyday | Fresh, green beans with a creamy, slightly sweet taste
+Dried fava beans |  | protein | fava | uncommon | Hearty dried broad beans simmered for Egyptian ful medames
+Ful medames |  | protein | fava | uncommon | Mashed fava beans with lemon, garlic and olive oil
+Tinned broad beans |  | protein | fava | uncommon | Ready-cooked broad beans for dips and stews
+Soya beans | soybeans | protein | soy | uncommon | Protein-rich beans that become tofu, tempeh and miso
+Shelled edamame |  | protein | soy | uncommon | Bright green soya beans, ready to toss into salads and rice
+Soya mince | textured vegetable protein | protein | soy | uncommon | Dried soya granules that soak up flavour in bolognese and chilli
+Soya chunks |  | protein | soy | uncommon | Dried meaty soya pieces for curries and stir-fries
+Tofu | bean curd | protein | tofu | everyday | Mild pressed soya curd that absorbs marinades and sauces
+Firm tofu |  | protein | tofu | everyday | Pressed tofu that holds its shape for frying and baking
+Extra-Firm tofu |  | protein | tofu | uncommon | Dense, low-moisture tofu for grilling and crisping
+Silken tofu |  | protein | tofu | uncommon | Smooth custard-like tofu for miso soup, desserts and sauces
+Smoked tofu |  | protein | tofu | uncommon | Firm tofu with a smoky, savoury flavour
+Fried tofu | tofu puffs | protein | tofu | uncommon | Crisp, golden tofu cubes with airy centres for soups and curries
+Tofu skin | yuba | protein | tofu | exotic | Delicate soya milk skin, silky when fresh and chewy when dried
+Stinky tofu |  | protein | tofu | exotic | Fermented, deep-fried tofu with a famous aroma and crisp shell
+Aburaage |  | protein | tofu | exotic | Thin fried tofu pouches for inari sushi and miso soup
+Agedashi tofu |  | protein | tofu | uncommon | Lightly fried tofu cubes in savoury dashi broth
+Seitan |  | protein | seitan | uncommon | Chewy wheat gluten, seasoned and sliced like meat
+Red lentils |  | protein | lentil | everyday | Quick-cooking split lentils that melt into soups and dal
+Green lentils |  | protein | lentil | everyday | Firm, peppery lentils that hold their shape in salads and stews
+Brown lentils |  | protein | lentil | everyday | Earthy everyday lentils for soups, bolognese and shepherd's pie
+Puy lentils | french green lentils | protein | lentil | uncommon | Peppery, slate-green French lentils with a firm, nutty bite
+Beluga lentils | black lentils | protein | lentil | uncommon | Tiny glossy black lentils that look like caviar
+Yellow split peas |  | protein | pea | everyday | Sweet, creamy split peas for soups and pease pudding
+Green split peas |  | protein | pea | everyday | Dried peas that cook down into thick soups
+Toor dal |  | protein | lentil | uncommon | Yellow split pigeon peas, the base of sambar and everyday dal
+Chana dal | split chickpeas | protein | chickpea | uncommon | Nutty split chickpeas that keep their texture in curries
+Masoor dal |  | protein | lentil | uncommon | Red split lentils that cook to a golden purée
+Lentil pasta |  | base | lentil | uncommon | Pasta made from lentil flour, earthy and filling
+Green peas |  | protein | pea | everyday | Sweet garden peas, popped from pod or frozen
+Pease pudding |  | protein | pea | uncommon | Boiled and mashed split peas with ham, a northern classic
+Lupini beans |  | protein | lupin | exotic | Brined yellow beans served as a Mediterranean snack
+Pigeon peas | gandules | protein | lentil | exotic | Nutty beans used in Caribbean rice and Indian curries
+Guar beans | cluster beans | produce | green-bean | exotic | Angular Indian beans stir-fried with spices
+Falafel mix |  | protein | chickpea | uncommon | Dried chickpea and herb mix, fried into crisp falafel
+Jackfruit seeds |  | protein | exotic-seed | exotic | Starchy boiled seeds with a chestnut-like taste
+Carob |  | accent | exotic-seed | exotic | Cocoa-like sweet pods ground into flour or syrup
+Peanuts | groundnuts | accent | peanut | everyday | Crunchy roasted legume-nuts for snacking and satay
+Roasted peanuts |  | accent | peanut | everyday | Salty, crisp roasted peanuts for stir-fries and noodles
+Raw peanuts |  | accent | peanut | uncommon | Unroasted peanuts for boiling or roasting yourself
+Boiled peanuts |  | accent | peanut | exotic | Soft, salty boiled peanuts, a Southern American snack
+Peanut butter |  | accent | nut-butter | everyday | Creamy, toasty spread for sandwiches and satay sauce
+Crunchy peanut butter |  | accent | nut-butter | everyday | Peanut butter studded with crunchy roasted nuts
+Almonds |  | accent | almond | everyday | Sweet crunchy nuts for baking, salads and granola
+Flaked almonds |  | accent | almond | everyday | Thin almond slivers toasted over salads and tarts
+Ground almonds | almond flour | accent | almond | everyday | Fine almond meal for cakes, frangipane and macarons
+Blanched almonds |  | accent | almond | uncommon | Skinless almonds for marzipan-style pastes and smooth cakes
+Smoked almonds |  | accent | almond | uncommon | Crunchy almonds roasted with a smoky edge
+Marcona almonds |  | accent | almond | exotic | Plump, tender Spanish almonds fried in olive oil
+Almond butter |  | accent | nut-butter | uncommon | Smooth, mildly sweet spread of ground almonds
+Cashews |  | accent | cashew | everyday | Creamy, curved nuts for stir-fries and nut curries
+Cashew butter |  | accent | nut-butter | uncommon | Mellow, smooth, buttery nut spread
+Hazelnuts | cobnuts | accent | hazelnut | everyday | Sweet, toasty nuts for chocolate, praline and salads
+Chopped hazelnuts |  | accent | hazelnut | everyday | Roasted hazelnut pieces for crumbles and toppings
+Hazelnut butter |  | accent | nut-butter | uncommon | Rich, roasted hazelnut spread for toast
+Hazelnut flour |  | accent | hazelnut | exotic | Finely ground nuts for rich cakes and biscuits
+Walnuts |  | accent | walnut | everyday | Bittersweet, crinkled nuts for cakes, salads and pesto
+Walnut halves |  | accent | walnut | everyday | Whole walnut halves to top cakes and salads
+Black walnuts |  | accent | walnut | exotic | American walnuts with a bold, earthy flavour
+Pecans |  | accent | pecan | everyday | Buttery, sweet nuts for pie, praline and baking
+Pecan halves |  | accent | pecan | everyday | Whole pecans to crown pies and brownies
+Pistachios |  | accent | pistachio | everyday | Bright green nuts with a delicate sweet flavour
+Shelled pistachios |  | accent | pistachio | uncommon | Unsalted green pistachio kernels for baking and ice cream
+Pistachio paste |  | accent | pistachio | exotic | Intense green nut paste for desserts and ice cream
+Brazil nuts |  | accent | brazil-nut | uncommon | Big, creamy, rich nuts from the Amazon
+Macadamia nuts |  | accent | macadamia | uncommon | Buttery, luxurious nuts from Australia
+Pine nuts | pine kernels | accent | pine-nut | everyday | Tiny soft, resinous nuts for pesto and salads
+Chestnuts |  | accent | chestnut | uncommon | Sweet, floury nuts roasted over embers or in stuffing
+Roasted chestnuts |  | accent | chestnut | uncommon | Warm, smoky-sweet nuts, a winter street treat
+Vacuum-Packed chestnuts |  | accent | chestnut | uncommon | Peeled cooked chestnuts for stuffings and soups
+Chestnut purée | chestnut puree | accent | chestnut | exotic | Smooth sweet paste of cooked chestnuts for desserts
+Chestnut flour |  | base | chestnut | exotic | Sweet flour for Italian cakes and polenta
+Mixed nuts |  | accent | mixed-nuts | everyday | Salted assortment of roasted nuts for snacking
+Nut mix |  | accent | mixed-nuts | everyday | Assorted crunchy nuts for baking and sprinkling
+Trail mix |  | accent | mixed-nuts | everyday | Nuts, seeds and dried fruit for munching on the go
+Pralines |  | accent | mixed-nuts | uncommon | Caramelised nuts crushed into crunchy toppings
+Candied nuts |  | accent | mixed-nuts | uncommon | Sugar-glazed nuts for salads and cheese boards
+Kola nuts |  | accent | exotic-seed | exotic | Bitter West African nuts chewed for caffeine
+Pili nuts |  | accent | exotic-seed | exotic | Creamy Philippine nuts with a buttery, mild taste
+Tiger nuts |  | accent | exotic-seed | exotic | Chewy tubers with a nutty sweetness, used for horchata
+Ginkgo nuts |  | accent | exotic-seed | exotic | Soft, jade-green nuts in Asian congee and chawanmushi
+Candlenuts | kemiri | accent | exotic-seed | exotic | Waxy nuts that thicken Southeast Asian curry pastes
+Pecan butter |  | accent | nut-butter | exotic | Buttery, sweet spread with a maple edge
+Pumpkin seeds | pepitas | accent | seed | everyday | Green, chewy seeds for salads, granola and soups
+Roasted pumpkin seeds |  | accent | seed | uncommon | Crunchy, salted seeds scooped from the pumpkin
+Sunflower seeds |  | accent | seed | everyday | Mild, nutty seeds for bread, granola and salads
+Sunflower seed butter |  | accent | nut-butter | uncommon | Earthy, smooth spread for nut-free sandwiches
+Sesame seeds |  | accent | seed | everyday | Tiny nutty seeds for bread, stir-fries and dressings
+Black sesame seeds |  | accent | seed | uncommon | Dark, intense seeds for Japanese cooking and desserts
+Toasted sesame seeds |  | accent | seed | everyday | Golden seeds with a deep nutty aroma
+Tahini |  | accent | seed-paste | uncommon | Smooth, nutty sesame paste for hummus and dressings
+Black sesame paste |  | accent | seed-paste | exotic | Dark, nutty paste used in Chinese and Japanese sweets
+Gomashio |  | accent | seed | exotic | Japanese blend of toasted sesame and salt
+Poppy seeds |  | accent | seed | uncommon | Tiny blue-grey seeds for cakes, bagels and bread
+Linseed | flaxseed | accent | seed | uncommon | Nutty seeds, golden or brown, for bread and porridge
+Chia seeds |  | accent | seed | uncommon | Tiny seeds that swell into a pudding gel
+Hemp seeds | hemp hearts | accent | seed | uncommon | Soft, nutty seeds for sprinkling on salad and yoghurt
+Psyllium husk |  | accent | seed | exotic | Fibre husks that give gluten-free bread its structure
+Caraway seeds |  | accent | spice-seed | uncommon | Anise-like seeds for rye bread and sauerkraut
+Basil seeds | sabja | accent | seed | exotic | Tiny seeds that swell in drinks and desserts
+Watermelon seeds |  | accent | seed | exotic | Crunchy salted seeds, a favourite snack in Asia
+Melon seeds |  | accent | seed | exotic | Flat white seeds for sweets and soups
+Lotus seeds |  | accent | seed | exotic | Starchy, chewy seeds for Chinese soups and sweets
+Pumpkin seed oil |  | accent | seed-oil | exotic | Dark green Austrian oil with a nutty, intense flavour
+Roasted seed mix |  | accent | seed | everyday | Sunflower, pumpkin and sesame seeds toasted for salads
+Nut flour |  | base | nut-flour | uncommon | Fine ground nuts for grain-free baking
+Coconut flour |  | base | nut-flour | uncommon | Soft, absorbent flour from dried coconut
+Peanut flour |  | base | nut-flour | exotic | Roasted ground peanut powder for baking and sauces
+Popcorn |  | accent | popcorn | everyday | Light, crunchy puffed corn tossed with butter, salt or caramel
+Caramel popcorn |  | accent | popcorn | uncommon | Crunchy puffed corn in a sticky caramel coat
+Roasted chickpeas |  | accent | chickpea | uncommon | Crunchy spiced chickpeas for snacking and soup toppings
+Chocolate hazelnut spread |  | accent | nut-butter | everyday | Sweet hazelnut and chocolate spread for crepes and toast
+Pecan pralines |  | accent | mixed-nuts | exotic | Creamy Southern sweets of pecans and brown sugar
+Dukkah |  | accent | mixed-nuts | uncommon | Egyptian blend of nuts, seeds and spices for dipping with bread
