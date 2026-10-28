@@ -639,3 +639,17 @@ class TestRecovery:
 
         anyio.run(_group, go)
         assert len(h.generator.calls) == 1
+
+
+class TestFoldIns:
+    def test_l6_a_failing_claim_is_logged_and_never_raises(self, tmp_path: Path) -> None:
+        h = Harness(tmp_path, StubGenerator())
+        h.ready_round()
+
+        def boom(*a: Any, **k: Any) -> Any:
+            raise RuntimeError("database is locked")
+
+        h.store.claim_cookout_pictures = boom  # type: ignore[method-assign]
+        anyio.run(h.job().run, 1)
+        assert h.generator.calls == [] and h.demand.count == 0
+        assert h.row()["images"] == "pending"  # left for the sweep

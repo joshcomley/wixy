@@ -333,13 +333,17 @@ def _text(
     return cleaned
 
 
-def _id_list(value: object, where: str, problems: list[str]) -> list[str]:
+def _id_list(value: object, where: str, problems: list[str], *, dedupe: bool = False) -> list[str]:
+    """A list of id strings. A repeated id is a violation, unless `dedupe` (a step's `uses`, where
+    only "a subset of the recipe's ingredients" is required) keeps the first of each."""
     if not isinstance(value, list) or not all(isinstance(i, str) for i in value):
         problems.append(f"{where} must be a list of ids")
         return []
     ids = [str(i) for i in value]
     if len(set(ids)) != len(ids):
-        problems.append(f"{where} must not repeat an id")
+        if not dedupe:
+            problems.append(f"{where} must not repeat an id")
+        ids = list(dict.fromkeys(ids))
     return ids
 
 
@@ -399,7 +403,7 @@ def parse_concepts(response_text: str, *, bank: AiBank, picked_ids: Sequence[str
     by_id: dict[str, dict[str, Any]] = {}
     for raw in raw_concepts:
         cid = raw.get("id")
-        if cid in CONCEPT_IDS and cid not in by_id:
+        if isinstance(cid, str) and cid in CONCEPT_IDS and cid not in by_id:
             by_id[str(cid)] = raw
     if set(by_id) != set(CONCEPT_IDS):
         return Parsed(None, ("the three concepts must have the ids a, b and c, once each",))
@@ -510,11 +514,14 @@ def parse_concepts(response_text: str, *, bank: AiBank, picked_ids: Sequence[str
     uncovered = sorted(selected_set - union)
     if uncovered:
         problems.append(f"no concept uses these picks: {', '.join(uncovered)}")
-    pairs = {(c["dishType"], c["technique"]) for c in concepts}
-    if len(pairs) != 3:
-        problems.append("the three concepts need three different (dishType, technique) pairs")
-    if len({c["dishType"] for c in concepts}) < 2:
-        problems.append("the three concepts need at least two different dishType values")
+    # A malformed dishType/technique is already a violation above; only well-typed values are
+    # compared (an unhashable one must not crash the validator).
+    if all(c["dishType"] in DISH_TYPES and c["technique"] in TECHNIQUES for c in concepts):
+        pairs = {(c["dishType"], c["technique"]) for c in concepts}
+        if len(pairs) != 3:
+            problems.append("the three concepts need three different (dishType, technique) pairs")
+        if len({c["dishType"] for c in concepts}) < 2:
+            problems.append("the three concepts need at least two different dishType values")
 
     if problems:
         return Parsed(None, tuple(problems))
@@ -614,7 +621,7 @@ def parse_recipe(response_text: str, *, bank: AiBank, concept: Mapping[str, Any]
         minutes: int | None = None
         if minutes_raw is not None:
             minutes = _int(minutes_raw, f"step {index} minutes", 0, 480, problems)
-        uses = _id_list(step.get("uses"), f"step {index} uses", problems)
+        uses = _id_list(step.get("uses"), f"step {index} uses", problems, dedupe=True)
         for ingredient_id in uses:
             if ingredient_id not in recipe_set:
                 problems.append(f"step {index} uses '{ingredient_id}', which is not a recipe item")
@@ -1211,7 +1218,13 @@ class CmdCookoutRunner:
         give_up_at = min(give_up_at, self._clock() + max(0.0, remaining_wall))
         run_id = spec.initial_run_id
         may_retry = run_id is None  # a resumed run has no known start, so no early retry
-        repaired = False
+        # A resumed run may already be the repair run (the store cannot say), so a rejected answer
+        # from one is never repaired again: at most ONE repair run per job (spec 3.2).
+        repaired = run_id is not None
+        if run_id is None and remaining_wall <= 0:
+            _LOGGER.warning("%s is already past its deadline; failing without a run", spec.name)
+            await spec.finish_bad(None, False)
+            return
         if run_id is None:
             run_id = await self._start_run(spec, spawn_lock, spec.prompt, None)
             if run_id is None:
@@ -1263,7 +1276,7 @@ class CmdCookoutRunner:
                 continue
             if status in ("error", "timeout", "cancelled"):
                 early = self._clock() - started <= timing.early_retry_s
-                if status == "error" and may_retry and early:
+                if status == "error" and may_retry and early and not repaired:
                     may_retry = False
                     retried = await self._start_run(spec, spawn_lock, spec.prompt, run_id)
                     if retried is None:
