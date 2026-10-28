@@ -3,8 +3,9 @@
 // fixture's fake cmd PIN service — the grant routes, the janitor-independent storage and the
 // browser's own localStorage/reload behaviour are all real.
 //
-// `page.clock.install()` before every `goto`, as in server-lock.spec.ts: virtual time only
-// moves on `runFor`, so two taps issued back to back read as 0 ms apart on `performance.now()`.
+// `page.clock.install()` before every `goto` and `freezeClock` once loaded, as in
+// server-lock.spec.ts: virtual time only moves on `runFor`, so two taps issued back to back read
+// as 0 ms apart on `performance.now()`.
 // That is exactly what proves the inline PIN pad is exempt from R3's multi-tap lock — its digit
 // keys are tapped that fast, in a chat that would otherwise lock on the second tap.
 //
@@ -14,7 +15,7 @@
 
 import { expect, test } from "../fixtures";
 import type { Browser, Page } from "@playwright/test";
-import { trackConsoleErrors } from "./helpers";
+import { freezeClock, tapThreadGap, trackConsoleErrors } from "./helpers";
 
 const TEST_PIN = "246813";
 const WRONG_PIN = "000000";
@@ -84,6 +85,7 @@ async function withServerPage(
   await page.clock.install();
   await page.goto("/admin/server");
   await page.waitForSelector(".wx-srv-decoy");
+  await freezeClock(page);
   await fn(page);
   expect(errors).toEqual([]);
   await context.close();
@@ -304,8 +306,7 @@ for (const profile of DEVICE_PROFILES) {
         await keepDeviceUnlocked(page);
         await page.clock.runFor(401);
         // Two taps 0 ms apart on virtual time: R3's multi-tap.
-        await page.locator(".wx-srv-thread").click();
-        await page.locator(".wx-srv-thread").click();
+        await tapThreadGap(page, 2);
         await chatIsGone(page);
         expect(await page.evaluate((key) => window.localStorage.getItem(key), PAUSED_KEY)).toBe("1");
         await reloadOnServerPage(page);
@@ -438,6 +439,8 @@ for (const profile of DEVICE_PROFILES) {
       await pageB.goto("/admin/server");
       await pageA.waitForSelector(".wx-srv-decoy");
       await pageB.waitForSelector(".wx-srv-decoy");
+      await freezeClock(pageA);
+      await freezeClock(pageB);
 
       await unlockWithPin(pageA);
       await keepDeviceUnlocked(pageA);
