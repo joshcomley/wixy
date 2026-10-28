@@ -6071,3 +6071,1793 @@ video.wx-srv-gallery-media {
   border-radius: 12px;
   border: 1px solid var(--wx-border);
 }
+
+/* == Cookout (workspace 00058; spec/server-chat/09-cookout.md §5) ====================================
+   The pane (cookout/cookoutGame.ts), the start sheet (startSheet.ts), the main-chat card
+   (cookoutCard.ts) and the Recipe book (recipeBook.ts). A warm kitchen palette of its own — tomato,
+   saffron, herb — over the shell's theme tokens, so it reads in light and dark. Phone-first: 360 px is
+   THE layout; container queries (not the viewport, which the shell's sidebar makes meaningless) put the
+   ingredient pair and the three dishes side by side when the pane itself is wide. */
+
+.wx-srv-ck,
+.wx-srv-ck-mcard,
+.wx-srv-ck-book-view,
+.wx-srv-ck-start {
+  --ck-tomato: #d9472b;
+  --ck-tomato-deep: #b8361d;
+  --ck-saffron: #f2a33a;
+  --ck-herb: #23794c;
+  --ck-herb-tint: #e3f3e9;
+  --ck-plum: #3b2a4d;
+  --ck-cream: #fff7ec;
+  --ck-paper: #fffdf9;
+  --ck-line: #efd9bd;
+  --ck-line-strong: #e2c19a;
+  --ck-muted: #7a6656;
+  --ck-chip: #fbecd8;
+  --ck-shadow: 0 3px 0 var(--ck-line-strong);
+}
+
+:root[data-theme="dark"] .wx-srv-ck,
+:root[data-theme="dark"] .wx-srv-ck-mcard,
+:root[data-theme="dark"] .wx-srv-ck-book-view,
+:root[data-theme="dark"] .wx-srv-ck-start {
+  --ck-tomato: #ec5f3f;
+  --ck-tomato-deep: #c94a2d;
+  --ck-herb: #4fbf82;
+  --ck-herb-tint: #1d3a2a;
+  --ck-plum: #2c2138;
+  --ck-cream: #221c18;
+  --ck-paper: #2d2620;
+  --ck-line: #47392d;
+  --ck-line-strong: #5a4838;
+  --ck-muted: #c4ae98;
+  --ck-chip: #3a2f26;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck-mcard,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck-book-view,
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck-start {
+    --ck-tomato: #ec5f3f;
+    --ck-tomato-deep: #c94a2d;
+    --ck-herb: #4fbf82;
+    --ck-herb-tint: #1d3a2a;
+    --ck-plum: #2c2138;
+    --ck-cream: #221c18;
+    --ck-paper: #2d2620;
+    --ck-line: #47392d;
+    --ck-line-strong: #5a4838;
+    --ck-muted: #c4ae98;
+    --ck-chip: #3a2f26;
+  }
+}
+
+/* Everything Cookout shows and hides with the `hidden` attribute: a class's own `display` must never
+   beat the attribute (serverChatCss.test.ts explains the trap). */
+.wx-srv-ck[hidden],
+.wx-srv-ck [hidden],
+.wx-srv-ck-mcard [hidden],
+.wx-srv-ck-book-view[hidden],
+.wx-srv-ck-book-view [hidden],
+.wx-srv-ck-start[hidden],
+.wx-srv-ck-start [hidden] {
+  display: none !important;
+}
+
+/* -- The pane ------------------------------------------------------------------------------------------ */
+
+.wx-srv-ck {
+  position: relative;
+  gap: 0;
+  container-type: inline-size;
+  container-name: ck;
+  overflow: hidden;
+  border: 1px solid var(--ck-line);
+  border-radius: var(--wx-radius);
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  background: linear-gradient(135deg, var(--ck-tomato) 0%, #ea7a32 60%, var(--ck-saffron) 130%);
+  color: #fff;
+}
+
+.wx-srv-ck-title {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 800;
+  font-size: 1.0625rem;
+  letter-spacing: 0.01em;
+}
+
+.wx-srv-ck-title-icon {
+  font-size: 1.25rem;
+}
+
+.wx-srv-ck-title-icon {
+  flex: none;
+}
+
+.wx-srv-ck-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-end-short {
+  display: none;
+}
+
+.wx-srv-ck-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.24);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.wx-srv-ck-badge[data-mode="blind"] {
+  background: var(--ck-plum);
+  border-color: rgba(255, 255, 255, 0.35);
+}
+
+.wx-srv-ck-bar-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wx-srv-ck-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 36px;
+  min-width: 36px;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wx-srv-ck-chip:hover,
+.wx-srv-ck-chip:focus-visible {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+.wx-srv-ck-close {
+  padding: 0;
+  font-size: 1rem;
+}
+
+/* A narrow pane keeps the Recipe book's icon and drops its words. */
+/* A narrow pane (a phone): the Recipe book keeps its icon, End game says "End", and below ~310 px (a 320 px phone) the
+   title keeps its pan and the mode badge — never one control under another (the badge must stay
+   readable: it is how a player knows the round is Blind). */
+@container ck (max-width: 419px) {
+  .wx-srv-ck-book {
+    padding: 0;
+  }
+  .wx-srv-ck-book .wx-srv-ck-chip-text {
+    display: none;
+  }
+  .wx-srv-ck-end-long {
+    display: none;
+  }
+  .wx-srv-ck-end-short {
+    display: inline;
+  }
+}
+
+@container ck (max-width: 309px) {
+  .wx-srv-ck-title-text {
+    display: none;
+  }
+}
+
+.wx-srv-ck-confirm {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--ck-paper);
+  border-bottom: 1px solid var(--ck-line);
+  font-size: 0.875rem;
+}
+
+.wx-srv-ck-confirm-text {
+  flex: 1 1 180px;
+  font-weight: 600;
+}
+
+.wx-srv-ck-confirm-keep,
+.wx-srv-ck-confirm-end {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-confirm-keep {
+  border: 1px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-confirm-end {
+  border: 1px solid var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+.wx-srv-ck-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  container-type: inline-size;
+  container-name: ckbody;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.wx-srv-ck-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 72px;
+  transform: translateX(-50%);
+  z-index: 3;
+  max-width: calc(100% - 32px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(30, 22, 16, 0.88);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-align: center;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+  animation: wx-srv-ck-toast-in 180ms ease-out;
+}
+
+/* -- Progress: the pills and the turn banner -------------------------------------------------------------- */
+
+.wx-srv-ck-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--ck-paper);
+  border: 1px solid var(--ck-line);
+}
+
+.wx-srv-ck-pills {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wx-srv-ck-pills-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-pills-active .wx-srv-ck-pills-name {
+  color: var(--ck-tomato);
+}
+
+.wx-srv-ck-pills-dots {
+  flex: none;
+  display: flex;
+  gap: 5px;
+}
+
+.wx-srv-ck-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border-radius: 10px;
+  border: 2px dashed var(--ck-line-strong);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-pill-full {
+  border: 2px solid var(--ck-saffron);
+  background: var(--ck-chip);
+  animation: wx-srv-ck-pop 220ms ease-out;
+}
+
+.wx-srv-ck-pill-secret {
+  border: 2px solid var(--ck-plum);
+  background: var(--ck-plum);
+  font-size: 0.75rem;
+}
+
+.wx-srv-ck-pill-now {
+  border-style: solid;
+  border-color: var(--ck-tomato);
+  animation: wx-srv-ck-throb 1.4s ease-in-out infinite;
+}
+
+.wx-srv-ck-turn {
+  margin: 4px 0 0;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-turn-mine {
+  color: var(--ck-tomato);
+}
+
+.wx-srv-ck-join,
+.wx-srv-ck-again {
+  align-self: stretch;
+  min-height: 48px;
+  margin-top: 4px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ck-tomato);
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--ck-tomato-deep);
+  cursor: pointer;
+}
+
+.wx-srv-ck-join:active:not(:disabled),
+.wx-srv-ck-again:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-join:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* -- The stage: drafting ---------------------------------------------------------------------------------- */
+
+.wx-srv-ck-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-srv-ck-role,
+.wx-srv-ck-watch {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+  text-transform: none;
+}
+
+.wx-srv-ck-pair {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.wx-srv-ck-or {
+  justify-self: center;
+  padding: 0 10px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ck-muted);
+}
+
+@container ckbody (min-width: 560px) {
+  .wx-srv-ck-pair {
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+  }
+  .wx-srv-ck-pair > .wx-srv-ck-opt {
+    align-self: stretch;
+  }
+}
+
+.wx-srv-ck-opt {
+  position: relative;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "emoji cat cat"
+    "emoji name name"
+    "blurb blurb cta";
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 18px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  box-shadow: var(--ck-shadow);
+  transition:
+    transform 90ms ease-out,
+    box-shadow 90ms ease-out,
+    border-color 120ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.wx-srv-ck-opt {
+  cursor: pointer;
+}
+
+button.wx-srv-ck-opt:hover:not(:disabled),
+button.wx-srv-ck-opt:focus-visible {
+  border-color: var(--ck-tomato);
+}
+
+button.wx-srv-ck-opt:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--ck-line-strong);
+}
+
+button.wx-srv-ck-opt:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+.wx-srv-ck-opt-chosen,
+button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
+  opacity: 1;
+  border-color: var(--ck-herb);
+  transform: translateY(3px) scale(0.98);
+  box-shadow: 0 0 0 4px var(--ck-herb-tint);
+}
+
+.wx-srv-ck-pair-watch .wx-srv-ck-opt {
+  box-shadow: none;
+  border-style: dashed;
+}
+
+.wx-srv-ck-opt-emoji {
+  grid-area: emoji;
+  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: var(--ck-chip);
+  font-size: 1.6rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-opt-cat {
+  grid-area: cat;
+  justify-self: start;
+  max-width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  color: var(--ck-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-opt-name {
+  grid-area: name;
+  font-size: 1.125rem;
+  font-weight: 800;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-opt-blurb {
+  grid-area: blurb;
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-opt-cta {
+  grid-area: cta;
+  justify-self: end;
+  align-self: end;
+  margin-top: 4px;
+  padding: 7px 14px;
+  white-space: nowrap;
+  border-radius: 999px;
+  background: var(--ck-tomato);
+  color: #fff;
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-opt-chosen .wx-srv-ck-opt-cta {
+  background: var(--ck-herb);
+}
+
+.wx-srv-ck-skip {
+  min-height: 48px;
+  padding: 8px 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-skip:hover:not(:disabled),
+.wx-srv-ck-skip:focus-visible {
+  border-color: var(--ck-saffron);
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-skip:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.wx-srv-ck-final {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--ck-chip);
+  color: var(--ck-muted);
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* The covered cloche: the partner's secret turn (no ingredient words exist here at all). */
+.wx-srv-ck-cloche {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 22px 16px;
+  border-radius: 18px;
+  background: radial-gradient(circle at 50% 0%, #5a4377 0%, var(--ck-plum) 70%);
+  color: #fff;
+  text-align: center;
+}
+
+.wx-srv-ck-cloche-dome {
+  font-size: 2.75rem;
+  line-height: 1;
+  animation: wx-srv-ck-bob 2.4s ease-in-out infinite;
+}
+
+.wx-srv-ck-cloche-text {
+  margin: 0;
+  font-weight: 800;
+  font-size: 1rem;
+}
+
+.wx-srv-ck-cloche-sub {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* -- The basket tray -------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-tray {
+  border-radius: 14px;
+  background: var(--ck-paper);
+  border: 1px solid var(--ck-line);
+}
+
+.wx-srv-ck-tray-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-tray-title {
+  flex: 1 1 auto;
+  text-align: left;
+}
+
+.wx-srv-ck-tray-caret {
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-tray-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.wx-srv-ck-tray-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-srv-ck-tray-who {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-tray-chips,
+.wx-srv-ck-reveal-chips,
+.wx-srv-ck-uses-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-chip-ing,
+.wx-srv-ck-chip-secret {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 5px 10px 5px 6px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  border: 1px solid var(--ck-line);
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.wx-srv-ck-chip-secret {
+  background: var(--ck-plum);
+  border-color: var(--ck-plum);
+  color: #fff;
+}
+
+.wx-srv-ck-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-chip-empty {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 2px dashed var(--ck-line);
+  box-sizing: border-box;
+  color: var(--ck-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-chip-small {
+  padding: 3px 8px 3px 4px;
+  font-size: 0.75rem;
+}
+
+.wx-srv-ck-staples {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+/* -- The chef stage --------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-reveal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, var(--ck-paper) 0%, var(--ck-chip) 100%);
+  border: 1px solid var(--ck-line-strong);
+  perspective: 600px;
+}
+
+.wx-srv-ck-reveal-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-weight: 800;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-ck-flip {
+  animation: wx-srv-ck-flip 520ms cubic-bezier(0.2, 0.8, 0.3, 1.2) both;
+  transform-origin: 50% 50%;
+}
+
+.wx-srv-ck-chef {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--ck-paper);
+  border: 1px solid var(--ck-line);
+}
+
+.wx-srv-ck-chef-hat {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-chef-working .wx-srv-ck-chef-hat {
+  animation: wx-srv-ck-bob 1.6s ease-in-out infinite;
+}
+
+.wx-srv-ck-chef-text {
+  flex: 1 1 160px;
+  margin: 0;
+  font-weight: 700;
+}
+
+.wx-srv-ck-elapsed {
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-retry,
+.wx-srv-ck-recipe-retry,
+.wx-srv-ck-dish-retry {
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--ck-tomato);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--ck-tomato);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-retry:disabled,
+.wx-srv-ck-recipe-retry:disabled,
+.wx-srv-ck-dish-retry:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.wx-srv-ck-dishes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+.wx-srv-ck-dishes:empty {
+  display: none;
+}
+
+@container ckbody (min-width: 760px) {
+  .wx-srv-ck-dishes {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+  }
+  .wx-srv-ck-dish-pic {
+    aspect-ratio: 16 / 11;
+  }
+}
+
+.wx-srv-ck-reveal-chip {
+  padding: 3px 9px 3px 5px;
+  font-size: 0.75rem;
+}
+
+.wx-srv-ck-dish {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 18px;
+  background: var(--ck-paper);
+  border: 1px solid var(--ck-line-strong);
+  box-shadow: 0 6px 18px rgba(120, 72, 30, 0.1);
+  animation: wx-srv-ck-rise 320ms ease-out both;
+}
+
+.wx-srv-ck-dish[data-concept="b"] {
+  animation-delay: 80ms;
+}
+
+.wx-srv-ck-dish[data-concept="c"] {
+  animation-delay: 160ms;
+}
+
+.wx-srv-ck-dish-pic {
+  position: relative;
+  aspect-ratio: 4 / 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-dish-pic-empty {
+  background: radial-gradient(circle at 50% 45%, var(--ck-paper) 0 34%, var(--ck-chip) 35% 100%);
+}
+
+.wx-srv-ck-dish-pic-pending {
+  background:
+    linear-gradient(100deg, transparent 20%, rgba(255, 255, 255, 0.45) 50%, transparent 80%) 0 0 / 220% 100%,
+    radial-gradient(circle at 50% 45%, var(--ck-paper) 0 34%, var(--ck-chip) 35% 100%);
+  animation: wx-srv-ck-shimmer 1.4s linear infinite;
+}
+
+.wx-srv-ck-dish-plate {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-dish-pic-note {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-dish-photo {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.wx-srv-ck-dish-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  animation: wx-srv-ck-fade 400ms ease-out;
+}
+
+.wx-srv-ck-dish-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px 14px;
+}
+
+.wx-srv-ck-dish-title {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.wx-srv-ck-dish-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.wx-srv-ck-tag {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--ck-line-strong);
+  color: var(--ck-muted);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.wx-srv-ck-tag-vibe {
+  border-color: var(--ck-saffron);
+  background: var(--ck-chip);
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-dish-desc {
+  margin: 0;
+  font-size: 0.9063rem;
+  line-height: 1.45;
+}
+
+.wx-srv-ck-dish-uses {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-srv-ck-uses-count {
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-uses-staples {
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-omitted {
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--ck-cream);
+  border: 1px dashed var(--ck-line);
+}
+
+.wx-srv-ck-omitted-line {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-omitted-name {
+  font-weight: 700;
+}
+
+.wx-srv-ck-bankrow {
+  display: flex;
+  margin-top: 2px;
+}
+
+.wx-srv-ck-bank,
+.wx-srv-ck-banked {
+  flex: 1 1 auto;
+  min-height: 46px;
+  padding: 0 14px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-bank {
+  border: 0;
+  background: var(--ck-herb);
+  color: #fff;
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.18);
+}
+
+.wx-srv-ck-bank:active:not(:disabled) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.18);
+}
+
+.wx-srv-ck-bank:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+.wx-srv-ck-banked {
+  border: 2px solid var(--ck-herb);
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-writing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-spinner {
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 3px solid var(--ck-line-strong);
+  border-top-color: var(--ck-tomato);
+  animation: wx-srv-ck-spin 0.8s linear infinite;
+}
+
+/* -- The full recipe --------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-recipe {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--ck-line-strong);
+  animation: wx-srv-ck-rise 240ms ease-out;
+}
+
+.wx-srv-ck-recipe-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wx-srv-ck-fact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 2px;
+  border-radius: 10px;
+  background: var(--ck-chip);
+  text-align: center;
+}
+
+.wx-srv-ck-fact-label {
+  font-size: 0.625rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-fact-value {
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-recipe-head {
+  margin: 6px 0 0;
+  font-size: 0.875rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-recipe-ings,
+.wx-srv-ck-recipe-tips {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wx-srv-ck-recipe-ing-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-height: 40px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.wx-srv-ck-recipe-check {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 1px 0 0;
+  accent-color: var(--ck-herb);
+}
+
+.wx-srv-ck-recipe-ing-words {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 6px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.wx-srv-ck-recipe-qty {
+  font-weight: 800;
+}
+
+.wx-srv-ck-recipe-note {
+  flex-basis: 100%;
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-recipe-ing-done .wx-srv-ck-recipe-ing-words {
+  text-decoration: line-through;
+  opacity: 0.55;
+}
+
+.wx-srv-ck-recipe-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: ck-step;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-srv-ck-recipe-step {
+  counter-increment: ck-step;
+  position: relative;
+  padding-left: 36px;
+  font-size: 0.9063rem;
+  line-height: 1.45;
+}
+
+.wx-srv-ck-recipe-step::before {
+  content: counter(ck-step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--ck-tomato);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-recipe-step-time {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  color: var(--ck-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-recipe-tip {
+  position: relative;
+  padding: 8px 10px 8px 32px;
+  border-radius: 10px;
+  background: var(--ck-cream);
+  font-size: 0.8125rem;
+  line-height: 1.4;
+}
+
+.wx-srv-ck-recipe-tip::before {
+  content: "💡";
+  position: absolute;
+  left: 9px;
+  top: 7px;
+}
+
+.wx-srv-ck-recipe-missing {
+  margin: 4px 0 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-recipe-by {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+/* -- Ended ------------------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-ended {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 24px 16px;
+  border-radius: 16px;
+  background: var(--ck-paper);
+  border: 1px solid var(--ck-line);
+  text-align: center;
+}
+
+.wx-srv-ck-ended-icon {
+  font-size: 2.25rem;
+}
+
+.wx-srv-ck-ended-text {
+  margin: 0;
+  color: var(--ck-muted);
+  font-weight: 600;
+}
+
+/* -- The start sheet --------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-start {
+  position: absolute;
+  inset: 0; /* `top` is set to the chat header's height when it opens */
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.wx-srv-ck-start-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 12, 6, 0.45);
+}
+
+.wx-srv-ck-start-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  max-width: 440px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 18px 16px calc(16px + env(safe-area-inset-bottom));
+  border-radius: 22px 22px 0 0;
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  animation: wx-srv-ck-sheet-in 200ms ease-out;
+}
+
+@media (min-width: 721px) {
+  .wx-srv-ck-start {
+    justify-content: center;
+  }
+  .wx-srv-ck-start-sheet {
+    border-radius: 22px;
+  }
+}
+
+.wx-srv-ck-start-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-start-intro {
+  margin: 0;
+  color: var(--ck-muted);
+  font-size: 0.875rem;
+}
+
+.wx-srv-ck-start-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-srv-ck-mode {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 64px;
+  padding: 10px 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-mode-on {
+  border-color: var(--ck-tomato);
+  box-shadow: 0 0 0 3px rgba(217, 71, 43, 0.18);
+}
+
+.wx-srv-ck-mode-icon {
+  font-size: 1.75rem;
+}
+
+.wx-srv-ck-mode-words {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wx-srv-ck-mode-name {
+  font-weight: 800;
+}
+
+.wx-srv-ck-mode-hint {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-mode-tick {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: 2px solid var(--ck-line-strong);
+  color: transparent;
+  font-size: 0.8125rem;
+  font-weight: 900;
+}
+
+.wx-srv-ck-mode-on .wx-srv-ck-mode-tick {
+  border-color: var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+.wx-srv-ck-start-error {
+  margin: 0;
+  color: var(--wx-danger-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.wx-srv-ck-start-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.wx-srv-ck-start-cancel,
+.wx-srv-ck-start-go {
+  min-height: 48px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-start-cancel {
+  flex: 0 0 auto;
+  padding: 0 18px;
+  border: 1px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-start-go {
+  flex: 1 1 auto;
+  border: 0;
+  background: var(--ck-tomato);
+  color: #fff;
+  box-shadow: 0 3px 0 var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-start-go:disabled,
+.wx-srv-ck-start-cancel:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* -- The main-chat card ------------------------------------------------------------------------------------ */
+
+.wx-srv-ck-mcard {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.wx-srv-ck-mcard-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.wx-srv-ck-mcard-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wx-srv-ck-mcard-title {
+  font-weight: 800;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-mcard .wx-srv-ck-badge {
+  background: var(--ck-chip);
+  color: var(--ck-tomato);
+  border-color: var(--ck-line-strong);
+}
+
+.wx-srv-ck-mcard .wx-srv-ck-badge[data-mode="blind"] {
+  background: var(--ck-plum);
+  color: #fff;
+  border-color: var(--ck-plum);
+}
+
+.wx-srv-ck-mcard-status {
+  margin: 0;
+  color: var(--wx-muted);
+  font-size: 0.875rem;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-mcard-open {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 18px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-mcard-media {
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, 44px);
+  gap: 4px;
+}
+
+.wx-srv-ck-mcard-dish {
+  display: block;
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 10px;
+  border: 1px solid var(--wx-border);
+}
+
+.wx-srv-ck-mcard-dish:first-child {
+  grid-column: 1 / -1;
+  width: 92px;
+  height: 64px;
+}
+
+/* -- The Recipe book (a full-height screen like the Holiday bank) ------------------------------------------ */
+
+.wx-srv-ck-book-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-ck-book-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.wx-srv-ck-book-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-weight: 700;
+  font-size: 0.9375rem;
+}
+
+.wx-srv-ck-book-close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-ck-book-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 12px;
+}
+
+.wx-srv-ck-book-entries {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 900px) {
+  .wx-srv-ck-book-entries {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.wx-srv-ck-book-entry {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 10px;
+  border: 1px solid var(--ck-line);
+  border-radius: 16px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-book-entry:hover,
+.wx-srv-ck-book-entry:focus-visible {
+  border-color: var(--ck-tomato);
+}
+
+.wx-srv-ck-book-thumb {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ck-chip);
+  font-size: 2rem;
+}
+
+.wx-srv-ck-book-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-ck-book-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.wx-srv-ck-book-name {
+  font-weight: 800;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-book-vibe {
+  align-self: flex-start;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.wx-srv-ck-book-meta {
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-book-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-ck-book-empty-icon {
+  font-size: 2.5rem;
+}
+
+.wx-srv-ck-book-empty-text,
+.wx-srv-ck-book-loading,
+.wx-srv-ck-book-error {
+  margin: 0;
+}
+
+.wx-srv-ck-book-error {
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-ck-book-retry {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* -- Motion ------------------------------------------------------------------------------------------------ */
+
+@keyframes wx-srv-ck-pop {
+  from {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* The toast is centred with a transform of its own: its entrance keeps the centring. */
+@keyframes wx-srv-ck-toast-in {
+  from {
+    transform: translate(-50%, 8px);
+    opacity: 0;
+  }
+  to {
+    transform: translate(-50%, 0);
+    opacity: 1;
+  }
+}
+
+@keyframes wx-srv-ck-throb {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(217, 71, 43, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(217, 71, 43, 0);
+  }
+}
+
+@keyframes wx-srv-ck-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-3deg);
+  }
+  50% {
+    transform: translateY(-4px) rotate(3deg);
+  }
+}
+
+@keyframes wx-srv-ck-flip {
+  from {
+    transform: rotateY(90deg) scale(0.85);
+    opacity: 0;
+  }
+  to {
+    transform: rotateY(0deg) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes wx-srv-ck-rise {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@keyframes wx-srv-ck-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes wx-srv-ck-shimmer {
+  from {
+    background-position:
+      120% 0,
+      0 0;
+  }
+  to {
+    background-position:
+      -120% 0,
+      0 0;
+  }
+}
+
+@keyframes wx-srv-ck-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes wx-srv-ck-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-ck *,
+  .wx-srv-ck-start *,
+  .wx-srv-ck-toast {
+    animation: none !important;
+    transition: none !important;
+  }
+}
