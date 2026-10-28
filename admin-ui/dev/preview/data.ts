@@ -40,6 +40,8 @@ export interface PackItem {
   readonly name: string;
   readonly detail: string;
   readonly url: string | null;
+  /** The English Wikipedia article title of the dish itself (dishes only), when one exists. */
+  readonly wikipedia: string | null;
   /** A photo of this item, when one exists. */
   readonly photo: PackPhoto | null;
 }
@@ -194,6 +196,7 @@ export function normalizePack(json: Record<string, unknown>): Pack {
         name,
         detail: str(rawItem["detail"]),
         url: typeof rawItem["url"] === "string" && rawItem["url"] !== "" ? rawItem["url"] : null,
+        wikipedia: str(rawItem["wikipedia"]) || null,
         photo: normalizePhoto(rawItem["photo"] ?? rawItem["image"] ?? rawItem["img"], name),
       });
     }
@@ -224,22 +227,22 @@ const BUILTIN_PACK: Pack = {
       key: "food",
       title: "Food and drink",
       items: [
-        { name: "The dish everyone orders", detail: "What the area is known for, and where locals actually eat it.", url: "https://example.com/food", photo: null },
-        { name: "A harbour-side grill", detail: "Fresh fish by weight, plain and brilliant. Book ahead in season.", url: null, photo: null },
+        { name: "The dish everyone orders", detail: "What the area is known for, and where locals actually eat it.", url: "https://example.com/food", wikipedia: null, photo: null },
+        { name: "A harbour-side grill", detail: "Fresh fish by weight, plain and brilliant. Book ahead in season.", url: null, wikipedia: null, photo: null },
       ],
     },
     {
       key: "stay",
       title: "Where to stay",
       items: [
-        { name: "A hillside villa with a pool", detail: "Sleeps six, ten minutes from the old town on foot.", url: "https://example.com/villa", photo: null },
-        { name: "A characterful old-town guesthouse", detail: "Five rooms, a roof terrace and breakfast included.", url: null, photo: null },
+        { name: "A hillside villa with a pool", detail: "Sleeps six, ten minutes from the old town on foot.", url: "https://example.com/villa", wikipedia: null, photo: null },
+        { name: "A characterful old-town guesthouse", detail: "Five rooms, a roof terrace and breakfast included.", url: null, wikipedia: null, photo: null },
       ],
     },
     {
       key: "sights",
       title: "Sights",
-      items: [{ name: "The old town walls", detail: "Walk the full circuit at sunset; allow ninety minutes.", url: null, photo: null }],
+      items: [{ name: "The old town walls", detail: "Walk the full circuit at sunset; allow ninety minutes.", url: null, wikipedia: null, photo: null }],
     },
   ],
   bestTime: "May to June and September: warm, quieter and cheaper than high summer.",

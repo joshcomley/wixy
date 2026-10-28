@@ -57,3 +57,44 @@
 .seg-btn[aria-checked="true"] { background: var(--teal); color: #052a1d; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
 .seg-btn:disabled { opacity: .35; }
 .opt-credit { margin-top: 6px; font-size: 11.5px; opacity: .8; }
+
+/* ---- Local food to try: a photo-forward grid, text cards for dishes without a picture, a detail sheet ---- */
+.pk-dishes { margin: 6px 0 20px; }
+.pk-dishes-title { margin: 0; display: flex; align-items: center; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif; font-size: 23px; line-height: 1.15; font-weight: 700; letter-spacing: -0.005em; }
+.pk-dishes-title .pk-icon { font-size: 21px; margin-right: 9px; }
+.pk-dishes-sub { margin: 4px 0 12px; font-size: 13.5px; line-height: 1.4; color: var(--ink-dim); }
+.dish-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 640px) { .dish-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; } }
+@media (min-width: 960px) { .dish-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.dish-card { display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding: 0; border: 1px solid var(--glass-edge); border-radius: 16px; overflow: hidden; background: var(--glass); color: var(--ink); text-align: left; cursor: pointer; box-shadow: 0 6px 18px rgba(0, 0, 0, .22); transition: transform .12s, box-shadow .12s; }
+.dish-card:active { transform: scale(.975); box-shadow: 0 3px 10px rgba(0, 0, 0, .25); }
+.dish-card:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.reduce .dish-card { transition: none; }
+.dish-photo { display: block; aspect-ratio: 1; overflow: hidden; background: #0c2744; }
+.dish-photo img { display: block; width: 100%; height: 100%; object-fit: cover; transition: transform .35s; }
+.dish-card:hover .dish-photo img { transform: scale(1.04); }
+.reduce .dish-photo img { transition: none; }
+.dish-name { display: block; padding: 9px 11px 0; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 16.5px; line-height: 1.18; font-weight: 700; }
+.dish-line { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; padding: 0 11px; margin: 3px 0 12px; font-size: 12.5px; line-height: 1.38; color: var(--ink-dim); }
+/* A dish with no picture: a tinted card the same size as its neighbours, never a hole. */
+.dish-text { justify-content: center; min-height: 150px; padding: 14px 13px 12px; background: linear-gradient(155deg, hsl(var(--dish-hue, 24) 62% 31%), hsl(calc(var(--dish-hue, 24) + 16) 55% 17%)); border-color: hsla(var(--dish-hue, 24), 80%, 70%, .28); }
+.dish-text .dish-glyph { display: block; margin-bottom: 8px; font-size: 26px; line-height: 1; opacity: .92; }
+.dish-text .dish-name { padding: 0; font-size: 19px; }
+.dish-text .dish-line { padding: 0; margin: 5px 0 0; color: rgba(255, 244, 230, .82); -webkit-line-clamp: 4; line-clamp: 4; }
+
+.dish-sheet { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; background: rgba(2, 8, 18, .66); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px); }
+.dish-sheet-card { position: relative; width: 100%; max-width: 560px; max-height: 92%; overflow-y: auto; -webkit-overflow-scrolling: touch; background: linear-gradient(180deg, #112c4d, #0a1f3a); border: 1px solid var(--glass-edge); border-radius: 24px 24px 0 0; box-shadow: 0 -12px 40px rgba(0, 0, 0, .5); }
+@media (min-width: 700px) { .dish-sheet { align-items: center; } .dish-sheet-card { border-radius: 24px; max-height: 88%; } }
+.dish-sheet-close { position: absolute; z-index: 2; top: 10px; right: 10px; width: 40px; height: 40px; border-radius: 50%; border: 1px solid rgba(255, 255, 255, .28); background: rgba(8, 20, 38, .72); color: #fff; font-size: 17px; font-weight: 800; }
+.dish-sheet-photo { position: relative; display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 46vh; padding: 0; border: 0; overflow: hidden; background: #0c2744; cursor: zoom-in; }
+.dish-sheet-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.dish-sheet-photo.pk-photo-failed { display: none; }
+.dish-sheet-body { padding: 16px 18px calc(22px + var(--safe-b)); }
+.dish-sheet-card .dish-sheet-photo-host[hidden] + .dish-sheet-body { padding-top: 54px; }
+.dish-sheet-kicker { font-size: 12.5px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--teal); }
+.dish-sheet-name { margin: 4px 0 8px; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 27px; line-height: 1.1; font-weight: 700; }
+.dish-sheet-detail { margin: 0 0 12px; font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif; font-size: 16.5px; line-height: 1.58; color: rgba(236, 244, 255, .9); }
+.dish-sheet-wiki { margin: 0 0 8px; }
+.dish-sheet-credit { font-size: 12px; line-height: 1.4; color: var(--ink-dim); }
+.dish-sheet-credit .pk-link { font-size: 12px; margin: 0; }
+.dish-sheet-credit .pk-link::after { content: ""; }
