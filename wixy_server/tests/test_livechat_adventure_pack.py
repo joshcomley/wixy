@@ -452,9 +452,13 @@ class TestCmdchatRuns:
         state = FakeCmdState()
         researcher = CmdAdventureResearcher(_fake_client(state))
 
+        # Forward slashes in the literal, not backslashes: a `Path` is the native flavour, and on
+        # Linux (CI) a backslash is an ordinary filename character, so `as_posix()` would keep it.
+        # On Windows (production) this still renders natively as `D:\Servers\...`, so the test
+        # still proves the conversion cmd needs.
         async def go() -> str:
             return await researcher.start(
-                prompt="the brief", cwd=Path("D:\\Servers\\Wixy\\Storage\\x\\adventure-research")
+                prompt="the brief", cwd=Path("D:/Servers/Wixy/Storage/x/adventure-research")
             )
 
         run_id = anyio.run(go)
