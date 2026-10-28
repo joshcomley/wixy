@@ -490,6 +490,10 @@ class PictureJob(Protocol):
         """Startup recovery: redo the hunt for every round whose pictures were still pending."""
         ...
 
+    async def watch_forever(self, background: ContainedTaskGroup) -> None:
+        """The supervised self-healing loop: re-run hunts pending longer than a hunt can take."""
+        ...
+
 
 class AdventurePackRunner:
     """Runs the holiday-pack job for rounds whose pack is `pending`. One instance per app; it
@@ -554,6 +558,18 @@ class AdventurePackRunner:
         if self._pictures is not None:
             await self._pictures.resume(background)
         return len(pending)
+
+    def supervise_pictures(self, background: ContainedTaskGroup) -> None:
+        """Start the picture job's self-healing sweep as a supervised app-lifetime loop (Inv 47):
+        a pending picture wait never depends on a startup redo alone. A no-op without pictures."""
+        pictures = self._pictures
+        if pictures is None:
+            return
+
+        async def _watch() -> None:
+            await pictures.watch_forever(background)
+
+        background.supervise("livechat-adventure-pictures-watch", _watch)
 
     async def run_job(self, anchor_seq: int) -> None:
         """Research the round's destination and land the outcome on its row; once the pack is

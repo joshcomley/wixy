@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS adv_rounds(
     CHECK(pack IN ('none','pending','ready','failed','unavailable')),
   pack_run_id TEXT, pack_json TEXT, pack_error TEXT,
   images TEXT NOT NULL DEFAULT 'none' CHECK(images IN ('none','pending','done','failed')),
-  pictures TEXT,
+  pictures TEXT, images_started_at REAL, images_tries INTEGER NOT NULL DEFAULT 0,
   decided_by TEXT,
   rev INTEGER NOT NULL DEFAULT 1,
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
@@ -366,15 +366,27 @@ CREATE TABLE IF NOT EXISTS adv_settings(
 #
 # The holiday pack's PICTURES (spec §4.3a) live on the same row: `images` is the picture job's state
 # (the `wyr_rounds.images` precedent) and `pictures` maps each picture slot to the ordinal of its
-# ordinary photo attachment on the anchor message, with its credit, source page and caption. The v20
-# DDL above was amended IN PLACE to carry them (v20 was never deployed); `_ensure_adventure_picture_
-# columns` adds the two columns to a database that ran the earlier v20 text (a developer's), so no
-# version bump is needed.
-_ADVENTURE_PICTURE_COLUMNS = (
-    "ALTER TABLE adv_rounds ADD COLUMN images TEXT NOT NULL DEFAULT 'none' "
-    "CHECK(images IN ('none','pending','done','failed'))",
-    "ALTER TABLE adv_rounds ADD COLUMN pictures TEXT",
-)
+# ordinary photo attachment on the anchor message, with its credit, source page and caption.
+# `images_started_at` / `images_tries` make a `pending` wait SELF-HEALING (audit round 3, F4): the
+# time the current hunt attempt began and how many have begun. A hunt that dies without finishing
+# (a blue/green hand-off stops the old process mid-hunt) leaves the round `pending`; a supervised
+# sweep re-claims any round pending longer than a hunt can take (compare-and-set on
+# `images_started_at`), and after `MAX_PICTURE_TRIES` attempts gives up (`failed`), so the wait can
+# never be stuck. The v20 DDL above was amended IN PLACE to carry them (v20 was never deployed);
+# `_ensure_adventure_picture_columns` adds whichever are missing to a database that ran an earlier
+# v20 text (a developer's), so no version bump is needed.
+_ADVENTURE_PICTURE_COLUMNS = {
+    "images": (
+        "ALTER TABLE adv_rounds ADD COLUMN images TEXT NOT NULL DEFAULT 'none' "
+        "CHECK(images IN ('none','pending','done','failed'))"
+    ),
+    "pictures": "ALTER TABLE adv_rounds ADD COLUMN pictures TEXT",
+    "images_started_at": "ALTER TABLE adv_rounds ADD COLUMN images_started_at REAL",
+    "images_tries": "ALTER TABLE adv_rounds ADD COLUMN images_tries INTEGER NOT NULL DEFAULT 0",
+}
+MAX_PICTURE_TRIES = 3
+"""How many times a round's picture hunt may begin (the first, then re-claims after a hunt died)
+before the wait is ended as `failed`."""
 _LATEST_SCHEMA_VERSION = 20
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
@@ -855,6 +867,8 @@ def _row_to_adv_round(row: sqlite3.Row) -> AdventureRoundRow:
         pack_error=row["pack_error"],
         images=row["images"],
         pictures_json=row["pictures"],
+        images_started_at=row["images_started_at"],
+        images_tries=row["images_tries"],
         decided_by=row["decided_by"],
         rev=row["rev"],
         created_at=row["created_at"],
@@ -1244,15 +1258,14 @@ class LiveChatStore:
         Settled here, once, for such a database; a plain column read otherwise (the
         `_ensure_attachment_transcripts_table` precedent)."""
         columns = {row[1] for row in conn.execute("PRAGMA table_info(adv_rounds)")}
-        if not columns or {"images", "pictures"} <= columns:
+        if not columns or _ADVENTURE_PICTURE_COLUMNS.keys() <= columns:
             return
         conn.execute("BEGIN IMMEDIATE")
         try:
             columns = {row[1] for row in conn.execute("PRAGMA table_info(adv_rounds)")}
-            if "images" not in columns:
-                conn.execute(_ADVENTURE_PICTURE_COLUMNS[0])
-            if "pictures" not in columns:
-                conn.execute(_ADVENTURE_PICTURE_COLUMNS[1])
+            for column, statement in _ADVENTURE_PICTURE_COLUMNS.items():
+                if column not in columns:
+                    conn.execute(statement)
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -2893,6 +2906,8 @@ class LiveChatStore:
                         "pack_error": None,
                         "images": "none",
                         "pictures": None,
+                        "images_started_at": None,
+                        "images_tries": 0,
                     },
                 )
                 return updated, True
@@ -2939,14 +2954,27 @@ class LiveChatStore:
         still lands (the trip's pack arrives after the couple saved it). `pictures_pending` (a
         `ready` pack on a server that can fetch pictures) starts the picture wait in the same
         write: `images` becomes `pending` and the caller then runs the picture job."""
-        images = "pending" if state == "ready" and pictures_pending else "none"
+        hunt = state == "ready" and pictures_pending
+        images = "pending" if hunt else "none"
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
+            # The first hunt begins now, in this same write: its start time and try count are what
+            # let a sweep recognise a hunt that died (see `claim_adventure_pictures`).
             cursor = conn.execute(
                 "UPDATE adv_rounds SET pack = ?, pack_json = ?, pack_error = ?, images = ?, "
-                "rev = rev + 1, updated_at = ? "
+                "images_started_at = ?, images_tries = ?, rev = rev + 1, updated_at = ? "
                 "WHERE anchor_message_seq = ? AND pack = 'pending' AND pack_run_id IS ?",
-                (state, pack_json, error, images, now_s, anchor_seq, run_id),
+                (
+                    state,
+                    pack_json,
+                    error,
+                    images,
+                    now_s if hunt else None,
+                    1 if hunt else 0,
+                    now_s,
+                    anchor_seq,
+                    run_id,
+                ),
             )
             if cursor.rowcount != 1:
                 return False
@@ -2980,6 +3008,71 @@ class LiveChatStore:
                 "ORDER BY anchor_message_seq"
             ).fetchall()
             return [int(row["anchor_message_seq"]) for row in rows]
+
+    def adventure_stale_pictures(self, *, stale_before: float) -> list[int]:
+        """Rounds whose picture wait looks abandoned: `images = pending` on a `ready` pack of a
+        `chosen`/`banked` round, whose current hunt began before `stale_before` (or never recorded a
+        start). The sweep re-claims these; a hunt still running in some process is far younger."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq FROM adv_rounds "
+                "WHERE pack = 'ready' AND images = 'pending' AND state IN ('chosen', 'banked') "
+                "AND (images_started_at IS NULL OR images_started_at < ?) "
+                "ORDER BY anchor_message_seq",
+                (stale_before,),
+            ).fetchall()
+            return [int(row["anchor_message_seq"]) for row in rows]
+
+    def claim_adventure_pictures(
+        self,
+        *,
+        anchor_seq: int,
+        stale_before: float | None,
+        now: float,
+        max_tries: int = MAX_PICTURE_TRIES,
+    ) -> Literal["claimed", "not_due", "gave_up", "gone"]:
+        """Begin another hunt for a `pending` round — a compare-and-set, so two processes sweeping
+        at once start one: it succeeds only while the round still waits (`ready` pack,
+        `images = pending`, `chosen`/`banked`) and, when `stale_before` is given, only while the
+        current hunt began before it (`None` = unconditionally, the startup redo of a hunt that
+        died with the previous process). A claim stamps `images_started_at = now` and counts a try.
+        A round already at `max_tries` is not hunted again: the wait ends as `failed` (`gave_up`,
+        announced like any other change). `not_due` = another process already claimed it or the
+        hunt is young; `gone` = the round no longer waits (done, failed, rejected, deleted)."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT state, pack, images, images_started_at, images_tries FROM adv_rounds "
+                "WHERE anchor_message_seq = ?",
+                (anchor_seq,),
+            ).fetchone()
+            if (
+                row is None
+                or row["state"] not in ("chosen", "banked")
+                or row["pack"] != "ready"
+                or row["images"] != "pending"
+            ):
+                return "gone"
+            started = row["images_started_at"]
+            if stale_before is not None and started is not None and started >= stale_before:
+                return "not_due"
+            if int(row["images_tries"]) >= max_tries:
+                conn.execute(
+                    "UPDATE adv_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ? AND images = 'pending'",
+                    (now, anchor_seq),
+                )
+                conn.execute(
+                    "INSERT INTO events (type, message_seq, created_at) "
+                    "VALUES ('message_updated', ?, ?)",
+                    (anchor_seq, now),
+                )
+                return "gave_up"
+            conn.execute(
+                "UPDATE adv_rounds SET images_started_at = ?, images_tries = images_tries + 1 "
+                "WHERE anchor_message_seq = ? AND images = 'pending'",
+                (now, anchor_seq),
+            )
+            return "claimed"
 
     def fail_adventure_pictures(self, *, anchor_seq: int, now: float) -> bool:
         """The pictures for a round are not coming (nothing found, a failure, or the round no longer

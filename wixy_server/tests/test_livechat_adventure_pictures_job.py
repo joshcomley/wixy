@@ -22,7 +22,11 @@ import pytest
 from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.livechat.adventure_bank import AdventureBank
 from wixy_server.livechat.adventure_pack import canonical_pack_json, parse_pack
-from wixy_server.livechat.adventure_pictures import AdventurePictureJob, WebPictureFinder
+from wixy_server.livechat.adventure_pictures import (
+    AdventurePictureJob,
+    PictureTiming,
+    WebPictureFinder,
+)
 from wixy_server.livechat.models import AttachmentResult
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
@@ -91,8 +95,10 @@ def ready_round(
     cid: str = "adv-client-0001",
     pictures_pending: bool = True,
     state: str = "chosen",
+    now: float | None = None,
 ) -> int:
-    """A round whose destination is chosen and whose text pack is stored `ready`."""
+    """A round whose destination is chosen and whose text pack is stored `ready` (at `now`, when
+    given: that is also when its first picture hunt is recorded as having begun)."""
     seq = start_round(store, cid)
     to_chosen(store, bank, seq)
     assert store.set_adventure_pack_run(anchor_seq=seq, run_id="run-1")
@@ -102,6 +108,7 @@ def ready_round(
         state="ready",
         pack_json=PACK_JSON,
         pictures_pending=pictures_pending,
+        now=now,
     )
     if state == "banked":
         store.decide_adventure(anchor_seq=seq, sender="Josh", decision="bank")
@@ -212,7 +219,7 @@ class TestSchema:
             before = {r[1] for r in conn.execute("PRAGMA table_info(adv_rounds)")}
         finally:
             conn.close()
-        assert "images" not in before and "pictures" not in before
+        assert not {"images", "pictures", "images_started_at", "images_tries"} & before
 
         store = LiveChatStore(db_path)  # reconnecting settles the columns
         seq = start_round(store)
@@ -220,7 +227,7 @@ class TestSchema:
         assert row.images == "none" and row.pictures_json is None
         conn = sqlite3.connect(str(db_path))
         try:
-            assert {"images", "pictures"} <= {
+            assert {"images", "pictures", "images_started_at", "images_tries"} <= {
                 r[1] for r in conn.execute("PRAGMA table_info(adv_rounds)")
             }
             assert conn.execute("PRAGMA user_version").fetchone()[0] == 20  # no version bump
@@ -476,10 +483,19 @@ def make_job(
     finder: FakePictureFinder,
     *,
     space_ok: Any = None,
+    timing: PictureTiming | None = None,
+    clock: Any = time.time,
 ) -> tuple[AdventurePictureJob, MagicMock]:
     notifier = MagicMock(spec=LiveChatNotifier)
     job = AdventurePictureJob(
-        store=store, paths=paths, bank=bank, finder=finder, notifier=notifier, space_ok=space_ok
+        store=store,
+        paths=paths,
+        bank=bank,
+        finder=finder,
+        notifier=notifier,
+        space_ok=space_ok,
+        timing=timing,
+        clock=clock,
     )
     return job, notifier
 
@@ -676,6 +692,285 @@ class TestJob:
         assert round_of(store, seq).images == "pending"  # not failed: the next start redoes it
         assert store.adventure_pending_pictures() == [seq]
         assert staged_dirs(paths) == []
+
+
+# -- a pending wait heals itself (audit round 3, F4) ---------------------------------------------
+
+
+class TestHuntBookkeeping:
+    def test_the_first_hunt_is_recorded_with_the_pack(
+        self, store: LiveChatStore, bank: AdventureBank
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)
+        row = round_of(store, seq)
+        assert (row.images, row.images_started_at, row.images_tries) == ("pending", 1000.0, 1)
+        none = ready_round(store, bank, cid="adv-client-0002", pictures_pending=False, now=1000.0)
+        row = round_of(store, none)
+        assert (row.images, row.images_started_at, row.images_tries) == ("none", None, 0)
+
+    def test_a_retry_forgets_the_old_hunt(self, store: LiveChatStore, bank: AdventureBank) -> None:
+        seq = start_round(store)
+        to_chosen(store, bank, seq)
+        store.set_adventure_pack_run(anchor_seq=seq, run_id="r")
+        store.finish_adventure_pack(anchor_seq=seq, run_id="r", state="failed", error="no")
+        row, _ = store.retry_adventure_pack(anchor_seq=seq, researcher_available=True)
+        assert row.images_started_at is None and row.images_tries == 0
+
+    def test_stale_rounds_are_the_pending_ones_whose_hunt_began_before_the_cut(
+        self, store: LiveChatStore, bank: AdventureBank
+    ) -> None:
+        old = ready_round(store, bank, cid="adv-client-0001", now=1000.0)
+        young = ready_round(store, bank, cid="adv-client-0002", now=2000.0)
+        banked = ready_round(store, bank, cid="adv-client-0003", now=1000.0, state="banked")
+        ready_round(store, bank, cid="adv-client-0004", pictures_pending=False, now=1000.0)
+        rejected = ready_round(store, bank, cid="adv-client-0005", now=1000.0)
+        store.decide_adventure(anchor_seq=rejected, sender="Josh", decision="reject")
+        assert store.adventure_stale_pictures(stale_before=1500.0) == [old, banked]
+        assert store.adventure_stale_pictures(stale_before=3000.0) == [old, young, banked]
+        assert store.adventure_stale_pictures(stale_before=500.0) == []
+
+    def test_a_claim_is_a_compare_and_set_that_counts_tries_and_gives_up(
+        self, store: LiveChatStore, bank: AdventureBank, db_path: Path
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)  # try 1 began at 1000
+
+        def claim(stale_before: float | None, now: float) -> str:
+            return store.claim_adventure_pictures(
+                anchor_seq=seq, stale_before=stale_before, now=now
+            )
+
+        assert claim(900.0, 1100.0) == "not_due"  # the hunt (1000) is younger than the cut
+        assert claim(1001.0, 1100.0) == "claimed"  # began before the cut: abandoned
+        row = round_of(store, seq)
+        assert (row.images_started_at, row.images_tries) == (1100.0, 2)
+        assert claim(1050.0, 1200.0) == "not_due"  # another sweeper already claimed it
+        assert claim(None, 1300.0) == "claimed"  # a startup redo claims unconditionally
+        assert round_of(store, seq).images_tries == 3
+        rev = round_of(store, seq).rev
+        assert claim(1400.0, 1500.0) == "gave_up"  # three hunts began, none finished
+        row = round_of(store, seq)
+        assert row.images == "failed" and row.rev == rev + 1
+        assert claim(None, 1600.0) == "gone"
+        conn = sqlite3.connect(str(db_path))
+        try:
+            events = [
+                r[0]
+                for r in conn.execute(
+                    "SELECT type FROM events WHERE message_seq = ? ORDER BY event_seq", (seq,)
+                )
+            ]
+        finally:
+            conn.close()
+        assert events[-1] == "message_updated"
+
+    @pytest.mark.parametrize("how", ["done", "rejected", "pack_failed", "deleted", "unknown"])
+    def test_a_round_that_no_longer_waits_cannot_be_claimed(
+        self,
+        store: LiveChatStore,
+        bank: AdventureBank,
+        paths: ProjectPaths,
+        how: str,
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)
+        if how == "done":
+            store.create_adventure_picture_attachments(
+                anchor_seq=seq,
+                images=stage(paths, 1),
+                pictures_json=slots_json(1),
+                by_email=None,
+                now=1.0,
+            )
+        elif how == "rejected":
+            store.decide_adventure(anchor_seq=seq, sender="Josh", decision="reject")
+        elif how == "pack_failed":
+            with store._write_txn() as conn:
+                conn.execute("UPDATE adv_rounds SET pack = 'failed' WHERE 1")
+        elif how == "deleted":
+            store.delete_message(seq=seq, now=2.0)
+        target = 9999 if how == "unknown" else seq
+        assert (
+            store.claim_adventure_pictures(anchor_seq=target, stale_before=None, now=5000.0)
+            == "gone"
+        )
+
+
+class TestSelfHealing:
+    """The hand-off the audit found: the OLD process wins the pack, sets `images = pending`, starts
+    hunting, and is stopped mid-hunt AFTER the new process already did its startup redo."""
+
+    TIMING = PictureTiming(watch_interval_s=0.02, stale_after_s=360.0, max_tries=3)
+
+    def test_a_hunt_stopped_by_the_old_side_of_a_hand_off_is_redone_by_the_new_side(
+        self, store: LiveChatStore, bank: AdventureBank, paths: ProjectPaths
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)  # process A stored the pack at t=1000...
+        stuck = FakePictureFinder(sample_pictures(3), hold=True)
+        job_a, _ = make_job(store, bank, paths, stuck, clock=lambda: 1000.0)
+
+        async def a_runs_then_is_stopped() -> None:
+            with anyio.move_on_after(0.3):  # ...started hunting; Slots stops it 30 s later
+                await job_a.run(seq)
+
+        anyio.run(a_runs_then_is_stopped)
+        assert stuck.started.is_set()
+        assert (round_of(store, seq).images, staged_dirs(paths)) == ("pending", [])
+
+        # Process B did its startup redo BEFORE A won the pack, so it never looks at this round
+        # again on its own. Its sweep runs while the wait is still young: nothing happens...
+        fresh = FakePictureFinder(sample_pictures(3))
+        job_b, notifier_b = make_job(
+            store, bank, paths, fresh, timing=self.TIMING, clock=lambda: 1100.0
+        )
+
+        async def sweep(job: AdventurePictureJob) -> int:
+            result = 0
+            async with anyio.create_task_group() as tg:
+                result = await job.sweep(ContainedTaskGroup(tg, BackgroundTaskHealth()))
+            return result
+
+        assert anyio.run(sweep, job_b) == 0 and fresh.plans == []
+        assert round_of(store, seq).images == "pending"
+
+        # ...and once the wait is older than a hunt can last, B re-claims it and finishes it.
+        job_late, notifier_late = make_job(
+            store, bank, paths, fresh, timing=self.TIMING, clock=lambda: 1400.0
+        )
+        assert anyio.run(sweep, job_late) == 1
+        row = round_of(store, seq)
+        assert (
+            row.images == "done" and len(store.adventure_picture_attachments(anchor_seq=seq)) == 3
+        )
+        assert (row.images_started_at, row.images_tries) == (1400.0, 2)
+        assert notifier_late.publish.call_count == 1 and notifier_b.publish.call_count == 0
+
+    def test_the_supervised_loop_heals_a_wait_nobody_is_hunting(
+        self, store: LiveChatStore, bank: AdventureBank, paths: ProjectPaths
+    ) -> None:
+        seq = ready_round(store, bank, now=time.time() - 1000.0)
+        finder = FakePictureFinder(sample_pictures(2))
+        job, _ = make_job(
+            store,
+            bank,
+            paths,
+            finder,
+            timing=PictureTiming(watch_interval_s=0.02, stale_after_s=0.2, max_tries=3),
+        )
+
+        async def go() -> None:
+            async with anyio.create_task_group() as tg:
+                job_group = ContainedTaskGroup(tg, BackgroundTaskHealth())
+                job_group.supervise("watch", lambda: job.watch_forever(job_group))
+                with anyio.fail_after(10):
+                    while round_of(store, seq).images == "pending":
+                        await anyio.sleep(0.02)
+                tg.cancel_scope.cancel()
+
+        anyio.run(go)
+        assert round_of(store, seq).images == "done" and len(finder.plans) == 1
+
+    def test_a_failure_to_even_end_the_wait_is_healed_by_the_next_sweep(
+        self,
+        store: LiveChatStore,
+        bank: AdventureBank,
+        paths: ProjectPaths,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """`fail_adventure_pictures` itself fails (SQLite busy): the round stays pending, the next
+        sweep re-hunts it and, this time, ends the wait."""
+        seq = ready_round(store, bank, now=1000.0)
+        real = store.fail_adventure_pictures
+        failures = {"left": 1}
+
+        def flaky(*, anchor_seq: int, now: float) -> bool:
+            if failures["left"]:
+                failures["left"] -= 1
+                raise sqlite3.OperationalError("database is locked")
+            return real(anchor_seq=anchor_seq, now=now)
+
+        monkeypatch.setattr(store, "fail_adventure_pictures", flaky)
+        finder = FakePictureFinder([])  # finds nothing: the hunt ends the wait as `failed`
+        job, _ = make_job(store, bank, paths, finder, timing=self.TIMING, clock=lambda: 1400.0)
+        anyio.run(job.run, seq)
+        assert round_of(store, seq).images == "pending"  # could not be recorded
+
+        async def sweep() -> int:
+            started = 0
+            async with anyio.create_task_group() as tg:
+                started = await job.sweep(ContainedTaskGroup(tg, BackgroundTaskHealth()))
+            return started
+
+        assert anyio.run(sweep) == 1
+        assert round_of(store, seq).images == "failed" and len(finder.plans) == 2
+
+    def test_hunts_that_keep_dying_end_after_the_try_limit(
+        self, store: LiveChatStore, bank: AdventureBank, paths: ProjectPaths
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)  # try 1 was the pack's own hunt
+        hung = FakePictureFinder(sample_pictures(2), hold=True)
+        now = {"t": 1000.0}
+        job, notifier = make_job(
+            store, bank, paths, hung, timing=self.TIMING, clock=lambda: now["t"]
+        )
+
+        async def one_hunt_that_dies() -> int:
+            async with anyio.create_task_group() as tg:
+                started = await job.sweep(ContainedTaskGroup(tg, BackgroundTaskHealth()))
+                await anyio.sleep(0.1)  # the hunt begins, then dies with its process (cancelled)
+                tg.cancel_scope.cancel()
+            return started
+
+        started: list[int] = []
+        for _ in range(5):
+            if round_of(store, seq).images != "pending":
+                break
+            now["t"] += 400.0  # the wait outlives a hunt each time
+            started.append(anyio.run(one_hunt_that_dies))
+        assert started == [1, 1, 0]  # tries 2 and 3 hunted; the next sweep ends the wait instead
+        row = round_of(store, seq)
+        assert (row.images, row.images_tries) == ("failed", 3)
+        assert notifier.publish.call_count == 1  # the give-up is announced
+        assert store.adventure_picture_attachments(anchor_seq=seq) == ()
+
+    def test_the_sweep_leaves_a_round_this_process_is_hunting_alone(
+        self, store: LiveChatStore, bank: AdventureBank, paths: ProjectPaths
+    ) -> None:
+        seq = ready_round(store, bank, now=1000.0)
+        slow = FakePictureFinder(sample_pictures(2), hold=True)
+        job, _ = make_job(store, bank, paths, slow, timing=self.TIMING, clock=lambda: 9999.0)
+
+        async def go() -> int:
+            started = -1
+            async with anyio.create_task_group() as tg:
+                group = ContainedTaskGroup(tg, BackgroundTaskHealth())
+                tg.start_soon(job.run, seq)
+                while not slow.started.is_set():
+                    await anyio.sleep(0.01)
+                started = await job.sweep(group)  # long past stale, but it is running right here
+                slow.release.set()
+            return started
+
+        assert anyio.run(go) == 0
+        assert len(slow.plans) == 1 and round_of(store, seq).images == "done"
+
+    def test_two_sweepers_start_one_hunt(
+        self, store: LiveChatStore, bank: AdventureBank, paths: ProjectPaths
+    ) -> None:
+        """A blue/green overlap: both processes sweep at once; the claim is a compare-and-set."""
+        seq = ready_round(store, bank, now=1000.0)
+        finder_a, finder_b = FakePictureFinder(sample_pictures(2)), FakePictureFinder([])
+        job_a, _ = make_job(store, bank, paths, finder_a, timing=self.TIMING, clock=lambda: 1400.0)
+        job_b, _ = make_job(store, bank, paths, finder_b, timing=self.TIMING, clock=lambda: 1400.0)
+
+        async def go() -> list[int]:
+            async with anyio.create_task_group() as tg:
+                group = ContainedTaskGroup(tg, BackgroundTaskHealth())
+                a = await job_a.sweep(group)
+                b = await job_b.sweep(group)
+            return [a, b]
+
+        assert sorted(anyio.run(go)) == [0, 1]
+        assert len(finder_a.plans) + len(finder_b.plans) == 1
+        assert round_of(store, seq).images_tries == 2
 
 
 # -- through the app: the view, the media, erasure, restart --------------------------------------
@@ -925,6 +1220,45 @@ class TestThroughTheApp:
                 what="the picture files to be erased",
             )
             assert client.get(f"{BASE}/adventure/bank", headers=h).json() == {"trips": []}
+
+    def test_the_app_heals_a_wait_whose_hunt_died_with_another_process(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """The supervised sweep is wired into the app: a round left `images = pending` by a process
+        that stored the pack and then stopped is hunted again, with nobody calling anything."""
+        finder = FakePictureFinder(sample_pictures(3))
+        researcher = FakeResearcher([FakeRunPlan(statuses=["running"])])
+        timing = PictureTiming(watch_interval_s=0.05, stale_after_s=0.3, max_tries=3)
+        with unlocked_client(
+            storage_root,
+            wixy_repo_root,
+            pin_verifier,
+            researcher=researcher,
+            picture_finder=finder,
+            picture_timing=timing,
+        ) as (client, h):
+            seq = create_round(client, h).json()["message"]["seq"]
+            route_to_chosen(client, h, seq)  # the research is still running in THIS process...
+            store = app_store(client)
+            wait_for(
+                lambda: (
+                    (r := store.get_adventure_round(anchor_seq=seq)) is not None
+                    and r.pack_run_id == "fake-run-1"
+                ),
+                what="the research run to be recorded",
+            )
+            # ...while "the other process" stores the pack and starts a hunt that never finishes.
+            assert store.finish_adventure_pack(
+                anchor_seq=seq,
+                run_id="fake-run-1",
+                state="ready",
+                pack_json=PACK_JSON,
+                pictures_pending=True,
+                now=time.time() - 100.0,
+            )
+            view = wait_for_pictures(client, h, seq, count=3)
+            assert view["pack"]["images"] == "done" and len(finder.plans) == 1
+            assert store.get_adventure_round(anchor_seq=seq).images_tries == 2  # type: ignore[union-attr]
 
 
 class TestTheRealFinderThroughTheApp:

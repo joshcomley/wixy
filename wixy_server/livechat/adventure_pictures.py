@@ -64,7 +64,7 @@ from wixy_server.livechat.safe_fetch import (
     SafeFetcher,
     SafeFetchError,
 )
-from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.store import MAX_PICTURE_TRIES, LiveChatStore
 from wixy_server.storage import ProjectPaths
 
 _LOGGER = logging.getLogger(__name__)
@@ -1132,10 +1132,32 @@ def pictures_wanted(row: AdventureRoundRow | None) -> bool:
     )
 
 
+STALE_MARGIN_S: Final = 120.0
+"""How long past the finder's own budget a hunt may run (the non-cancellable decode, the staging and
+the attach) before its round counts as abandoned."""
+
+
+@dataclass(frozen=True, slots=True)
+class PictureTiming:
+    """When a `pending` picture wait counts as abandoned and how often that is checked. The
+    defaults are production's; tests shorten them."""
+
+    watch_interval_s: float = 60.0
+    stale_after_s: float = JOB_BUDGET_S + STALE_MARGIN_S
+    max_tries: int = MAX_PICTURE_TRIES
+
+
 class AdventurePictureJob:
     """Finds a ready pack's pictures, stages them and attaches them to the round's anchor message
     in one transaction. Idempotent: the attach is a compare-and-set on `images = 'pending'`, so a
-    restart, a blue/green overlap or a repeat finds nothing to do or loses the race harmlessly."""
+    restart, a blue/green overlap or a repeat finds nothing to do or loses the race harmlessly.
+
+    A `pending` wait is SELF-HEALING (audit round 3, F4), not startup-only: when the current hunt
+    began is recorded with the pack (`images_started_at`), and `watch_forever` — a supervised loop
+    (Inv 47) — re-claims and re-runs any round pending longer than a hunt can take. That covers a
+    hunt cancelled by the old side of a blue/green hand-off AFTER the new side's startup redo, and a
+    failure to even record the failure. A round whose hunts keep dying is ended after
+    `max_tries`."""
 
     def __init__(
         self,
@@ -1146,6 +1168,8 @@ class AdventurePictureJob:
         finder: AdventurePictureFinder,
         notifier: LiveChatNotifier,
         space_ok: Callable[[int], bool] | None = None,
+        timing: PictureTiming | None = None,
+        clock: Callable[[], float] = time.time,
     ) -> None:
         self._store = store
         self._paths = paths
@@ -1153,19 +1177,80 @@ class AdventurePictureJob:
         self._finder = finder
         self._notifier = notifier
         self._space_ok = space_ok
+        self._timing = timing if timing is not None else PictureTiming()
+        self._clock = clock
+        self._running: set[int] = set()
+        """Rounds this process is hunting right now (the sweep never starts a second one)."""
+
+    async def _claim(self, anchor_seq: int, *, stale_before: float | None) -> str:
+        now = self._clock()
+        result = await anyio.to_thread.run_sync(
+            lambda: self._store.claim_adventure_pictures(
+                anchor_seq=anchor_seq,
+                stale_before=stale_before,
+                now=now,
+                max_tries=self._timing.max_tries,
+            )
+        )
+        if result == "gave_up":
+            _LOGGER.warning(
+                "adventure pictures: round %s's hunts keep dying; giving up", anchor_seq
+            )
+            self._notifier.publish()
+        return result
 
     async def resume(self, background: ContainedTaskGroup) -> int:
         """Startup recovery: redo the hunt for every round whose pictures were still pending when
-        the previous process stopped (nothing was attached — the attach is all-or-nothing)."""
+        the previous process stopped (nothing was attached — the attach is all-or-nothing). Each
+        redo is a claim (it counts as a try and restarts the round's staleness clock). Returns how
+        many hunts were started."""
         pending = await anyio.to_thread.run_sync(self._store.adventure_pending_pictures)
+        started = 0
         for anchor_seq in pending:
-            background.spawn("livechat-adventure-pictures", self.run, anchor_seq)
-        return len(pending)
+            if await self._claim(anchor_seq, stale_before=None) == "claimed":
+                background.spawn("livechat-adventure-pictures", self.run, anchor_seq)
+                started += 1
+        return started
+
+    async def sweep(self, background: ContainedTaskGroup) -> int:
+        """One pass of the self-healing check: re-run the hunt for every round pending longer than
+        `stale_after_s` (one this process is already hunting is left alone). Returns how many
+        hunts were started."""
+        stale_before = self._clock() - self._timing.stale_after_s
+        stale = await anyio.to_thread.run_sync(
+            lambda: self._store.adventure_stale_pictures(stale_before=stale_before)
+        )
+        started = 0
+        for anchor_seq in stale:
+            if anchor_seq in self._running:
+                continue
+            if await self._claim(anchor_seq, stale_before=stale_before) == "claimed":
+                background.spawn("livechat-adventure-pictures", self.run, anchor_seq)
+                started += 1
+        return started
+
+    async def watch_forever(self, background: ContainedTaskGroup) -> None:
+        """The supervised loop (`ContainedTaskGroup.supervise`): sweep every `watch_interval_s`. A
+        failed sweep is logged and tried again on the next tick, never fatal."""
+        while True:
+            await anyio.sleep(self._timing.watch_interval_s)
+            try:
+                await self.sweep(background)
+            except Exception:
+                _LOGGER.exception("adventure pictures: the sweep for abandoned hunts failed")
 
     async def run(self, anchor_seq: int) -> None:
         """Find and attach the pictures for `anchor_seq`. Never raises for an ordinary failure (the
         round just ends with `images = failed` and no pictures); only cancellation (shutdown)
-        propagates, leaving the round `pending` for the next start to redo."""
+        propagates, leaving the round `pending` for the sweep (or the next start) to redo. If even
+        ending the wait fails, the round stays `pending` and the sweep heals it."""
+        self._running.add(anchor_seq)
+        try:
+            await self._run_and_settle(anchor_seq)
+        finally:
+            self._running.discard(anchor_seq)
+
+    async def _run_and_settle(self, anchor_seq: int) -> None:
         try:
             attached = await self._run(anchor_seq)
         except Exception:

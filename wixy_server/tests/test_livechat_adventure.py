@@ -132,6 +132,8 @@ class TestSchema:
                 "pack_error",
                 "images",
                 "pictures",
+                "images_started_at",
+                "images_tries",
                 "decided_by",
                 "rev",
                 "created_at",

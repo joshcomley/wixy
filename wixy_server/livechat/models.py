@@ -284,6 +284,10 @@ class AdventureRoundRow:
     pictures_json: str | None
     """Which stored attachment (by ordinal on the anchor message) fills which picture slot, with its
     credit, source page and caption — JSON, written in the same transaction as the attachments."""
+    images_started_at: float | None
+    """When the current picture hunt began (epoch seconds, server clock); `None` before any."""
+    images_tries: int
+    """How many hunts have begun for this round (the first, then re-claims of a dead one)."""
     decided_by: str | None
     rev: int
     created_at: float

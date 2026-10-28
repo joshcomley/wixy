@@ -31,6 +31,7 @@ from wixy_server.livechat.adventure_pictures import (
     AdventurePictureFinder,
     FoundPicture,
     PicturePlan,
+    PictureTiming,
 )
 from wixy_server.livechat.models import AdventureLanding, AdventureRoundRow
 from wixy_server.livechat.pinclient import CmdPinVerifier
@@ -333,6 +334,7 @@ def unlocked_client(
     timing: PackTiming | None = None,
     email: str = "a@example.com",
     picture_finder: AdventurePictureFinder | None = None,
+    picture_timing: PictureTiming | None = None,
 ) -> Iterator[tuple[TestClient, dict[str, str]]]:
     """An app (with the small fixture bank and a `FakeResearcher` unless told otherwise — a test
     never reaches a real cmd) and an unlocked token, closed on exit so each test's background
@@ -354,6 +356,7 @@ def unlocked_client(
         adventure_researcher=resolved,
         adventure_pack_timing=timing if timing is not None else FAST,
         adventure_picture_finder=picture_finder,
+        adventure_picture_timing=picture_timing,
     )
     client = TestClient(app, cookies={"CF_Authorization": "dummy"})
     client.__enter__()

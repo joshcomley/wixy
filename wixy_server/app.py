@@ -51,6 +51,7 @@ from wixy_server.livechat.adventure_pack import (
 from wixy_server.livechat.adventure_pictures import (
     AdventurePictureFinder,
     AdventurePictureJob,
+    PictureTiming,
     WebPictureFinder,
 )
 from wixy_server.livechat.call_broker import CallBroker
@@ -167,6 +168,7 @@ def create_app(
     adventure_researcher: AdventureResearcher | None = None,
     adventure_pack_timing: PackTiming | None = None,
     adventure_picture_finder: AdventurePictureFinder | None = None,
+    adventure_picture_timing: PictureTiming | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -225,6 +227,8 @@ def create_app(
     researcher (fleet edition, cmd AI backend, no researcher injected) and only with the media
     pipeline available; an injected researcher therefore never reaches the internet unless the test
     also injects a finder. Standalone / no researcher / no media pipeline: a pack has no pictures.
+    `adventure_picture_timing` shortens how long a `pending` picture wait must last before the
+    supervised sweep re-runs its hunt, and how often the sweep looks (tests).
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -380,6 +384,7 @@ def create_app(
             finder=resolved_picture_finder,
             notifier=livechat_notifier,
             space_ok=_picture_space_ok,
+            timing=adventure_picture_timing,
         )
         if resolved_picture_finder is not None and resolved_adventure_researcher is not None
         else None
@@ -530,6 +535,10 @@ def create_app(
                 # A holiday pack still `pending` belongs to a job that died with the previous
                 # process: resume polling its run, or start one if it never got that far.
                 await livechat_adventure_runner.resume(background)
+                # ...and a picture wait is never startup-only: a supervised sweep re-runs any hunt
+                # pending longer than a hunt can take (a blue/green hand-off can stop the old
+                # side mid-hunt after this side's resume), ending a round whose hunts keep dying.
+                livechat_adventure_runner.supervise_pictures(background)
                 yield
                 tg.cancel_scope.cancel()
         finally:
