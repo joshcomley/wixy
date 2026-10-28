@@ -42,19 +42,26 @@ picking (turns 1..10) ──[turn 10 pick commits]──► finished
 `cookout_rounds.concepts` (once `state = 'finished'`):
 `none` (while `picking`/`abandoned`) → `pending` → `ready` | `failed` | `unavailable`
 (`unavailable` = no AI runner configured, e.g. the standalone edition). `failed` | `unavailable`
-→ retry → `pending`.
+→ manual retry (§3.5) → `pending` (clearing `concepts_run_id`, `concepts_error`, `concepts_json`,
+resetting `concepts_started_at = now`, `concepts_tries = 1`, `concepts_deadline_at = now + 900`, and
+resetting `images = 'none'`, `pictures = NULL`, `images_started_at = NULL`, `images_tries = 0`,
+`images_deadline_at = NULL` while incrementing `images_generation`).
 
 `cookout_rounds.images` (starts when `concepts` becomes `ready`):
 `none` → `pending` → `done` | `failed` (`none` in standalone or when ComfyUI is not configured).
 Partial success is kept (`pictures` maps each completed slot `"a"|"b"|"c"` to its attachment id);
-if any slot fails, `images = 'failed'` and `POST /cookout/{seq}/pictures/retry` regenerates only
-the missing slots.
+if any slot fails, `images = 'failed'` and `POST /cookout/{seq}/pictures/retry` increments
+`images_generation`, resets `images = 'pending'`, `images_started_at = now`, `images_tries = 1`,
+`images_deadline_at = now + 600`, preserves already-attached `pictures`, and regenerates only the
+missing slots.
 
 `cookout_recipes.state` (per concept `concept_id ∈ {'a','b','c'}` when **Bank this** is tapped):
 row absent (not yet requested) → `pending` ("Writing recipe…") → `banked` | `failed` | `unavailable`.
 A concept becomes **`banked`** (and appears in the Recipe book) **only** when its validated full
 recipe is stored. Each of the three concepts is independently bankable by either player; failed or
-unavailable saves are retryable on the card.
+unavailable saves are retryable on the card (§3.5: resetting `state = 'pending'`, clearing `run_id`,
+`error`, `recipe_json`, leaving `banked_at = NULL`, and setting `started_at = now`, `tries = 1`,
+`deadline_at = now + 900`).
 
 ### 1.1 Players, explicit Join, and turn order
 
@@ -128,10 +135,11 @@ is immutable for that round.
   - `cookout_view_json` redacts the response in Python before serialization based on
     `viewer_slot = _slot_of(round_, viewer_key, viewer_email)`:
     1. **Partner's picks:** `players[partner].picks` is `null` (only `pickCount: 0..5` is sent).
-    2. **Current turn options:** `current.options`, `current.offerIndex`, and
+    2. **Current turn options & role:** `current.role`, `current.options`, `current.offerIndex`, and
        `current.skipsRemaining` are populated **only** when `viewer_slot == current.player`. When
-       `viewer_slot != current.player` (including `viewer_slot is None`), all three fields are
-       `null`.
+       `viewer_slot != current.player` (including `viewer_slot is None`), all four fields
+       (`current.role`, `current.options`, `current.offerIndex`, `current.skipsRemaining`) are
+       `null` (only public `turn`, `player`, and `waitingForJoin` are exposed).
     3. **Turn history:** `history` includes **only** turns where `turn.player == viewer_slot`.
 - **In Blind mode when `state == 'finished'` (The Big Reveal):**
   - When Turn 10's pick commits (`state == 'finished'`), `revealed` becomes `true` and both
@@ -147,8 +155,15 @@ is immutable for that round.
   `message_updated`) carries no ingredient IDs, options, or recipe text, and every personalised
   `CookoutView` response sets `Cache-Control: no-store`.
 
-### 1.4 Abandonment and idempotency
+### 1.4 Serialization, abandonment, and idempotency
 
+- **Two-phone write serialization (`BEGIN IMMEDIATE`):**
+  - Every `create`, `join`, `skip`, `pick`, `abandon`, `bank`, and `retry` decision and draw write
+    executes in one `store._write_txn()` (`BEGIN IMMEDIATE`) transaction, with `time.time()` sampled
+    only after the SQLite write lock is acquired and `notifier.publish()` called only after commit.
+  - Competing moves from two phones or two processes serialize at the database lock: the first
+    applicable move wins and commits; the loser receives `409 bad_state` (or `200 OK` on a
+    state-idempotent `join`/`bank`/`retry`) and re-reads the updated view.
 - **Abandonment:**
   - Starting a new Cookout round (`POST /cookout`) atomically marks any open `picking` Cookout round
     as `abandoned` (bumping its `rev` and emitting `message_updated`).
@@ -156,7 +171,7 @@ is immutable for that round.
     `picking` round via the pane's **End game** action (`POST /cookout/{seq}/abandon` `{sender}`).
   - A `finished` round is **never** abandoned by starting a new game or calling `/abandon`.
 - **Idempotency (no global `expectedRev`):**
-  - `POST /cookout` is idempotent on `clientId` (`messages.client_id`, checked before abandonar).
+  - `POST /cookout` is idempotent on `clientId` (`messages.client_id`, checked before abandonment).
   - `POST /cookout/{seq}/join` is state-idempotent for the already-bound Slot 2 player (`200 OK`
     with the current view).
   - `POST /cookout/{seq}/skip` and `POST /cookout/{seq}/pick` carry `{moveId, turn, offer}`.
@@ -199,7 +214,7 @@ No dietary or allergen promises are made or stored.
     { "id": "granulated-sugar", "name": "Granulated sugar", "pickable": true },
     { "id": "milk", "name": "Milk", "pickable": true }
   ],
-  "stopWords": ["bread", "sauce", "salad", "soup", "stew", "roast", "bake", "pie", "toast", "water"],
+  "stopWords": ["bread", "sauce", "salad", "soup", "stew", "roast", "bake", "pie", "pan", "pot", "bowl", "plate", "crust", "glaze", "broth", "water"],
   "ingredients": [
     {
       "id": "thick-white-toast",
@@ -250,10 +265,14 @@ No dietary or allergen promises are made or stored.
   Checks total count (`2,500–4,000`), schema/type/slug rules, normalized `name`/`aliases`
   uniqueness, that all 15 categories are populated and none exceeds `25%` of the bank, that each of
   the 4 roles (`base`, `protein`, `produce`, `accent`) has at least `200` entries and at least `30`
-  `everyday` families, mandatory operator examples (toast, sugar, parsley, beef, cream), that the 5
-  pickable staples exist in `ingredients` with matching IDs while `water`, `salt`, `black-pepper`
-  do not, and runs 500 simulated maximum-skip rounds (all 10 turns × 3 offers = 60 items/round) with
-  zero draw exhaustion.
+  `everyday` families across at least 2 categories, mandatory operator examples (toast, sugar,
+  parsley, beef, cream), that the 5 pickable staples exist in `ingredients` with matching IDs while
+  `water`, `salt`, `black-pepper` do not, that no staple food name (`butter`, `flour`, `milk`, `oil`,
+  `sugar`, `salt`, `pepper`) appears in `stopWords`, and runs 500 simulated maximum-skip rounds (all
+  10 turns × 3 offers = 30 pairs / 60 items per round) asserting on **every emitted pair** that both
+  options belong to the turn's role, have two distinct categories (`cat_a != cat_b`), have two
+  distinct families (`fam_a != fam_b`), include at least one `everyday` entry
+  (`rarity == "everyday"`), and never repeat an `id` or a selected `family`.
 
 ### 2.2 The eight cupboard staples
 
@@ -282,27 +301,39 @@ The complete cupboard staples list is **eight items**:
   exact same five role opportunities (`1 base, 1 protein, 2 produce, 1 accent`), and skipping keeps
   the turn's role.
 - **Pair selection rules for `(turn, player)` with target `role = role_schedule[(turn - 1) // 2]`:**
-  1. **Hard exclusions (round-wide):**
+  1. **Hard constraints (never relaxed):**
      - Exclude every ingredient `id` already offered anywhere in this round (`seen_ids`, across both
        players and all skips/unchosen mates).
      - Exclude every `family` already **selected** (`choice_id`) by either player in this round
        (`picked_families`).
-  2. **Soft family preference:** Prefer families not yet offered in this round (`offered_families`);
-     if fewer than 2 legal families remain for `role` under that preference, relax the unpicked
-     `offered_families` preference while keeping `seen_ids` and `picked_families` strictly excluded.
-  3. **Per-player least-shown category within the role:**
-     - Among categories that have eligible candidates in `role`, choose `cat_a` uniformly at random
-       from those tied for the lowest number of items already offered to `player` in this round.
-     - Temporarily increment `cat_a`'s offered count for `player` and choose `cat_b` (`cat_b != cat_a`
-       when at least two categories in `role` have legal families) from those tied for the lowest
-       offered count.
-  4. **At least one `everyday` per pair + `8 : 3 : 1` rarity weighting:**
-     - For **Option 1** (in `cat_a`): draw uniformly from eligible families in `cat_a` that have an
-       `everyday` entry (falling back to any eligible family in `cat_a` only if no `everyday` family
-       remains), then uniformly among that family's eligible entries.
-     - For **Option 2** (in `cat_b`, excluding Option 1's `family`): choose an available rarity tier
-       in `cat_b` with weights **`everyday = 8, uncommon = 3, exotic = 1`**, then choose a family
-       uniformly within that tier, then an entry uniformly within that family.
+     - The pair **must** have two distinct categories (`cat_a != cat_b`), two distinct families
+       (`fam_a != fam_b`), and at least one option whose own entry has `rarity == "everyday"`.
+  2. **Feasible category/family pairings & soft `offered_families` preference:**
+     - First restrict candidates in `role` to families not yet offered in this round
+       (`offered_families`) and compute all ordered category pairs `(cat_a, cat_b)` with
+       `cat_a != cat_b` for which `cat_a` has at least one eligible `everyday` entry (`fam_a`) and
+       `cat_b` has at least one eligible entry in a different family (`fam_b != fam_a`).
+     - If no such feasible `(cat_a, cat_b)` pairing exists under the unpicked `offered_families`
+       preference, relax only `offered_families` (keeping `seen_ids`, `picked_families`,
+       `cat_a != cat_b`, `fam_a != fam_b`, and at least one `everyday` entry strictly enforced).
+     - If no feasible `(cat_a, cat_b)` pairing exists even after relaxing `offered_families`, raise
+       `409 exhausted` without charging a skip or mutating the current offer/round state.
+  3. **Per-player least-shown category within feasible pairings:**
+     - Among all `cat_a` values that appear in at least one feasible `(cat_a, cat_b)` pairing,
+       choose `cat_a` uniformly at random from those tied for the lowest number of items already
+       offered to `player` in this round.
+     - For **Option 1** (in `cat_a`): choose a family `fam_a` uniformly among `cat_a`'s eligible
+       families that have at least one eligible `everyday` entry AND leave at least one valid partner
+       category `cat_b != cat_a` with an eligible family `fam_b != fam_a`; then choose Option 1
+       uniformly from `fam_a`'s **eligible `everyday` entries only** (`entry.rarity == "everyday"`).
+     - Temporarily increment `cat_a`'s offered count for `player` and choose `cat_b` uniformly at
+       random from the valid partner categories (`cat_b != cat_a` having at least one eligible family
+       `fam_b != fam_a`) tied for the lowest offered count for `player`.
+  4. **Option 2 (`8 : 3 : 1` rarity weighting) & fair coin swap:**
+     - For **Option 2** (in `cat_b`, restricted to eligible entries with `family != fam_a`): choose
+       an available rarity tier in `cat_b` with weights **`everyday = 8, uncommon = 3, exotic = 1`**,
+       then choose a family uniformly within that tier, then an entry uniformly within that family's
+       eligible entries of that tier.
      - Randomly swap `(Option 1, Option 2)` with a 50/50 coin toss so the guaranteed-everyday side
        is not predictable.
   5. **Immutable offer snapshots:** Store both options in `cookout_turns.offers` as full snapshots
@@ -375,23 +406,42 @@ Validation runs deterministically in Python (`parse_concepts` / `parse_recipe`):
      ingredients.
    - **Technique/type diversity:** The three concepts must have **three distinct
      `(dishType, technique)` pairs** and at least **two distinct `dishType` values**.
-3. **Lexical contraband scan:**
-   - Scans every prose field (`title`, `description`, `omitted[].reason`, and in full recipes
-     `ingredients[].quantity`, `ingredients[].note`, `steps[].text`, `tips[]`) against a compiled
-     longest-first word-boundary dictionary of all bank `name` and `aliases` entries, **excluding**:
-     - the 10 picked ingredients and every bank entry sharing one of their `family` values,
-     - for a single concept/recipe, also checking that unpicked basket items listed in `omitted` are
-       not claimed as used in `title`, `description`, or `steps`,
-     - the 8 cupboard staples (`water`, `salt`, `black-pepper`, plus the concept's declared
-       `stapleIds`), and
-     - the bank's curated `stopWords` list of generic culinary nouns/verbs (`bread`, `sauce`,
-       `salad`, `soup`, `stew`, `roast`, `bake`, `pie`, `toast`, `water`, `oil`, `sugar`, `salt`,
-       `pepper`, `butter`, `flour`, `milk`, `pan`, `pot`, `bowl`, `plate`, `crust`, `glaze`, `broth`,
-       etc. — unit-tested against the committed bank).
-   - **One repair run on failure:** If structural validation or the lexical scan fails, the runner
-     spawns **at most one repair run** under the same job deadline, feeding back the exact violation
-     messages (including any contraband food words detected). If the repair run also fails, the job
-     transitions to `failed` (retryable by the user).
+3. **Lexical contraband scan (two deterministic passes):**
+   - **Pass 1 — Main bank contraband scan:** Scans every prose field (`title`, `vibe`, `description`,
+     `omitted[].reason`, and in full recipes `ingredients[].quantity`, `ingredients[].note`,
+     `steps[].text`, `tips[]`) against a compiled longest-first word-boundary dictionary of all bank
+     `name` and `aliases` entries, **excluding ONLY**:
+     - for `omitted[].reason`: the round's 10 picked ingredients (and every bank entry sharing one
+       of their `family` values), the free seasonings (`water`, `salt`, `black-pepper`), the
+       concept's declared `stapleIds`, and `stopWords` (so `omitted[].reason` may name the omitted
+       basket item it is explaining);
+     - for consumption fields (`title`, `vibe`, `description`, `ingredients[].quantity`,
+       `ingredients[].note`, `steps[].text`, `tips[]`): the concept/recipe's **used**
+       `pickedIngredientIds` (and every bank entry sharing one of their `family` values, except any
+       `omitted` basket item's own `name`/`aliases`), the free seasonings (`water`, `salt`,
+       `black-pepper`), the concept/recipe's declared `stapleIds`, and the bank's curated
+       `stopWords` list of genuinely non-ingredient generic culinary/cookware words (`bread`,
+       `sauce`, `salad`, `soup`, `stew`, `roast`, `bake`, `pie`, `pan`, `pot`, `bowl`, `plate`,
+       `crust`, `glaze`, `broth`, `water`, etc.). **No staple food name (`butter`, `flour`, `milk`,
+       `oil`, `sugar`, `salt`, `pepper`) is ever in `stopWords`.**
+   - **Pass 2 — Manifest-specific lexical scan (never suppressed by `stopWords` or family exemptions):**
+     Scans every consumption field (`title`, `vibe`, `description`, and in full recipes
+     `ingredients[].quantity`, `ingredients[].note`, `steps[].text`, `tips[]`) against the
+     unfiltered `name` and `aliases` (plus common short forms `butter`, `flour`, `oil`, `sugar`,
+     `milk`) of:
+     1. Every `omitted` basket ingredient for that concept: **any** word-boundary occurrence in
+        `title`, `vibe`, `description`, `quantity`, `note`, `steps[].text`, or `tips[]` is rejected
+        (the prompt explicitly instructs the model never to mention omitted items outside
+        `omitted[].reason`; no negation inference is attempted).
+     2. Every undeclared non-seasoning staple (any of `butter`, `plain-flour`/`flour`,
+        `cooking-oil`/`oil`, `granulated-sugar`/`sugar`, `milk` that is neither in the
+        concept/recipe's `pickedIngredientIds` nor in its declared `stapleIds`): **any**
+        word-boundary occurrence in consumption prose is rejected, enforcing both the ≤ 4
+        non-seasoning staple cap and the frozen recipe manifest.
+   - **One repair run on failure:** If structural validation or either lexical pass fails, the
+     runner spawns **at most one repair run** under the same job deadline, feeding back the exact
+     violation messages (including any contraband or undeclared/omitted food words detected). If the
+     repair run also fails, the job transitions to `failed` (retryable by the user).
    - **Honest limit:** Because the scan uses the bank's names and aliases as its food dictionary, a
      food word absent from the ~3,000-item bank could slip through prose; there is no second LLM
      checker pass.
@@ -401,38 +451,62 @@ Validation runs deterministically in Python (`parse_concepts` / `parse_recipe`):
 - **Text first, pictures second:** As soon as `concepts` validates, `finish_cookout_concepts`
   stores `concepts = 'ready'` and publishes `message_updated` so the three titles and descriptions
   appear immediately. In the same transaction (when `ComfyImageGenerator` is configured), it sets
-  `images = 'pending'`, `images_started_at = now`, `images_tries = 1`, `images_deadline_at = now + 600`.
-- **Single ComfyUI graph with 3 sampling chains (`generate_many`):**
+  `images = 'pending'`, `images_started_at = now`, `images_tries = 1`,
+  `images_deadline_at = now + 600`, and increments `images_generation = images_generation + 1`.
+- **Single ComfyUI graph with 1–3 sampling chains (`generate_many`):**
   - `ComfyImageGenerator` in `wixy_server/livechat/wyr_images.py` gains
     `generate_many(self, prompts: Sequence[str], out_dir: Path, *, seeds: Sequence[int] | None = None) -> list[Path | None]`
-    for `1..3` prompts. It loads `UNETLoader` (`"1"`), `CLIPLoader` (`"2"`), and `VAELoader` (`"3"`)
-    **once** and wires `len(prompts)` sampling chains (`CLIPTextEncode` → `EmptySD3LatentImage` →
-    `KSampler` → `VAEDecode` → `SaveImage`) at node-ID bases `10, 20, 30` in a single `/prompt`
-    submission (`1024×1024`, `DEFAULT_IMAGE_MODEL = "krea2-turbo-nvfp4"`).
-  - `generate_pair` remains a thin wrapper around `generate_many([prompt_a, prompt_b], ...)` that
-    raises `WyrImageError` if either slot is `None`, so Would-You-Rather is completely untouched.
+    for `1..3` prompts. It generalizes the **current WYR graph verbatim**: loads `UNETLoader`
+    (`"1"`), `CLIPLoader` (`"2"`), and `VAELoader` (`"3"`) **once**, and wires `len(prompts)`
+    sampling chains (`CLIPTextEncode` → `ConditioningZeroOut` negative branch + `EmptyLatentImage`
+    (`1024×1024`, `batch_size = 1`) → `KSampler` → `VAEDecode` → `SaveImage`) at node-ID bases
+    `10, 20, 30` in a single `/prompt` submission (`DEFAULT_IMAGE_MODEL = "krea2-turbo-nvfp4"`),
+    preserving all existing Krea 2 Turbo node settings and defaults.
+  - `generate_pair` remains a thin compatibility wrapper around
+    `generate_many([prompt_a, prompt_b], ...)` that keeps its exact signature and `(Path, Path)`
+    return type and raises the existing **`ImageGenerationError`** (`wyr_images.py:40`) if either
+    slot is `None`, so Would-You-Rather is completely untouched.
 - **Reuse `wyr_` prefix (Inv 54):**
   - Keep `FILE_PREFIX = "wyr_"` (`wyr_<run_id>_0`, `wyr_<run_id>_1`, `wyr_<run_id>_2`) so the
     existing ComfyUI history/output sweeper (`purge_leftovers`, `sweep_leftovers`, `_forget_run`)
-    automatically cleans up Cookout runs with zero new sweep prefix risk.
+    automatically cleans up Cookout runs in ComfyUI's output directory and `/history` with zero new
+    sweep prefix risk.
+- **Scratch directory ownership & erasure (`server/cookout-tmp/`):**
+  - Each picture attempt writes downloaded PNGs into an attempt-scoped random work directory
+    `<storage>/projects/<slug>/server/cookout-tmp/<random_token>/` owned by `cookout_images.py`.
+  - Its `try/finally` block removes every downloaded file, the attempt work directory, and every
+    staged upload not transferred by a winning `store_cookout_pictures` transaction — on success,
+    partial failure, total failure, lost `images_generation` claim, anchor deletion, and task
+    cancellation.
+  - `clear_cookout_scratch(paths, *, max_age_s: float = 900.0)` runs both **at server startup and on
+    the supervised 60 s sweep**, removing any file or subdirectory under `server/cookout-tmp/` older
+    than 900 seconds so young work from a blue/green overlap is preserved while any killed-process
+    orphan initially too young at startup is reclaimed once it ages out.
 - **Server-built deterministic image prompt:**
   ```text
   Photorealistic appetising food photograph of "<concept.title>", one finished cooked serving made with <resolved pickedIngredientIds + stapleIds names>. Rustic home-cooked presentation, natural kitchen light, simple ceramic plate, shallow depth of field, no people, no hands, no raw-ingredient collage, no unlisted side dishes, no text, labels, logos, or watermark.
   ```
-- **Shared GPU limiter, partial success & self-healing:**
+- **Shared GPU limiter, `images_generation` fencing, partial success & self-healing:**
   - Runs under the existing `wyr_image_limiter` (`CapacityLimiter(1)`) and increments
     `WyrDemand.count` (`demand.count += 1` / `demand.count -= 1` in `try/finally`) so background WYR
     pool fill yields immediately.
-  - Each non-null PNG returned by `generate_many` is staged via `server/cookout-tmp/` and attached
-    to the anchor message as an ordinary private `photo` attachment (excluded from `list_gallery`
-    and bumping `cookout_rounds.rev` in `finish_attachment`, matching `adv_rounds`).
-  - `cookout_rounds.pictures` stores the JSON map `{"a": att_id, "b": att_id, "c": att_id}` for all
-    slots that succeeded. If all 3 slots are present, `images = 'done'`; if 1 or 2 slots succeeded
-    and the rest failed, those successful attachments are **kept** and `images = 'failed'` so
-    `POST /cookout/{seq}/pictures/retry` generates only the missing slot(s) (`1..3` prompts) and
-    merges them into `pictures`.
-  - Orphaned `images = 'pending'` waits self-heal via `images_started_at` and `images_tries`
-    (`MAX_PICTURE_TRIES = 3`, supervised 60 s sweep, matching `adventure_pack.py`).
+  - Every picture attempt is fenced by the monotonic `cookout_rounds.images_generation` counter:
+    `claim_cookout_pictures` increments `images_generation` and returns `("claimed", generation)`;
+    both `store_cookout_pictures(..., expected_generation=generation)` and
+    `fail_cookout_pictures(..., expected_generation=generation)` require the live anchor row with
+    `state = 'finished'`, `concepts = 'ready'`, `images = 'pending'`, and
+    `images_generation = expected_generation`. A losing write returns `False`, journals/removes its
+    unattached staged uploads, and leaves the newer attempt untouched.
+  - Under the winning transaction, each non-null PNG is attached to the anchor message as an
+    ordinary private `photo` attachment (excluded from `list_gallery` and bumping `cookout_rounds.rev`
+    in `finish_attachment`, matching `adv_rounds`), merging only still-missing slots into
+    `cookout_rounds.pictures` (`{"a": att_id, "b": att_id, "c": att_id}`) and preserving any
+    already-ready slot attachments. If all 3 slots are present, `images = 'done'`; if 1 or 2 slots
+    succeeded and the rest failed, those successful attachments are **kept** and `images = 'failed'`
+    so `POST /cookout/{seq}/pictures/retry` increments `images_generation` and generates only the
+    missing slot(s) (`1..3` prompts).
+  - Orphaned `images = 'pending'` waits self-heal via `images_started_at`, `images_tries`, and
+    `images_generation` (`MAX_PICTURE_TRIES = 3`, supervised 60 s sweep).
 
 ### 3.4 Stage 2: "Bank this" full-recipe job (`cookout_ai.py`) and Recipe book
 
@@ -474,23 +548,49 @@ Validation runs deterministically in Python (`parse_concepts` / `parse_recipe`):
   - `serves` must be `2`; `prepMinutes` (`0..240`), `cookMinutes` (`0..480`), with
     `totalMinutes = prepMinutes + cookMinutes` (`1..720`) computed by the server.
   - `ingredients` (`1..24` unique IDs): must cover every ID in `concept.pickedIngredientIds` and
-    `concept.stapleIds`, and may only additionally include `water`, `salt`, or `black-pepper`. Each
-    item has `quantity` (`1..80` chars) and `note` (`0..120` chars).
+    `concept.stapleIds`, and may only additionally include free seasonings (`water`, `salt`,
+    `black-pepper`). It may **never** add an omitted basket ingredient or an undeclared non-seasoning
+    staple (`butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk`) not already in
+    `concept.pickedIngredientIds ∪ concept.stapleIds`. Each item has `quantity` (`1..80` chars) and
+    `note` (`0..120` chars).
   - `steps` (`2..20` items): `text` (`1..600` chars), `minutes` (`0..480 | null`), `uses` subset of
     the recipe's ingredient IDs; every listed ingredient ID must appear in at least one step's
     `uses`. `tips`: `0..4` strings (`1..240` chars each).
-  - Runs the same lexical contraband scan (§3.2) over `quantity`, `note`, `steps[].text`, and
-    `tips[]`, with at most one repair run on failure.
+  - Runs both deterministic lexical contraband passes (§3.2 Pass 1 and Pass 2) over `quantity`,
+    `note`, `steps[].text`, and `tips[]` against the frozen recipe manifest, with at most one repair
+    run on failure.
   - On validation success, compare-and-set transitions `cookout_recipes.state = 'banked'` and stamps
     `banked_at = now`. Only `state = 'banked'` rows appear in `GET /cookout/bank`.
 
-### 3.5 Restarts, self-healing, standalone edition, and privacy
+### 3.5 Restarts, manual retry transactions, self-healing, standalone edition, and privacy
 
 - **Startup & supervised sweep:** Following `adventure_pack.py`, at startup and on a supervised
-  periodic sweep every `pending` concept or recipe row with a persisted `run_id` resumes polling
+  60 s periodic sweep every `pending` concept or recipe row with a persisted `run_id` resumes polling
   that cmd run; a `pending` row without a `run_id` (or whose run died before completion and
-  `tries < 2` within `deadline_at`) starts/retries cleanly. All completions are compare-and-set on
-  `(state = 'pending' AND run_id = ?)`.
+  `tries < 2` within `deadline_at`) starts/retries cleanly. All concept/recipe completions are
+  compare-and-set on `(state = 'pending' AND run_id = ?)`. Both startup and the 60 s sweep also call
+  `clear_cookout_scratch(paths, max_age_s=900.0)` (§3.3).
+- **Manual retry store transactions (one `_write_txn` per retry):**
+  - **Concepts retry (`retry_cookout_concepts`):** Requires `state = 'finished'` and
+    `concepts IN ('failed', 'unavailable')` (when runner is available); sets `concepts = 'pending'`,
+    clears `concepts_run_id = NULL`, `concepts_error = NULL`, `concepts_json = NULL`, sets
+    `concepts_started_at = now`, `concepts_tries = 1`, `concepts_deadline_at = now + 900`, resets
+    image fields (`images = 'none'`, `pictures = NULL`, `images_started_at = NULL`,
+    `images_tries = 0`, `images_deadline_at = NULL`, while incrementing
+    `images_generation = images_generation + 1`), bumps `rev`, and appends `message_updated`.
+  - **Pictures retry (`retry_cookout_pictures`):** Requires `state = 'finished'`,
+    `concepts = 'ready'`, `images != 'pending'`, and at least one missing slot in `pictures`
+    (`a`/`b`/`c`); preserves already-attached `pictures`, sets `images = 'pending'`,
+    `images_started_at = now`, `images_tries = 1`, `images_deadline_at = now + 600`, increments
+    `images_generation = images_generation + 1` (never resetting `images_generation`), bumps `rev`,
+    and appends `message_updated`.
+  - **Recipe retry (`retry_cookout_recipe`):** Requires `state = 'finished'`, `concepts = 'ready'`,
+    and `cookout_recipes.state IN ('failed', 'unavailable')`; sets `state = 'pending'`, clears
+    `run_id = NULL`, `error = NULL`, `recipe_json = NULL` (leaving `banked_at = NULL`), sets
+    `started_at = now`, `tries = 1`, `deadline_at = now + 900`, bumps `cookout_rounds.rev`, and
+    appends `message_updated`.
+  - A repeated retry request while the target is already `pending` is a state-idempotent `200 OK`
+    no-op.
 - **Shared cmd spawn pacing:** `CookoutRunner` uses `CapacityLimiter(2)` and a `5.0 s` minimum gap
   between `spawn_run` calls.
 - **Standalone edition:** When the AI backend is not `cmd`, the game remains playable (`picking` and
@@ -498,10 +598,11 @@ Validation runs deterministically in Python (`parse_concepts` / `parse_recipe`):
   `unavailable`, and `images` stays `none`.
 - **Privacy (Inv 57):** All Cookout state (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, and
   anchor photo attachments) is chat content — erased on anchor message delete (`ON DELETE CASCADE`)
-  and on chat wipe (`store._wipe`). As with Adventure Time (Inv 56), `cmd` retains its own hidden
-  `chat-spawn` record of each food-only concept/recipe run (which contains only static bank
-  ingredient names/IDs and no user or chat identifiers, though its timestamp indicates a round was
-  played then).
+  and on chat wipe (`store._wipe`), with `server/cookout-tmp/` cleaned in `finally` and by
+  `clear_cookout_scratch`. As with Adventure Time (Inv 56), `cmd` retains the food-only prompt AND
+  response in its hidden `chat-spawn` ledger/transcript, including the selected basket combination,
+  generated concepts/full recipes, omission reasons, and any repair feedback; no player name, email,
+  message body, device id, or other chat content is sent, and this server cannot erase `cmd`'s copy.
 
 ---
 
@@ -529,6 +630,7 @@ CREATE TABLE IF NOT EXISTS cookout_rounds(
   pictures TEXT,
   images_started_at REAL, images_tries INTEGER NOT NULL DEFAULT 0,
   images_deadline_at REAL,
+  images_generation INTEGER NOT NULL DEFAULT 0,
   rev INTEGER NOT NULL DEFAULT 1,
   created_at REAL NOT NULL, updated_at REAL NOT NULL
 );
@@ -572,6 +674,10 @@ CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
 
 ### 4.2 Wire (`/api/admin/server/cookout*`)
 
+- **Mandatory unlock/auth gate:** Every `/api/admin/server/cookout*` route, including
+  `/cookout/bank`, calls `require_server_token` FIRST; only then does it validate `sender`/`?as=`
+  with `_slot_of`. A missing, invalid, or expired token or a revoked grant gets the existing
+  `401 locked` response; no player label is an auth credential.
 - `Message.cookout = {state, blind, pickedCount, concepts, bankedCount, rev} | null` (joined at read
   time like `wyr` and `adventure`; contains zero ingredient or recipe data).
 - `POST /api/admin/server/cookout` `{clientId, deviceId, sender, blind?: bool}` → `201 {message}`
@@ -590,7 +696,7 @@ CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
     ],
     you: { slot: 1 | 2 } | null,
     current: {
-      turn: 1..10, player: 1 | 2, role: "base"|"protein"|"produce"|"accent",
+      turn: 1..10, player: 1 | 2, role: "base"|"protein"|"produce"|"accent" | null,
       waitingForJoin: bool,
       options: [IngredientSnap, IngredientSnap] | null,
       offerIndex: 0 | 1 | 2 | null,
@@ -630,16 +736,26 @@ CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
 - `POST /api/admin/server/cookout/{seq}/abandon` `{sender}` → `200 CookoutView`. Marks an open
   `picking` round as `abandoned` (`409 bad_state` if already `finished`).
 - `POST /api/admin/server/cookout/{seq}/concepts/retry` `{sender}` → `200 CookoutView` (when
-  `concepts` is `failed`, or `unavailable` and a runner now exists).
+  `concepts` is `failed`, or `unavailable` and a runner now exists; executes `retry_cookout_concepts`
+  in §3.5: sets `concepts = 'pending'`, clears `concepts_run_id`, `concepts_error`, `concepts_json`,
+  sets `concepts_started_at = now`, `concepts_tries = 1`, `concepts_deadline_at = now + 900`, resets
+  image fields while incrementing `images_generation`, and publishes; state-idempotent no-op when
+  already `pending`).
 - `POST /api/admin/server/cookout/{seq}/pictures/retry` `{sender}` → `200 CookoutView` (when
-  `concepts == 'ready'`, any picture slot `a`/`b`/`c` is missing, and `images != 'pending'`).
+  `concepts == 'ready'`, any picture slot `a`/`b`/`c` is missing, and `images != 'pending'`;
+  executes `retry_cookout_pictures` in §3.5: preserves already-attached `pictures`, increments
+  `images_generation`, sets `images = 'pending'`, `images_started_at = now`, `images_tries = 1`,
+  `images_deadline_at = now + 600`, and publishes; state-idempotent no-op when already `pending`).
 - `POST /api/admin/server/cookout/{seq}/concepts/{conceptId}/bank` `{sender, moveId}` →
   `200 CookoutView` (when `concepts == 'ready'`; starts the Stage-2 full-recipe job for `conceptId`).
 - `POST /api/admin/server/cookout/{seq}/concepts/{conceptId}/recipe/retry` `{sender}` →
-  `200 CookoutView` (when `recipes[conceptId].state` is `failed` or `unavailable`).
+  `200 CookoutView` (when `recipes[conceptId].state` is `failed` or `unavailable`; executes
+  `retry_cookout_recipe` in §3.5: sets `state = 'pending'`, clears `run_id`, `error`, `recipe_json`,
+  leaves `banked_at = NULL`, sets `started_at = now`, `tries = 1`, `deadline_at = now + 900`, and
+  publishes; state-idempotent no-op when already `pending`).
 - Standard errors: `404 not_found`, `409 bad_state`, `409 not_your_turn`, `409 not_player`,
   `409 skip_exhausted`, `409 exhausted`, `422 invalid`, `503 game_unavailable`. Every mutation
-   response is filtered through `cookout_view_json` for the caller and sets `Cache-Control: no-store`.
+  response is filtered through `cookout_view_json` for the caller and sets `Cache-Control: no-store`.
 
 ---
 
@@ -724,34 +840,62 @@ guard, exponential poll backoff while `concepts`, `images`, or any `recipes[id]`
 
 - **pytest** `test_cookout_bank.py`: runs `tooling/cookout/validate_bank.py` over the committed
   `cookout_ingredients.json` (2,500–4,000 items, 15 categories, 4 roles, ≥ 200 items & ≥ 30 everyday
-  families per role, unique normalized names/aliases, 8 staples contract, stop-words list, and 500
-  simulated maximum-skip 60-item rounds without exhaustion) plus negative fixtures.
-- **pytest** `test_livechat_cookout.py`: migration v20→v21 from a real v20 DB; round creation in
-  `picking` with Turn 1 drawn; explicit `/join` binding Slot 2 (both before and after Turn 1's pick,
-  verifying Turn 2 is never drawn before Join); strict turn alternation; 2 skips per turn (3rd skip
-  returns `409 skip_exhausted`, pick resets next turn's skips to 2); Open vs. Blind redaction in
-  `cookout_view_json` (partner options, picks, and history `null` while `picking`; all 10 selected
-  picks revealed on `finished`; partner skipped offers stay hidden even when `finished`; `abandoned`
-  blind round never reveals; `Cache-Control: no-store`); `_slot_of` email verification; `moveId`
-  idempotent replays on `skip`, `pick`, and `bank`; `clientId` replay on `create`; abandonment on
-  new round and `/abandon` (never abandoning `finished`); anchor delete cascade and `store._wipe`
-  clearing `cookout_recipes`, `cookout_turns`, `cookout_rounds`; `wyrSeq` accepted for Cookout
-  anchors (`wyrRefKind = "cookout"`).
+  families per role across ≥ 2 categories, unique normalized names/aliases, 8 staples contract,
+  stop-words list containing no staple food names, and 500 simulated maximum-skip 60-item rounds
+  asserting on **every emitted pair** that `cat_a != cat_b`, `fam_a != fam_b`, at least one option
+  has `rarity == "everyday"`, and no `id` or picked `family` repeats) plus unit fixtures for
+  mixed-rarity entries in one family, least-shown category lacking everyday entries when a valid
+  alternative exists, cross-category family collisions, one remaining eligible category (`409
+  exhausted`), and negative bank fixtures.
+- **pytest** `test_livechat_cookout.py`: migration v20→v21 from a real v20 DB; parametrized
+  `401 locked` auth gate test across every Cookout route (create, view, join, pick, skip, abandon,
+  bank, book, and all retries) plus revoked-grant coverage; round creation in `picking` with Turn 1
+  drawn; explicit `/join` binding Slot 2 (both before and after Turn 1's pick, verifying Turn 2 is
+  never drawn before Join); strict turn alternation; 2 skips per turn (3rd skip returns
+  `409 skip_exhausted`, pick resets next turn's skips to 2); Open vs. Blind redaction in
+  `cookout_view_json` (asserting `current.role`, `current.options`, `current.offerIndex`,
+  `current.skipsRemaining`, partner option IDs/names/categories/aliases/blurbs, partner `picks`, and
+  partner offer `history` are `null`/absent from every non-active blind response, including mutation
+  responses; all 10 selected picks revealed on `finished`; partner skipped offers stay hidden even
+  when `finished`; `abandoned` blind round never reveals; `Cache-Control: no-store`); `_slot_of`
+  email verification; `moveId` idempotent replays on `skip`, `pick`, and `bank`; `clientId` replay
+  on `create`; manual retry transactions from `tries >= limit`, expired `deadline_at`, and when an
+  old run completes late after a new retry epoch begins; competing two-store-connection
+  (`BEGIN IMMEDIATE`) race tests for `pick`/`pick`, `skip`/`pick`, `join`/`join`, `new`/`new`,
+  `bank`/`bank`, `retry`/`retry`, the Turn-10 final `pick` (asserting one state transition, one
+  `message_updated` event, one job start, and no second draw), and `delete`/`wipe` racing against
+  job completion; abandonment on new round and `/abandon` (never abandoning `finished`); anchor
+  delete cascade and `store._wipe` clearing `cookout_recipes`, `cookout_turns`, `cookout_rounds`;
+  `wyrSeq` accepted for Cookout anchors (`wyrRefKind = "cookout"`).
 - **pytest** `test_livechat_cookout_ai.py` & `test_livechat_cookout_images.py`: `parse_concepts` and
   `parse_recipe` structural checks, coverage rules (≥ 7 each, at least one ≥ 8, union = 10, exact
   `omitted` complement, ≤ 4 non-seasoning staples, distinct `(dishType, technique)` pairs),
-  deterministic lexical contraband scan (rejecting unpicked bank foods like `"mango"` or `"bacon"`
-  in titles/descriptions/steps while permitting picked items, their families, staples, and
-  `stopWords`), one-repair-run feedback loop, startup resume and compare-and-set completion,
-  standalone `unavailable` mode, `ComfyImageGenerator.generate_many(1..3)` with `wyr_` prefix
-  cleanup, partial-success attachment persistence + missing-slot `/pictures/retry`, Gallery
-  exclusion, and `images_started_at`/`images_tries` self-healing.
-- **vitest** (`admin-ui/src/server/__tests__/`): `cookout/api.test.ts` (defensive parsers),
-  `cookout/model.test.ts` (rev monotonicity, pending poll backoff), `cookout/cookoutGame.test.ts`
-  (start sheet, Join button, 2-skip button states, Blind cloche view with zero leaked DOM strings,
-  10-pick reveal, 3 concept cards, independent `Bank this` → `Writing recipe…` → `Banked ✓` full
-  recipe view), `cookout/cookoutCard.test.ts`, `cookout/recipeBook.test.ts`, and `gameTabs.test.ts`
-  (`GameKey = "wyr" | "adventure" | "cookout"`).
+  two-pass deterministic lexical contraband scan (rejecting unpicked bank foods like `"mango"` or
+  `"bacon"`, a 5th undeclared non-seasoning staple such as `"milk"`, a known staple absent from the
+  frozen recipe manifest, and any `omitted` basket item mentioned in `title`/`vibe`/`description`/
+  `quantity`/`note`/`steps`/`tips` including negated mentions, while permitting `omitted` items in
+  their own `omitted[].reason`, declared items/families/staples, and genuine `stopWords`),
+  one-repair-run feedback loop, startup resume and compare-and-set completion, standalone
+  `unavailable` mode, `ComfyImageGenerator.generate_many(1..3)` preserving existing WYR graph nodes
+  (`EmptyLatentImage`, `ConditioningZeroOut`, shared loader IDs `"1"`, `"2"`, `"3"`, and existing
+  WYR image tests green) with `generate_pair` raising `ImageGenerationError` on missing output,
+  `wyr_` prefix cleanup, `server/cookout-tmp/` attempt-directory cleanup on success/partial failure/
+  delete/wipe/cancel, `clear_cookout_scratch` preserving young `< 900 s` work and reclaiming it once
+  `>= 900 s`, rejected/fenced upload staging cleanup, two-store-instance `images_generation` fencing
+  (claim A then B; late A failure and late A success both return `False` without touching B or
+  overwriting ready slots; manual retry fencing earlier completions), partial-success attachment
+  persistence + missing-slot `/pictures/retry`, Gallery exclusion, and `images_started_at`/
+  `images_tries` self-healing.
+- **vitest** (`admin-ui/tests/cookout/*.test.ts` and `admin-ui/tests/serverGameTabs.test.ts`,
+  verified discovered via `npm test -- --list`): `admin-ui/tests/cookout/api.test.ts` (defensive
+  parsers), `admin-ui/tests/cookout/model.test.ts` (rev monotonicity, pending poll backoff),
+  `admin-ui/tests/cookout/cookoutGame.test.ts` (start sheet, Join button, 2-skip button states,
+  Blind cloche view with zero leaked DOM strings, 10-pick reveal, 3 concept cards, independent
+  `Bank this` → `Writing recipe…` → `Banked ✓` full recipe view),
+  `admin-ui/tests/cookout/cookoutCard.test.ts`, `admin-ui/tests/cookout/recipeBook.test.ts`, and
+  `admin-ui/tests/serverGameTabs.test.ts` (`GameKey = "wyr" | "adventure" | "cookout"`), plus
+  verifying the rebuilt `wixy_server/static/admin/` CSS bundle contains the Cookout selectors from
+  `admin-ui/src/server/chat.css`.
 - **e2e** `e2e/tests/server-cookout.spec.ts`: two players in separate browser contexts; start a
   Blind Cookout from the `⋯` menu start sheet, Player 1 picks Turn 1 immediately, Player 2 joins and
   uses 2 skips before picking on Turn 2 (verifying the 3rd skip is disabled and Player 1's DOM never
@@ -767,11 +911,15 @@ guard, exponential poll backoff while `concepts`, `images`, or any `recipes[id]`
 `docs/ai/livechat.md` (new §24 for Cookout + updated game frame notes), `docs/ai/contracts.md`
 (`/api/admin/server/cookout*` routes, `Message.cookout`, `wyrRefKind = "cookout"`),
 `docs/ai/invariants.md` (**Inv 57** — a Cookout round and its banked recipes/pictures are anchor-owned
-chat content erased on delete/wipe; Blind mode's server-side redaction, `_slot_of` shared-email
-honest limit, and non-reveal on abandon; deterministic lexical contraband scan honest limit; `cmd`'s
-retained food-only run copy; ComfyUI `wyr_` cleanup under Inv 54), `docs/ai/glossary.md` (Cookout
-states), `docs/ai/testing.md`, `CLAUDE.md` store table (`cookout_rounds`, `cookout_turns`,
-`cookout_recipes` at schema v21), and `decisions/00193-server-chat-cookout/`.
+chat content erased on delete/wipe, with `server/cookout-tmp/` cleaned in `finally` and by
+`clear_cookout_scratch`; Blind mode's server-side redaction including `current.role`, `_slot_of`
+shared-email honest limit, and non-reveal on abandon; deterministic lexical contraband scan honest
+limit; `cmd` retains the food-only prompt AND response — including the selected basket combination,
+generated concepts/full recipes, omission reasons, and repair feedback — with no player name, email,
+message body, device id, or other chat content sent, and this server cannot erase `cmd`'s copy;
+ComfyUI `wyr_` cleanup under Inv 54), `docs/ai/glossary.md` (Cookout states), `docs/ai/testing.md`,
+`CLAUDE.md` store table (`cookout_rounds`, `cookout_turns`, `cookout_recipes` at schema v21), and
+`decisions/00193-server-chat-cookout/`.
 Commits carry `Release-note: General bug fixes and improvements.` (R14a: Server chat stays discreet).
 
 ---
@@ -785,7 +933,7 @@ To prevent merge conflicts across parallel builders, every shared file has a **s
 | **P1 — Static Ingredient Bank & Draw Engine** | **Sonnet 5.5** | `wixy_server/livechat/cookout_ingredients.json`, `wixy_server/livechat/cookout_bank.py`, `tooling/cookout/validate_bank.py`, `wixy_server/tests/test_cookout_bank.py` | Frozen `CookoutBank` interface below (exports a 60-item test fixture immediately while authoring the ~3,000-item JSON) |
 | **P2 — Store v21, Game State, Routes & App Wiring** | **Sonnet 5.5** | **Sole owner** of `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, `wixy_server/app.py`, `wixy_server/tests/test_livechat_cookout.py` | Frozen `CookoutBank` & `CookoutRunner` protocols (uses lightweight fakes in unit tests so P2 and P3 build in parallel) |
 | **P3 — AI Concept/Recipe Runner & ComfyUI Pictures** | **Sonnet 5.5** | **Sole owner** of `wixy_server/livechat/cookout_ai.py`, `wixy_server/livechat/cookout_images.py`, `wixy_server/livechat/wyr_images.py` (`generate_many`), `wixy_server/tests/fake_cmd.py`, `wixy_server/tests/test_livechat_cookout_ai.py`, `wixy_server/tests/test_livechat_cookout_images.py` | Frozen `CookoutBank` & P2 store methods below (never edits `store.py`, `models.py`, or `app.py`) |
-| **P4 — Admin UI (Pane, Card, Recipe Book & Frame)** | **Opus 5.5** | **Sole owner** of `admin-ui/src/server/cookout/{api.ts, model.ts, cookoutGame.ts, cookoutCard.ts, recipeBook.ts}`, `admin-ui/src/server/{gameTabs.ts, thread.ts, api/messages.ts}`, `admin-ui/src/styles/livechat.css`, `admin-ui/src/server/__tests__/cookout*.test.ts`, and rebuilt `wixy_server/static/admin/*` bundles | §4.2 wire contract & §5.1 TS interfaces (builds in parallel against JSON fixtures) |
+| **P4 — Admin UI (Pane, Card, Recipe Book & Frame)** | **Opus 5.5** | **Sole owner** of `admin-ui/src/server/cookout/{api.ts, model.ts, cookoutGame.ts, cookoutCard.ts, recipeBook.ts}`, `admin-ui/src/server/{gameTabs.ts, thread.ts, chat.css, api/messages.ts}`, `admin-ui/tests/cookout/*.test.ts`, `admin-ui/tests/serverGameTabs.test.ts`, and rebuilt `wixy_server/static/admin/*` bundles | §4.2 wire contract & §5.1 TS interfaces (builds in parallel against JSON fixtures) |
 | **P5 — Docs, Invariant 57 & Playwright E2E** | **Sonnet 5.5** | `e2e/tests/server-cookout.spec.ts`, `docs/ai/{livechat.md, contracts.md, invariants.md, glossary.md, testing.md}`, `CLAUDE.md` store table, `decisions/00193-server-chat-cookout/` | Drafts docs in parallel; runs full-stack E2E once P1–P4 integrate |
 
 ### A.1 Frozen Python interface — P1 (`wixy_server/livechat/cookout_bank.py`)
@@ -854,6 +1002,8 @@ class CookoutBank:
         *,
         allowed_ingredient_ids: AbstractSet[str],
         allowed_staple_ids: AbstractSet[str],
+        omitted_ingredient_ids: AbstractSet[str] = frozenset(),
+        allow_omitted_mentions: bool = False,
     ) -> list[str]: ...
 
 
@@ -881,23 +1031,28 @@ def finish_cookout_concepts(
     error: str | None = None,
     pictures_pending: bool = False,
 ) -> bool: ...
+def retry_cookout_concepts(self, anchor_seq: int, *, now: float) -> bool: ...
 def cookout_pending_concepts(self) -> list[tuple[int, str | None]]: ...
 
 
-# ComfyUI pictures (partial-success aware)
+# ComfyUI pictures (partial-success aware, fenced by images_generation)
 def claim_cookout_pictures(
     self, anchor_seq: int, *, stale_before: float | None, now: float
-) -> Literal["claimed", "not_due", "gave_up", "gone"]: ...
+) -> tuple[Literal["claimed", "not_due", "gave_up", "gone"], int]: ...
 def store_cookout_pictures(
     self,
     anchor_seq: int,
+    expected_generation: int,
     slot_uploads: Mapping[str, tuple[str, int]],  # slot ("a"|"b"|"c") -> (upload_id, byte_size)
     by_email: str | None,
     *,
     all_done: bool,
     now: float,
 ) -> bool: ...
-def fail_cookout_pictures(self, anchor_seq: int, *, now: float) -> bool: ...
+def fail_cookout_pictures(
+    self, anchor_seq: int, *, expected_generation: int, now: float
+) -> bool: ...
+def retry_cookout_pictures(self, anchor_seq: int, *, now: float) -> bool: ...
 def cookout_stale_pictures(self, *, stale_before: float) -> list[int]: ...
 
 
@@ -915,6 +1070,7 @@ def finish_cookout_recipe(
     recipe_json: str | None = None,
     error: str | None = None,
 ) -> bool: ...
+def retry_cookout_recipe(self, anchor_seq: int, concept_id: str, *, now: float) -> bool: ...
 def cookout_pending_recipes(self) -> list[tuple[int, str, str | None]]: ...
 ```
 
