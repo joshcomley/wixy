@@ -1189,6 +1189,23 @@ describe("initOverlay", () => {
       teardown();
     });
 
+    it("the toolbar names the list and the item it belongs to, and follows the pointer to another item", () => {
+      renderShowcase();
+      const items = root.querySelectorAll("[data-wx-list-item]");
+      const { teardown } = initFor("index", showcaseBindings);
+
+      items[1]?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      let toolbar = document.querySelector<HTMLElement>(".wx-item-toolbar");
+      expect(toolbar?.dataset["wxToolbarList"]).toBe("showcase.items");
+      expect(toolbar?.dataset["wxToolbarIndex"]).toBe("1");
+
+      items[0]?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+      expect(document.querySelectorAll(".wx-item-toolbar")).toHaveLength(1);
+      toolbar = document.querySelector<HTMLElement>(".wx-item-toolbar");
+      expect(toolbar?.dataset["wxToolbarIndex"]).toBe("0");
+      teardown();
+    });
+
     it("hovering an item shows a toolbar; delete removes the item and emits the shrunk array", () => {
       renderShowcase();
       const firstItem = root.querySelectorAll("[data-wx-list-item]")[0] as HTMLElement;
