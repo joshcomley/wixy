@@ -5,6 +5,7 @@
 import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from "./http";
 import type { DrawingSummary } from "./drawings";
 import type { WyrSummary } from "./wyr";
+import type { AdventureSummary } from "../adventure/api";
 import type { ServerSession } from "../types";
 
 import type { AttachmentTranscript } from "../mediaRender";
@@ -95,6 +96,13 @@ export interface Message {
   /** The would-you-rather round (its anchor message's seq) this message was sent in the game
    * chat of — null/absent for an ordinary message or on a server that predates the game chat. */
   readonly wyrRef?: number | null;
+  /** Which game `wyrRef` belongs to (resolved by the server at read time, so a client paging history
+   * need not have the anchor loaded): "wyr" or "adventure"; null with `wyrRef`. Absent from a server
+   * that predates Adventure Time (read as unknown: the anchor itself, if loaded, says). */
+  readonly wyrRefKind?: "wyr" | "adventure" | null;
+  /** The Adventure Time round anchored to this message (summary only: never the spin, landing or
+   * pack). Absent or null on a server that predates the game, or on an ordinary message. */
+  readonly adventure?: AdventureSummary | null;
 }
 
 export interface HistoryPage {
@@ -126,8 +134,8 @@ export interface SendMessageInput {
   /** Round 2 ruling item 10 §(3): omit the key entirely for an ordinary
    * message — never send it as `undefined` explicitly. */
   readonly replyToSeq?: number;
-  /** Send into a would-you-rather round's game chat (the round's anchor seq); omit for the
-   * main chat. */
+  /** Send into a game item's chat — a would-you-rather round's OR an Adventure Time round's anchor
+   * seq (the historical name means "the game-chat anchor of ANY game"); omit for the main chat. */
   readonly wyrSeq?: number;
 }
 
