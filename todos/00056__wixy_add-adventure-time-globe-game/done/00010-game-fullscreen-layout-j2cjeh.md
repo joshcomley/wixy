@@ -9,4 +9,4 @@ message, R5 quick reply (ordinary composer re-parented; mic + send), R6 pack scr
 map, R7 WYR too, R8 360/390/1280 screenshots, R9 docs + decision (number after 00193),
 R10 tests; R11 (addendum) Yay/Nay buttons on the left of the Adventure title row, no
 "Adventure Time" title text, no big Bank this / No thanks dock, AA contrast.
-Status: building.
+Status: DONE — PR #349 merged as 9bed312, live 19:51:30Z; served admin.js verified (FAB, quick reply, Yay/Nay strings).

@@ -95,7 +95,7 @@ never "auto"; `1` reproduces the old fully serial run for debugging) and `WIXY_E
 `python3`; on Windows use the real interpreter, bare `python` is the Store stub). Do not add a
 shared `webServer` or a fixed port back: that is what forced `workers: 1`.
 
-**Every test starts from a pristine Server chat** (decisions/00193). A worker's one fixture server
+**Every test starts from a pristine Server chat** (decisions/00195). A worker's one fixture server
 holds one Server chat that its tests share in sequence, and which tests share a worker varies run to
 run, so a test used to inherit earlier tests' messages, game rounds (Adventure Time's unfinished
 rounds are OFFERED as a tab and their cards carry a Play button), device grants, call state and
