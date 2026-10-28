@@ -145,6 +145,7 @@ class FakeOpenWeb:
             commons_api=f"http://{COMMONS_HOST}:{port}/w/api.php",
             commons_page_base=f"http://{COMMONS_HOST}:{port}/wiki/",
             thumb_hosts=frozenset({THUMB_HOST, UPLOAD_HOST}),
+            wikimedia_suffixes=("wikimedia.test", "wikipedia.test"),
         )
 
     # -- Commons ---------------------------------------------------------------------------------
@@ -275,6 +276,8 @@ class FakeOpenWeb:
         image_content_type: str = "image/jpeg",
         status: int = 200,
         head_extra: str = "",
+        page_content_type: str = "text/html; charset=utf-8",
+        after_html: bytes = b"",
     ) -> None:
         """A venue page at `host`+`path` carrying `og:image` (a path on the same host, or a full
         URL), optionally `twitter:image` / `og:site_name`; the image is served at `image_path`."""
@@ -290,7 +293,9 @@ class FakeOpenWeb:
             meta.append(f'<meta property="og:site_name" content="{site_name}">')
         head = "".join(meta) + head_extra
         html = f"<!doctype html><html><head><title>Venue</title>{head}</head><body>hi</body></html>"
-        self.web.add(host, path, Reply(body=html.encode(), content_type="text/html; charset=utf-8"))
+        self.web.add(
+            host, path, Reply(body=html.encode() + after_html, content_type=page_content_type)
+        )
         self.web.add(
             host,
             image_path,

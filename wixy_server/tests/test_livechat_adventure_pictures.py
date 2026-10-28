@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import dataclasses
 import io
+import threading
 import time
 import warnings
 from collections.abc import Callable, Sequence
@@ -15,10 +16,11 @@ from urllib.parse import urlsplit, urlunsplit
 
 import anyio
 import pytest
-from PIL import Image
+from PIL import Image, JpegImagePlugin
 
 from wixy_server.livechat import adventure_pictures
 from wixy_server.livechat.adventure_pictures import (
+    HEAD_SCAN_BYTES,
     HERO_MAX,
     HERO_TARGET,
     ITEM_SLOT_ATTEMPTS,
@@ -26,13 +28,17 @@ from wixy_server.livechat.adventure_pictures import (
     FoundPicture,
     PicturePlan,
     PictureRejected,
+    PictureSlot,
     WebPictureFinder,
     commons_file_name,
+    declared_picture_size,
+    is_wikimedia_host,
     page_meta,
     parse_commons_pages,
     plain_text,
     plan_pictures,
     prepare_picture,
+    web_codec,
 )
 from wixy_server.tests.fake_open_web import (
     COMMONS_HOST,
@@ -435,14 +441,284 @@ class TestPreparePicture:
         with pytest.raises(PictureRejected):
             prepare_picture(b"\xff\xd8\xff" + png[3:])
 
-    def test_a_picture_declaring_more_than_36_megapixels_is_refused_before_decoding(self) -> None:
-        # 7000 x 6000 = 42 MP: under the chat's own 80 MP cap, over the fetched-picture cap.
+    def test_a_picture_declaring_more_than_16_megapixels_is_refused_before_decoding(self) -> None:
+        # 5000 x 4000 = 20 MP: under the chat's own 80 MP cap, over the fetched-picture cap.
         big = io.BytesIO()
-        Image.new("1", (7000, 6000)).save(big, format="PNG")
-        assert adventure_pictures.MAX_FETCHED_PIXELS == 36_000_000
+        Image.new("1", (5000, 4000)).save(big, format="PNG")
+        assert adventure_pictures.MAX_FETCHED_PIXELS == 16_000_000
         with pytest.raises(PictureRejected) as caught:
             prepare_picture(big.getvalue())
         assert caught.value.reason == "too_many_pixels"
+
+    def test_a_picture_of_exactly_16_megapixels_is_accepted_and_shrunk(self) -> None:
+        # The largest allowed input, in the format that needs the most memory (RGBA).
+        buffer = io.BytesIO()
+        Image.new("RGBA", (4000, 4000), (200, 30, 30, 255)).save(buffer, format="PNG")
+        prepared = prepare_picture(buffer.getvalue())
+        assert (prepared.width, prepared.height) == (1600, 1600)
+
+    def test_the_reported_size_is_the_upright_size_written(self) -> None:
+        # Stored 3600 x 2400, EXIF orientation 6 (rotate 90): upright 2400 x 3600 -> 1067 x 1600.
+        prepared = prepare_picture(make_image(3600, 2400, orientation=6))
+        assert (prepared.width, prepared.height) == (1067, 1600)
+        assert Image.open(io.BytesIO(prepared.jpeg)).size == (1067, 1600)
+
+
+# -- the header is read from the bytes, BEFORE Image.open (F1) -------------------------------------
+
+
+def png_header(width: int, height: int) -> bytes:
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + (13).to_bytes(4, "big")
+        + b"IHDR"
+        + width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + b"\x08\x06\x00\x00\x00"
+        + b"\x00" * 8
+    )
+
+
+def jpeg_header(width: int, height: int) -> bytes:
+    sof = (
+        b"\x08"
+        + height.to_bytes(2, "big")
+        + width.to_bytes(2, "big")
+        + b"\x03"
+        + b"\x01\x22\x00\x02\x11\x01\x03\x11\x01"
+    )
+    return (
+        b"\xff\xd8"
+        + b"\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"
+        + b"\xff\xc0"
+        + (len(sof) + 2).to_bytes(2, "big")
+        + sof
+        + b"\xff\xda\x00\x08\x01\x01\x00\x00?\x00"
+        + b"\x00" * 8
+    )
+
+
+def _riff(chunk: bytes) -> bytes:
+    return b"RIFF" + (4 + len(chunk)).to_bytes(4, "little") + b"WEBP" + chunk
+
+
+def webp_vp8x(width: int, height: int) -> bytes:
+    body = (
+        b"\x10\x00\x00\x00" + (width - 1).to_bytes(3, "little") + (height - 1).to_bytes(3, "little")
+    )
+    return _riff(b"VP8X" + (10).to_bytes(4, "little") + body + b"\x00" * 8)
+
+
+def webp_vp8(width: int, height: int) -> bytes:
+    frame = (
+        b"\x10\x02\x00"
+        + b"\x9d\x01\x2a"
+        + width.to_bytes(2, "little")
+        + height.to_bytes(2, "little")
+    )
+    return _riff(b"VP8 " + len(frame).to_bytes(4, "little") + frame + b"\x00" * 8)
+
+
+def webp_vp8l(width: int, height: int) -> bytes:
+    bits = (width - 1) | ((height - 1) << 14)
+    frame = b"\x2f" + bits.to_bytes(4, "little")
+    return _riff(b"VP8L" + len(frame).to_bytes(4, "little") + frame + b"\x00" * 8)
+
+
+HEADER_BUILDERS = {
+    "png": png_header,
+    "jpeg": jpeg_header,
+    "webp-vp8x": webp_vp8x,
+    "webp-vp8": webp_vp8,
+    "webp-vp8l": webp_vp8l,
+}
+
+
+class TestDeclaredSize:
+    @pytest.fixture
+    def no_image_open(self, monkeypatch: pytest.MonkeyPatch) -> list[int]:
+        calls: list[int] = []
+
+        def boom(*args: object, **kwargs: object) -> object:
+            calls.append(1)
+            raise AssertionError("Image.open must not be called for this header")
+
+        monkeypatch.setattr(Image, "open", boom)
+        return calls
+
+    @pytest.mark.parametrize("kind", list(HEADER_BUILDERS))
+    @pytest.mark.parametrize(("width", "height"), [(4001, 4000), (8000, 8000), (16383, 16383)])
+    def test_an_oversize_header_is_refused_without_calling_image_open(
+        self, no_image_open: list[int], kind: str, width: int, height: int
+    ) -> None:
+        with pytest.raises(PictureRejected) as caught:
+            prepare_picture(HEADER_BUILDERS[kind](width, height))
+        assert caught.value.reason == "too_many_pixels"
+        assert no_image_open == []
+
+    @pytest.mark.parametrize(("width", "height"), [(65535, 65535), (30000, 40000)])
+    def test_the_huge_sizes_only_png_jpeg_and_vp8x_can_declare_are_refused_too(
+        self, no_image_open: list[int], width: int, height: int
+    ) -> None:
+        for builder in (png_header, jpeg_header):
+            with pytest.raises(PictureRejected) as caught:
+                prepare_picture(builder(width, height))
+            assert caught.value.reason == "too_many_pixels"
+        # The auditor's case: a 140-byte animated WebP declaring a 16384 x 16384 canvas.
+        with pytest.raises(PictureRejected) as caught:
+            prepare_picture(webp_vp8x(16384, 16384))
+        assert caught.value.reason == "too_many_pixels"
+        assert no_image_open == []
+
+    @pytest.mark.parametrize("kind", list(HEADER_BUILDERS))
+    def test_a_small_or_banner_header_is_refused_before_opening_too(
+        self, no_image_open: list[int], kind: str
+    ) -> None:
+        for size, reason in (((300, 300), "too_small"), ((2000, 480), "banner")):
+            with pytest.raises(PictureRejected) as caught:
+                prepare_picture(HEADER_BUILDERS[kind](*size))
+            assert caught.value.reason == reason
+        assert no_image_open == []
+
+    @pytest.mark.parametrize("kind", list(HEADER_BUILDERS))
+    def test_an_acceptable_header_does_reach_image_open(
+        self, kind: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        opened: list[int] = []
+        real_open = Image.open
+
+        def spy(*args: Any, **kwargs: Any) -> Any:
+            opened.append(1)
+            return real_open(*args, **kwargs)
+
+        monkeypatch.setattr(Image, "open", spy)
+        with pytest.raises(PictureRejected) as caught:  # a header with no image data behind it
+            prepare_picture(HEADER_BUILDERS[kind](1200, 800))
+        assert caught.value.reason in ("corrupt", "format_mismatch")
+        assert opened == [1]
+
+    @pytest.mark.parametrize(
+        "data",
+        [
+            b"\x89PNG\r\n\x1a\n" + b"\x00" * 30,  # no IHDR
+            b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IDAT" + b"\x00" * 20,
+            b"\xff\xd8\xff\xe0\x00\x10JFIF" + b"\x00" * 40,  # never reaches a frame header
+            b"\xff\xd8\xff\xdb\x00\x04\x00\x00" + b"\x00" * 12,  # junk where a marker should be
+            b"RIFF\x00\x00\x00\x00WEBPJUNK" + b"\x00" * 30,  # a first chunk that is not VP8*
+            b"RIFF\x00\x00\x00\x00WEBPVP8 " + b"\x00" * 30,  # bad VP8 start code
+            b"RIFF\x00\x00\x00\x00WEBPVP8L" + b"\x00" * 30,  # bad VP8L signature
+            b"RIFF\x00\x00\x00\x00WEBPVP8X\x0a",  # truncated
+        ],
+    )
+    def test_an_unreadable_header_is_refused_before_opening(
+        self, no_image_open: list[int], data: bytes
+    ) -> None:
+        with pytest.raises(PictureRejected) as caught:
+            prepare_picture(data)
+        assert caught.value.reason == "corrupt"
+        assert no_image_open == []
+
+    def test_the_header_reader_agrees_with_real_files(self) -> None:
+        def encode(image: Image.Image, **options: Any) -> bytes:
+            out = io.BytesIO()
+            image.save(out, **options)
+            return out.getvalue()
+
+        rgb = Image.new("RGB", (731, 509), (10, 120, 200))
+        lossy_webp = make_image(731, 509, fmt="WEBP", exif=False)
+        exif_webp = make_image(731, 509, fmt="WEBP", exif=True)
+        assert lossy_webp[12:16] == b"VP8 " and exif_webp[12:16] == b"VP8X"
+        cases: dict[str, tuple[str, bytes]] = {
+            "baseline jpeg": ("jpeg", make_image(731, 509)),
+            "progressive jpeg": ("jpeg", encode(rgb, format="JPEG", progressive=True)),
+            "grey jpeg": ("jpeg", encode(rgb.convert("L"), format="JPEG")),
+            "png": ("png", make_image(731, 509, fmt="PNG")),
+            "webp VP8": ("webp", lossy_webp),
+            "webp VP8X": ("webp", exif_webp),
+            "webp VP8L": ("webp", encode(rgb, format="WEBP", lossless=True)),
+        }
+        for name, (container, data) in cases.items():
+            assert declared_picture_size(container, data) == (731, 509), name
+
+    def test_an_exif_thumbnail_inside_a_segment_is_not_mistaken_for_the_frame(self) -> None:
+        real = make_image(1200, 900, exif=False)
+        thumbnail = make_image(10, 10, exif=False)
+        app1 = b"\xff\xe1" + (len(thumbnail) + 8).to_bytes(2, "big") + b"Exif\x00\x00" + thumbnail
+        data = real[:2] + app1 + real[2:]
+        assert declared_picture_size("jpeg", data) == (1200, 900)
+
+    def test_a_jpeg_with_two_frame_headers_is_refused(self) -> None:
+        real = make_image(1200, 900, exif=False)
+        start = real.index(b"\xff\xc0")
+        length = int.from_bytes(real[start + 2 : start + 4], "big")
+        frame = real[start : start + 2 + length]
+        doubled = real[: start + 2 + length] + frame + real[start + 2 + length :]
+        assert declared_picture_size("jpeg", doubled) is None
+        with pytest.raises(PictureRejected):
+            prepare_picture(doubled)
+
+    def test_the_header_and_pillow_must_agree(self) -> None:
+        real = bytearray(make_image(1200, 900, fmt="PNG", exif=False))
+        real[16:20] = (1000).to_bytes(4, "big")  # lie about the width in IHDR
+        with pytest.raises(PictureRejected):
+            prepare_picture(bytes(real))
+
+
+class TestLeanReencode:
+    """Every mode Pillow can hand over comes out as the same clean RGB JPEG, shrunk first."""
+
+    @staticmethod
+    def _png(image: Image.Image, **options: Any) -> bytes:
+        out = io.BytesIO()
+        image.save(out, format="PNG", **options)
+        return out.getvalue()
+
+    @pytest.mark.parametrize(
+        "mode",
+        ["RGB", "RGBA", "LA", "L", "1", "P", "PT", "I;16", "CMYK"],
+    )
+    def test_each_mode_becomes_an_rgb_jpeg_of_the_right_size(self, mode: str) -> None:
+        size = (1800, 1200)
+        out = io.BytesIO()
+        if mode == "CMYK":
+            Image.new("CMYK", size, (0, 100, 200, 10)).save(out, format="JPEG")
+        elif mode == "PT":  # palette with a transparent index
+            Image.new("P", size, 0).save(out, format="PNG", transparency=0)
+        elif mode == "P":
+            Image.new("P", size, 3).save(out, format="PNG")
+        elif mode == "I;16":
+            Image.new("I;16", size, 40000).save(out, format="PNG")
+        else:
+            Image.new(mode, size).save(out, format="PNG")  # black / transparent: any pixels do
+        prepared = prepare_picture(out.getvalue())
+        assert (prepared.width, prepared.height) == (1600, 1067)
+        result = Image.open(io.BytesIO(prepared.jpeg))
+        assert result.format == "JPEG" and result.mode == "RGB" and result.size == (1600, 1067)
+
+    def test_a_big_jpeg_is_decoded_at_reduced_scale(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        drafted: list[tuple[str, tuple[int, int]]] = []
+        real: Any = JpegImagePlugin.JpegImageFile.draft
+
+        def spy(self: Image.Image, mode: str | None, size: tuple[int, int]) -> object:
+            drafted.append((str(mode), size))
+            return real(self, mode, size)
+
+        monkeypatch.setattr(JpegImagePlugin.JpegImageFile, "draft", spy)
+        prepared = prepare_picture(make_image(3600, 2400))
+        assert drafted and drafted[0] == ("RGB", (1600, 1067))
+        assert (prepared.width, prepared.height) == (1600, 1067)
+
+    def test_a_transparent_png_flattens_onto_white_even_after_shrinking(self) -> None:
+        source = self._png(Image.new("RGBA", (2400, 1600), (255, 0, 0, 0)))  # fully transparent
+        prepared = prepare_picture(source)
+        pixel = Image.open(io.BytesIO(prepared.jpeg)).convert("RGB").getpixel((800, 500))
+        assert isinstance(pixel, tuple) and min(pixel) > 240
+
+    def test_an_icc_profile_is_applied_then_dropped(self) -> None:
+        source = make_image(2000, 1400, fmt="PNG")  # carries an sRGB profile and EXIF
+        assert b"iCCP" in source
+        result = Image.open(io.BytesIO(prepare_picture(source).jpeg))
+        assert "icc_profile" not in result.info and len(result.getexif()) == 0
 
 
 # -- the sources ---------------------------------------------------------------------------------
@@ -662,6 +938,248 @@ class TestSiteImage:
         plan = plan_of({"food": [item("a", url="http://junk.example.com/")]}, wikipedia=None)
         pictures, web, _ = run_find(configure, plan)
         assert pictures == [] and [r.path for r in web.seen("junk.example.com")] == ["/"]
+
+
+class TestPageCharset:
+    """F3: a third party's `charset=` can neither freeze the event loop nor make the slot raise."""
+
+    @pytest.mark.parametrize(
+        ("charset", "codec"),
+        [
+            ("utf-8", "utf-8"),
+            ("UTF8", "utf-8"),
+            ("us-ascii", "ascii"),
+            ("latin-1", "iso8859-1"),
+            ("ISO-8859-15", "iso8859-15"),
+            ("windows-1252", "cp1252"),
+            ("cp1251", "cp1251"),
+            ("utf-16", "utf-16"),
+            ("UTF-32LE", "utf-32-le"),
+            ("shift_jis", "shift_jis"),
+            ("euc-kr", "euc_kr"),
+            ("gb2312", "gb2312"),
+            ("big5", "big5"),
+            ("koi8-r", "koi8-r"),
+        ],
+    )
+    def test_real_web_encodings_are_kept(self, charset: str, codec: str) -> None:
+        assert web_codec(charset) == codec
+
+    @pytest.mark.parametrize(
+        "charset",
+        [
+            "punycode",  # quadratic to decode: 15.6 s for 1 MB on the audit box
+            "idna",  # raises UnicodeError('Unsupported error handling: replace')
+            "utf-7",
+            "unicode_escape",
+            "raw_unicode_escape",
+            "rot13",
+            "base64",
+            "hex",
+            "zlib",
+            "bz2",
+            "uu",
+            "quopri",
+            "mbcs",
+            "oem",
+            "undefined",
+            "palmos",
+            "mac_roman",
+            "nope-not-a-codec",
+            "utf-8\x00",
+            "a" * 100,
+            "",
+            None,
+        ],
+    )
+    def test_anything_else_is_read_as_utf8(self, charset: str | None) -> None:
+        assert web_codec(charset) == "utf-8"
+
+    HEAD = b'<html><head><meta property="og:image" content="/hero.jpg"></head><body>'
+
+    @pytest.mark.parametrize("charset", ["punycode", "idna", "unicode_escape", "utf-7", "nope"])
+    def test_a_hostile_charset_on_a_one_megabyte_page_is_fast_and_the_head_still_read(
+        self, charset: str
+    ) -> None:
+        body = self.HEAD + b"-" + b"a" * 1_000_000  # exactly the shape that took punycode 15.6 s
+        started = time.monotonic()
+        meta = page_meta(body, charset)
+        assert time.monotonic() - started < 2.0
+        assert meta == {"og:image": "/hero.jpg"}
+
+    def test_only_the_first_200_kb_of_bytes_is_decoded(self) -> None:
+        body = (
+            b"<html><head>"
+            + b" " * (HEAD_SCAN_BYTES + 10)
+            + b'<meta property="og:image" content="/late.jpg"></head>'
+        )
+        assert page_meta(body, "utf-8") == {}
+        assert page_meta(self.HEAD + b"x" * 5_000_000, "utf-8") == {"og:image": "/hero.jpg"}
+
+    def test_a_real_non_utf8_page_is_still_read_in_its_charset(self) -> None:
+        body = '<head><meta property="og:site_name" content="Café Zürich"></head>'.encode("latin-1")
+        assert page_meta(body, "ISO-8859-1") == {"og:site_name": "Café Zürich"}
+        assert page_meta(body, "utf-8") == {"og:site_name": "Caf� Z�rich"}
+
+    @pytest.mark.parametrize("charset", ["punycode", "idna"])
+    def test_through_the_finder_a_hostile_charset_costs_nothing(self, charset: str) -> None:
+        def configure(w: FakeOpenWeb) -> None:
+            w.add_venue(
+                "trap.example.com",
+                "/",
+                og_image="/img/hero.jpg",
+                page_content_type=f"text/html; charset={charset}",
+                after_html=b"-" + b"a" * 1_000_000,
+            )
+
+        plan = plan_of({"stay": [item("a", url="http://trap.example.com/")]}, wikipedia=None)
+        started = time.monotonic()
+        pictures, _, _ = run_find(configure, plan)
+        assert time.monotonic() - started < 5.0
+        assert [p.slot for p in pictures] == ["stay:0"]  # the og:image was still found
+
+    def test_no_third_party_text_is_parsed_on_the_event_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        seen: dict[str, int] = {}
+        loop_thread: list[int] = []
+
+        def recording(name: str, real: Callable[..., Any]) -> Callable[..., Any]:
+            def wrapper(*args: Any, **kwargs: Any) -> Any:
+                seen[name] = threading.get_ident()
+                return real(*args, **kwargs)
+
+            return wrapper
+
+        for name in ("page_meta", "parse_commons_pages", "plain_text", "_load_json"):
+            monkeypatch.setattr(
+                adventure_pictures, name, recording(name, getattr(adventure_pictures, name))
+            )
+
+        def configure(w: FakeOpenWeb) -> None:
+            lead = w.add_file(FakeFile("Kotor Lead.jpg", 4256, 2832, seed=1))
+            w.add_article("Kotor", lead, description="City in Coastal Montenegro")
+            w.add_venue("v.example.com", "/", og_image="/img/hero.jpg")
+
+        original_find = WebPictureFinder.find
+
+        async def find(self: WebPictureFinder, plan: PicturePlan, **kwargs: Any) -> Any:
+            loop_thread.append(threading.get_ident())
+            return await original_find(self, plan, **kwargs)
+
+        monkeypatch.setattr(WebPictureFinder, "find", find)
+        plan = plan_of({"stay": [item("a", url="http://v.example.com/")]})
+        pictures, _, _ = run_find(configure, plan)
+        assert pictures
+        assert set(seen) == {"page_meta", "parse_commons_pages", "plain_text", "_load_json"}
+        assert all(ident != loop_thread[0] for ident in seen.values()), seen
+
+
+class TestWikimediaOriginals:
+    """F5: Wikimedia is only ever asked for API thumbnails, even through a venue's own page."""
+
+    def _original_url(self, w: FakeOpenWeb, file: FakeFile) -> str:
+        a, ab = file.hash_dirs
+        return f"http://{UPLOAD_HOST}:{w.web.port}/wikipedia/commons/{a}/{ab}/{file.underscored}"
+
+    def test_a_venue_image_tag_naming_an_upload_original_goes_through_the_thumbnail(self) -> None:
+        file = FakeFile("Casa Alfama Terrace.jpg", 4000, 2667, seed=5)
+
+        def configure(w: FakeOpenWeb) -> None:
+            w.add_file(file)
+            w.add_venue("casa.example.com", "/", og_image=self._original_url(w, file))
+
+        plan = plan_of({"stay": [item("Casa", url="http://casa.example.com/")]}, wikipedia=None)
+        pictures, web, open_web = run_find(configure, plan)
+        (pic,) = pictures
+        assert pic.slot == "stay:0" and pic.credit == "Jane Doe, CC BY-SA 4.0"
+        assert pic.page.endswith("/wiki/File:Casa_Alfama_Terrace.jpg")  # credited as a Commons file
+        assert open_web.imageinfo_titles == ["File:Casa Alfama Terrace.jpg"]
+        assert web.seen(UPLOAD_HOST) == []  # the ORIGINAL was never requested
+        assert all("/thumb/" in r.path for r in web.seen(THUMB_HOST))
+
+    def test_a_wikimedia_address_that_names_no_commons_file_is_skipped(self) -> None:
+        def configure(w: FakeOpenWeb) -> None:
+            local = f"http://{UPLOAD_HOST}:{w.web.port}/wikipedia/en/a/ab/Some_Logo.png"
+            static = f"http://{WIKI_HOST}:{w.web.port}/static/images/logo.png"
+            w.add_venue("v.example.com", "/", og_image=local, twitter_image=static)
+
+        plan = plan_of({"stay": [item("V", url="http://v.example.com/")]}, wikipedia=None)
+        pictures, web, _ = run_find(configure, plan)
+        assert pictures == []
+        assert web.seen(UPLOAD_HOST) == [] and web.seen(WIKI_HOST) == []
+
+    def test_an_image_that_redirects_onto_wikimedia_is_refused_before_it_is_followed(self) -> None:
+        file = FakeFile("Redirected.jpg", 4000, 2667, seed=6)
+
+        def configure(w: FakeOpenWeb) -> None:
+            w.add_venue("cdn.example.com", "/", og_image="/img/hero.jpg")
+            w.serve(
+                "cdn.example.com",
+                "/img/hero.jpg",
+                Reply(status=302, headers={"Location": self._original_url(w, file)}),
+            )
+            w.serve(UPLOAD_HOST, f"/wikipedia/commons/x/{file.underscored}", Reply(body=b"orig"))
+
+        plan = plan_of({"stay": [item("V", url="http://cdn.example.com/")]}, wikipedia=None)
+        pictures, web, _ = run_find(configure, plan)
+        assert pictures == [] and web.seen(UPLOAD_HOST) == []
+
+    def test_a_venue_url_on_wikipedia_is_an_article_not_a_site(self) -> None:
+        plan = plan_pictures(
+            PackSpec(
+                None,
+                {
+                    "sights": [
+                        item("Perast", url="https://en.wikipedia.org/wiki/Perast"),
+                        item("Gate", url="https://commons.wikimedia.org/wiki/File:Gate.jpg"),
+                        item(
+                            "Both",
+                            wikipedia="Real Title",
+                            url="https://en.wikipedia.org/wiki/Other",
+                        ),
+                    ]
+                },
+            ).as_pack(),
+            **KOTOR_PLAN_ARGS,
+        )
+        got = {s.key: (s.wikipedia, s.url) for s in plan.slots}
+        assert got["sights:0"] == ("Perast", None)  # the link's title feeds source 1
+        assert got["sights:1"] == (None, None) and plan.slots[1].search is True
+        assert got["sights:2"] == ("Real Title", None)  # the AI's own title wins
+
+    def test_a_slot_aimed_at_a_wikimedia_page_is_not_fetched_even_if_the_plan_allows_it(
+        self,
+    ) -> None:
+        plan = PicturePlan(
+            destination="Kotor",
+            unit="Montenegro",
+            destination_wikipedia=None,
+            slots=(
+                PictureSlot("stay:0", "stay", "X", None, f"http://{WIKI_HOST}/wiki/Perast", False),
+            ),
+        )
+        pictures, web, _ = run_find(lambda w: None, plan)
+        assert pictures == [] and web.seen(WIKI_HOST) == []  # (only the hero search ran)
+
+    @pytest.mark.parametrize(
+        ("host", "expected"),
+        [
+            ("upload.wikimedia.org", True),
+            ("commons.wikimedia.org", True),
+            ("wikimedia.org", True),
+            ("en.wikipedia.org", True),
+            ("EN.Wikipedia.ORG.", True),
+            ("wikipedia.org", True),
+            ("notwikipedia.org", False),
+            ("wikipedia.org.evil.example", False),
+            ("example.com", False),
+            ("", False),
+            (None, False),
+        ],
+    )
+    def test_which_hosts_count_as_wikimedia(self, host: str | None, expected: bool) -> None:
+        assert is_wikimedia_host(host) is expected
 
 
 class TestCommonsSearch:

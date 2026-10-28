@@ -25,6 +25,7 @@ ordinary attachment machinery's.
 
 from __future__ import annotations
 
+import codecs
 import dataclasses
 import functools
 import hashlib
@@ -75,13 +76,18 @@ HERO_TARGET: Final = 5
 HERO_MAX: Final = 6
 ITEM_SLOT_ATTEMPTS: Final = 20
 """How many item slots are tried (the pack can name up to 36 items; only ~11 pictures fit)."""
-MAX_FETCHED_PIXELS: Final = min(processing.PHOTO_PIXEL_CAP, 36_000_000)
-"""A fetched picture may declare at most this many pixels (6000 x 6000), checked BEFORE it is
-decoded. Tighter than the chat's own 80 MP photo cap on purpose: an RGB decode costs 3 bytes a pixel
-and the clean-up makes a few copies, and this runs on pictures nobody here chose."""
-HEAD_SCAN_CHARS: Final = 200_000
-DECODE_PARALLELISM: Final = 2
-"""How many fetched images are decoded at once (each can be a hundred MB while it is)."""
+MAX_FETCHED_PIXELS: Final = min(processing.PHOTO_PIXEL_CAP, 16_000_000)
+"""A fetched picture may declare at most this many pixels (4000 x 4000), read from the file's own
+header and checked BEFORE `Image.open`. Far tighter than the chat's 80 MP photo cap on purpose: this
+runs on pictures nobody here chose, Commons thumbnails are 1600-1920 px and venue `og:image`s are
+rarely above 12 MP. The measured worst case is in decisions/00191 and Inv 56."""
+HEAD_SCAN_BYTES: Final = 200_000
+"""How much of a page is looked at for its `<meta>` tags: the first 200 KB of BYTES, sliced before
+any decoding."""
+DECODE_PARALLELISM: Final = 1
+"""How many fetched images are decoded at once: ONE, so the memory worst case is a single decode
+(measured in decisions/00191; libwebp alone holds ~250 MB for a 16 MP image, and a decode takes
+well under a second, so serial decoding costs the hunt nothing that its network time does not)."""
 MIN_SHORT_SIDE: Final = 480
 SEARCH_MIN_SHORT_SIDE: Final = 900
 MAX_ASPECT: Final = 3.0
@@ -111,6 +117,24 @@ _HASH_DIR_ONE_RE = re.compile(r"^[0-9a-f]$")
 _HASH_DIR_TWO_RE = re.compile(r"^[0-9a-f]{2}$")
 
 PICTURES_VERSION: Final = 1
+DEFAULT_WIKIMEDIA_SUFFIXES: Final = ("wikimedia.org", "wikipedia.org")
+
+
+def is_wikimedia_host(
+    host: str | None, suffixes: Sequence[str] = DEFAULT_WIKIMEDIA_SUFFIXES
+) -> bool:
+    """Whether `host` is one of, or under, the given Wikimedia domains."""
+    if not host:
+        return False
+    name = host.lower().rstrip(".")
+    return any(name == suffix or name.endswith("." + suffix) for suffix in suffixes)
+
+
+def _url_host(url: str) -> str | None:
+    try:
+        return urlsplit(url).hostname
+    except ValueError:
+        return None
 
 
 # -- what the finder is given and returns --------------------------------------------------------
@@ -193,6 +217,12 @@ def plan_pictures(
                 continue
             wikipedia = clean_wikipedia_title(item.get("wikipedia"))
             url = clean_url(item.get("url"))
+            if url is not None and is_wikimedia_host(_url_host(url)):
+                # A link to a Wikipedia / Commons page is an article reference, not a venue's own
+                # site: its title belongs in source 1 (the lead image, as a thumbnail) and the page
+                # is never fetched for an `og:image` (that is an original upload).
+                wikipedia = wikipedia or clean_wikipedia_title(url)
+                url = None
             search = key == "sights"
             if wikipedia is None and url is None and not search:
                 continue
@@ -236,12 +266,106 @@ class PreparedImage:
     height: int
 
 
+_MAX_JPEG_SEGMENTS: Final = 4096
+_SOF_MARKERS: Final = frozenset(
+    {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}
+)
+"""The JPEG start-of-frame markers (DHT 0xC4, JPG 0xC8 and DAC 0xCC are not frames)."""
+
+
+def _jpeg_declared_size(data: bytes) -> tuple[int, int] | None:
+    """The `(width, height)` in a JPEG's single start-of-frame segment, found by walking the marker
+    segments by their lengths (so a size inside an EXIF thumbnail is never mistaken for it). `None`
+    when there is no frame before the scan, or MORE THAN ONE (Pillow keeps the last, libjpeg
+    decodes the first: a file that disagrees with itself is refused, not guessed at)."""
+    position = 2
+    found: tuple[int, int] | None = None
+    for _ in range(_MAX_JPEG_SEGMENTS):
+        while (
+            position < len(data)
+            and data[position] == 0xFF
+            and data[position + 1 : position + 2] == b"\xff"
+        ):
+            position += 1  # fill bytes
+        if position + 4 > len(data) or data[position] != 0xFF:
+            return None
+        marker = data[position + 1]
+        if marker == 0xDA:  # start of scan: the headers are over
+            return found
+        if marker == 0xD9 or marker == 0x01 or 0xD0 <= marker <= 0xD8:
+            position += 2  # a marker with no length
+            continue
+        length = int.from_bytes(data[position + 2 : position + 4], "big")
+        if length < 2:
+            return None
+        if marker in _SOF_MARKERS:
+            if found is not None or length < 8 or position + 9 > len(data):
+                return None
+            height = int.from_bytes(data[position + 5 : position + 7], "big")
+            width = int.from_bytes(data[position + 7 : position + 9], "big")
+            found = (width, height)
+        position += 2 + length
+    return None
+
+
+def _png_declared_size(data: bytes) -> tuple[int, int] | None:
+    """The `(width, height)` in a PNG's IHDR, which must be the first chunk."""
+    if len(data) < 24 or data[12:16] != b"IHDR" or int.from_bytes(data[8:12], "big") != 13:
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def _webp_declared_size(data: bytes) -> tuple[int, int] | None:
+    """The `(width, height)` a WebP declares in its first chunk: the VP8X canvas (24-bit
+    width-1 / height-1 — the size libwebp's animation decoder allocates its buffers from, which
+    Pillow's `Image.open` builds BEFORE anything can check it), or a bare VP8 / VP8L frame
+    header."""
+    if len(data) < 30 or data[:4] != b"RIFF" or data[8:12] != b"WEBP":
+        return None
+    kind = data[12:16]
+    if kind == b"VP8X":
+        return (
+            int.from_bytes(data[24:27], "little") + 1,
+            int.from_bytes(data[27:30], "little") + 1,
+        )
+    if kind == b"VP8 ":
+        if data[23:26] != b"\x9d\x01\x2a":
+            return None
+        return (
+            int.from_bytes(data[26:28], "little") & 0x3FFF,
+            int.from_bytes(data[28:30], "little") & 0x3FFF,
+        )
+    if kind == b"VP8L":
+        if data[20] != 0x2F:
+            return None
+        bits = int.from_bytes(data[21:25], "little")
+        return (bits & 0x3FFF) + 1, ((bits >> 14) & 0x3FFF) + 1
+    return None
+
+
+_DECLARED_SIZE: Final = {
+    "jpeg": _jpeg_declared_size,
+    "png": _png_declared_size,
+    "webp": _webp_declared_size,
+}
+
+
+def declared_picture_size(container: str, data: bytes) -> tuple[int, int] | None:
+    """The size a JPEG / PNG / WebP file's own header declares, read from the bytes with no image
+    library involved (`None` when the header is unreadable or self-contradictory)."""
+    reader = _DECLARED_SIZE.get(container)
+    return reader(data) if reader is not None else None
+
+
 def prepare_picture(data: bytes, *, min_short_side: int = MIN_SHORT_SIDE) -> PreparedImage:
     """Validate fetched image bytes and re-encode them (blocking; run in a thread). The bytes must
-    sniff as JPEG/PNG/WebP (the content type was checked before the body was read), open in Pillow
-    as that same format under the decompression-bomb cap, be a single still frame, have a short
-    side of at least `min_short_side` px and an aspect ratio of at most 3:1 (icons and banners are
-    refused), and are then rebuilt as a metadata-free sRGB JPEG of at most 1600 px."""
+    sniff as JPEG/PNG/WebP (the content type was checked before the body was read); the size the
+    FILE'S OWN HEADER declares is read from the bytes and checked BEFORE `Image.open` is called —
+    at most 16 MP, a short side of at least `min_short_side` px and an aspect ratio of at most 3:1
+    (icons and banners are refused) — because for WebP `Image.open` itself allocates canvas buffers
+    from the declared size; Pillow must then agree with the header, as the same single still frame
+    of the same format; the image is then shrunk to 1600 px FIRST and rebuilt as a metadata-free
+    sRGB JPEG (`processing.reencode_still_as_jpeg`)."""
     try:
         container = processing.sniff(data[:64])
     except processing.MediaProcessingError as exc:
@@ -249,29 +373,34 @@ def prepare_picture(data: bytes, *, min_short_side: int = MIN_SHORT_SIDE) -> Pre
     expected = {"jpeg": "JPEG", "png": "PNG", "webp": "WEBP"}.get(container)
     if expected is None:
         raise PictureRejected(f"format_{container}")
+    declared = declared_picture_size(container, data)
+    if declared is None:
+        raise PictureRejected("corrupt")
+    width, height = declared
+    if width < 1 or height < 1 or width * height > MAX_FETCHED_PIXELS:
+        raise PictureRejected("too_many_pixels")
+    short, long = min(width, height), max(width, height)
+    if short < min_short_side:
+        raise PictureRejected("too_small")
+    if long / short > MAX_ASPECT:
+        raise PictureRejected("banner")
     try:
         with Image.open(io.BytesIO(data), formats=("JPEG", "PNG", "WEBP")) as image:
-            if image.format != expected:
+            if image.format != expected or image.size != declared:
                 raise PictureRejected("format_mismatch")
-            width, height = image.size
-            if width < 1 or height < 1 or width * height > MAX_FETCHED_PIXELS:
-                raise PictureRejected("too_many_pixels")
             if int(getattr(image, "n_frames", 1)) > 1:
                 raise PictureRejected("animated")
-            short, long = min(width, height), max(width, height)
-            if short < min_short_side:
-                raise PictureRejected("too_small")
-            if long / short > MAX_ASPECT:
-                raise PictureRejected("banner")
             jpeg = processing.reencode_still_as_jpeg(
                 image, long_edge=OUTPUT_LONG_EDGE, quality=OUTPUT_QUALITY
             )
     except PictureRejected:
         raise
-    except (OSError, ValueError, SyntaxError, Image.DecompressionBombError) as exc:
+    except (OSError, ValueError, SyntaxError, MemoryError, Image.DecompressionBombError) as exc:
         raise PictureRejected("corrupt") from exc
-    scale = min(1.0, OUTPUT_LONG_EDGE / long)
-    return PreparedImage(jpeg=jpeg, width=round(width * scale), height=round(height * scale))
+    out_size = _jpeg_declared_size(jpeg)  # the upright size actually written
+    if out_size is None:  # cannot happen for what Pillow just wrote; never guess
+        raise PictureRejected("corrupt")
+    return PreparedImage(jpeg=jpeg, width=out_size[0], height=out_size[1])
 
 
 # -- text helpers --------------------------------------------------------------------------------
@@ -284,6 +413,14 @@ class _TextExtractor(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
+
+
+def _load_json(body: bytes) -> object:
+    """Decode an API answer (blocking; run in a thread)."""
+    try:
+        return json.loads(body)
+    except (ValueError, RecursionError) as exc:  # malformed, or nested deeper than Python allows
+        raise PictureRejected("bad_json") from exc
 
 
 def plain_text(value: object, limit: int) -> str:
@@ -323,15 +460,65 @@ class _MetaParser(HTMLParser):
             self._done = True
 
 
-def page_meta(body: bytes, charset: str | None) -> dict[str, str]:
-    """The `<meta>` tags of an HTML page (at most 1 MB, already capped by the fetch). Only the head
-    is parsed: the text up to the first `</head>`, else the first 200 KB."""
+_WEB_CODECS: Final = frozenset(
+    {
+        "utf-8",
+        "utf-8-sig",
+        "ascii",
+        "utf-16",
+        "utf-16-le",
+        "utf-16-be",
+        "utf-32",
+        "utf-32-le",
+        "utf-32-be",
+        "koi8-r",
+        "koi8-u",
+        "big5",
+        "big5hkscs",
+        "cp932",
+        "cp949",
+        "cp950",
+        "euc_jp",
+        "euc_kr",
+        "gb2312",
+        "gbk",
+        "gb18030",
+        "shift_jis",
+        "iso2022_jp",
+    }
+)
+_WEB_CODEC_FAMILIES_RE: Final = re.compile(r"^(?:iso8859-(?:[1-9]|1[0-6])|cp125[0-8])$")
+"""The code pages the web actually serves text in: ISO-8859-N and the Windows 125x set."""
+
+
+def web_codec(charset: str | None) -> str:
+    """The Python codec to decode a fetched page with: the one `charset` (a third party's
+    Content-Type parameter) names, normalised through `codecs.lookup`, but ONLY when it is a real
+    web text encoding (UTF-8/16/32, ASCII, ISO-8859-N, Windows 125x, KOI8, the common CJK ones);
+    anything else — an unknown name, `punycode` (quadratic to decode: ~16 s for 1 MB), `idna`,
+    `unicode_escape`, `rot13`, `utf-7`, a hostile null byte — is read as UTF-8."""
+    if not charset or len(charset) > 40:
+        return "utf-8"
     try:
-        text = body.decode(charset or "utf-8", errors="replace")
-    except LookupError:
-        text = body.decode("utf-8", errors="replace")
+        name = codecs.lookup(charset).name
+    except LookupError, ValueError:
+        return "utf-8"
+    return name if name in _WEB_CODECS or _WEB_CODEC_FAMILIES_RE.match(name) else "utf-8"
+
+
+def page_meta(body: bytes, charset: str | None) -> dict[str, str]:
+    """The `<meta>` tags of an HTML page. Only the head is looked at, and the BYTES are cut to the
+    first 200 KB before anything is decoded, with a vetted codec (`web_codec`): a hostile page can
+    neither make the decode slow nor make it raise. Blocking, though cheap — callers run it in a
+    thread so no parsing of third-party text ever happens on the event loop. The text is cut at
+    the first `</head>`."""
+    head = body[:HEAD_SCAN_BYTES]
+    try:
+        text = head.decode(web_codec(charset), errors="replace")
+    except UnicodeError, ValueError:
+        text = head.decode("utf-8", errors="replace")
     head_end = text.lower().find("</head")
-    text = text[:head_end] if head_end >= 0 else text[:HEAD_SCAN_CHARS]
+    text = text[:head_end] if head_end >= 0 else text
     parser = _MetaParser()
     try:
         parser.feed(text)
@@ -354,6 +541,12 @@ class WikimediaEndpoints:
     commons_page_base: str = "https://commons.wikimedia.org/wiki/"
     thumb_hosts: frozenset[str] = frozenset({"thumb.wikimedia.org", "upload.wikimedia.org"})
     """The hosts a Commons thumbnail URL may be on."""
+    wikimedia_suffixes: tuple[str, ...] = DEFAULT_WIKIMEDIA_SUFFIXES
+    """Every host under these domains is Wikimedia's: a venue page's own image tag aimed there is
+    never fetched directly (it would be an original) and no venue page is fetched from there."""
+
+    def is_wikimedia_host(self, host: str | None) -> bool:
+        return is_wikimedia_host(host, self.wikimedia_suffixes)
 
 
 @dataclass(frozen=True, slots=True)
@@ -519,17 +712,27 @@ class WebPictureFinder:
         response = await self._fetcher.get(
             url, max_bytes=JSON_MAX_BYTES, accept=("application/json",)
         )
-        try:
-            return json.loads(response.body)
-        except (
-            ValueError,
-            RecursionError,
-        ) as exc:  # malformed, or nested deeper than Python allows
-            raise PictureRejected("bad_json") from exc
+        # Third-party text is parsed in a thread, never on the event loop.
+        return await anyio.to_thread.run_sync(_load_json, response.body)
 
-    async def image_get(self, url: str, *, min_short_side: int) -> tuple[PreparedImage, str]:
-        """Fetch and validate an image; returns it with the SHA-256 of the fetched bytes."""
-        response = await self._fetcher.get(url, max_bytes=IMAGE_MAX_BYTES, accept=("image/",))
+    async def parse_pages(self, data: object) -> list[CommonsFile]:
+        """`parse_commons_pages` in a thread (it strips HTML from the credit fields)."""
+        return await anyio.to_thread.run_sync(
+            parse_commons_pages, data, self._endpoints.thumb_hosts
+        )
+
+    async def image_get(
+        self, url: str, *, min_short_side: int, refuse_wikimedia: bool = False
+    ) -> tuple[PreparedImage, str]:
+        """Fetch and validate an image; returns it with the SHA-256 of the fetched bytes.
+        `refuse_wikimedia` refuses any hop (the URL and every redirect) onto a Wikimedia host: an
+        image a venue's page names is never allowed to become an upload.wikimedia.org original."""
+        response = await self._fetcher.get(
+            url,
+            max_bytes=IMAGE_MAX_BYTES,
+            accept=("image/",),
+            refuse_host_suffixes=self._endpoints.wikimedia_suffixes if refuse_wikimedia else (),
+        )
         if self._decode_limiter is None:
             self._decode_limiter = anyio.CapacityLimiter(DECODE_PARALLELISM)
         prepared = await anyio.to_thread.run_sync(
@@ -542,7 +745,8 @@ class WebPictureFinder:
         response = await self._fetcher.get(
             url, max_bytes=HTML_MAX_BYTES, accept=("text/html", "application/xhtml+xml")
         )
-        return response.url, page_meta(response.body, response.charset)
+        meta = await anyio.to_thread.run_sync(page_meta, response.body, response.charset)
+        return response.url, meta
 
     # -- the sources -----------------------------------------------------------------------------
 
@@ -569,7 +773,7 @@ class WebPictureFinder:
                 }
             )
         )
-        files = parse_commons_pages(data, self._endpoints.thumb_hosts)
+        files = await self.parse_pages(data)
         return files[0] if files else None
 
     async def commons_search(self, query: str, *, min_short_side: int) -> list[CommonsFile]:
@@ -595,7 +799,7 @@ class WebPictureFinder:
         )
         good = [
             f
-            for f in parse_commons_pages(data, self._endpoints.thumb_hosts)
+            for f in await self.parse_pages(data)
             if f.mime == "image/jpeg"
             and min(f.width, f.height) >= min_short_side
             and max(f.width, f.height) / max(1, min(f.width, f.height)) <= MAX_ASPECT
@@ -634,28 +838,41 @@ class WebPictureFinder:
         name = commons_file_name(image.get("source") if isinstance(image, dict) else None)
         if name is None:
             return None
+        caption = await anyio.to_thread.run_sync(
+            plain_text, summary.get("description"), MAX_CAPTION
+        )
+        return await self.commons_thumbnail_picture(name, caption=caption)
+
+    async def commons_thumbnail_picture(
+        self, name: str, *, caption: str | None
+    ) -> FoundPicture | None:
+        """A Commons file, by name, as its API thumbnail — never the original. Wikimedia serves a
+        file narrower than its smallest thumbnail step as itself, so when the API's `thumburl` is
+        not a thumbnail path the next standard size down is asked for, and a file with no step
+        below it is skipped."""
         commons_title = "File:" + name.replace("_", " ")
         file = await self.imageinfo(commons_title, COMMONS_THUMB_WIDTH)
         if file is not None and not _is_thumbnail_path(file.thumb_url):
-            # Wikimedia serves a file narrower than its smallest step as itself; never fetch an
-            # original — ask for the next standard thumbnail size down instead.
             smaller = _smaller_standard_step(file.width)
             file = await self.imageinfo(commons_title, smaller) if smaller is not None else None
         if file is None or file.mime not in LEAD_MIMES or not _is_thumbnail_path(file.thumb_url):
             return None
-        return await self.commons_picture(
-            file,
-            caption=plain_text(summary.get("description"), MAX_CAPTION),
-            min_short_side=MIN_SHORT_SIDE,
-        )
+        return await self.commons_picture(file, caption=caption, min_short_side=MIN_SHORT_SIDE)
 
     async def site_picture(self, url: str) -> FoundPicture | None:
-        """Source 2: the venue's own page `og:image` / `twitter:image`."""
+        """Source 2: the venue's own page `og:image` / `twitter:image`. Wikimedia is never asked
+        for an original here: a page (or an image tag) on a Wikimedia host is not fetched
+        directly — an image tag naming a Commons file goes through the same API thumbnail as
+        source 1, any other Wikimedia address is skipped, and the image fetch itself refuses to
+        be redirected onto Wikimedia."""
+        if self._endpoints.is_wikimedia_host(_url_host(url)):
+            return None
         page_url, meta = await self.html_get(url)
         page = clean_url(page_url)
         if page is None:
             raise PictureRejected("bad_page_url")
-        candidates: list[str] = []
+        # `(image url, the Commons file name when the url is a Wikimedia upload)`
+        candidates: list[tuple[str, str | None]] = []
         for key in (
             "og:image:secure_url",
             "og:image",
@@ -665,20 +882,37 @@ class WebPictureFinder:
         ):
             raw = meta.get(key)
             image_url = clean_url(urljoin(page_url, raw)) if raw else None
-            if image_url is not None and image_url not in candidates:
-                candidates.append(image_url)
+            if image_url is None or any(image_url == known for known, _ in candidates):
+                continue
+            if self._endpoints.is_wikimedia_host(_url_host(image_url)):
+                commons_name = commons_file_name(image_url)
+                if commons_name is None:
+                    continue  # a Wikimedia address that names no Commons file: skipped
+                candidates.append((image_url, commons_name))
+            else:
+                candidates.append((image_url, None))
         last_error: SafeFetchError | PictureRejected | None = None
-        for image_url in candidates[:SITE_IMAGE_TRIES]:
+        for image_url, commons_name in candidates[:SITE_IMAGE_TRIES]:
             try:
-                prepared, digest = await self.image_get(image_url, min_short_side=MIN_SHORT_SIDE)
+                if commons_name is not None:
+                    found = await self.commons_thumbnail_picture(commons_name, caption=None)
+                    if found is not None:
+                        return found
+                    continue
+                prepared, digest = await self.image_get(
+                    image_url, min_short_side=MIN_SHORT_SIDE, refuse_wikimedia=True
+                )
             except (SafeFetchError, PictureRejected) as exc:
                 last_error = exc
                 continue
             host = (urlsplit(page_url).hostname or "").removeprefix("www.")
+            site_name = await anyio.to_thread.run_sync(
+                plain_text, meta.get("og:site_name"), MAX_CREDIT
+            )
             return FoundPicture(
                 slot="",
                 jpeg=prepared.jpeg,
-                credit=plain_text(meta.get("og:site_name"), MAX_CREDIT) or host,
+                credit=site_name or host,
                 page=page,
                 caption=None,
                 keys=frozenset({f"sha256:{digest}"}),
