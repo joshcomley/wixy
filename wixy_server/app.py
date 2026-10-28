@@ -55,6 +55,14 @@ from wixy_server.livechat.adventure_pictures import (
     WebPictureFinder,
 )
 from wixy_server.livechat.call_broker import CallBroker
+from wixy_server.livechat.cookout_game import (
+    BankLike as CookoutBankLike,
+)
+from wixy_server.livechat.cookout_game import (
+    CookoutRunner,
+    NullCookoutRunner,
+    default_bank,
+)
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
 from wixy_server.livechat.grants import GrantFailureLimiter
@@ -98,6 +106,7 @@ from wixy_server.routes_internal import router as internal_router
 from wixy_server.routes_livechat import router as livechat_router
 from wixy_server.routes_livechat_adventure import router as livechat_adventure_router
 from wixy_server.routes_livechat_calls import router as livechat_calls_router
+from wixy_server.routes_livechat_cookout import router as livechat_cookout_router
 from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -169,6 +178,8 @@ def create_app(
     adventure_pack_timing: PackTiming | None = None,
     adventure_picture_finder: AdventurePictureFinder | None = None,
     adventure_picture_timing: PictureTiming | None = None,
+    cookout_bank: CookoutBankLike | None = None,
+    cookout_runner: CookoutRunner | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -401,6 +412,15 @@ def create_app(
     livechat_adventure_live_limiter = SlidingWindowRateLimiter(
         max_events=ADVENTURE_LIVE_BATCHES_PER_SECOND, window_s=1.0
     )
+    # Cookout (workspace 00058): the ingredient bank loads once; with no runner injected the game is
+    # fully playable but its dish ideas and recipes are `unavailable` (the AI builder wires the
+    # real runner, which also owns the picture job).
+    resolved_cookout_bank: CookoutBankLike | None = (
+        cookout_bank if cookout_bank is not None else default_bank()
+    )
+    resolved_cookout_runner: CookoutRunner = (
+        cookout_runner if cookout_runner is not None else NullCookoutRunner()
+    )
     livechat_transcription = TranscriptionRuntime(
         store=livechat_store,
         paths=paths,
@@ -539,6 +559,10 @@ def create_app(
                 # pending longer than a hunt can take (a blue/green hand-off can stop the old
                 # side mid-hunt after this side's resume), ending a round whose hunts keep dying.
                 livechat_adventure_runner.supervise_pictures(background)
+                # Cookout: resume any concept/recipe run the previous process left `pending`, and
+                # keep the supervised sweep (stale pictures, scratch cleanup) going.
+                await resolved_cookout_runner.resume(background)
+                resolved_cookout_runner.supervise(background)
                 yield
                 tg.cancel_scope.cancel()
         finally:
@@ -612,6 +636,8 @@ def create_app(
     app.state.livechat_adventure_bank = resolved_adventure_bank
     app.state.livechat_adventure_runner = livechat_adventure_runner
     app.state.livechat_adventure_live_limiter = livechat_adventure_live_limiter
+    app.state.livechat_cookout_bank = resolved_cookout_bank
+    app.state.livechat_cookout_runner = resolved_cookout_runner
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:
@@ -642,6 +668,7 @@ def create_app(
     app.include_router(versions_router)
     app.include_router(livechat_router)
     app.include_router(livechat_adventure_router)
+    app.include_router(livechat_cookout_router)
     app.include_router(livechat_calls_router)
     app.include_router(livechat_media_router)
 

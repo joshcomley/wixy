@@ -49,6 +49,22 @@ AdventureImagesState = Literal["none", "pending", "done", "failed"]
 """The holiday pack's PICTURE job (spec §4.3a): `none` until the text pack is in (or when pictures
 are not available), `pending` while the server finds and fetches them, then `done` / `failed`."""
 
+CookoutState = Literal["picking", "finished", "abandoned"]
+"""The Cookout round's states (spec/server-chat/09-cookout.md §1): ten alternating picks
+(`picking`), all ten made (`finished`, the chef stage), or `abandoned` (a newer Cookout started or
+End game was pressed before turn 10)."""
+
+CookoutConceptsState = Literal["none", "pending", "ready", "failed", "unavailable"]
+"""Stage 1 (the three recipe concepts): `none` until the round finishes, `pending` while the cmd run
+works, then `ready` / `failed`; `unavailable` when no AI runner is configured."""
+
+CookoutImagesState = Literal["none", "pending", "done", "failed"]
+"""The concept pictures' ComfyUI job: `none` until concepts are ready (or when pictures are not
+available), `pending` while generating, then `done` / `failed` (partial success is kept)."""
+
+CookoutRecipeState = Literal["pending", "banked", "failed", "unavailable"]
+"""Stage 2 (one concept's full recipe, after "Bank this"): row absent = not requested."""
+
 
 MessageHook = Callable[["MessageRow"], Awaitable[None]]
 """`app.state.livechat_message_hooks`'s element type (§4 "App state"): run on the
@@ -142,6 +158,20 @@ class AdventureSummary:
 
     state: AdventureState
     pack: AdventurePackState
+    rev: int
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutSummary:
+    """What a `Message` carries about its Cookout round — enough for a client to notice the round
+    exists or moved and fetch the (personalised) body with `GET /cookout/{seq}`. Deliberately
+    carries NO ingredient, option or recipe text (spec §1.3, §4.2): it is broadcast to everybody."""
+
+    state: CookoutState
+    blind: bool
+    picked_count: int
+    concepts: CookoutConceptsState
+    banked_count: int
     rev: int
 
 
@@ -310,6 +340,84 @@ class AdventureViewData:
 
 
 @dataclass(frozen=True, slots=True)
+class CookoutTurnRow:
+    """One turn of a Cookout round (schema v21 `cookout_turns`): `offers` is every pair the turn
+    showed, as immutable ingredient snapshots (`{id, name, category, emoji, blurb, family}`), the
+    first dealt and one more per skip; `choice_id` is the picked ingredient once it is done."""
+
+    turn: int
+    player: int
+    offers: tuple[tuple[dict[str, str], dict[str, str]], ...]
+    choice_id: str | None
+    skip_move_ids: tuple[str, ...]
+    pick_move_id: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutRecipeRow:
+    """One concept's "Bank this" row (`cookout_recipes`); absent until requested."""
+
+    concept_id: str
+    state: CookoutRecipeState
+    run_id: str | None
+    recipe_json: str | None
+    error: str | None
+    requested_by: str
+    bank_move_id: str | None
+    started_at: float | None
+    tries: int
+    deadline_at: float | None
+    banked_at: float | None
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutRoundRow:
+    """One Cookout round, anchored to its message (`anchor_message_seq`, schema v21). The whole
+    round — turns, picks, concepts, recipes, pictures — is chat content (Inv 57): erased with its
+    anchor message or a wipe."""
+
+    anchor_message_seq: int
+    state: CookoutState
+    blind: bool
+    started_by: str
+    player1_key: str
+    player1_name: str
+    player1_email: str | None
+    player2_key: str | None
+    player2_name: str | None
+    player2_email: str | None
+    role_schedule: tuple[str, ...]
+    concepts: CookoutConceptsState
+    concepts_run_id: str | None
+    concepts_json: str | None
+    concepts_error: str | None
+    concepts_started_at: float | None
+    concepts_tries: int
+    concepts_deadline_at: float | None
+    images: CookoutImagesState
+    pictures: dict[str, str]
+    """Slot (`a`/`b`/`c`) -> the ordinary photo attachment id on the anchor message."""
+    images_started_at: float | None
+    images_tries: int
+    images_deadline_at: float | None
+    images_generation: int
+    rev: int
+    created_at: float
+    updated_at: float
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutViewData:
+    """Everything `GET /cookout/{seq}` reads, in ONE transaction: the round, its turns in order,
+    its recipe rows and the anchor's picture attachments."""
+
+    round: CookoutRoundRow
+    turns: tuple[CookoutTurnRow, ...]
+    recipes: tuple[CookoutRecipeRow, ...]
+    attachments: tuple[AttachmentRow, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MessageRow:
     seq: int
     client_id: str
@@ -342,7 +450,7 @@ class MessageRow:
     """The anchor seq of the game round (would-you-rather OR Adventure Time) this message was sent
     in the game chat of, else None — joined from `wyr_chat` at read time. The message itself stays
     in the main chat."""
-    wyr_ref_kind: Literal["wyr", "adventure"] | None = None
+    wyr_ref_kind: Literal["wyr", "adventure", "cookout"] | None = None
     """Which game `wyr_ref` points at, resolved at read time beside it (the anchor is present in
     `adv_rounds` -> "adventure", else "wyr"); None exactly when `wyr_ref` is None. A client paging
     history may not have the anchor message loaded, so it cannot tell by itself."""
@@ -351,6 +459,9 @@ class MessageRow:
     adventure: AdventureSummary | None = None
     """The round summary when this message anchors an Adventure Time round, else None — joined from
     `adv_rounds` at read time, exactly like `wyr`."""
+    cookout: CookoutSummary | None = None
+    """The round summary when this message anchors a Cookout round, else None — joined from
+    `cookout_rounds` at read time, exactly like `adventure`. Carries no ingredient data."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -561,6 +672,18 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
         "adventure": (
             {"state": row.adventure.state, "pack": row.adventure.pack, "rev": row.adventure.rev}
             if row.adventure is not None
+            else None
+        ),
+        "cookout": (
+            {
+                "state": row.cookout.state,
+                "blind": row.cookout.blind,
+                "pickedCount": row.cookout.picked_count,
+                "concepts": row.cookout.concepts,
+                "bankedCount": row.cookout.banked_count,
+                "rev": row.cookout.rev,
+            }
+            if row.cookout is not None
             else None
         ),
     }
