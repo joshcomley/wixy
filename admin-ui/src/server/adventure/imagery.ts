@@ -1,7 +1,8 @@
 // Adventure Time — the map imagery: which picture lies under the borders, where it comes from and how it
 // is loaded.
 //
-// Three styles. "satellite" (NASA Blue Marble Next Generation with topography and bathymetry) and "atlas"
+// Three styles. "satellite" (NASA Visible Earth, Blue Marble Next Generation with topography and bathymetry,
+// the JULY 2004 image, record 73751: northern-summer greens rather than December snow) and "atlas"
 // (Natural Earth II, shaded relief with water) are 8192 x 4096 equirectangular WebP files served as static
 // assets; "classic" is the flat illustrated map the renderer paints itself. Both pictures are public
 // domain. The choice is per DEVICE (localStorage, never the server): a phone and a laptop may differ.

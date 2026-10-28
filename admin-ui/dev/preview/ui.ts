@@ -162,7 +162,17 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
   const styleRow = h(
     "div",
     { class: "opt opt-style" },
-    h("div", { class: "opt-text" }, h("div", { class: "opt-title" }, "Map style"), styleHelp),
+    h(
+      "div",
+      { class: "opt-text" },
+      h("div", { class: "opt-title" }, "Map style"),
+      styleHelp,
+      h(
+        "div",
+        { class: "opt-help opt-credit" },
+        "Satellite: NASA Visible Earth, Blue Marble Next Generation (July, with topography and bathymetry). Atlas: Natural Earth II shaded relief. Both public domain.",
+      ),
+    ),
     h("div", { class: "seg", role: "radiogroup", "aria-label": "Map style" }, ...styleButtons),
   );
   for (const b of styleButtons) {

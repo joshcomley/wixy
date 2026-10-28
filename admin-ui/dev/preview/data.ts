@@ -91,6 +91,52 @@ export function loadSamplePack(): Pack {
   return BUILTIN_PACK;
 }
 
+// -- Where the data comes from -----------------------------------------------------------------------
+//
+// The single-file build carries everything in <script> blocks. The SITE build (`--site`) ships the files
+// next to the page and fetches them by relative URL, with a content hash as the cache key.
+
+declare const ADV_SITE_MODE: boolean | undefined;
+declare const ADV_ASSET_VERSIONS: Readonly<Record<string, string>> | undefined;
+
+/** True in the site build: data and pictures are separate files, fetched on demand. */
+export function isSiteMode(): boolean {
+  return typeof ADV_SITE_MODE !== "undefined" && ADV_SITE_MODE === true;
+}
+
+function assetUrl(name: string): string {
+  const version = typeof ADV_ASSET_VERSIONS !== "undefined" ? ADV_ASSET_VERSIONS[name] : undefined;
+  return version === undefined ? name : `${name}?v=${version}`;
+}
+
+async function fetchJson(name: string): Promise<unknown> {
+  const response = await fetch(assetUrl(name), { credentials: "same-origin" });
+  if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
+  return response.json();
+}
+
+export interface PreviewData {
+  readonly worldJson: unknown;
+  readonly bank: Bank;
+  readonly pack: Pack;
+}
+
+/** Everything the page needs, from the inline blocks or (site build) from the files beside it. */
+export async function loadAll(): Promise<PreviewData> {
+  if (!isSiteMode()) return { worldJson: loadWorldJson(), bank: loadBank(), pack: loadSamplePack() };
+  const [worldJson, bank, pack] = await Promise.all([
+    fetchJson("adventure-world.json"),
+    fetchJson("adventure-destinations.json"),
+    fetchJson("adventure-sample-pack.json").catch(() => null),
+  ]);
+  if (!isRecord(bank) || !isRecord(bank["countries"])) throw new Error("The destination bank is not what was expected.");
+  return {
+    worldJson,
+    bank: bank as unknown as Bank,
+    pack: isRecord(pack) && Array.isArray(pack["sections"]) ? normalizePack(pack) : BUILTIN_PACK,
+  };
+}
+
 function str(v: unknown): string {
   return typeof v === "string" ? v : "";
 }

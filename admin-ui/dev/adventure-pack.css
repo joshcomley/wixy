@@ -56,3 +56,4 @@
 .seg-btn { flex: 1 1 0; min-height: 40px; border: 0; border-radius: 11px; background: transparent; color: var(--ink-dim); font-weight: 800; font-size: 14.5px; }
 .seg-btn[aria-checked="true"] { background: var(--teal); color: #052a1d; box-shadow: 0 2px 8px rgba(0, 0, 0, .3); }
 .seg-btn:disabled { opacity: .35; }
+.opt-credit { margin-top: 6px; font-size: 11.5px; opacity: .8; }

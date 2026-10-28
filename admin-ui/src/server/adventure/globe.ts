@@ -1160,6 +1160,8 @@ export function createGlobeRenderer(canvas: HTMLCanvasElement, world: World, opt
     },
     invert(x, y) {
       if (lastProjection === null || lastProjection.invert === undefined) return null;
+      // d3 clamps a pixel beyond the limb onto it; a pixel off the globe is not on the planet.
+      if (Math.hypot(x - vcx, y - vcy) > vscale) return null;
       const p = lastProjection.invert([x, y]);
       return p === null || !Number.isFinite(p[0]) || !Number.isFinite(p[1]) ? null : [p[0], p[1]];
     },

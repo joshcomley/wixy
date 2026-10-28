@@ -6,15 +6,18 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#040f20">
 <meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
 <title>Adventure Time preview</title>
 <style>/*@@CSS@@*/</style>
 </head>
 <body>
-<!-- Everything the page needs is inside this one file: nothing is fetched. -->
+<div id="adv-loading" style="position:fixed;inset:0;display:grid;place-items:center;padding:24px;text-align:center;color:#9fc4ff;background:#040f20;font:600 16px system-ui,sans-serif">Loading the globe&hellip;</div>
+<!-- In the single-file build everything the page needs is inside this file (nothing is fetched); in the
+     site build the data blocks below are removed and the files beside the page are fetched instead. -->
 <script type="application/json" id="adv-world">/*@@WORLD@@*/</script>
 <script type="application/json" id="adv-bank">/*@@BANK@@*/</script>
 <script type="application/json" id="adv-pack">/*@@PACK@@*/</script>
-<!-- Map imagery (base64 WebP, 8192x4096): NASA Blue Marble NG with topography and bathymetry, and Natural Earth II shaded relief. Both public domain. Decoded only when the style is selected. -->
+<!-- Map imagery (base64 WebP, 8192x4096): NASA Blue Marble Next Generation (July) with topography and bathymetry, and Natural Earth II shaded relief. Both public domain. Decoded only when the style is selected. -->
 <script type="text/plain" id="adv-tex-satellite" data-mime="image/webp">/*@@TEX_SATELLITE@@*/</script>
 <script type="text/plain" id="adv-tex-atlas" data-mime="image/webp">/*@@TEX_ATLAS@@*/</script>
 <script>/*@@JS@@*/</script>

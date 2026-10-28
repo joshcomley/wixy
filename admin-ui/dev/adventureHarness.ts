@@ -12,22 +12,22 @@ import { prepareLanding } from "../src/server/adventure/land";
 import { createGlobeRenderer, type GlobeFrame } from "../src/server/adventure/globe";
 import { mulberry32 } from "../src/server/adventure/roulette";
 import { parseWorld } from "../src/server/adventure/world";
-import { Memory, loadBank, loadSamplePack, loadWorldJson } from "./preview/data";
+import { Memory, isSiteMode, loadAll, type PreviewData } from "./preview/data";
 import { Game } from "./preview/game";
 import { renderPack } from "./preview/pack";
 import { buildUi } from "./preview/ui";
 
-function boot(): void {
+function boot(data: PreviewData): void {
   const params = new URLSearchParams(window.location.search);
   const seedParam = params.get("seed");
   const seed = seedParam === null ? Math.floor(Math.random() * 4294967296) : Number.parseInt(seedParam, 10) >>> 0;
   const rng = mulberry32(seed);
 
   const memory = new Memory();
-  const world = parseWorld(loadWorldJson());
+  const world = parseWorld(data.worldJson);
   prepareLanding(world);
-  const bank = loadBank();
-  const samplePack = loadSamplePack();
+  const bank = data.bank;
+  const samplePack = data.pack;
 
   const media = window.matchMedia("(prefers-reduced-motion: reduce)");
   const reducedMotion = (): boolean => memory.settings.reducedMotion ?? media.matches;
@@ -90,7 +90,7 @@ function boot(): void {
     const source = inline(style);
     return source === undefined ? Promise.reject(new Error("no inline picture")) : inlineLoader({ [style]: source })(style, maxSide);
   };
-  const renderer = createGlobeRenderer(ui.canvas, world, { imagery: { loader } });
+  const renderer = createGlobeRenderer(ui.canvas, world, { imagery: isSiteMode() ? {} : { loader } });
 
 
   // -- Sizing ---------------------------------------------------------------------------------------
@@ -255,4 +255,12 @@ function distanceBetween(pointers: Map<number, { x: number; y: number }>): numbe
   return a === undefined || b === undefined ? 0 : Math.hypot(a.x - b.x, a.y - b.y);
 }
 
-boot();
+loadAll()
+  .then((data) => {
+    document.getElementById("adv-loading")?.remove();
+    boot(data);
+  })
+  .catch((error: unknown) => {
+    const el = document.getElementById("adv-loading");
+    if (el !== null) el.textContent = `Could not load the game: ${error instanceof Error ? error.message : String(error)}`;
+  });

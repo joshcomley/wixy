@@ -14,7 +14,7 @@ await mkdir("../wixy_server/static/admin", { recursive: true });
 await copyFile("data/adventure-world.json", "../wixy_server/static/admin/adventure-world.json");
 const worldHash = createHash("sha256").update(await readFile("../wixy_server/static/admin/adventure-world.json")).digest("hex").slice(0, 10);
 
-// The globe's map imagery (satellite and atlas, 8192x4096 WebP, public domain: NASA Blue Marble NG with
+// The globe's map imagery (satellite and atlas, 8192x4096 WebP, public domain: NASA Blue Marble NG (July) with
 // topography and bathymetry; Natural Earth II shaded relief) is fetched lazily by the renderer, after the
 // vector globe is up, with the same content-hash scheme.
 const imageryDefines = {};
