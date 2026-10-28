@@ -62,6 +62,7 @@ class FakeIngredient:
     family: str
     blurb: str
     role: str
+    rarity: str = "everyday"
 
 
 @dataclass(frozen=True)
@@ -91,6 +92,7 @@ class FakeBank:
                         family=f"fam-{role}-{i:02d}",
                         blurb=f"A blurb for {role} {i:02d}.",
                         role=role,
+                        rarity="exotic" if i % 5 == 4 else "everyday",
                     )
                 )
         self._by_id = {i.id: i for i in self.items}
@@ -109,6 +111,7 @@ class FakeBank:
         )
         self.calls: list[dict[str, Any]] = []
         self.exhausted = False
+        self.exhausted_wildcard = False
 
     def ingredient(self, ingredient_id: str) -> FakeIngredient | None:
         return self._by_id.get(ingredient_id)
@@ -120,8 +123,13 @@ class FakeBank:
     def staples(self) -> tuple[FakeStaple, ...]:
         return self._staples
 
-    def shuffle_role_schedule(self, rng: random.Random | None = None) -> Sequence[str]:
-        return ["base", "protein", "produce", "produce", "accent"]
+    def shuffle_role_schedule(
+        self, rng: random.Random | None = None, *, first_role: str | None = None
+    ) -> Sequence[str]:
+        schedule = ["base", "protein", "produce", "produce", "accent"]
+        if first_role is not None:
+            schedule.insert(0, schedule.pop(schedule.index(first_role)))
+        return schedule
 
     def draw_pair(
         self,
@@ -132,6 +140,7 @@ class FakeBank:
         offered_families: AbstractSet[str],
         player_offered_categories: Sequence[str],
         rng: random.Random | None = None,
+        rarity_mode: str = "normal",
     ) -> tuple[FakeIngredient, FakeIngredient]:
         self.calls.append(
             {
@@ -140,6 +149,7 @@ class FakeBank:
                 "picked_families": frozenset(picked_families),
                 "offered_families": frozenset(offered_families),
                 "player_offered_categories": tuple(player_offered_categories),
+                "rarity_mode": rarity_mode,
             }
         )
         if self.exhausted:
@@ -147,7 +157,10 @@ class FakeBank:
         pool = [
             i
             for i in self.items
-            if i.role == role and i.id not in seen_ids and i.family not in picked_families
+            if i.role == role
+            and i.id not in seen_ids
+            and i.family not in picked_families
+            and (rarity_mode != "exotic" or i.rarity == "exotic")
         ]
         chooser = rng if rng is not None else self._rng
         chooser.shuffle(pool)
@@ -156,6 +169,68 @@ class FakeBank:
                 if second.category != first.category and second.family != first.family:
                     return first, second
         raise CookoutDrawExhausted()
+
+    def draw_replacement(
+        self,
+        *,
+        role: Any,
+        keep_id: str,
+        seen_ids: AbstractSet[str],
+        picked_families: AbstractSet[str],
+        offered_families: AbstractSet[str],
+        player_offered_categories: Sequence[str],
+        rarity_mode: str = "normal",
+        rng: random.Random | None = None,
+    ) -> FakeIngredient:
+        keep = self._by_id[keep_id]
+        self.calls.append({"replacement_for": keep_id, "rarity_mode": rarity_mode, "role": role})
+        if self.exhausted:
+            raise CookoutDrawExhausted()
+        pool = [
+            i
+            for i in self.items
+            if i.role == role
+            and i.id not in seen_ids
+            and i.family not in picked_families
+            and i.category != keep.category
+            and i.family != keep.family
+            and (
+                i.rarity == "exotic"
+                if rarity_mode == "exotic"
+                else keep.rarity == "everyday" or i.rarity == "everyday"
+            )
+        ]
+        if not pool:
+            raise CookoutDrawExhausted()
+        chooser = rng if rng is not None else self._rng
+        return chooser.choice(pool)
+
+    def draw_wildcard(
+        self,
+        *,
+        seen_ids: AbstractSet[str],
+        picked_families: AbstractSet[str],
+        offered_families: AbstractSet[str],
+        basket_categories: AbstractSet[str],
+        rng: random.Random | None = None,
+    ) -> FakeIngredient:
+        self.calls.append({"wildcard": True, "seen_ids": frozenset(seen_ids)})
+        if self.exhausted_wildcard:
+            raise CookoutDrawExhausted()
+        pool = [
+            i
+            for i in self.items
+            if i.rarity != "everyday" and i.id not in seen_ids and i.family not in picked_families
+        ]
+        if not pool:
+            raise CookoutDrawExhausted()
+        chooser = rng if rng is not None else self._rng
+        return chooser.choice(pool)
+
+    def search(self, query: str, *, limit: int = 20) -> tuple[FakeIngredient, ...]:
+        needle = query.strip().lower()
+        hits = [i for i in self.items if i.name.lower().startswith(needle)]
+        return tuple(hits[:limit])
 
 
 @pytest.fixture
@@ -332,9 +407,14 @@ def ready_round(
     """A finished round whose concepts are `ready` (and, with `pictures`, whose picture wait is
     `pending`, as `finish_cookout_concepts` leaves it)."""
     seq, picked = finished_round(store, bank, cid)
-    assert store.set_cookout_concepts_run(seq, "run-1")
+    assert store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
     assert store.finish_cookout_concepts(
-        seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=pictures
+        seq,
+        "run-1",
+        "ready",
+        concepts_json=canned_concepts(picked),
+        pictures_pending=pictures,
+        expected_generation=1,
     )
     return seq
 
@@ -426,6 +506,16 @@ class TestSchema:
         assert raw(db_path, "PRAGMA user_version") == [(21,)]
         names = {r[0] for r in raw(db_path, "SELECT name FROM sqlite_master")}
         assert {"cookout_rounds", "cookout_turns", "cookout_recipes"} <= names
+        # The migration produces the FINAL v21 shape directly (the twist addendum is folded in).
+        assert {"cookout_generations", "idx_cookout_recipes_photo"} <= names
+        recipe_pk = sorted(
+            (r[5], r[1]) for r in raw(db_path, "PRAGMA table_info(cookout_recipes)") if r[5]
+        )
+        assert [n for _, n in recipe_pk] == ["anchor_message_seq", "generation", "concept_id"]
+        round_columns = {r[1] for r in raw(db_path, "PRAGMA table_info(cookout_rounds)")}
+        assert {"style", "wildcard", "stars", "generation", "swap_state", "encore_kind"} <= (
+            round_columns
+        )
         # Every v20 row survived byte for byte, and v20's own tables were never edited.
         for table, rows in before.items():
             assert raw(db_path, f"SELECT * FROM {table} ORDER BY 1") == rows, table
@@ -487,6 +577,11 @@ class TestCreate:
             "concepts": "none",
             "bankedCount": 0,
             "rev": 1,
+            "generation": 1,
+            "waiting": [],
+            "swap": "none",
+            "dinnerDecided": False,
+            "cookedCount": 0,
         }
         first, second = data_of(store, seq).turns[0].offers[0]
         blob = json.dumps(wire)
@@ -650,9 +745,9 @@ class TestSeatIdentity:
         with pytest.raises(CookoutNotPlayerError):
             pick(store, bank, seq, "Josh", email="x@example.com")
         # The matching email (case-insensitively), or no email at all, is the player.
-        assert view_for(store, bank, seq, "Josh", "A@Example.com")["you"] == {"slot": 1}
-        assert view_for(store, bank, seq, "Josh", None)["you"] == {"slot": 1}
-        assert view_for(store, bank, seq, "josh ", None)["you"] == {"slot": 1}
+        assert view_for(store, bank, seq, "Josh", "A@Example.com")["you"]["slot"] == 1
+        assert view_for(store, bank, seq, "Josh", None)["you"]["slot"] == 1
+        assert view_for(store, bank, seq, "josh ", None)["you"]["slot"] == 1
         assert view_for(store, bank, seq, "Nobody", "a@example.com")["you"] is None
         assert view_for(store, bank, seq, None)["you"] is None
 
@@ -660,7 +755,7 @@ class TestSeatIdentity:
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq = start(store, bank, sender="Josh", email=None)
-        assert view_for(store, bank, seq, "Josh", "anyone@example.com")["you"] == {"slot": 1}
+        assert view_for(store, bank, seq, "Josh", "anyone@example.com")["you"]["slot"] == 1
 
 
 # -- turns: alternation, skips, picks -------------------------------------------------------------
@@ -1068,7 +1163,8 @@ class TestBlindRedaction:
         ]
         rose = view_for(store, bank, seq, "Rose")
         assert rose["revealed"] is False and rose["blind"] is True
-        assert rose["players"][0] == {"slot": 1, "name": "Josh", "pickCount": 2, "picks": None}
+        assert rose["players"][0]["picks"] is None and rose["players"][0]["pickCount"] == 2
+        assert rose["players"][0]["chaosUsed"] is None  # the partner's chaos flag is Blind-hidden
         assert rose["players"][1]["pickCount"] == 1 and len(rose["players"][1]["picks"]) == 1
         assert not any(name in all_text(rose) for name in p1_picks)
         josh = view_for(store, bank, seq, "Josh")
@@ -1155,15 +1251,20 @@ class TestBlindRedaction:
         v = view_for(store, bank, seq, "Josh")
         assert set(v) == {
             "seq", "state", "rev", "blind", "revealed", "players", "you", "current",
-            "history", "staples", "concepts", "images", "recipes",
+            "history", "staples", "concepts", "images", "recipes", "setup", "generation",
+            "starters", "basket", "gate", "wildcard", "stars", "vote", "swap", "generations",
         }  # fmt: skip
-        assert v["players"][1] == {"slot": 2, "name": None, "pickCount": 0, "picks": []}
+        assert v["players"][1] == {
+            "slot": 2, "name": None, "pickCount": 0, "picks": [], "chaosUsed": False,
+            "vetoUsed": False,
+        }  # fmt: skip
         assert set(v["current"]["options"][0]) == {"id", "name", "category", "emoji", "blurb"}
         assert len(v["staples"]) == 8 and v["staples"][0] == {"id": "water", "name": "Water"}
         assert v["concepts"] == {"state": "none", "data": None, "error": None}
         assert v["images"] == {"state": "none", "pictures": {"a": None, "b": None, "c": None}}
         assert v["recipes"]["a"] == {
             "state": "none", "requestedBy": None, "bankedAt": None, "error": None, "data": None,
+            "generation": 1, "cooked": None,
         }  # fmt: skip
 
 
@@ -1175,25 +1276,35 @@ class TestConcepts:
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq, _ = finished_round(store, bank)
-        assert store.cookout_pending_concepts() == [(seq, None)]
-        assert store.set_cookout_concepts_run(seq, "run-1") is True
-        assert store.cookout_pending_concepts() == [(seq, "run-1")]
+        assert store.cookout_pending_concepts() == [(seq, 1, None)]
+        assert store.set_cookout_concepts_run(seq, "run-1", expected_generation=1) is True
+        assert store.cookout_pending_concepts() == [(seq, 1, "run-1")]
         # Another process racing to record its own first run loses.
-        assert store.set_cookout_concepts_run(seq, "run-x") is False
+        assert store.set_cookout_concepts_run(seq, "run-x", expected_generation=1) is False
         # The single early retry replaces the dead run and counts a try.
-        assert store.set_cookout_concepts_run(seq, "run-2", expected_run_id="run-1") is True
+        assert (
+            store.set_cookout_concepts_run(
+                seq, "run-2", expected_run_id="run-1", expected_generation=1
+            )
+            is True
+        )
         row = data_of(store, seq).round
         assert row.concepts_run_id == "run-2" and row.concepts_tries == 2
-        assert store.set_cookout_concepts_run(404, "r") is False
+        assert store.set_cookout_concepts_run(404, "r", expected_generation=1) is False
 
     def test_a_ready_result_lands_once_and_starts_the_picture_wait(
         self, store: LiveChatStore, bank: FakeBank, db_path: Path
     ) -> None:
         seq, picked = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
         evs = events(db_path, seq)
         assert store.finish_cookout_concepts(
-            seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+            seq,
+            "run-1",
+            "ready",
+            concepts_json=canned_concepts(picked),
+            pictures_pending=True,
+            expected_generation=1,
         )
         row = data_of(store, seq).round
         assert row.concepts == "ready" and row.concepts_error is None
@@ -1203,7 +1314,12 @@ class TestConcepts:
         assert events(db_path, seq) == [*evs, "message_updated"]
         # A second completion (the blue/green overlap) finds nothing waiting.
         assert not store.finish_cookout_concepts(
-            seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+            seq,
+            "run-1",
+            "ready",
+            concepts_json=canned_concepts(picked),
+            pictures_pending=True,
+            expected_generation=1,
         )
         assert store.cookout_pending_concepts() == []
         view = view_for(store, bank, seq, "Josh")
@@ -1227,23 +1343,32 @@ class TestConcepts:
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq, _ = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
-        assert store.finish_cookout_concepts(seq, "run-1", "failed", error="cmd said no")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+        assert store.finish_cookout_concepts(
+            seq, "run-1", "failed", error="cmd said no", expected_generation=1
+        )
         v = view_for(store, bank, seq, "Josh")
         assert v["concepts"] == {"state": "failed", "data": None, "error": "cmd said no"}
         # `unavailable` is recorded with no run (the NULL run id compares equal).
         other, _ = finished_round(store, bank, "cookout-unavail-0001")
-        assert store.finish_cookout_concepts(other, None, "unavailable", error="no runner")
+        assert store.finish_cookout_concepts(
+            other, None, "unavailable", error="no runner", expected_generation=1
+        )
         assert data_of(store, other).round.concepts == "unavailable"
 
     def test_a_finish_from_a_cancelled_or_deleted_round_lands_nothing(
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq, picked = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
         store.delete_message(seq=seq, now=99.0)
         assert not store.finish_cookout_concepts(
-            seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+            seq,
+            "run-1",
+            "ready",
+            concepts_json=canned_concepts(picked),
+            pictures_pending=True,
+            expected_generation=1,
         )
         assert store.get_cookout_round(seq) is None
 
@@ -1251,11 +1376,11 @@ class TestConcepts:
         self, store: LiveChatStore, bank: FakeBank, db_path: Path
     ) -> None:
         seq, picked = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
-        store.finish_cookout_concepts(seq, "run-1", "failed", error="boom")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+        store.finish_cookout_concepts(seq, "run-1", "failed", error="boom", expected_generation=1)
         gen_before = data_of(store, seq).round.images_generation
         evs = events(db_path, seq)
-        assert store.retry_cookout_concepts(seq, now=100.0) is True
+        assert store.retry_cookout_concepts(seq, now=100.0, generation=None) is True
         row = data_of(store, seq).round
         assert row.concepts == "pending" and row.concepts_run_id is None
         assert row.concepts_error is None and row.concepts_json is None
@@ -1270,24 +1395,26 @@ class TestConcepts:
         assert row.images_deadline_at is None and row.images_generation == gen_before + 1
         assert events(db_path, seq) == [*evs, "message_updated"]
         # A second tap while pending is not applicable (the route reads that as idempotent).
-        assert store.retry_cookout_concepts(seq, now=101.0) is False
+        assert store.retry_cookout_concepts(seq, now=101.0, generation=None) is False
         # The old run completing late (after the retry epoch began) lands nothing...
-        store.set_cookout_concepts_run(seq, "run-2")
+        store.set_cookout_concepts_run(seq, "run-2", expected_generation=1)
         assert not store.finish_cookout_concepts(
-            seq, "run-1", "ready", concepts_json=canned_concepts(picked)
+            seq, "run-1", "ready", concepts_json=canned_concepts(picked), expected_generation=1
         )
         # ...and only the new run's result does.
         assert store.finish_cookout_concepts(
-            seq, "run-2", "ready", concepts_json=canned_concepts(picked)
+            seq, "run-2", "ready", concepts_json=canned_concepts(picked), expected_generation=1
         )
 
     def test_a_retry_resets_a_job_that_hit_its_try_limit_and_deadline(
         self, store: LiveChatStore, bank: FakeBank, db_path: Path
     ) -> None:
         seq, _ = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
-        store.set_cookout_concepts_run(seq, "run-2", expected_run_id="run-1")
-        store.finish_cookout_concepts(seq, "run-2", "failed", error="timed out")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+        store.set_cookout_concepts_run(seq, "run-2", expected_run_id="run-1", expected_generation=1)
+        store.finish_cookout_concepts(
+            seq, "run-2", "failed", error="timed out", expected_generation=1
+        )
         conn = sqlite3.connect(str(db_path))
         try:
             conn.execute(
@@ -1299,18 +1426,20 @@ class TestConcepts:
             conn.close()
         row = data_of(store, seq).round
         assert row.concepts_tries == 2 and row.concepts_deadline_at == 1.0
-        assert store.retry_cookout_concepts(seq, now=500.0) is True
+        assert store.retry_cookout_concepts(seq, now=500.0, generation=None) is True
         row = data_of(store, seq).round
         assert (row.concepts_tries, row.concepts_started_at) == (1, 500.0)
         assert row.concepts_deadline_at == 1400.0
         # Recipes the same: a row past its deadline with tries at the limit starts afresh.
         ready = ready_round(store, bank, "cookout-limit-0000001", pictures=False)
         TestRecipes()._bank(store, ready)
-        store.set_cookout_recipe_run(ready, "a", "r1")
-        store.set_cookout_recipe_run(ready, "a", "r2", expected_run_id="r1")
-        store.finish_cookout_recipe(ready, "a", "r2", "failed", error="timed out")
+        store.set_cookout_recipe_run(ready, "a", "r1", expected_generation=1)
+        store.set_cookout_recipe_run(ready, "a", "r2", expected_run_id="r1", expected_generation=1)
+        store.finish_cookout_recipe(
+            ready, "a", "r2", "failed", error="timed out", expected_generation=1
+        )
         assert raw(db_path, "SELECT tries FROM cookout_recipes") == [(2,)]
-        assert store.retry_cookout_recipe(ready, "a", now=900.0) is True
+        assert store.retry_cookout_recipe(ready, "a", now=900.0, generation=None) is True
         assert raw(db_path, "SELECT tries, deadline_at FROM cookout_recipes") == [(1, 1800.0)]
 
     def test_retry_from_unavailable_and_not_from_ready_or_an_open_round(
@@ -1318,13 +1447,13 @@ class TestConcepts:
     ) -> None:
         seq, _ = finished_round(store, bank, runner=False)
         assert data_of(store, seq).round.concepts == "unavailable"
-        assert store.retry_cookout_concepts(seq, now=5.0) is True
+        assert store.retry_cookout_concepts(seq, now=5.0, generation=None) is True
         ready = ready_round(store, bank, "cookout-ready-000001")
-        assert store.retry_cookout_concepts(ready, now=5.0) is False
+        assert store.retry_cookout_concepts(ready, now=5.0, generation=None) is False
         open_seq = start(store, bank, "cookout-open-000002")
-        assert store.retry_cookout_concepts(open_seq, now=5.0) is False
+        assert store.retry_cookout_concepts(open_seq, now=5.0, generation=None) is False
         with pytest.raises(CookoutRoundNotFoundError):
-            store.retry_cookout_concepts(404, now=5.0)
+            store.retry_cookout_concepts(404, now=5.0, generation=None)
 
 
 # -- pictures -------------------------------------------------------------------------------------
@@ -1405,7 +1534,7 @@ class TestPictures:
         assert row.images == "failed" and set(row.pictures) == {"a", "c"}
         kept = dict(row.pictures)
         gen_before = row.images_generation
-        assert store.retry_cookout_pictures(seq, now=70.0) is True
+        assert store.retry_cookout_pictures(seq, now=70.0, generation=None) is True
         row = data_of(store, seq).round
         assert row.images == "pending" and row.pictures == kept  # attached slots preserved
         assert (row.images_tries, row.images_started_at, row.images_deadline_at) == (1, 70.0, 670.0)
@@ -1432,12 +1561,16 @@ class TestPictures:
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq = ready_round(store, bank)
-        assert store.retry_cookout_pictures(seq, now=1.0) is False  # pending already
+        assert (
+            store.retry_cookout_pictures(seq, now=1.0, generation=None) is False
+        )  # pending already
         _, gen = store.claim_cookout_pictures(seq, stale_before=None, now=2.0)
         store.store_cookout_pictures(seq, gen, uploads("a", "b", "c"), None, all_done=True, now=3.0)
-        assert store.retry_cookout_pictures(seq, now=4.0) is False  # nothing missing
+        assert (
+            store.retry_cookout_pictures(seq, now=4.0, generation=None) is False
+        )  # nothing missing
         open_seq = start(store, bank, "cookout-open-000003")
-        assert store.retry_cookout_pictures(open_seq, now=4.0) is False
+        assert store.retry_cookout_pictures(open_seq, now=4.0, generation=None) is False
 
     def test_two_store_instances_fence_a_late_attempt(self, db_path: Path, bank: FakeBank) -> None:
         a, b = LiveChatStore(db_path), LiveChatStore(db_path)
@@ -1480,7 +1613,7 @@ class TestPictures:
         _, gen = store.claim_cookout_pictures(seq, stale_before=None, now=10.0)
         store.fail_cookout_pictures(seq, expected_generation=gen, now=11.0)
         assert data_of(store, seq).round.images == "failed"
-        assert store.retry_cookout_pictures(seq, now=12.0) is True
+        assert store.retry_cookout_pictures(seq, now=12.0, generation=None) is True
         # The first attempt finishing late is fenced by the retry's incremented generation.
         assert not store.store_cookout_pictures(
             seq, gen, uploads("a", "b", "c"), None, all_done=True, now=13.0
@@ -1572,6 +1705,7 @@ class TestRecipes:
             move_id=mv or move_id(),
             runner_available=runner,
             now=40.0,
+            generation=None,
         )
 
     def test_bank_this_creates_a_pending_row_and_is_state_idempotent(
@@ -1593,9 +1727,9 @@ class TestRecipes:
         # Each concept is independently bankable.
         assert self._bank(store, seq, "b")[1] is True and self._bank(store, seq, "c")[1] is True
         assert store.cookout_pending_recipes() == [
-            (seq, "a", None),
-            (seq, "b", None),
-            (seq, "c", None),
+            (seq, 1, "a", None),
+            (seq, 1, "b", None),
+            (seq, 1, "c", None),
         ]
         assert row.rev == data_of(store, seq).round.rev - 2
 
@@ -1632,7 +1766,9 @@ class TestRecipes:
         second = ready_round(store, bank, "cookout-book-0000002", pictures=False)
         for seq, concept in ((first, "a"), (second, "b"), (first, "c")):
             self._bank(store, seq, concept)
-            assert store.set_cookout_recipe_run(seq, concept, f"r-{seq}-{concept}")
+            assert store.set_cookout_recipe_run(
+                seq, concept, f"r-{seq}-{concept}", expected_generation=1
+            )
         assert store.list_cookout_bank() == []  # pending rows are not in the book
         body = json.dumps(
             {
@@ -1646,17 +1782,24 @@ class TestRecipes:
         )
         for seq, concept in ((first, "a"), (second, "b"), (first, "c")):
             assert store.finish_cookout_recipe(
-                seq, concept, f"r-{seq}-{concept}", "banked", recipe_json=body
+                seq,
+                concept,
+                f"r-{seq}-{concept}",
+                "banked",
+                recipe_json=body,
+                expected_generation=1,
             )
         # CAS: a repeat finish lands nothing.
-        assert not store.finish_cookout_recipe(first, "a", "r-1-a", "banked", recipe_json=body)
+        assert not store.finish_cookout_recipe(
+            first, "a", "r-1-a", "banked", recipe_json=body, expected_generation=1
+        )
         book = store.list_cookout_bank()
-        assert [(r.anchor_message_seq, rec.concept_id) for r, rec, _ in book] == [
+        assert [(b.round.anchor_message_seq, b.recipe.concept_id) for b in book] == [
             (first, "c"),
             (second, "b"),
             (first, "a"),
         ]
-        assert all(rec.state == "banked" and rec.banked_at for _, rec, _ in book)
+        assert all(b.recipe.state == "banked" and b.recipe.banked_at for b in book)
         msg = next(m for m in store.list_messages(before=None, limit=10)[0] if m.seq == first)
         assert msg.cookout is not None and msg.cookout.banked_count == 2
 
@@ -1665,36 +1808,51 @@ class TestRecipes:
     ) -> None:
         seq = ready_round(store, bank, pictures=False)
         self._bank(store, seq)
-        assert store.set_cookout_recipe_run(seq, "a", "run-1") is True
-        assert store.set_cookout_recipe_run(seq, "a", "run-x") is False
-        assert store.set_cookout_recipe_run(seq, "a", "run-2", expected_run_id="run-1") is True
+        assert store.set_cookout_recipe_run(seq, "a", "run-1", expected_generation=1) is True
+        assert store.set_cookout_recipe_run(seq, "a", "run-x", expected_generation=1) is False
+        assert (
+            store.set_cookout_recipe_run(
+                seq, "a", "run-2", expected_run_id="run-1", expected_generation=1
+            )
+            is True
+        )
         assert store.get_cookout_round(seq)["recipes"]["a"]["tries"] == 2  # type: ignore[index]
-        assert store.finish_cookout_recipe(seq, "a", "run-2", "failed", error="bad json")
+        assert store.finish_cookout_recipe(
+            seq, "a", "run-2", "failed", error="bad json", expected_generation=1
+        )
         v = view_for(store, bank, seq, "Josh")["recipes"]["a"]
         assert v["state"] == "failed" and v["error"] == "bad json"
         with pytest.raises(CookoutBadStateError):
             self._bank(store, seq)  # a failed recipe is retried, not re-banked
         evs = events(db_path, seq)
-        assert store.retry_cookout_recipe(seq, "a", now=100.0) is True
+        assert store.retry_cookout_recipe(seq, "a", now=100.0, generation=None) is True
         got = store.get_cookout_round(seq)["recipes"]["a"]  # type: ignore[index]
         assert got["state"] == "pending" and got["run_id"] is None and got["error"] is None
         assert got["recipe_json"] is None and got["tries"] == 1
         assert got["started_at"] == 100.0 and got["deadline_at"] == 1000.0
         assert raw(db_path, "SELECT banked_at FROM cookout_recipes") == [(None,)]
         assert events(db_path, seq) == [*evs, "message_updated"]
-        assert store.retry_cookout_recipe(seq, "a", now=101.0) is False  # pending: not applicable
-        assert store.retry_cookout_recipe(seq, "b", now=101.0) is False  # never requested
+        assert (
+            store.retry_cookout_recipe(seq, "a", now=101.0, generation=None) is False
+        )  # pending: not applicable
+        assert (
+            store.retry_cookout_recipe(seq, "b", now=101.0, generation=None) is False
+        )  # never requested
         # The dead run completing after the retry lands nothing.
-        assert not store.finish_cookout_recipe(seq, "a", "run-2", "banked", recipe_json="{}")
+        assert not store.finish_cookout_recipe(
+            seq, "a", "run-2", "banked", recipe_json="{}", expected_generation=1
+        )
 
     def test_a_banked_recipe_view_carries_the_body_with_total_minutes(
         self, store: LiveChatStore, bank: FakeBank
     ) -> None:
         seq, picked = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
-        store.finish_cookout_concepts(seq, "run-1", "ready", concepts_json=canned_concepts(picked))
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+        store.finish_cookout_concepts(
+            seq, "run-1", "ready", concepts_json=canned_concepts(picked), expected_generation=1
+        )
         self._bank(store, seq)
-        store.set_cookout_recipe_run(seq, "a", "r1")
+        store.set_cookout_recipe_run(seq, "a", "r1", expected_generation=1)
         body = {
             "serves": 2,
             "prepMinutes": 15,
@@ -1703,7 +1861,9 @@ class TestRecipes:
             "steps": [{"text": "Cook.", "minutes": None, "uses": [picked[0]]}],
             "tips": [],
         }
-        store.finish_cookout_recipe(seq, "a", "r1", "banked", recipe_json=json.dumps(body))
+        store.finish_cookout_recipe(
+            seq, "a", "r1", "banked", recipe_json=json.dumps(body), expected_generation=1
+        )
         slot = view_for(store, bank, seq, "Rose")["recipes"]["a"]
         assert slot["state"] == "banked" and slot["requestedBy"] == "Josh" and slot["bankedAt"]
         assert slot["data"]["totalMinutes"] == 35 and slot["data"]["serves"] == 2
@@ -1931,20 +2091,20 @@ class TestRaces:
         r = run_concurrently(lambda: t._bank(a, seq), lambda: t._bank(b, seq, sender="Rose"))
         assert sorted(x[1] for x in r) == [False, True]
         assert raw(db_path, "SELECT COUNT(*) FROM cookout_recipes") == [(1,)]
-        a.set_cookout_recipe_run(seq, "a", "r1")
-        a.finish_cookout_recipe(seq, "a", "r1", "failed", error="x")
+        a.set_cookout_recipe_run(seq, "a", "r1", expected_generation=1)
+        a.finish_cookout_recipe(seq, "a", "r1", "failed", error="x", expected_generation=1)
         rr = run_concurrently(
-            lambda: a.retry_cookout_recipe(seq, "a", now=5.0),
-            lambda: b.retry_cookout_recipe(seq, "a", now=5.0),
+            lambda: a.retry_cookout_recipe(seq, "a", now=5.0, generation=None),
+            lambda: b.retry_cookout_recipe(seq, "a", now=5.0, generation=None),
         )
         assert sorted(rr) == [False, True]
         # Concepts retries likewise.
         other, _ = finished_round(a, bank, "cookout-race-retry-001")
-        a.set_cookout_concepts_run(other, "c1")
-        a.finish_cookout_concepts(other, "c1", "failed", error="x")
+        a.set_cookout_concepts_run(other, "c1", expected_generation=1)
+        a.finish_cookout_concepts(other, "c1", "failed", error="x", expected_generation=1)
         cr = run_concurrently(
-            lambda: a.retry_cookout_concepts(other, now=5.0),
-            lambda: b.retry_cookout_concepts(other, now=5.0),
+            lambda: a.retry_cookout_concepts(other, now=5.0, generation=None),
+            lambda: b.retry_cookout_concepts(other, now=5.0, generation=None),
         )
         assert sorted(cr) == [False, True]
         assert data_of(a, other).round.images_generation == 1  # one reset, one increment
@@ -1985,21 +2145,30 @@ class TestRaces:
     def test_delete_and_wipe_racing_job_completion(self, db_path: Path, bank: FakeBank) -> None:
         a, b = LiveChatStore(db_path), LiveChatStore(db_path)
         seq, picked = finished_round(a, bank)
-        a.set_cookout_concepts_run(seq, "run-1")
+        a.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
         results = run_concurrently(
             lambda: a.delete_message(seq=seq, now=99.0),
             lambda: b.finish_cookout_concepts(
-                seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+                seq,
+                "run-1",
+                "ready",
+                concepts_json=canned_concepts(picked),
+                pictures_pending=True,
+                expected_generation=1,
             ),
         )
         assert not any(isinstance(r, Exception) for r in results)
         assert a.get_cookout_round(seq) is None  # whichever order, the round ends erased
         wipe_seq, picked2 = finished_round(a, bank, "cookout-race-wipe-0001")
-        a.set_cookout_concepts_run(wipe_seq, "run-w")
+        a.set_cookout_concepts_run(wipe_seq, "run-w", expected_generation=1)
         results = run_concurrently(
             lambda: a.wipe(now=100.0),
             lambda: b.finish_cookout_concepts(
-                wipe_seq, "run-w", "ready", concepts_json=canned_concepts(picked2)
+                wipe_seq,
+                "run-w",
+                "ready",
+                concepts_json=canned_concepts(picked2),
+                expected_generation=1,
             ),
         )
         assert not any(isinstance(r, Exception) for r in results)
@@ -2014,8 +2183,8 @@ class TestClockAndMoveIds:
         competing writer must not eat into a window): the stamped time is the one `time.time`
         returned after `BEGIN IMMEDIATE`, not one sampled before the call."""
         seq, picked = finished_round(store, bank)
-        store.set_cookout_concepts_run(seq, "run-1")
-        store.finish_cookout_concepts(seq, "run-1", "failed", error="x")
+        store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+        store.finish_cookout_concepts(seq, "run-1", "failed", error="x", expected_generation=1)
         real = time.time
         log: list[str] = []
         clock = iter(float(n) for n in range(5000, 6000))
@@ -2031,14 +2200,19 @@ class TestClockAndMoveIds:
 
         monkeypatch.setattr(LiveChatStore, "_write_txn", traced)
         monkeypatch.setattr(time, "time", tick)
-        assert store.retry_cookout_concepts(seq) is True
+        assert store.retry_cookout_concepts(seq, generation=None) is True
         assert log[:2] == ["lock", "clock"]
         row = data_of(store, seq).round
         assert row.concepts_started_at == 5000.0 and row.concepts_deadline_at == 5900.0
         monkeypatch.setattr(time, "time", real)
-        store.set_cookout_concepts_run(seq, "run-2")
+        store.set_cookout_concepts_run(seq, "run-2", expected_generation=1)
         store.finish_cookout_concepts(
-            seq, "run-2", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+            seq,
+            "run-2",
+            "ready",
+            concepts_json=canned_concepts(picked),
+            pictures_pending=True,
+            expected_generation=1,
         )
         monkeypatch.setattr(time, "time", tick)
         log.clear()
@@ -2048,7 +2222,7 @@ class TestClockAndMoveIds:
         assert store.fail_cookout_pictures(seq, expected_generation=gen) is True
         assert log[:2] == ["lock", "clock"]
         log.clear()
-        assert store.retry_cookout_pictures(seq) is True
+        assert store.retry_cookout_pictures(seq, generation=None) is True
         assert log[:2] == ["lock", "clock"]
         row = data_of(store, seq).round
         assert row.images_deadline_at == (row.images_started_at or 0) + 600

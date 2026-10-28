@@ -48,21 +48,27 @@ class FakeRunner:
         self.available = available
         self.images_available = images
         self.concepts: list[int] = []
+        self.concept_generations: list[tuple[int, int]] = []
         self.pictures: list[int] = []
         self.recipes: list[tuple[int, str]] = []
+        self.recipe_generations: list[tuple[int, int, str]] = []
         self.resumed = 0
         self.supervised = 0
 
-    def start_concepts(self, background: ContainedTaskGroup, anchor_seq: int) -> None:
+    def start_concepts(
+        self, background: ContainedTaskGroup, anchor_seq: int, generation: int
+    ) -> None:
         self.concepts.append(anchor_seq)
+        self.concept_generations.append((anchor_seq, generation))
 
     def start_pictures(self, background: ContainedTaskGroup, anchor_seq: int) -> None:
         self.pictures.append(anchor_seq)
 
     def start_recipe(
-        self, background: ContainedTaskGroup, anchor_seq: int, concept_id: str
+        self, background: ContainedTaskGroup, anchor_seq: int, generation: int, concept_id: str
     ) -> None:
         self.recipes.append((anchor_seq, concept_id))
+        self.recipe_generations.append((anchor_seq, generation, concept_id))
 
     async def resume(self, background: ContainedTaskGroup) -> None:
         self.resumed += 1
@@ -201,9 +207,14 @@ def store_of(client: TestClient) -> LiveChatStore:
 def finish_concepts(client: TestClient, seq: int, *, pictures: bool = False) -> None:
     store = store_of(client)
     picked = store.get_cookout_round(seq)["picked_ids"]  # type: ignore[index]
-    assert store.set_cookout_concepts_run(seq, "run-1")
+    assert store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
     assert store.finish_cookout_concepts(
-        seq, "run-1", "ready", concepts_json=canned_concepts(picked), pictures_pending=pictures
+        seq,
+        "run-1",
+        "ready",
+        concepts_json=canned_concepts(picked),
+        pictures_pending=pictures,
+        expected_generation=1,
     )
 
 
@@ -234,6 +245,34 @@ ROUTES = [
     ("POST", "/cookout/1/skip", {**_SKIP, "offer": 7}),
     ("POST", "/cookout/1/concepts/zz/bank", {"sender": "Josh", "moveId": "x"}),
     ("GET", "/cookout/0", None),
+    # The twists (spec 09a §4.2): every new route, including the literal GETs.
+    ("GET", "/cookout/options", None),
+    ("GET", "/cookout/ingredients?q=ze", None),
+    ("GET", "/cookout/1/photos?as=Josh", None),
+    ("POST", "/cookout/1/lucky", {**_SKIP, "optionIds": ["a1", "b2"]}),
+    ("POST", "/cookout/1/chaos", {**_SKIP, "optionIds": ["a1", "b2"]}),
+    ("POST", "/cookout/1/veto", {**_SKIP, "ingredientId": "base-00"}),
+    ("POST", "/cookout/1/star", {"sender": "Josh", "ingredientId": "base-00"}),
+    ("POST", "/cookout/1/wildcard", {"sender": "Josh", "moveId": "move-0000001", "lift": True}),
+    ("POST", "/cookout/1/vote", {"sender": "Josh", "generation": 1, "conceptId": "a"}),
+    (
+        "POST",
+        "/cookout/1/swap/propose",
+        {"sender": "Josh", "moveId": "move-0000001", "ingredientId": "base-00"},
+    ),
+    (
+        "POST",
+        "/cookout/1/swap/choose",
+        {"sender": "Josh", "moveId": "move-0000001", "ingredientId": "base-00"},
+    ),
+    ("POST", "/cookout/1/swap/cancel", {"sender": "Josh"}),
+    ("POST", "/cookout/1/recipes/1/a/cooked", {"sender": "Josh", "cooked": True}),
+    ("POST", "/cookout/1/recipes/1/a/rating", {"sender": "Josh", "rating": 3}),
+    (
+        "POST",
+        "/cookout/1/recipes/1/a/photo",
+        {"sender": "Josh", "messageSeq": None, "attachmentId": None},
+    ),
 ]
 
 
@@ -298,11 +337,16 @@ class TestCreate:
                 "concepts": "none",
                 "bankedCount": 0,
                 "rev": 1,
+                "generation": 1,
+                "waiting": [],
+                "swap": "none",
+                "dinnerDecided": False,
+                "cookedCount": 0,
             }
             assert message["text"] is None and message["sender"] == "Bubble"
             assert message["wyr"] is None and message["adventure"] is None
             v = view(client, h, message["seq"], "Bubble")
-            assert v["you"] == {"slot": 1} and v["current"]["turn"] == 1
+            assert v["you"]["slot"] == 1 and v["current"]["turn"] == 1
             assert v["players"][0]["name"] == "Bubble" and v["players"][1]["name"] is None
             names = [o["name"] for o in v["current"]["options"]]
             assert not any(n in json.dumps(message) for n in names)  # broadcast carries no food
@@ -395,7 +439,7 @@ class TestView:
             joined = post(client, h, f"/cookout/{seq}/join", sender="Rose")
             assert joined.status_code == 200 and joined.headers["cache-control"] == "no-store"
             body = joined.json()
-            assert body["you"] == {"slot": 2}
+            assert body["you"]["slot"] == 2
             assert body["current"]["player"] == 1 and body["current"]["options"] is None
 
 
@@ -460,7 +504,16 @@ class TestGame:
         slot = {"Josh": 1, "Rose": 2}[viewer]
         cur = body["current"]
         if cur is not None and cur["player"] != slot:
-            for key in ("role", "options", "offerIndex", "skipsRemaining"):
+            for key in (
+                "role",
+                "options",
+                "offerIndex",
+                "skipsRemaining",
+                "chaosPair",
+                "vetoed",
+                "canChaos",
+                "canLucky",
+            ):
                 assert cur[key] is None, (viewer, key, cur)
         if body["state"] == "abandoned":
             assert body["revealed"] is False and body["current"] is None
@@ -472,7 +525,7 @@ class TestGame:
             assert body["revealed"] is True
             assert [len(p["picks"]) for p in body["players"]] == [5, 5]
         assert all(h["player"] == slot for h in body["history"]), (viewer, body["history"])
-        assert body["you"] == {"slot": slot}
+        assert body["you"]["slot"] == slot
 
     def test_blind_redaction_holds_in_every_mutation_response_parsed(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
@@ -743,8 +796,10 @@ class TestConceptsRetry:
             seq = create(client, h)
             play(client, h, seq)
             store = store_of(client)
-            store.set_cookout_concepts_run(seq, "run-1")
-            store.finish_cookout_concepts(seq, "run-1", "failed", error="nope")
+            store.set_cookout_concepts_run(seq, "run-1", expected_generation=1)
+            store.finish_cookout_concepts(
+                seq, "run-1", "failed", error="nope", expected_generation=1
+            )
             failed = view(client, h, seq, "Josh")
             assert failed["concepts"] == {"state": "failed", "data": None, "error": "nope"}
             first = post(client, h, f"/cookout/{seq}/concepts/retry", sender="Rose")
@@ -929,8 +984,10 @@ class TestRecipes:
                     client, h, f"/cookout/{seq}/concepts/{concept}/bank", sender="Josh", moveId=mv()
                 )
             store = store_of(client)
-            store.set_cookout_recipe_run(seq, "a", "ra")
-            store.finish_cookout_recipe(seq, "a", "ra", "failed", error="bad")
+            store.set_cookout_recipe_run(seq, "a", "ra", expected_generation=1)
+            store.finish_cookout_recipe(
+                seq, "a", "ra", "failed", error="bad", expected_generation=1
+            )
             failed = view(client, h, seq, "Josh")["recipes"]["a"]
             assert failed["state"] == "failed" and failed["error"] == "bad"
             retried = post(client, h, f"/cookout/{seq}/concepts/a/recipe/retry", sender="Rose")
@@ -946,10 +1003,14 @@ class TestRecipes:
                     "tips": [],
                 }
             )
-            store.set_cookout_recipe_run(seq, "a", "ra2")
-            store.finish_cookout_recipe(seq, "a", "ra2", "banked", recipe_json=body)
-            store.set_cookout_recipe_run(seq, "b", "rb")
-            store.finish_cookout_recipe(seq, "b", "rb", "banked", recipe_json=body)
+            store.set_cookout_recipe_run(seq, "a", "ra2", expected_generation=1)
+            store.finish_cookout_recipe(
+                seq, "a", "ra2", "banked", recipe_json=body, expected_generation=1
+            )
+            store.set_cookout_recipe_run(seq, "b", "rb", expected_generation=1)
+            store.finish_cookout_recipe(
+                seq, "b", "rb", "banked", recipe_json=body, expected_generation=1
+            )
             book = client.get(f"{BASE}/cookout/bank", headers=h)
             assert book.status_code == 200 and book.headers["cache-control"] == "no-store"
             recipes = book.json()["recipes"]
@@ -958,6 +1019,8 @@ class TestRecipes:
             assert set(first) == {
                 "seq", "conceptId", "title", "vibe", "description", "serves", "prepMinutes",
                 "cookMinutes", "totalMinutes", "bankedAt", "requestedBy", "picture",
+                "generation", "cooked", "dinnerPick", "style", "challenge", "ingredients",
+                "leftovers",
             }  # fmt: skip
             assert first["totalMinutes"] == 30 and first["title"] == "Dish B"
             assert first["requestedBy"] == "Josh" and first["picture"] is None
@@ -1035,3 +1098,467 @@ class TestStartup:
     ) -> None:
         with cookout_client(storage_root, wixy_repo_root, pin_verifier) as (_client, _h, runner):
             assert runner is not None and runner.resumed == 1 and runner.supervised == 1
+
+
+# -- the twists (spec 09a §4) ---------------------------------------------------------------------
+
+
+def cx(storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier) -> Any:
+    return cookout_client(storage_root, wixy_repo_root, pin_verifier, runner=FakeRunner())
+
+
+def create_with(client: TestClient, h: dict[str, str], cid: str, **extra: Any) -> Any:
+    return post(client, h, "/cookout", clientId=cid, deviceId="device-1234", sender="Josh", **extra)
+
+
+def table(client: TestClient, h: dict[str, str], seq: int, who: str) -> dict[str, Any]:
+    cur = view(client, h, seq, who)["current"]
+    return {
+        "sender": who,
+        "moveId": mv(),
+        "turn": cur["turn"],
+        "offer": cur["offerIndex"],
+        "optionIds": [o["id"] for o in cur["options"]],
+    }
+
+
+class TestTwistCatalogueRoutes:
+    def test_options_lists_labels_only_and_reports_the_chef(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            response = client.get(f"{BASE}/cookout/options", headers=h)
+            assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+            body = response.json()
+            assert len(body["styles"]) == 8 and len(body["challenges"]) == 4
+            assert set(body["styles"][0]) == {"id", "label", "emoji", "blurb"}
+            assert body["chef"] is True and body["pictures"] is True
+            assert "cosy country pub" not in json.dumps(body)
+
+    def test_options_report_no_chef_without_a_runner(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cookout_client(storage_root, wixy_repo_root, pin_verifier, no_runner=True) as (
+            client,
+            h,
+            _,
+        ):
+            body = client.get(f"{BASE}/cookout/options", headers=h).json()
+            assert body["chef"] is False and body["pictures"] is False
+
+    def test_ingredient_search_is_bounded_and_bank_only(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            found = client.get(f"{BASE}/cookout/ingredients?q=zedbase0", headers=h)
+            assert found.status_code == 200 and found.headers["cache-control"] == "no-store"
+            items = found.json()["ingredients"]
+            assert items and len(items) <= 20 and all(i["id"].startswith("base-0") for i in items)
+            assert set(items[0]) == {"id", "name", "category", "emoji", "blurb"}
+            assert client.get(f"{BASE}/cookout/ingredients?q=z", headers=h).status_code == 422
+            long_q = "x" * 41
+            assert (
+                client.get(f"{BASE}/cookout/ingredients?q={long_q}", headers=h).status_code == 422
+            )
+            assert client.get(f"{BASE}/cookout/ingredients", headers=h).status_code == 422
+            nothing = client.get(f"{BASE}/cookout/ingredients?q=qqqq", headers=h)
+            assert nothing.json() == {"ingredients": []}
+
+
+_ENCORE = {"fromSeq": 1, "generation": 1, "conceptId": "a", "kind": "leftovers"}
+
+
+class TestTwistCreate:
+    def test_every_start_sheet_option_is_stored_and_shown_in_the_view(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            response = create_with(
+                client,
+                h,
+                "twist-create-0001",
+                style="picnic",
+                challenge="one-pan",
+                wildcard=True,
+                stars=True,
+                fridgeSeedId="base-04",
+            )
+            assert response.status_code == 201, response.text
+            seq = response.json()["message"]["seq"]
+            v = view(client, h, seq, "Josh")
+            assert v["setup"]["style"]["id"] == "picnic" and v["setup"]["styleSpun"] is False
+            assert v["setup"]["challenge"]["label"] == "One pan only"
+            assert v["setup"]["wildcard"] is True and v["setup"]["stars"] is True
+            assert v["setup"]["fridgeRaid"] is True and v["starters"][0]["id"] == "base-04"
+            assert v["current"]["waitingForJoin"] is True
+
+    def test_spin_is_resolved_by_the_server_and_marked_spun(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = create_with(client, h, "twist-spin-00001", style="spin").json()["message"]["seq"]
+            v = view(client, h, seq, "Josh")["setup"]
+            assert v["styleSpun"] is True and v["style"]["id"] != "spin" and v["style"]["emoji"]
+
+    @pytest.mark.parametrize(
+        "extra",
+        [
+            {"style": "gothic"},
+            {"challenge": "no-heat"},
+            {"fridgeSeedId": "not-in-the-bank"},
+            {"encore": {**_ENCORE, "fromSeq": 9999, "seedIds": ["base-01"]}},
+            {"encore": {**_ENCORE, "conceptId": "q", "seedIds": ["base-01"]}},
+            {"encore": {**_ENCORE, "seedIds": []}},
+        ],
+    )
+    def test_unknown_values_are_invalid(
+        self,
+        storage_root: Path,
+        wixy_repo_root: Path,
+        pin_verifier: CmdPinVerifier,
+        extra: dict[str, Any],
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            response = create_with(client, h, "twist-bad-000001", **extra)
+            assert response.status_code == 422 and response.json()["error"] == "invalid"
+            assert client.get(f"{BASE}/cookout/1", headers=h).status_code == 404
+
+    def test_chef_only_options_need_a_chef_but_fridge_raid_does_not(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cookout_client(storage_root, wixy_repo_root, pin_verifier, no_runner=True) as (
+            client,
+            h,
+            _,
+        ):
+            for extra in (
+                {"style": "picnic"},
+                {"challenge": "no-oven"},
+                {"wildcard": True},
+                {"stars": True},
+            ):
+                response = create_with(client, h, "twist-nochef-0001", **extra)
+                assert response.status_code == 422, extra
+            ok = create_with(client, h, "twist-nochef-0002", fridgeSeedId="base-01")
+            assert ok.status_code == 201
+
+    def test_a_replay_answers_200_with_the_same_message(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            first = create_with(client, h, "twist-replay-0001", style="campfire")
+            again = create_with(client, h, "twist-replay-0001", style="campfire")
+            assert (first.status_code, again.status_code) == (201, 200)
+            assert first.json()["message"]["seq"] == again.json()["message"]["seq"]
+
+
+class TestDraftingRoutes:
+    def test_lucky_chaos_and_veto_flow_through_the_routes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = create(client, h)
+            post(client, h, f"/cookout/{seq}/join", sender="Rose")
+            chaos = post(client, h, f"/cookout/{seq}/chaos", **table(client, h, seq, "Josh"))
+            assert chaos.status_code == 200 and chaos.headers["cache-control"] == "no-store"
+            assert chaos.json()["current"]["chaosPair"] is True
+            again = post(client, h, f"/cookout/{seq}/chaos", **table(client, h, seq, "Josh"))
+            assert again.status_code == 409 and again.json() == {"error": "token_used"}
+            swept_id = view(client, h, seq, "Rose")["current"]["options"][0]["id"]
+            veto = {"sender": "Rose", "turn": 1, "offer": 0, "ingredientId": swept_id}
+            swept = post(client, h, f"/cookout/{seq}/veto", moveId=mv(), **veto)
+            assert swept.status_code == 200 and swept.json()["you"]["vetoUsed"] is True
+            fresh = view(client, h, seq, "Rose")["current"]["options"][0]["id"]
+            second = post(
+                client, h, f"/cookout/{seq}/veto", moveId=mv(), **{**veto, "ingredientId": fresh}
+            )
+            assert second.status_code == 409 and second.json() == {"error": "token_used"}
+            dip = post(client, h, f"/cookout/{seq}/lucky", **table(client, h, seq, "Josh"))
+            assert dip.status_code == 200 and dip.json()["players"][0]["pickCount"] == 1
+            mine = table(client, h, seq, "Rose")
+            wrong = post(client, h, f"/cookout/{seq}/lucky", **{**mine, "sender": "Josh"})
+            assert wrong.status_code == 409 and wrong.json() == {"error": "not_your_turn"}
+
+    def test_a_blind_veto_is_bad_state_and_a_stale_table_is_bad_state(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = create(client, h, blind=True)
+            post(client, h, f"/cookout/{seq}/join", sender="Rose")
+            ingredient = view(client, h, seq, "Josh")["current"]["options"][0]["id"]
+            blind = post(
+                client,
+                h,
+                f"/cookout/{seq}/veto",
+                sender="Rose",
+                moveId=mv(),
+                turn=1,
+                offer=0,
+                ingredientId=ingredient,
+            )
+            assert blind.status_code == 409 and blind.json() == {"error": "bad_state"}
+            old = table(client, h, seq, "Josh")
+            move_pick(client, h, seq, "Josh")
+            stale = post(client, h, f"/cookout/{seq}/lucky", **{**old, "moveId": mv()})
+            assert stale.status_code == 409 and stale.json() == {"error": "bad_state"}
+
+    def test_validation_errors_are_422(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = create(client, h)
+            good = table(client, h, seq, "Josh")
+            for bad in (
+                {**good, "moveId": "short"},
+                {**good, "turn": 11},
+                {**good, "offer": 3},
+                {**good, "optionIds": ["only-one"]},
+            ):
+                assert post(client, h, f"/cookout/{seq}/chaos", **bad).status_code == 422
+                assert post(client, h, f"/cookout/{seq}/lucky", **bad).status_code == 422
+
+
+class TestGateRoutes:
+    def gated(self, client: TestClient, h: dict[str, str], cid: str, **extra: Any) -> int:
+        seq = int(create_with(client, h, cid, **extra).json()["message"]["seq"])
+        play(client, h, seq)
+        return seq
+
+    def test_a_cloche_lift_starts_exactly_one_concepts_job_for_the_generation(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            seq = self.gated(client, h, "twist-cloche-0001", wildcard=True)
+            assert runner.concept_generations == []
+            assert view(client, h, seq, "Josh")["gate"] == {"waitingFor": ["wildcard"]}
+            path = f"/cookout/{seq}/wildcard"
+            lift = post(client, h, path, sender="Josh", moveId=mv(), lift=True)
+            assert lift.status_code == 200 and lift.json()["wildcard"]["state"] == "lifted"
+            assert runner.concept_generations == [(seq, 1)]
+            again = post(client, h, path, sender="Rose", moveId=mv(), lift=True)
+            assert again.status_code == 200 and runner.concept_generations == [(seq, 1)]
+            nope = post(client, h, path, sender="Rose", moveId=mv(), lift=False)
+            assert nope.status_code == 409 and nope.json() == {"error": "bad_state"}
+
+    def test_stars_open_the_gate_and_blind_stars_stay_private_on_the_wire(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            seq = self.gated(client, h, "twist-stars-0001", stars=True, blind=True)
+            mine = view(client, h, seq, "Josh")["players"][0]["picks"][0]["id"]
+            hers = view(client, h, seq, "Rose")["players"][1]["picks"][0]["id"]
+            first = post(client, h, f"/cookout/{seq}/star", sender="Josh", ingredientId=mine)
+            assert first.status_code == 200 and runner.concept_generations == []
+            seen_by_rose = view(client, h, seq, "Rose")["stars"]
+            assert seen_by_rose["partnerChosen"] is True and seen_by_rose["partner"] is None
+            second = post(client, h, f"/cookout/{seq}/star", sender="Rose", ingredientId=hers)
+            assert second.json()["stars"]["revealed"] is True
+            assert runner.concept_generations == [(seq, 1)]
+            bad = post(client, h, f"/cookout/{seq}/star", sender="Josh", ingredientId=hers)
+            assert bad.status_code == 409 and bad.json() == {"error": "bad_state"}
+
+
+class TestVoteAndSwapRoutes:
+    def ready(self, client: TestClient, h: dict[str, str], cid: str) -> int:
+        seq = create(client, h, cid)
+        play(client, h, seq)
+        finish_concepts(client, seq)
+        return seq
+
+    def basket(self, client: TestClient, seq: int) -> list[str]:
+        return list(store_of(client).get_cookout_round(seq)["basket_ids"])  # type: ignore[index]
+
+    def test_vote_is_secret_until_both_have_voted(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = self.ready(client, h, "twist-vote-00001")
+            path = f"/cookout/{seq}/vote"
+            mine = post(client, h, path, sender="Josh", generation=1, conceptId="b")
+            assert mine.status_code == 200 and mine.json()["vote"]["you"] == "b"
+            theirs = view(client, h, seq, "Rose")["vote"]
+            assert theirs["partnerVoted"] is True and theirs["votes"] is None
+            stale = post(client, h, path, sender="Rose", generation=2, conceptId="b")
+            assert stale.status_code == 409 and stale.json() == {"error": "bad_state"}
+            done = post(client, h, path, sender="Rose", generation=1, conceptId="b")
+            assert done.json()["vote"]["match"] == "b"
+            card = client.get(f"{BASE}/messages", headers=h).json()["messages"]
+            assert next(m for m in card if m["seq"] == seq)["cookout"]["dinnerDecided"] is True
+
+    def test_the_swap_runs_through_the_routes_and_starts_generation_two(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            seq = self.ready(client, h, "twist-swap-00001")
+            target = self.basket(client, seq)[0]
+            propose = f"/cookout/{seq}/swap/propose"
+            proposed = post(client, h, propose, sender="Josh", moveId=mv(), ingredientId=target)
+            assert proposed.status_code == 200 and proposed.json()["swap"]["state"] == "proposed"
+            pair = proposed.json()["swap"]["pair"]
+            choose = f"/cookout/{seq}/swap/choose"
+            own = post(client, h, choose, sender="Josh", moveId=mv(), ingredientId=pair[0]["id"])
+            assert own.status_code == 409 and own.json() == {"error": "not_your_turn"}
+            bank = f"/cookout/{seq}/concepts/a/bank"
+            blocked = post(client, h, bank, sender="Rose", moveId=mv(), generation=1)
+            assert blocked.status_code == 409 and blocked.json() == {"error": "bad_state"}
+            assert runner.recipes == []
+            chosen = post(client, h, choose, sender="Rose", moveId=mv(), ingredientId=pair[1]["id"])
+            assert chosen.status_code == 200
+            body = chosen.json()
+            assert body["generation"] == 2 and body["swap"]["in"]["id"] == pair[1]["id"]
+            assert len(body["generations"]) == 1
+            assert runner.concept_generations == [(seq, 1), (seq, 2)]
+
+    def test_a_pending_recipe_is_recipe_pending_and_cancel_keeps_the_dishes(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            seq = self.ready(client, h, "twist-pend-00001")
+            target = self.basket(client, seq)[0]
+            bank = f"/cookout/{seq}/concepts/a/bank"
+            banked = post(client, h, bank, sender="Josh", moveId=mv(), generation=1)
+            assert banked.status_code == 200 and runner.recipe_generations == [(seq, 1, "a")]
+            propose = f"/cookout/{seq}/swap/propose"
+            pending = post(client, h, propose, sender="Josh", moveId=mv(), ingredientId=target)
+            assert pending.status_code == 409 and pending.json() == {"error": "recipe_pending"}
+            noop = post(client, h, f"/cookout/{seq}/swap/cancel", sender="Josh")
+            assert noop.status_code == 200 and noop.json()["swap"]["state"] == "none"
+
+    def test_a_stale_generation_on_bank_and_retries_is_bad_state_without_a_job(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, runner):
+            assert runner is not None
+            seq = self.ready(client, h, "twist-gen-000001")
+            target = self.basket(client, seq)[0]
+            propose = f"/cookout/{seq}/swap/propose"
+            proposed = post(client, h, propose, sender="Josh", moveId=mv(), ingredientId=target)
+            pair = proposed.json()["swap"]["pair"]
+            choose = f"/cookout/{seq}/swap/choose"
+            post(client, h, choose, sender="Rose", moveId=mv(), ingredientId=pair[0]["id"])
+            store = store_of(client)
+            assert store.set_cookout_concepts_run(seq, "g2", expected_generation=2)
+            assert store.finish_cookout_concepts(
+                seq,
+                "g2",
+                "ready",
+                expected_generation=2,
+                concepts_json=canned_concepts(self.basket(client, seq)),
+            )
+            jobs = (len(runner.recipes), len(runner.concepts))
+            for path, extra in (
+                ("/concepts/a/bank", {"moveId": mv()}),
+                ("/concepts/retry", {}),
+                ("/pictures/retry", {}),
+                ("/concepts/a/recipe/retry", {}),
+            ):
+                for generation in ({"generation": 1}, {}):
+                    body = {**extra, **generation}
+                    response = post(client, h, f"/cookout/{seq}{path}", sender="Josh", **body)
+                    assert response.status_code == 409, (path, generation, response.text)
+                    assert response.json() == {"error": "bad_state"}
+            assert (len(runner.recipes), len(runner.concepts)) == jobs
+            bank = f"/cookout/{seq}/concepts/a/bank"
+            ok = post(client, h, bank, sender="Josh", moveId=mv(), generation=2)
+            assert ok.status_code == 200 and runner.recipe_generations[-1] == (seq, 2, "a")
+
+
+class TestCookedRoutes:
+    def banked(self, client: TestClient, h: dict[str, str], cid: str) -> int:
+        seq = create(client, h, cid)
+        play(client, h, seq)
+        finish_concepts(client, seq)
+        store = store_of(client)
+        bank = f"/cookout/{seq}/concepts/a/bank"
+        post(client, h, bank, sender="Josh", moveId=mv(), generation=1)
+        assert store.set_cookout_recipe_run(seq, "a", "r1", expected_generation=1)
+        body = json.dumps(
+            {"serves": 2, "prepMinutes": 10, "cookMinutes": 20, "ingredients": [], "steps": ["x"]}
+        )
+        assert store.finish_cookout_recipe(
+            seq, "a", "r1", "banked", expected_generation=1, recipe_json=body
+        )
+        return seq
+
+    def test_cooked_rating_and_the_recipe_book(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = self.banked(client, h, "twist-cook-00001")
+            path = f"/cookout/{seq}/recipes/1/a"
+            early = post(client, h, f"{path}/rating", sender="Josh", rating=4)
+            assert early.status_code == 409 and early.json() == {"error": "bad_state"}
+            marked = post(client, h, f"{path}/cooked", sender="Rose", cooked=True)
+            assert marked.status_code == 200
+            assert marked.json()["recipes"]["a"]["cooked"]["cookedBy"] == "Rose"
+            rated = post(client, h, f"{path}/rating", sender="Josh", rating=4)
+            assert rated.json()["recipes"]["a"]["cooked"]["ratings"] == {"1": 4, "2": None}
+            assert post(client, h, f"{path}/rating", sender="Josh", rating=9).status_code == 422
+            entry = client.get(f"{BASE}/cookout/bank", headers=h).json()["recipes"][0]
+            assert entry["cooked"]["ratings"] == [
+                {"name": "Josh", "rating": 4},
+                {"name": "Rose", "rating": None},
+            ]
+            assert entry["generation"] == 1 and entry["dinnerPick"] is False
+            assert entry["leftovers"]  # feeds the Leftovers encore button
+            other = f"/cookout/{seq}/recipes/1/b/cooked"
+            gone = post(client, h, other, sender="Josh", cooked=True)
+            assert gone.status_code == 409 and gone.json() == {"error": "bad_state"}
+            unmarked = post(client, h, f"{path}/cooked", sender="Josh", cooked=False)
+            assert unmarked.json()["recipes"]["a"]["cooked"] is None
+
+    def test_the_photo_chooser_and_link_use_the_exact_attachment(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = self.banked(client, h, "twist-photo-0001")
+            store = store_of(client)
+            post(client, h, f"/cookout/{seq}/recipes/1/a/cooked", sender="Josh", cooked=True)
+            for att in ("att-route-1", "att-route-2"):
+                store.create_attachment(att_id=att, kind="photo", now=5.0)
+            message, _ = store.create_message(
+                client_id="route-photo-msg-001",
+                sender="Rose",
+                device_id="device-1234",
+                by_email=None,
+                text=None,
+                attachment_ids=["att-route-1", "att-route-2"],
+                wyr_anchor_seq=seq,
+                now=6.0,
+            )
+            # The media worker is not running here: mark both photos ready directly.
+            with store._write_txn() as conn:  # noqa: SLF001
+                conn.execute(
+                    "UPDATE attachments SET status = 'ready', renditions = ? WHERE message_seq = ?",
+                    (json.dumps(["thumb", "full"]), message.seq),
+                )
+            listing = client.get(f"{BASE}/cookout/{seq}/photos?as=Josh", headers=h)
+            assert listing.status_code == 200 and listing.headers["cache-control"] == "no-store"
+            [entry] = listing.json()["photos"]
+            assert entry["messageSeq"] == message.seq and entry["attachmentId"] == "att-route-1"
+            assert entry["sender"] == "Rose" and "thumbUrl" in entry["picture"]
+            stranger = client.get(f"{BASE}/cookout/{seq}/photos?as=Nobody", headers=h)
+            assert stranger.status_code == 409 and stranger.json() == {"error": "not_player"}
+            assert client.get(f"{BASE}/cookout/{seq}/photos", headers=h).status_code == 422
+            path = f"/cookout/{seq}/recipes/1/a/photo"
+            half = post(client, h, path, sender="Josh", messageSeq=message.seq)
+            assert half.status_code == 422
+            wrong = post(client, h, path, sender="Josh", messageSeq=message.seq, attachmentId="x1")
+            assert wrong.status_code == 409 and wrong.json() == {"error": "bad_state"}
+            linked = post(
+                client,
+                h,
+                path,
+                sender="Josh",
+                messageSeq=message.seq,
+                attachmentId=entry["attachmentId"],
+            )
+            photo = linked.json()["recipes"]["a"]["cooked"]
+            assert photo["photoMessageSeq"] == message.seq
+            assert photo["photo"]["attachmentId"] == "att-route-1"
+            unlinked = post(client, h, path, sender="Josh", messageSeq=None, attachmentId=None)
+            assert unlinked.json()["recipes"]["a"]["cooked"]["photo"] is None

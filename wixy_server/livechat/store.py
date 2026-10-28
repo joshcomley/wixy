@@ -28,6 +28,7 @@ transaction-before-DML behavior.
 
 from __future__ import annotations
 
+import dataclasses
 import hmac
 import json
 import logging
@@ -43,26 +44,46 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
+from wixy_server.livechat import cookout_twists
 from wixy_server.livechat.adventure_bank import TOP_DESTINATIONS, AdventureBank
 from wixy_server.livechat.cookout_game import (
     CONCEPT_IDS,
     CONCEPTS_DEADLINE_S,
     CONCEPTS_UNAVAILABLE_TEXT,
+    MAX_ROUND_PHOTOS,
     MAX_SKIPS,
+    MAX_STARTERS,
     PICTURES_DEADLINE_S,
     RECIPE_DEADLINE_S,
     RECIPE_UNAVAILABLE_TEXT,
     TOTAL_TURNS,
     CookoutDrawExhausted,
+    basket_ids,
+    basket_snaps,
+    chaos_used,
     concept_by_id,
+    concepts_from_json,
     current_turn,
     draw_inputs,
+    next_turn_draws_now,
     player_of_turn,
     role_for_turn,
+    round_snaps,
     slot_of,
     snapshot,
+    stars_locked,
+    swap_target_role,
+    veto_used,
+    waiting_for,
+    waiting_from_columns,
 )
 from wixy_server.livechat.cookout_game import BankLike as CookoutBankLike
+from wixy_server.livechat.cookout_game import (
+    CookoutSetup as CookoutSetup,
+)
+from wixy_server.livechat.cookout_game import (
+    EncoreSpec as EncoreSpec,
+)
 from wixy_server.livechat.drawings import (
     MAX_DRAWINGS_PER_ANCHOR,
     MAX_POINT_X_PAD,
@@ -79,6 +100,8 @@ from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
     AttachmentRow,
+    CookoutBankData,
+    CookoutGenerationRow,
     CookoutRecipeRow,
     CookoutRoundRow,
     CookoutSummary,
@@ -415,7 +438,9 @@ _ADVENTURE_PICTURE_COLUMNS = {
 # table erases a round with its message, and an explicit `DELETE` in wipe. `cookout_turns` holds
 # each turn's offered pairs as immutable ingredient snapshots (a later bank edit never alters a
 # round) and `cookout_recipes` one row per concept the couple asked to "Bank this". All of it is
-# chat content (Inv 57).
+# chat content (Inv 57). The twist addendum (spec 09a §2) is folded into this same, still undeployed
+# definition: `cookout_recipes` is keyed by generation from the start, `cookout_generations` holds
+# the dish sets a rescue swap superseded, and the twist columns ride on the round and turn rows.
 _SCHEMA_V21_COOKOUT = """
 CREATE TABLE IF NOT EXISTS cookout_rounds(
   anchor_message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
@@ -435,6 +460,31 @@ CREATE TABLE IF NOT EXISTS cookout_rounds(
   images_started_at REAL, images_tries INTEGER NOT NULL DEFAULT 0,
   images_deadline_at REAL,
   images_generation INTEGER NOT NULL DEFAULT 0,
+  style TEXT,
+  style_spun INTEGER NOT NULL DEFAULT 0 CHECK(style_spun IN (0, 1)),
+  challenge TEXT,
+  wildcard TEXT NOT NULL DEFAULT 'off'
+    CHECK(wildcard IN ('off','armed','offered','lifted','declined')),
+  wildcard_snap TEXT,
+  wildcard_move_id TEXT,
+  stars INTEGER NOT NULL DEFAULT 0 CHECK(stars IN (0, 1)),
+  star1_id TEXT,
+  star2_id TEXT,
+  vote1 TEXT CHECK(vote1 IS NULL OR vote1 IN ('a','b','c')),
+  vote2 TEXT CHECK(vote2 IS NULL OR vote2 IN ('a','b','c')),
+  generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
+  bank_move_ids TEXT NOT NULL DEFAULT '[]',
+  swap_state TEXT NOT NULL DEFAULT 'none' CHECK(swap_state IN ('none','proposed','done')),
+  swap_by INTEGER CHECK(swap_by IS NULL OR swap_by IN (1, 2)),
+  swap_out_id TEXT,
+  swap_pair TEXT,
+  swap_seen TEXT NOT NULL DEFAULT '[]',
+  swap_in TEXT,
+  swap_move_ids TEXT NOT NULL DEFAULT '[]',
+  encore_kind TEXT CHECK(encore_kind IS NULL OR encore_kind IN ('leftovers','remix')),
+  encore_from_seq INTEGER REFERENCES cookout_rounds(anchor_message_seq) ON DELETE SET NULL,
+  encore_generation INTEGER,
+  encore_concept_id TEXT,
   rev INTEGER NOT NULL DEFAULT 1,
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_cookout_rounds_state ON cookout_rounds(state);
@@ -447,20 +497,50 @@ CREATE TABLE IF NOT EXISTS cookout_turns(
   choice_id TEXT,
   skip_move_ids TEXT NOT NULL DEFAULT '[]',
   pick_move_id TEXT,
+  seed TEXT,
+  seed_source TEXT CHECK(seed_source IS NULL OR seed_source IN ('fridge','encore')),
+  replaced TEXT NOT NULL DEFAULT '[]',
+  chaos_offer INTEGER CHECK(chaos_offer IS NULL OR chaos_offer BETWEEN 0 AND 2),
+  veto_offer INTEGER CHECK(veto_offer IS NULL OR veto_offer BETWEEN 0 AND 2),
+  lucky INTEGER NOT NULL DEFAULT 0 CHECK(lucky IN (0, 1)),
+  twist_move_ids TEXT NOT NULL DEFAULT '[]',
   PRIMARY KEY(anchor_message_seq, turn));
 CREATE TABLE IF NOT EXISTS cookout_recipes(
   anchor_message_seq INTEGER NOT NULL
     REFERENCES cookout_rounds(anchor_message_seq) ON DELETE CASCADE,
+  generation INTEGER NOT NULL DEFAULT 1 CHECK(generation >= 1),
   concept_id TEXT NOT NULL CHECK(concept_id IN ('a','b','c')),
   state TEXT NOT NULL CHECK(state IN ('pending','banked','failed','unavailable')),
   run_id TEXT, recipe_json TEXT, error TEXT,
   requested_by TEXT NOT NULL, bank_move_id TEXT,
   started_at REAL, tries INTEGER NOT NULL DEFAULT 0, deadline_at REAL,
   banked_at REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
-  PRIMARY KEY(anchor_message_seq, concept_id));
+  cooked_at REAL, cooked_by TEXT,
+  rating1 INTEGER CHECK(rating1 IS NULL OR rating1 BETWEEN 1 AND 5),
+  rating2 INTEGER CHECK(rating2 IS NULL OR rating2 BETWEEN 1 AND 5),
+  photo_message_seq INTEGER REFERENCES messages(seq) ON DELETE SET NULL,
+  photo_attachment_id TEXT,
+  PRIMARY KEY(anchor_message_seq, generation, concept_id));
 CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
   ON cookout_recipes(state, banked_at DESC, anchor_message_seq DESC);
+CREATE INDEX IF NOT EXISTS idx_cookout_recipes_photo ON cookout_recipes(photo_message_seq);
+CREATE TABLE IF NOT EXISTS cookout_generations(
+  anchor_message_seq INTEGER NOT NULL
+    REFERENCES cookout_rounds(anchor_message_seq) ON DELETE CASCADE,
+  generation INTEGER NOT NULL CHECK(generation >= 1),
+  basket TEXT NOT NULL,
+  concepts_json TEXT NOT NULL,
+  pictures TEXT,
+  vote1 TEXT CHECK(vote1 IS NULL OR vote1 IN ('a','b','c')),
+  vote2 TEXT CHECK(vote2 IS NULL OR vote2 IN ('a','b','c')),
+  superseded_at REAL NOT NULL,
+  PRIMARY KEY(anchor_message_seq, generation));
 """
+_CX_GATE_FIELDS = ("state", "wildcard", "star1_id", "star2_id", "concepts")
+"""The round columns the chef gate (`waiting_for`) reads: `_cx_apply` probes them before a write."""
+_SYSTEM_RANDOM = secrets.SystemRandom()
+Moved = tuple[CookoutRoundRow, bool]
+"""`(round after the move, whether anything changed)` — what every Cookout player move returns."""
 MAX_PICTURE_TRIES = 3
 """How many times a round's picture hunt may begin (the first, then re-claims after a hunt died)
 before the wait is ended as `failed`."""
@@ -596,6 +676,16 @@ class CookoutRoundNotFoundError(LiveChatStoreError):
     def __init__(self, anchor_seq: int) -> None:
         super().__init__(f"no Cookout round on message {anchor_seq}")
         self.anchor_seq = anchor_seq
+
+
+class CookoutTokenUsedError(LiveChatStoreError):
+    """The chaos shelf or the partner veto was already spent by the caller (spec 09a §1.2). Mapped
+    to 409 `token_used`."""
+
+
+class CookoutRecipePendingError(LiveChatStoreError):
+    """A rescue swap was asked for while a current-generation recipe is still being written (spec
+    09a §1.6). Mapped to 409 `recipe_pending`."""
 
 
 class CookoutBadStateError(LiveChatStoreError):
@@ -1024,7 +1114,48 @@ def _decode_pictures(text: str | None) -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
+def _json_or(text: str | None, default: Any) -> Any:
+    """A JSON text column read defensively: garbage or NULL reads as `default`."""
+    if text is None:
+        return default
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return default
+
+
+def _json_snap(text: str | None) -> dict[str, str] | None:
+    data = _json_or(text, None)
+    if not isinstance(data, dict):
+        return None
+    return {str(k): str(v) for k, v in data.items()}
+
+
+def _json_dicts(text: str | None) -> tuple[dict[str, Any], ...]:
+    data = _json_or(text, [])
+    if not isinstance(data, list):
+        return ()
+    return tuple(d for d in data if isinstance(d, dict))
+
+
 def _row_to_cookout_round(row: sqlite3.Row) -> CookoutRoundRow:
+    swap_pair_raw = _json_or(row["swap_pair"], None)
+    swap_pair: tuple[dict[str, str], dict[str, str]] | None = None
+    if (
+        isinstance(swap_pair_raw, list)
+        and len(swap_pair_raw) == 2
+        and all(isinstance(x, dict) for x in swap_pair_raw)
+    ):
+        swap_pair = (
+            {str(k): str(v) for k, v in swap_pair_raw[0].items()},
+            {str(k): str(v) for k, v in swap_pair_raw[1].items()},
+        )
+    swap_seen_raw = _json_or(row["swap_seen"], [])
+    swap_seen = tuple(
+        {str(k): str(v) for k, v in x.items()}
+        for x in (swap_seen_raw if isinstance(swap_seen_raw, list) else [])
+        if isinstance(x, dict)
+    )
     return CookoutRoundRow(
         anchor_message_seq=row["anchor_message_seq"],
         state=row["state"],
@@ -1053,6 +1184,30 @@ def _row_to_cookout_round(row: sqlite3.Row) -> CookoutRoundRow:
         rev=row["rev"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        style=row["style"],
+        style_spun=bool(row["style_spun"]),
+        challenge=row["challenge"],
+        wildcard=row["wildcard"],
+        wildcard_snap=_json_snap(row["wildcard_snap"]),
+        wildcard_move_id=row["wildcard_move_id"],
+        stars=bool(row["stars"]),
+        star1_id=row["star1_id"],
+        star2_id=row["star2_id"],
+        vote1=row["vote1"],
+        vote2=row["vote2"],
+        generation=row["generation"],
+        bank_move_ids=_json_dicts(row["bank_move_ids"]),
+        swap_state=row["swap_state"],
+        swap_by=row["swap_by"],
+        swap_out_id=row["swap_out_id"],
+        swap_pair=swap_pair,
+        swap_seen=swap_seen,
+        swap_in=_json_snap(row["swap_in"]),
+        swap_move_ids=_json_dicts(row["swap_move_ids"]),
+        encore_kind=row["encore_kind"],
+        encore_from_seq=row["encore_from_seq"],
+        encore_generation=row["encore_generation"],
+        encore_concept_id=row["encore_concept_id"],
     )
 
 
@@ -1065,6 +1220,13 @@ def _row_to_cookout_turn(row: sqlite3.Row) -> CookoutTurnRow:
         choice_id=row["choice_id"],
         skip_move_ids=tuple(str(m) for m in json.loads(row["skip_move_ids"])),
         pick_move_id=row["pick_move_id"],
+        seed=_json_snap(row["seed"]),
+        seed_source=row["seed_source"],
+        replaced=_json_dicts(row["replaced"]),
+        chaos_offer=row["chaos_offer"],
+        veto_offer=row["veto_offer"],
+        lucky=bool(row["lucky"]),
+        twist_move_ids=_json_dicts(row["twist_move_ids"]),
     )
 
 
@@ -1081,23 +1243,47 @@ def _row_to_cookout_recipe(row: sqlite3.Row) -> CookoutRecipeRow:
         tries=row["tries"],
         deadline_at=row["deadline_at"],
         banked_at=row["banked_at"],
+        generation=row["generation"],
+        cooked_at=row["cooked_at"],
+        cooked_by=row["cooked_by"],
+        rating1=row["rating1"],
+        rating2=row["rating2"],
+        photo_message_seq=row["photo_message_seq"],
+        photo_attachment_id=row["photo_attachment_id"],
+    )
+
+
+def _row_to_cookout_generation(row: sqlite3.Row) -> CookoutGenerationRow:
+    basket_raw = _json_or(row["basket"], [])
+    return CookoutGenerationRow(
+        generation=row["generation"],
+        basket=tuple(str(i) for i in (basket_raw if isinstance(basket_raw, list) else [])),
+        concepts_json=row["concepts_json"],
+        pictures=_decode_pictures(row["pictures"]),
+        vote1=row["vote1"],
+        vote2=row["vote2"],
+        superseded_at=row["superseded_at"],
     )
 
 
 def _load_cookout_summaries_for(
     conn: sqlite3.Connection, message_seqs: Sequence[int]
 ) -> dict[int, CookoutSummary]:
-    """Round summary per anchor message — the `Message` wire shape's `cookout` member. Counts only:
-    it is broadcast to everyone, so it carries no ingredient or recipe text (spec §1.3)."""
+    """Round summary per anchor message — the `Message` wire shape's `cookout` member. Counts and
+    flags only: it is broadcast to everyone, so it carries no ingredient, star, vote or recipe text
+    (spec §1.3, 09a §4.4)."""
     if not message_seqs:
         return {}
     placeholders = ",".join("?" for _ in message_seqs)
     rows = conn.execute(
-        "SELECT r.anchor_message_seq, r.state, r.blind, r.concepts, r.rev, "
+        "SELECT r.anchor_message_seq, r.state, r.blind, r.concepts, r.rev, r.generation, "
+        "r.wildcard, r.stars, r.star1_id, r.star2_id, r.swap_state, r.vote1, r.vote2, "
         "(SELECT COUNT(*) FROM cookout_turns t WHERE t.anchor_message_seq = r.anchor_message_seq "
         " AND t.choice_id IS NOT NULL) AS picked, "
         "(SELECT COUNT(*) FROM cookout_recipes c WHERE c.anchor_message_seq = "
-        " r.anchor_message_seq AND c.state = 'banked') AS banked "
+        " r.anchor_message_seq AND c.state = 'banked') AS banked, "
+        "(SELECT COUNT(*) FROM cookout_recipes c WHERE c.anchor_message_seq = "
+        " r.anchor_message_seq AND c.state = 'banked' AND c.cooked_at IS NOT NULL) AS cooked "
         f"FROM cookout_rounds r WHERE r.anchor_message_seq IN ({placeholders})",
         tuple(message_seqs),
     ).fetchall()
@@ -1109,6 +1295,18 @@ def _load_cookout_summaries_for(
             concepts=row["concepts"],
             banked_count=row["banked"],
             rev=row["rev"],
+            generation=row["generation"],
+            waiting=waiting_from_columns(
+                row["state"],
+                row["concepts"],
+                row["wildcard"],
+                bool(row["stars"]),
+                row["star1_id"],
+                row["star2_id"],
+            ),
+            swap=row["swap_state"],
+            dinner_decided=row["vote1"] is not None and row["vote1"] == row["vote2"],
+            cooked_count=row["cooked"],
         )
         for row in rows
     }
@@ -3413,7 +3611,9 @@ class LiveChatStore:
     # `CookoutBadStateError` (or an idempotent success for a replay of the SAME move). A real
     # change bumps `rev` + `updated_at` and appends one `message_updated` event for the anchor;
     # a replay changes nothing (`False`). Methods that mutate the picture/concept/recipe jobs'
-    # state are compare-and-set so a late or duplicate worker lands nothing.
+    # state are compare-and-set so a late or duplicate worker lands nothing — and, since the rescue
+    # swap (spec 09a §1.10), every job-driven write also names the round GENERATION its job was
+    # started for, because concept ids a/b/c are reused by generation 2.
 
     @staticmethod
     def _cx_load(conn: sqlite3.Connection, anchor_seq: int) -> CookoutRoundRow:
@@ -3433,11 +3633,22 @@ class LiveChatStore:
         return [_row_to_cookout_turn(row) for row in rows]
 
     @staticmethod
-    def _cx_recipes(conn: sqlite3.Connection, anchor_seq: int) -> list[CookoutRecipeRow]:
-        rows = conn.execute(
-            "SELECT * FROM cookout_recipes WHERE anchor_message_seq = ? ORDER BY concept_id",
-            (anchor_seq,),
-        ).fetchall()
+    def _cx_recipes(
+        conn: sqlite3.Connection, anchor_seq: int, generation: int | None = None
+    ) -> list[CookoutRecipeRow]:
+        """The round's recipe rows: one generation's, or (`generation=None`) every generation's."""
+        if generation is None:
+            rows = conn.execute(
+                "SELECT * FROM cookout_recipes WHERE anchor_message_seq = ? "
+                "ORDER BY generation, concept_id",
+                (anchor_seq,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM cookout_recipes WHERE anchor_message_seq = ? AND generation = ? "
+                "ORDER BY concept_id",
+                (anchor_seq, generation),
+            ).fetchall()
         return [_row_to_cookout_recipe(row) for row in rows]
 
     def _cx_update(
@@ -3465,6 +3676,49 @@ class LiveChatStore:
             "INSERT INTO events (type, message_seq, created_at) VALUES ('message_updated', ?, ?)",
             (anchor_seq, now),
         )
+
+    @staticmethod
+    def _cx_concepts_start(runner_available: bool, now_s: float) -> dict[str, object]:
+        """The Stage-1 assignments that begin the concepts job (or mark it unavailable)."""
+        if runner_available:
+            return {
+                "concepts": "pending",
+                "concepts_run_id": None,
+                "concepts_started_at": now_s,
+                "concepts_tries": 1,
+                "concepts_deadline_at": now_s + CONCEPTS_DEADLINE_S,
+            }
+        return {"concepts": "unavailable", "concepts_error": CONCEPTS_UNAVAILABLE_TEXT}
+
+    def _cx_apply(
+        self,
+        conn: sqlite3.Connection,
+        round_: CookoutRoundRow,
+        now_s: float,
+        assignments: dict[str, object],
+        runner_available: bool,
+    ) -> CookoutRoundRow:
+        """Commit `assignments` and — the shared chef-gate helper of spec 09a §1.4 — start Stage 1
+        in the same write when, after them, the round is `finished`, its concepts are `none` and no
+        gate (unanswered cloche, missing star) remains. Otherwise the concepts stay `none`."""
+        probe_fields: dict[str, Any] = {
+            k: v for k, v in assignments.items() if k in _CX_GATE_FIELDS
+        }
+        probe = dataclasses.replace(round_, **probe_fields)
+        merged = dict(assignments)
+        if probe.state == "finished" and probe.concepts == "none" and not waiting_for(probe):
+            merged.update(self._cx_concepts_start(runner_available, now_s))
+        return self._cx_update(conn, round_.anchor_message_seq, now_s, merged)
+
+    @staticmethod
+    def _cx_guard_generation(round_: CookoutRoundRow, generation: int | None) -> None:
+        """Spec 09a §1.10: a current-generation action names the generation of the dishes its
+        button was rendered from. Absent (a core-era client) is accepted only on generation 1."""
+        expected = 1 if generation is None else generation
+        if round_.generation != expected:
+            raise CookoutBadStateError(
+                f"those dishes were replaced (now generation {round_.generation})"
+            )
 
     @staticmethod
     def _cx_draw(
@@ -3505,6 +3759,65 @@ class LiveChatStore:
             pick_move_id=None,
         )
 
+    def _cx_encore_seeds(
+        self, conn: sqlite3.Connection, spec: EncoreSpec, bank: CookoutBankLike
+    ) -> list[dict[str, str]]:
+        """Validate a leftover encore / remix against its source and return the seed snapshots
+        (copied from the SOURCE round, spec 09a §1.3). Runs inside the create transaction."""
+        source_row = conn.execute(
+            "SELECT * FROM cookout_rounds WHERE anchor_message_seq = ?", (spec.from_seq,)
+        ).fetchone()
+        if source_row is None:
+            raise CookoutInvalidError("the round to continue from no longer exists")
+        source = _row_to_cookout_round(source_row)
+        if source.state != "finished":
+            raise CookoutInvalidError("that round has no finished dishes to continue from")
+        if spec.generation == source.generation:
+            if source.concepts != "ready":
+                raise CookoutInvalidError("that round's dishes are not ready")
+            concepts_json = source.concepts_json
+        else:
+            archived = conn.execute(
+                "SELECT concepts_json FROM cookout_generations "
+                "WHERE anchor_message_seq = ? AND generation = ?",
+                (spec.from_seq, spec.generation),
+            ).fetchone()
+            if archived is None:
+                raise CookoutInvalidError("that set of dishes does not exist")
+            concepts_json = archived["concepts_json"]
+        concept = next(
+            (c for c in concepts_from_json(concepts_json) if c.get("id") == spec.concept_id), None
+        )
+        if concept is None:
+            raise CookoutInvalidError("there is no such dish idea to continue from")
+        if spec.kind == "leftovers":
+            allowed = {
+                str(e["id"])
+                for e in concept.get("omitted", [])
+                if isinstance(e, dict) and "id" in e
+            }
+            if not allowed:
+                raise CookoutInvalidError("that dish left nothing out")
+        else:
+            banked = conn.execute(
+                "SELECT 1 FROM cookout_recipes WHERE anchor_message_seq = ? AND generation = ? "
+                "AND concept_id = ? AND state = 'banked'",
+                (spec.from_seq, spec.generation, spec.concept_id),
+            ).fetchone()
+            if banked is None:
+                raise CookoutInvalidError("only a banked recipe can be remixed")
+            allowed = {str(i) for i in concept.get("pickedIngredientIds", [])}
+        if not spec.seed_ids or not set(spec.seed_ids) <= allowed:
+            raise CookoutInvalidError("those ingredients are not available to continue with")
+        lookup = round_snaps(source, self._cx_turns(conn, spec.from_seq))
+        seeds: list[dict[str, str]] = []
+        for seed_id in spec.seed_ids:
+            found = bank.ingredient(seed_id)
+            if found is None:
+                raise CookoutInvalidError("that ingredient is no longer in the bank")
+            seeds.append(dict(lookup.get(seed_id) or snapshot(found)))
+        return seeds
+
     def create_cookout_round(
         self,
         *,
@@ -3514,13 +3827,20 @@ class LiveChatStore:
         by_email: str | None,
         blind: bool,
         bank: CookoutBankLike,
+        setup: CookoutSetup = CookoutSetup(),  # noqa: B008 - a frozen, immutable value
         rng: random.Random | None = None,
         now: float | None = None,
     ) -> tuple[MessageRow, bool]:
         """Create a round: a text-less anchor message, a `cookout_rounds` row in `picking` with the
-        sender bound to Slot 1, a freshly shuffled role schedule and Turn 1's first pair. Every
+        sender bound to Slot 1, a freshly shuffled role schedule and the first drawn pair. Every
         round still `picking` is abandoned in the same transaction (a `finished` one never is).
-        Idempotent on `client_id`, checked BEFORE the abandonment, like every other send."""
+        Idempotent on `client_id`, checked BEFORE the abandonment, like every other send.
+
+        `setup` carries the start-sheet twists (spec 09a §1.1), fixed for the round. A fridge-raid
+        or encore seed becomes a public STARTER — a seeded turn that fills Turn 1 (and Turn 2) —
+        and the first drawn turn is the first non-seeded one, unless it belongs to Player 2, who
+        has not joined (§1.3). Every setup rule is validated INSIDE the transaction, after the
+        replay check, so a replay succeeds even if its encore source has since been deleted."""
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
             existing = conn.execute(
@@ -3528,6 +3848,34 @@ class LiveChatStore:
             ).fetchone()
             if existing is not None:
                 return _load_message(conn, existing["seq"]), False
+
+            if setup.style is not None and cookout_twists.style_by_id(setup.style) is None:
+                raise CookoutInvalidError("that style does not exist")
+            if setup.challenge is not None and (
+                cookout_twists.challenge_by_id(setup.challenge) is None
+            ):
+                raise CookoutInvalidError("that challenge does not exist")
+            starters: list[tuple[dict[str, str], Literal["fridge", "encore"]]] = []
+            if setup.fridge_seed_id is not None:
+                fridge = bank.ingredient(setup.fridge_seed_id)
+                if fridge is None:
+                    raise CookoutInvalidError("that ingredient is not in the bank")
+                starters.append((snapshot(fridge), "fridge"))
+            if setup.encore is not None:
+                spec = setup.encore
+                if len(set(spec.seed_ids)) != len(spec.seed_ids):
+                    raise CookoutInvalidError("an ingredient can only be a starter once")
+                if len(spec.seed_ids) > (1 if setup.fridge_seed_id is not None else MAX_STARTERS):
+                    raise CookoutInvalidError("too many starter ingredients")
+                starters.extend(
+                    (snap, "encore") for snap in self._cx_encore_seeds(conn, spec, bank)
+                )
+            if len(starters) > MAX_STARTERS:
+                raise CookoutInvalidError("too many starter ingredients")
+            if len({snap["id"] for snap, _ in starters}) != len(starters) or len(
+                {snap["family"] for snap, _ in starters}
+            ) != len(starters):
+                raise CookoutInvalidError("starter ingredients must come from different families")
 
             for old in conn.execute(
                 "SELECT anchor_message_seq FROM cookout_rounds WHERE state = 'picking'"
@@ -3542,12 +3890,20 @@ class LiveChatStore:
             )
             seq = cursor.lastrowid
             assert seq is not None
-            schedule = list(bank.shuffle_role_schedule(rng))
+            if starters:
+                head = bank.ingredient(starters[0][0]["id"])
+                assert head is not None
+                schedule = list(bank.shuffle_role_schedule(rng, first_role=head.role))
+            else:
+                schedule = list(bank.shuffle_role_schedule(rng))
+            encore = setup.encore
             conn.execute(
                 "INSERT INTO cookout_rounds "
                 "(anchor_message_seq, state, blind, started_by, player1_key, player1_name, "
-                "player1_email, role_schedule, rev, created_at, updated_at) "
-                "VALUES (?, 'picking', ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                "player1_email, role_schedule, style, style_spun, challenge, wildcard, stars, "
+                "encore_kind, encore_from_seq, encore_generation, encore_concept_id, "
+                "rev, created_at, updated_at) "
+                "VALUES (?, 'picking', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
                 (
                     seq,
                     int(blind),
@@ -3556,11 +3912,43 @@ class LiveChatStore:
                     sender,
                     by_email,
                     json.dumps(schedule),
+                    setup.style,
+                    int(setup.style_spun),
+                    setup.challenge,
+                    "armed" if setup.wildcard else "off",
+                    int(setup.stars),
+                    encore.kind if encore is not None else None,
+                    encore.from_seq if encore is not None else None,
+                    encore.generation if encore is not None else None,
+                    encore.concept_id if encore is not None else None,
                     now_s,
                     now_s,
                 ),
             )
-            self._cx_draw(conn, self._cx_load(conn, seq), [], 1, bank, rng)
+            turns: list[CookoutTurnRow] = []
+            for index, (snap, source) in enumerate(starters):
+                turn = index + 1
+                conn.execute(
+                    "INSERT INTO cookout_turns (anchor_message_seq, turn, player, offers, "
+                    "choice_id, seed, seed_source) VALUES (?, ?, ?, '[]', ?, ?, ?)",
+                    (seq, turn, player_of_turn(turn), snap["id"], json.dumps(snap), source),
+                )
+                turns.append(
+                    CookoutTurnRow(
+                        turn=turn,
+                        player=player_of_turn(turn),
+                        offers=(),
+                        choice_id=snap["id"],
+                        skip_move_ids=(),
+                        pick_move_id=None,
+                        seed=snap,
+                        seed_source=source,
+                    )
+                )
+            round_ = self._cx_load(conn, seq)
+            first_draw = len(starters) + 1
+            if next_turn_draws_now(round_, first_draw):
+                self._cx_draw(conn, round_, turns, first_draw, bank, rng)
             conn.execute(
                 "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
                 (seq, now_s),
@@ -3568,7 +3956,8 @@ class LiveChatStore:
             return _load_message(conn, seq), True
 
     def cookout_view_data(self, *, anchor_seq: int) -> CookoutViewData | None:
-        """The round, its turns, its recipe rows and its picture attachments in ONE read
+        """The round, its turns, its recipe rows (current generation, and every generation for the
+        archived dish sets), the superseded generations and the picture attachments in ONE read
         transaction — a view never pairs one `rev` with the contents of a later one."""
         with self._read_txn() as conn:
             row = conn.execute(
@@ -3577,34 +3966,100 @@ class LiveChatStore:
             if row is None:
                 return None
             round_ = _row_to_cookout_round(row)
+            generations = tuple(
+                _row_to_cookout_generation(r)
+                for r in conn.execute(
+                    "SELECT * FROM cookout_generations WHERE anchor_message_seq = ? "
+                    "ORDER BY generation",
+                    (anchor_seq,),
+                ).fetchall()
+            )
+            all_recipes = tuple(self._cx_recipes(conn, anchor_seq))
+            photo_seqs = sorted(
+                {r.photo_message_seq for r in all_recipes if r.photo_message_seq is not None}
+            )
+            photo_by_message = _load_attachments_for(conn, photo_seqs)
+            encore_title: str | None = None
+            if round_.encore_from_seq is not None and round_.encore_concept_id is not None:
+                source = conn.execute(
+                    "SELECT generation, concepts_json FROM cookout_rounds "
+                    "WHERE anchor_message_seq = ?",
+                    (round_.encore_from_seq,),
+                ).fetchone()
+                concepts_json: str | None = None
+                if source is not None:
+                    if source["generation"] == round_.encore_generation:
+                        concepts_json = source["concepts_json"]
+                    else:
+                        archived = conn.execute(
+                            "SELECT concepts_json FROM cookout_generations "
+                            "WHERE anchor_message_seq = ? AND generation = ?",
+                            (round_.encore_from_seq, round_.encore_generation),
+                        ).fetchone()
+                        concepts_json = archived["concepts_json"] if archived is not None else None
+                concept = next(
+                    (
+                        c
+                        for c in concepts_from_json(concepts_json)
+                        if c.get("id") == round_.encore_concept_id
+                    ),
+                    None,
+                )
+                if concept is not None:
+                    encore_title = str(concept.get("title", "")) or None
+            has_pictures = bool(round_.pictures) or any(g.pictures for g in generations)
             return CookoutViewData(
                 round=round_,
                 turns=tuple(self._cx_turns(conn, anchor_seq)),
-                recipes=tuple(self._cx_recipes(conn, anchor_seq)),
+                recipes=tuple(r for r in all_recipes if r.generation == round_.generation),
                 attachments=(
                     tuple(_load_attachments_for(conn, [anchor_seq]).get(anchor_seq, []))
-                    if round_.pictures
+                    if has_pictures
                     else ()
                 ),
+                generations=generations,
+                all_recipes=all_recipes,
+                photo_attachments=tuple(a for seq in photo_seqs for a in photo_by_message[seq]),
+                encore_title=encore_title,
             )
 
     def get_cookout_round(self, anchor_seq: int) -> dict[str, Any] | None:
-        """The AI runner's read (spec Appendix A.2): the raw `cookout_rounds` columns (JSON text
-        columns stay text, except `pictures`, decoded to slot -> attachment id) plus `picked_ids`
-        (the ten choices in turn order, `[]` until finished) and `recipes` (`{a|b|c: {state,
-        run_id, recipe_json, error, tries, deadline_at, started_at}}`, only rows that exist)."""
+        """The AI runner's read (spec 09a §5.2): the raw `cookout_rounds` columns (JSON text columns
+        stay text, except `pictures`, decoded to slot -> attachment id) plus `basket_ids` (the
+        CURRENT generation's effective basket — 10 or 11 ids in turn order, wildcard last — `[]`
+        until the chef gate clears), `picked_ids` (an alias of it), `star_ids` (sorted; `[]` when
+        stars are off), `wildcard_id`, `forbidden_ids` (the swapped-out ingredient of a generation
+        created by a completed swap), `style`, `challenge`, `generation`, and `recipes` (the
+        current generation's rows only: `{a|b|c: {state, run_id, recipe_json, error, tries,
+        deadline_at, started_at}}`)."""
         with self._read_txn() as conn:
             row = conn.execute(
                 "SELECT * FROM cookout_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
             ).fetchone()
             if row is None:
                 return None
+            round_ = _row_to_cookout_round(row)
             data: dict[str, Any] = {key: row[key] for key in row.keys()}  # noqa: SIM118
             data["pictures"] = _decode_pictures(row["pictures"])
             turns = self._cx_turns(conn, anchor_seq)
-            data["picked_ids"] = (
-                [t.choice_id for t in turns if t.choice_id is not None]
-                if row["state"] == "finished"
+            ready = round_.state == "finished" and not waiting_for(round_)
+            basket = basket_ids(round_, turns) if ready else []
+            data["basket_ids"] = basket
+            data["picked_ids"] = list(basket)
+            data["star_ids"] = (
+                sorted(s for s in (round_.star1_id, round_.star2_id) if s is not None)
+                if round_.stars
+                else []
+            )
+            wildcard_id: str | None = None
+            if round_.wildcard == "lifted" and round_.wildcard_snap is not None:
+                wid = round_.wildcard_snap["id"]
+                if not (round_.swap_state == "done" and round_.swap_out_id == wid):
+                    wildcard_id = wid
+            data["wildcard_id"] = wildcard_id
+            data["forbidden_ids"] = (
+                [round_.swap_out_id]
+                if round_.swap_state == "done" and round_.swap_out_id is not None
                 else []
             )
             data["recipes"] = {
@@ -3617,7 +4072,7 @@ class LiveChatStore:
                     "deadline_at": r.deadline_at,
                     "started_at": r.started_at,
                 }
-                for r in self._cx_recipes(conn, anchor_seq)
+                for r in self._cx_recipes(conn, anchor_seq, round_.generation)
             }
             return data
 
@@ -3630,12 +4085,12 @@ class LiveChatStore:
         bank: CookoutBankLike,
         rng: random.Random | None = None,
         now: float | None = None,
-    ) -> tuple[CookoutRoundRow, bool]:
-        """Bind Slot 2 (an explicit act, never implied by a first move). If Player 1 has already
-        picked Turn 1 the round is waiting at Turn 2: that pair is drawn in this same transaction.
-        The already-bound Slot-2 player joining again is an idempotent success; a name that is
-        Player 1's, or any join once Slot 2 is taken or the round is no longer `picking`, is
-        `CookoutBadStateError`."""
+    ) -> Moved:
+        """Bind Slot 2 (an explicit act, never implied by a first move). If every turn so far is
+        picked and the next belongs to Player 2, the round was waiting for them: that pair is drawn
+        in this same transaction. The already-bound Slot-2 player joining again is an idempotent
+        success; a name that is Player 1's, or any join once Slot 2 is taken or the round is no
+        longer `picking`, is `CookoutBadStateError`."""
         key = reactor_key(sender)
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
@@ -3657,8 +4112,12 @@ class LiveChatStore:
             )
             round_ = self._cx_load(conn, anchor_seq)
             turns = self._cx_turns(conn, anchor_seq)
-            if len(turns) == 1 and turns[0].choice_id is not None:
-                self._cx_draw(conn, round_, turns, 2, bank, rng)
+            if (
+                turns
+                and turns[-1].choice_id is not None
+                and next_turn_draws_now(round_, len(turns) + 1)
+            ):
+                self._cx_draw(conn, round_, turns, len(turns) + 1, bank, rng)
             return self._cx_update(conn, anchor_seq, now_s, {}), True
 
     def skip_cookout(
@@ -3673,7 +4132,7 @@ class LiveChatStore:
         bank: CookoutBankLike,
         rng: random.Random | None = None,
         now: float | None = None,
-    ) -> tuple[CookoutRoundRow, bool]:
+    ) -> Moved:
         """Skip the current pair: deal a fresh one for the same turn (two skips a turn). Replaying
         a recorded `move_id` is an idempotent success; a different move whose `turn`/`offer` is not
         the live one is `CookoutBadStateError`; a third skip is `CookoutSkipExhaustedError`."""
@@ -3740,6 +4199,43 @@ class LiveChatStore:
             raise CookoutNotYourTurnError(f"it is player {cur.player}'s turn")
         return cur.row
 
+    def _cx_commit_pick(
+        self,
+        conn: sqlite3.Connection,
+        round_: CookoutRoundRow,
+        turns: Sequence[CookoutTurnRow],
+        live: CookoutTurnRow,
+        *,
+        ingredient_id: str,
+        move_id: str,
+        lucky: bool,
+        bank: CookoutBankLike,
+        runner_available: bool,
+        rng: random.Random | None,
+        now_s: float,
+    ) -> Moved:
+        """Record the live turn's pick. Turn 10's pick finishes the round (and, with no chef gate
+        pending, starts Stage 1 in the same write); an earlier one draws the next turn's pair
+        unless that turn is Player 2's and Slot 2 has not joined (then it waits)."""
+        anchor_seq = round_.anchor_message_seq
+        conn.execute(
+            "UPDATE cookout_turns SET choice_id = ?, pick_move_id = ?, lucky = ? "
+            "WHERE anchor_message_seq = ? AND turn = ?",
+            (ingredient_id, move_id, int(lucky), anchor_seq, live.turn),
+        )
+        picked = [
+            *turns[:-1],
+            dataclasses.replace(live, choice_id=ingredient_id, pick_move_id=move_id, lucky=lucky),
+        ]
+        if live.turn == TOTAL_TURNS:
+            assignments: dict[str, object] = {"state": "finished"}
+            if round_.wildcard == "armed":
+                assignments["wildcard"] = "offered"
+            return self._cx_apply(conn, round_, now_s, assignments, runner_available), True
+        if next_turn_draws_now(round_, live.turn + 1):
+            self._cx_draw(conn, round_, picked, live.turn + 1, bank, rng)
+        return self._cx_update(conn, anchor_seq, now_s, {}), True
+
     def pick_cookout(
         self,
         *,
@@ -3754,12 +4250,15 @@ class LiveChatStore:
         runner_available: bool,
         rng: random.Random | None = None,
         now: float | None = None,
-    ) -> tuple[CookoutRoundRow, bool]:
+    ) -> Moved:
         """Pick one of the live pair. Turn 10's pick finishes the round and starts Stage 1: the
         concepts go `pending` (a job will start the run) when a runner exists, else `unavailable`
         at once — the caller starts the job when the returned round is `finished` + `pending`
-        and the flag says it changed. Turn < 10 draws the next turn's pair (unless it is turn 2 and
-        Slot 2 has not joined: then it waits). Replaying a recorded `move_id` is a no-op."""
+        and the flag says it changed. With the wildcard cloche armed the pick offers it, and with
+        the cloche or secret stars still unanswered the concepts stay `none` until the gate clears
+        (spec 09a §1.4). Turn < 10 draws the next turn's pair (unless it is Player 2's and Slot 2
+        has not joined: then it waits). Replaying a recorded `move_id` is a no-op. Picking an
+        option a veto swept off the table after the player saw it is `CookoutBadStateError`."""
         key = reactor_key(sender)
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
@@ -3776,47 +4275,257 @@ class LiveChatStore:
             if offer != len(live.offers) - 1:
                 raise CookoutBadStateError("that pair is no longer on the table")
             if ingredient_id not in {snap["id"] for snap in live.offers[offer]}:
+                if any(e["snap"]["id"] == ingredient_id for e in live.replaced):
+                    raise CookoutBadStateError("that option was swept off the table")
                 raise CookoutInvalidError("that ingredient is not one of the two offered")
-            conn.execute(
-                "UPDATE cookout_turns SET choice_id = ?, pick_move_id = ? "
-                "WHERE anchor_message_seq = ? AND turn = ?",
-                (ingredient_id, move_id, anchor_seq, turn),
+            return self._cx_commit_pick(
+                conn,
+                round_,
+                turns,
+                live,
+                ingredient_id=ingredient_id,
+                move_id=move_id,
+                lucky=False,
+                bank=bank,
+                runner_available=runner_available,
+                rng=rng,
+                now_s=now_s,
             )
-            picked = [
-                *turns[:-1],
-                CookoutTurnRow(
-                    turn=live.turn,
-                    player=live.player,
-                    offers=live.offers,
-                    choice_id=ingredient_id,
-                    skip_move_ids=live.skip_move_ids,
-                    pick_move_id=move_id,
-                ),
+
+    def lucky_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        turn: int,
+        offer: int,
+        option_ids: tuple[str, str],
+        bank: CookoutBankLike,
+        runner_available: bool,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> Moved:
+        """Lucky dip (T10): the active player lets a kitchen coin choose between the two options on
+        the table. The server flips at commit time and commits it exactly as `pick` would (same
+        turn advance, same Turn-10 behaviour), marking the turn `lucky`; the move id is the pick's
+        (`pick_move_id`). `option_ids` must equal the live pair, order-free, so a veto that changed
+        the table first makes the dip stale (`CookoutBadStateError`)."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            turns = self._cx_turns(conn, anchor_seq)
+            if any(t.pick_move_id == move_id and t.player == slot for t in turns):
+                if any(t.pick_move_id == move_id and t.turn != turn for t in turns):
+                    raise CookoutBadStateError("that move id was used on another turn")
+                return round_, False
+            live = self._cx_live_turn(round_, turns, slot, turn)
+            if offer != len(live.offers) - 1:
+                raise CookoutBadStateError("that pair is no longer on the table")
+            pair = live.offers[offer]
+            if {pair[0]["id"], pair[1]["id"]} != set(option_ids) or len(set(option_ids)) != 2:
+                raise CookoutBadStateError("the table changed: those are not the two options")
+            heads = (rng or _SYSTEM_RANDOM).random() < 0.5
+            chosen = pair[0]["id"] if heads else pair[1]["id"]
+            return self._cx_commit_pick(
+                conn,
+                round_,
+                turns,
+                live,
+                ingredient_id=chosen,
+                move_id=move_id,
+                lucky=True,
+                bank=bank,
+                runner_available=runner_available,
+                rng=rng,
+                now_s=now_s,
+            )
+
+    @staticmethod
+    def _cx_twist_replayed(
+        turns: Sequence[CookoutTurnRow], move_id: str, slot: int, kind: str, turn: int
+    ) -> bool:
+        """`True` when this actor already made this twist move (an idempotent replay); a move id
+        recorded against a DIFFERENT turn is `CookoutBadStateError`."""
+        for t in turns:
+            for entry in t.twist_move_ids:
+                if entry.get("id") == move_id and entry.get("slot") == slot:
+                    if t.turn != turn or entry.get("kind") != kind:
+                        raise CookoutBadStateError("that move id was used on another move")
+                    return True
+        return False
+
+    def chaos_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        turn: int,
+        offer: int,
+        option_ids: tuple[str, str],
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> Moved:
+        """Chaos shelf (T12): the active player, once per round, swaps BOTH options on the table
+        for an exotic pair, in place (`offerIndex`/skips unchanged; the replaced pair is kept so it
+        still counts as offered). `CookoutTokenUsedError` when spent, `CookoutExhaustedError`
+        (token kept) when no exotic pair exists, `CookoutBadStateError` when the table is not the
+        one named."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            turns = self._cx_turns(conn, anchor_seq)
+            if self._cx_twist_replayed(turns, move_id, slot, "chaos", turn):
+                return round_, False
+            live = self._cx_live_turn(round_, turns, slot, turn)
+            if offer != len(live.offers) - 1:
+                raise CookoutBadStateError("that pair is no longer on the table")
+            pair = live.offers[offer]
+            if {pair[0]["id"], pair[1]["id"]} != set(option_ids) or len(set(option_ids)) != 2:
+                raise CookoutBadStateError("the table changed: those are not the two options")
+            if chaos_used(turns, slot):
+                raise CookoutTokenUsedError("you have already used the chaos shelf")
+            inputs = draw_inputs(turns, live.player)
+            try:
+                first, second = bank.draw_pair(
+                    role=role_for_turn(round_.role_schedule, turn),
+                    seen_ids=inputs.seen_ids,
+                    picked_families=inputs.picked_families,
+                    offered_families=inputs.offered_families,
+                    player_offered_categories=inputs.player_offered_categories,
+                    rng=rng,
+                    rarity_mode="exotic",
+                )
+            except CookoutDrawExhausted as exc:
+                raise CookoutExhaustedError("no exotic pair is left for this turn") from exc
+            offers = [[dict(a), dict(b)] for a, b in live.offers]
+            offers[offer] = [snapshot(first), snapshot(second)]
+            replaced = [
+                *live.replaced,
+                {"offer": offer, "position": 0, "snap": dict(pair[0]), "by": "chaos"},
+                {"offer": offer, "position": 1, "snap": dict(pair[1]), "by": "chaos"},
             ]
-            if turn == TOTAL_TURNS:
-                assignments: dict[str, object] = {"state": "finished"}
-                if runner_available:
-                    assignments.update(
-                        {
-                            "concepts": "pending",
-                            "concepts_run_id": None,
-                            "concepts_started_at": now_s,
-                            "concepts_tries": 1,
-                            "concepts_deadline_at": now_s + CONCEPTS_DEADLINE_S,
-                        }
-                    )
-                else:
-                    assignments.update(
-                        {"concepts": "unavailable", "concepts_error": CONCEPTS_UNAVAILABLE_TEXT}
-                    )
-                return self._cx_update(conn, anchor_seq, now_s, assignments), True
-            if not (turn == 1 and round_.player2_key is None):
-                self._cx_draw(conn, round_, picked, turn + 1, bank, rng)
+            conn.execute(
+                "UPDATE cookout_turns SET offers = ?, replaced = ?, chaos_offer = ?, "
+                "twist_move_ids = ? WHERE anchor_message_seq = ? AND turn = ?",
+                (
+                    json.dumps(offers),
+                    json.dumps(replaced),
+                    offer,
+                    json.dumps(
+                        [*live.twist_move_ids, {"id": move_id, "slot": slot, "kind": "chaos"}]
+                    ),
+                    anchor_seq,
+                    turn,
+                ),
+            )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def veto_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        turn: int,
+        offer: int,
+        ingredient_id: str,
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> Moved:
+        """Partner veto (T8, Open mode only): the NON-active bound player, once per round, sweeps
+        one live option off the active player's table. The swept option is replaced in place by one
+        fresh option that keeps the pair legal (spec 09a §1.2); the swept snapshot is kept in
+        `replaced`. A stale or Blind-mode move, or the active player's own, is
+        `CookoutBadStateError`; a spent token `CookoutTokenUsedError`; no feasible replacement
+        `CookoutExhaustedError` with the token kept."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.blind:
+                raise CookoutBadStateError("a veto only exists in an Open game")
+            turns = self._cx_turns(conn, anchor_seq)
+            if self._cx_twist_replayed(turns, move_id, slot, "veto", turn):
+                return round_, False
+            cur = current_turn(round_, turns)
+            if cur is None:
+                raise CookoutBadStateError(f"round on message {anchor_seq} is not picking")
+            live = cur.row
+            if live is None or not live.offers:
+                raise CookoutBadStateError("there is no pair on the table to veto")
+            if cur.turn != turn:
+                raise CookoutBadStateError(f"the live turn is {cur.turn}, not {turn}")
+            if cur.player == slot:
+                raise CookoutBadStateError("you cannot veto your own table")
+            if offer != len(live.offers) - 1:
+                raise CookoutBadStateError("that pair is no longer on the table")
+            pair = live.offers[offer]
+            if ingredient_id == pair[0]["id"]:
+                position, keep = 0, pair[1]
+            elif ingredient_id == pair[1]["id"]:
+                position, keep = 1, pair[0]
+            else:
+                raise CookoutBadStateError("that option is no longer on the table")
+            if veto_used(turns, slot):
+                raise CookoutTokenUsedError("you have already used your veto")
+            inputs = draw_inputs(turns, live.player)
+            exotic_dare = live.chaos_offer is not None and live.chaos_offer == offer
+            try:
+                fresh = bank.draw_replacement(
+                    role=role_for_turn(round_.role_schedule, turn),
+                    keep_id=keep["id"],
+                    seen_ids=inputs.seen_ids,
+                    picked_families=inputs.picked_families,
+                    offered_families=inputs.offered_families,
+                    player_offered_categories=inputs.player_offered_categories,
+                    rarity_mode="exotic" if exotic_dare else "normal",
+                    rng=rng,
+                )
+            except CookoutDrawExhausted as exc:
+                raise CookoutExhaustedError("no replacement option is left for this turn") from exc
+            offers = [[dict(a), dict(b)] for a, b in live.offers]
+            offers[offer][position] = snapshot(fresh)
+            replaced = [
+                *live.replaced,
+                {"offer": offer, "position": position, "snap": dict(pair[position]), "by": "veto"},
+            ]
+            conn.execute(
+                "UPDATE cookout_turns SET offers = ?, replaced = ?, veto_offer = ?, "
+                "twist_move_ids = ? WHERE anchor_message_seq = ? AND turn = ?",
+                (
+                    json.dumps(offers),
+                    json.dumps(replaced),
+                    offer,
+                    json.dumps(
+                        [*live.twist_move_ids, {"id": move_id, "slot": slot, "kind": "veto"}]
+                    ),
+                    anchor_seq,
+                    turn,
+                ),
+            )
             return self._cx_update(conn, anchor_seq, now_s, {}), True
 
     def abandon_cookout(
         self, *, anchor_seq: int, sender: str, email: str | None, now: float | None = None
-    ) -> tuple[CookoutRoundRow, bool]:
+    ) -> Moved:
         """End an open round (a bound player's "End game"). A `finished` round is never abandoned
         (`CookoutBadStateError`); ending an already-abandoned round is an idempotent success."""
         key = reactor_key(sender)
@@ -3837,22 +4546,391 @@ class LiveChatStore:
         with self._read_txn() as conn:
             return slot_of(self._cx_load(conn, anchor_seq), reactor_key(sender), email)
 
+    # -- Cookout: secret stars, the wildcard cloche, the dinner vote -----------------------------
+
+    def star_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        ingredient_id: str,
+        runner_available: bool,
+        now: float | None = None,
+    ) -> Moved:
+        """Secret star (T11): set or change the caller's star among their OWN picks (starters
+        included, the wildcard never). Reveal and lock are ONE transition (spec 09a §1.5): the
+        moment both stars are set on a `finished` round both are revealed and committed, so a
+        DIFFERENT star after that — or once the concepts have left `none` — is
+        `CookoutBadStateError`; the same id again is an idempotent success. A star can clear the
+        chef gate, in which case Stage 1 starts in the same write."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.state == "abandoned" or not round_.stars:
+                raise CookoutBadStateError("there is nothing to star in this round")
+            column = "star1_id" if slot == 1 else "star2_id"
+            current = round_.star1_id if slot == 1 else round_.star2_id
+            if current == ingredient_id:
+                return round_, False
+            if round_.state == "finished" and (stars_locked(round_) or round_.concepts != "none"):
+                raise CookoutBadStateError("the stars are locked in")
+            turns = self._cx_turns(conn, anchor_seq)
+            own = {r.choice_id for r in turns if r.player == slot and r.choice_id is not None}
+            if ingredient_id not in own:
+                raise CookoutInvalidError("you can only star one of your own picks")
+            return (
+                self._cx_apply(conn, round_, now_s, {column: ingredient_id}, runner_available),
+                True,
+            )
+
+    def wildcard_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        lift: bool,
+        bank: CookoutBankLike,
+        runner_available: bool,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> Moved:
+        """Wildcard cloche (T5): either player lifts it (draws a surprise eleventh ingredient the
+        two of you did not choose) or declines. A replay of the move id, or any later move asking
+        for the SAME outcome, is an idempotent success; the opposite outcome after the cloche was
+        answered is `CookoutBadStateError`. No drawable wildcard is `CookoutExhaustedError` — the
+        cloche stays offered and declining still works."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.wildcard_move_id == move_id:
+                return round_, False
+            if round_.wildcard in ("lifted", "declined"):
+                if (round_.wildcard == "lifted") == lift:
+                    return round_, False
+                raise CookoutBadStateError("the cloche was already answered")
+            if round_.state != "finished" or round_.wildcard != "offered":
+                raise CookoutBadStateError("there is no cloche to lift")
+            if not lift:
+                assignments: dict[str, object] = {
+                    "wildcard": "declined",
+                    "wildcard_move_id": move_id,
+                }
+            else:
+                turns = self._cx_turns(conn, anchor_seq)
+                inputs = draw_inputs(turns, 1)
+                categories = {snap["category"] for _, _, snap in basket_snaps(round_, turns)}
+                try:
+                    found = bank.draw_wildcard(
+                        seen_ids=inputs.seen_ids,
+                        picked_families=inputs.picked_families,
+                        offered_families=inputs.offered_families,
+                        basket_categories=categories,
+                        rng=rng,
+                    )
+                except CookoutDrawExhausted as exc:
+                    raise CookoutExhaustedError("no surprise ingredient could be found") from exc
+                assignments = {
+                    "wildcard": "lifted",
+                    "wildcard_snap": json.dumps(snapshot(found)),
+                    "wildcard_move_id": move_id,
+                }
+            return self._cx_apply(conn, round_, now_s, assignments, runner_available), True
+
+    def vote_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        generation: int,
+        concept_id: str,
+        now: float | None = None,
+    ) -> Moved:
+        """Dinner vote (T2): secretly tap the one dish you would eat tonight. State-idempotent; a
+        player may change their vote until BOTH have voted, when both are revealed and locked.
+        `generation` must be the round's current one (`CookoutBadStateError` otherwise, spec 09a
+        §1.10) and the dishes `ready`."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.generation != generation:
+                raise CookoutBadStateError("those dishes were replaced")
+            if round_.state != "finished" or round_.concepts != "ready":
+                raise CookoutBadStateError("the dish ideas are not ready to vote on")
+            if concept_by_id(round_, concept_id) is None:
+                raise CookoutInvalidError("there is no such dish idea")
+            mine = round_.vote1 if slot == 1 else round_.vote2
+            if mine == concept_id:
+                return round_, False
+            if round_.vote1 is not None and round_.vote2 is not None:
+                raise CookoutBadStateError("the votes are in")
+            return (
+                self._cx_update(
+                    conn, anchor_seq, now_s, {"vote1" if slot == 1 else "vote2": concept_id}
+                ),
+                True,
+            )
+
+    # -- Cookout: rescue swap (generations) -------------------------------------------------------
+
+    @staticmethod
+    def _cx_pending_recipe(conn: sqlite3.Connection, round_: CookoutRoundRow) -> bool:
+        return (
+            conn.execute(
+                "SELECT 1 FROM cookout_recipes WHERE anchor_message_seq = ? AND generation = ? "
+                "AND state = 'pending'",
+                (round_.anchor_message_seq, round_.generation),
+            ).fetchone()
+            is not None
+        )
+
+    @staticmethod
+    def _cx_swap_replayed(round_: CookoutRoundRow, move_id: str, slot: int, kind: str) -> bool:
+        for entry in round_.swap_move_ids:
+            if entry.get("id") == move_id and entry.get("slot") == slot:
+                if entry.get("kind") != kind:
+                    raise CookoutBadStateError("that move id was used on another move")
+                return True
+        return False
+
+    def propose_cookout_swap(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        ingredient_id: str,
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> Moved:
+        """Rescue swap, step 1 (T1): either player sends one basket ingredient back (never a star)
+        and the server draws a replacement PAIR for the partner to choose from (spec 09a §1.6).
+        Once per round: `CookoutBadStateError` unless the dishes are `ready` and no swap was
+        proposed or done; `CookoutRecipePendingError` while a current recipe is being written;
+        `CookoutInvalidError` for an ingredient outside the basket or a starred one;
+        `CookoutExhaustedError` when no pair can be dealt."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if self._cx_swap_replayed(round_, move_id, slot, "propose"):
+                return round_, False
+            if round_.state != "finished" or round_.concepts != "ready":
+                raise CookoutBadStateError("the dish ideas are not ready to swap")
+            if round_.swap_state != "none":
+                raise CookoutBadStateError("a swap was already used in this round")
+            if self._cx_pending_recipe(conn, round_):
+                raise CookoutRecipePendingError("a recipe is still being written")
+            turns = self._cx_turns(conn, anchor_seq)
+            basket = basket_snaps(round_, turns)
+            if ingredient_id not in {snap["id"] for _, _, snap in basket}:
+                raise CookoutInvalidError("that ingredient is not in the basket")
+            if ingredient_id in (round_.star1_id, round_.star2_id):
+                raise CookoutInvalidError("a starred ingredient cannot be sent back")
+            role = swap_target_role(round_, turns, ingredient_id, bank)
+            snaps = round_snaps(round_, turns)
+            target = snaps.get(ingredient_id)
+            if role is None or target is None:
+                raise CookoutInvalidError("that ingredient cannot be swapped")
+            partner = 2 if slot == 1 else 1
+            try:
+                first, second = bank.draw_pair(
+                    role=role,
+                    seen_ids=frozenset(snaps),
+                    picked_families=frozenset(
+                        {snap["family"] for _, _, snap in basket} | {target["family"]}
+                    ),
+                    offered_families=frozenset(s.get("family", "") for s in snaps.values()),
+                    player_offered_categories=draw_inputs(turns, partner).player_offered_categories,
+                    rng=rng,
+                )
+            except CookoutDrawExhausted as exc:
+                raise CookoutExhaustedError("no replacement pair could be dealt") from exc
+            pair = [snapshot(first), snapshot(second)]
+            return (
+                self._cx_update(
+                    conn,
+                    anchor_seq,
+                    now_s,
+                    {
+                        "swap_state": "proposed",
+                        "swap_by": slot,
+                        "swap_out_id": ingredient_id,
+                        "swap_pair": json.dumps(pair),
+                        "swap_seen": json.dumps([*round_.swap_seen, *pair]),
+                        "swap_move_ids": json.dumps(
+                            [
+                                *round_.swap_move_ids,
+                                {"id": move_id, "slot": slot, "kind": "propose"},
+                            ]
+                        ),
+                    },
+                ),
+                True,
+            )
+
+    def choose_cookout_swap(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        ingredient_id: str,
+        runner_available: bool,
+        now: float | None = None,
+    ) -> Moved:
+        """Rescue swap, step 2: the OTHER player picks the replacement — choosing is the consent.
+        In ONE transaction the current dish set is archived into `cookout_generations`, unfinished
+        recipe saves of it are dropped (banked ones stay tied to their generation), the round moves
+        to the next generation with Stage 1 and the picture hunt reset (`images_generation`
+        incremented, the late-picture fence), and the votes clear. The route then starts the
+        concepts job for the new generation."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if self._cx_swap_replayed(round_, move_id, slot, "choose"):
+                return round_, False
+            if round_.swap_state != "proposed" or round_.swap_pair is None:
+                raise CookoutBadStateError("no swap is waiting for a choice")
+            if round_.swap_by == slot:
+                raise CookoutNotYourTurnError("your partner chooses the replacement")
+            chosen = next((s for s in round_.swap_pair if s["id"] == ingredient_id), None)
+            if chosen is None:
+                raise CookoutBadStateError("that is not one of the two replacements")
+            if self._cx_pending_recipe(conn, round_):
+                raise CookoutRecipePendingError("a recipe is still being written")
+            turns = self._cx_turns(conn, anchor_seq)
+            conn.execute(
+                "INSERT INTO cookout_generations (anchor_message_seq, generation, basket, "
+                "concepts_json, pictures, vote1, vote2, superseded_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    anchor_seq,
+                    round_.generation,
+                    json.dumps(basket_ids(round_, turns)),
+                    round_.concepts_json or "[]",
+                    json.dumps(round_.pictures),
+                    round_.vote1,
+                    round_.vote2,
+                    now_s,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM cookout_recipes WHERE anchor_message_seq = ? AND generation = ? "
+                "AND state IN ('failed', 'unavailable')",
+                (anchor_seq, round_.generation),
+            )
+            start = self._cx_concepts_start(runner_available, now_s)
+            conn.execute(
+                "UPDATE cookout_rounds SET generation = generation + 1, swap_state = 'done', "
+                "swap_in = ?, swap_pair = NULL, swap_move_ids = ?, vote1 = NULL, vote2 = NULL, "
+                "concepts = ?, concepts_run_id = NULL, concepts_json = NULL, concepts_error = ?, "
+                "concepts_started_at = ?, concepts_tries = ?, concepts_deadline_at = ?, "
+                "images = 'none', pictures = NULL, images_started_at = NULL, images_tries = 0, "
+                "images_deadline_at = NULL, images_generation = images_generation + 1, "
+                "rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                (
+                    json.dumps(chosen),
+                    json.dumps(
+                        [*round_.swap_move_ids, {"id": move_id, "slot": slot, "kind": "choose"}]
+                    ),
+                    start["concepts"],
+                    start.get("concepts_error"),
+                    start.get("concepts_started_at"),
+                    start.get("concepts_tries", 0),
+                    start.get("concepts_deadline_at"),
+                    now_s,
+                    anchor_seq,
+                ),
+            )
+            self._cx_event(conn, anchor_seq, now_s)
+            return self._cx_load(conn, anchor_seq), True
+
+    def cancel_cookout_swap(
+        self, *, anchor_seq: int, sender: str, email: str | None, now: float | None = None
+    ) -> Moved:
+        """Keep these dishes: either player withdraws a proposal; the swap is not used up
+        (`swap_seen` is kept so a new proposal never re-deals the same items). Already `none` is an
+        idempotent success; `done` is `CookoutBadStateError`."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if slot_of(round_, key, email) is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.swap_state == "none":
+                return round_, False
+            if round_.swap_state == "done":
+                raise CookoutBadStateError("the swap is already done")
+            return (
+                self._cx_update(
+                    conn,
+                    anchor_seq,
+                    now_s,
+                    {
+                        "swap_state": "none",
+                        "swap_by": None,
+                        "swap_out_id": None,
+                        "swap_pair": None,
+                    },
+                ),
+                True,
+            )
+
     # -- Cookout: Stage 1 (concepts) -------------------------------------------------------------
 
     def set_cookout_concepts_run(
-        self, anchor_seq: int, run_id: str, *, expected_run_id: str | None = None
+        self,
+        anchor_seq: int,
+        run_id: str,
+        *,
+        expected_run_id: str | None = None,
+        expected_generation: int,
     ) -> bool:
         """Record the run a `pending` concepts job waits on — a compare-and-set on
-        `(finished AND concepts = 'pending' AND concepts_run_id = expected_run_id)`. Replacing a
-        dead run (`expected_run_id` not None) counts a try. `False` = the round moved on."""
+        `(finished AND concepts = 'pending' AND concepts_run_id = expected_run_id AND generation =
+        expected_generation)`. Replacing a dead run (`expected_run_id` not None) counts a try.
+        `False` = the round moved on (a swap started a newer generation, spec 09a §1.10)."""
         with self._write_txn() as conn:
             now_s = time.time()
             cursor = conn.execute(
                 "UPDATE cookout_rounds SET concepts_run_id = ?, "
                 "concepts_tries = concepts_tries + ?, updated_at = ? "
                 "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'pending' "
-                "AND concepts_run_id IS ?",
-                (run_id, 0 if expected_run_id is None else 1, now_s, anchor_seq, expected_run_id),
+                "AND concepts_run_id IS ? AND generation = ?",
+                (
+                    run_id,
+                    0 if expected_run_id is None else 1,
+                    now_s,
+                    anchor_seq,
+                    expected_run_id,
+                    expected_generation,
+                ),
             )
             return cursor.rowcount == 1
 
@@ -3862,14 +4940,16 @@ class LiveChatStore:
         run_id: str | None,
         state: Literal["ready", "failed", "unavailable"],
         *,
+        expected_generation: int,
         concepts_json: str | None = None,
         error: str | None = None,
         pictures_pending: bool = False,
     ) -> bool:
         """Land the concepts outcome — a compare-and-set on
-        `(concepts = 'pending' AND concepts_run_id = run_id)`, so two processes polling the same
-        run store it once and a deleted round is untouched. `pictures_pending` (a `ready` result on
-        a server that can draw) starts the picture wait in the same write: `images = 'pending'`,
+        `(concepts = 'pending' AND concepts_run_id = run_id AND generation = expected_generation)`,
+        so two processes polling the same run store it once, a deleted round is untouched and a
+        slow generation-1 job can never finish generation 2's. `pictures_pending` (a `ready` result
+        on a server that can draw) starts the picture wait in the same write: `images = 'pending'`,
         `images_started_at = now`, `images_tries = 1`, a 600 s deadline, and `images_generation`
         incremented (the fence for the picture job)."""
         hunt = state == "ready" and pictures_pending
@@ -3880,7 +4960,7 @@ class LiveChatStore:
                 "images = ?, images_started_at = ?, images_tries = ?, images_deadline_at = ?, "
                 "images_generation = images_generation + ?, rev = rev + 1, updated_at = ? "
                 "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'pending' "
-                "AND concepts_run_id IS ?",
+                "AND concepts_run_id IS ? AND generation = ?",
                 (
                     state,
                     concepts_json if state == "ready" else None,
@@ -3893,6 +4973,7 @@ class LiveChatStore:
                     now_s,
                     anchor_seq,
                     run_id,
+                    expected_generation,
                 ),
             )
             if cursor.rowcount != 1:
@@ -3900,15 +4981,20 @@ class LiveChatStore:
             self._cx_event(conn, anchor_seq, now_s)
             return True
 
-    def retry_cookout_concepts(self, anchor_seq: int, *, now: float | None = None) -> bool:
+    def retry_cookout_concepts(
+        self, anchor_seq: int, *, generation: int | None, now: float | None = None
+    ) -> bool:
         """Try Stage 1 again (spec §3.5): valid for a `finished` round whose concepts are `failed`
         or `unavailable`. Back to `pending` with no run, data or error, a fresh 900 s window, and
         the picture job reset (its generation incremented so any late picture write is fenced).
+        `generation` is the dish set the caller saw (`None` = a core-era request, accepted only on
+        generation 1); a mismatch is `CookoutBadStateError` with no write.
         `False` = not applicable (the caller decides between an idempotent `pending` and a
         `bad_state`); `CookoutRoundNotFoundError` when there is no round."""
         with self._write_txn() as conn:
             now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
+            self._cx_guard_generation(round_, generation)
             if round_.state != "finished" or round_.concepts not in ("failed", "unavailable"):
                 return False
             conn.execute(
@@ -3923,17 +5009,20 @@ class LiveChatStore:
             self._cx_event(conn, anchor_seq, now)
             return True
 
-    def cookout_pending_concepts(self) -> list[tuple[int, str | None]]:
-        """Startup/sweep recovery: every round whose concepts are `pending`, as `(anchor seq, run
-        id or None)` — a run id resumes polling that run; none means the process died before the
-        spawn, so a new run starts."""
+    def cookout_pending_concepts(self) -> list[tuple[int, int, str | None]]:
+        """Startup/sweep recovery: every round whose concepts are `pending`, as `(anchor seq,
+        generation, run id or None)` — the generation is the job's captured fence; a run id resumes
+        polling that run; none means the process died before the spawn, so a new run starts."""
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT anchor_message_seq, concepts_run_id FROM cookout_rounds "
+                "SELECT anchor_message_seq, generation, concepts_run_id FROM cookout_rounds "
                 "WHERE state = 'finished' AND concepts = 'pending' "
                 "ORDER BY anchor_message_seq"
             ).fetchall()
-            return [(int(r["anchor_message_seq"]), r["concepts_run_id"]) for r in rows]
+            return [
+                (int(r["anchor_message_seq"]), int(r["generation"]), r["concepts_run_id"])
+                for r in rows
+            ]
 
     # -- Cookout: pictures (partial-success aware, fenced by `images_generation`) ----------------
 
@@ -3994,7 +5083,9 @@ class LiveChatStore:
         taken (a ready slot is never overwritten). `images` becomes `done` once all three slots are
         present, else `failed` (partial success is KEPT; `/pictures/retry` makes the missing ones).
         `all_done` is accepted for interface compatibility and IGNORED: completeness (all three
-        slots present after the merge) alone decides `done` vs `failed`.
+        slots present after the merge) alone decides `done` vs `failed`. A round's second dish set
+        (spec 09a §2.5) keeps `ordinal = (generation - 1) * 3 + index(slot)`, so its pictures never
+        collide with the archived first set's.
         A compare-and-set on `(finished, concepts = 'ready', images = 'pending', images_generation
         = expected_generation)`: a losing write returns False after journaling every staged id for
         cleanup — the caller removes the files — and touches nothing."""
@@ -4008,7 +5099,7 @@ class LiveChatStore:
             ):
                 return False
             row = conn.execute(
-                "SELECT state, concepts, images, images_generation, pictures "
+                "SELECT state, concepts, images, images_generation, pictures, generation "
                 "FROM cookout_rounds WHERE anchor_message_seq = ?",
                 (anchor_seq,),
             ).fetchone()
@@ -4022,6 +5113,7 @@ class LiveChatStore:
                 self._queue_deleted_storage(conn, kind="attachment", ids=ids, now=now)
                 self._queue_deleted_storage(conn, kind="upload", ids=ids, now=now)
                 return False
+            ordinal_base = (int(row["generation"]) - 1) * len(CONCEPT_IDS)
             merged = _decode_pictures(row["pictures"])
             unused: list[str] = []
             for slot, (att_id, size_bytes) in slot_uploads.items():
@@ -4038,7 +5130,7 @@ class LiveChatStore:
                     "(id, kind, status, message_seq, ordinal, renditions, bytes_on_disk, "
                     "created_at, updated_at) "
                     "VALUES (?, 'photo', 'processing', ?, ?, '[]', 0, ?, ?)",
-                    (att_id, anchor_seq, CONCEPT_IDS.index(slot), now, now),
+                    (att_id, anchor_seq, ordinal_base + CONCEPT_IDS.index(slot), now, now),
                 )
                 merged[slot] = att_id
             if unused:
@@ -4072,14 +5164,18 @@ class LiveChatStore:
             self._cx_event(conn, anchor_seq, now)
             return True
 
-    def retry_cookout_pictures(self, anchor_seq: int, *, now: float | None = None) -> bool:
+    def retry_cookout_pictures(
+        self, anchor_seq: int, *, generation: int | None, now: float | None = None
+    ) -> bool:
         """Draw the missing pictures again (spec §3.5): valid for a `finished` round with `ready`
         concepts, `images` not already `pending` and at least one empty slot. Keeps the attached
         slots, sets `pending` with a fresh try count and 600 s window, and increments
-        `images_generation` (never resets it). `False` = not applicable."""
+        `images_generation` (never resets it). `generation` is the dish set the caller saw (see
+        `retry_cookout_concepts`). `False` = not applicable."""
         with self._write_txn() as conn:
             now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
+            self._cx_guard_generation(round_, generation)
             if (
                 round_.state != "finished"
                 or round_.concepts != "ready"
@@ -4121,27 +5217,38 @@ class LiveChatStore:
         email: str | None,
         concept_id: str,
         move_id: str,
+        generation: int | None,
         runner_available: bool,
         now: float | None = None,
-    ) -> tuple[CookoutRoundRow, bool]:
-        """Bank this: create the concept's `cookout_recipes` row — `pending` (a job will write
-        the full recipe) or `unavailable` without a runner. Valid for a `finished` round with
-        `ready` concepts. State-idempotent: a row already `pending` or `banked` is an idempotent
-        success (`False`, no second job). A `failed`/`unavailable` row is retried through
-        `retry_cookout_recipe`, so banking it again is `CookoutBadStateError`."""
+    ) -> Moved:
+        """Bank this: create the concept's `cookout_recipes` row for the CURRENT generation —
+        `pending` (a job will write the full recipe) or `unavailable` without a runner. Valid for a
+        `finished` round with `ready` concepts. The round-level Bank ledger is read FIRST, by
+        `move_id` alone (spec 09a §1.10): a recorded move, of any generation, is an idempotent
+        success that changes nothing and starts no job. Only an unrecorded move meets the
+        generation check (`CookoutBadStateError` for dishes that were replaced), then the core
+        rules: a row already `pending` or `banked` is an idempotent success (`False`, no second
+        job); a `failed`/`unavailable` row is retried through `retry_cookout_recipe`, so banking it
+        again is `CookoutBadStateError`; so is banking while a swap is proposed."""
         key = reactor_key(sender)
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
             if slot_of(round_, key, email) is None:
                 raise CookoutNotPlayerError("you are not a player in this round")
+            if any(entry.get("id") == move_id for entry in round_.bank_move_ids):
+                return round_, False
+            self._cx_guard_generation(round_, generation)
             if round_.state != "finished" or round_.concepts != "ready":
                 raise CookoutBadStateError("the dish ideas are not ready to bank")
+            if round_.swap_state == "proposed":
+                raise CookoutBadStateError("finish or cancel the swap first")
             if concept_by_id(round_, concept_id) is None:
                 raise CookoutInvalidError("there is no such dish idea")
             existing = conn.execute(
-                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? AND concept_id = ?",
-                (anchor_seq, concept_id),
+                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? "
+                "AND generation = ? AND concept_id = ?",
+                (anchor_seq, round_.generation, concept_id),
             ).fetchone()
             if existing is not None:
                 if existing["state"] in ("pending", "banked"):
@@ -4149,11 +5256,12 @@ class LiveChatStore:
                 raise CookoutBadStateError("that recipe failed; try it again instead")
             state = "pending" if runner_available else "unavailable"
             conn.execute(
-                "INSERT INTO cookout_recipes (anchor_message_seq, concept_id, state, error, "
-                "requested_by, bank_move_id, started_at, tries, deadline_at, created_at, "
-                "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO cookout_recipes (anchor_message_seq, generation, concept_id, state, "
+                "error, requested_by, bank_move_id, started_at, tries, deadline_at, created_at, "
+                "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     anchor_seq,
+                    round_.generation,
                     concept_id,
                     state,
                     None if runner_available else RECIPE_UNAVAILABLE_TEXT,
@@ -4166,24 +5274,39 @@ class LiveChatStore:
                     now_s,
                 ),
             )
-            return self._cx_update(conn, anchor_seq, now_s, {}), True
+            ledger = [
+                *round_.bank_move_ids,
+                {"id": move_id, "generation": round_.generation, "conceptId": concept_id},
+            ]
+            return (
+                self._cx_update(conn, anchor_seq, now_s, {"bank_move_ids": json.dumps(ledger)}),
+                True,
+            )
 
     def set_cookout_recipe_run(
-        self, anchor_seq: int, concept_id: str, run_id: str, *, expected_run_id: str | None = None
+        self,
+        anchor_seq: int,
+        concept_id: str,
+        run_id: str,
+        *,
+        expected_run_id: str | None = None,
+        expected_generation: int,
     ) -> bool:
         """Record the run a `pending` recipe waits on (compare-and-set on `state = 'pending' AND
-        run_id = expected_run_id`); replacing a dead run counts a try. `False` = it moved on."""
+        run_id = expected_run_id` for the captured generation's row); replacing a dead run counts a
+        try. `False` = it moved on."""
         with self._write_txn() as conn:
             now_s = time.time()
             cursor = conn.execute(
                 "UPDATE cookout_recipes SET run_id = ?, tries = tries + ?, updated_at = ? "
-                "WHERE anchor_message_seq = ? AND concept_id = ? AND state = 'pending' "
-                "AND run_id IS ?",
+                "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
+                "AND state = 'pending' AND run_id IS ?",
                 (
                     run_id,
                     0 if expected_run_id is None else 1,
                     now_s,
                     anchor_seq,
+                    expected_generation,
                     concept_id,
                     expected_run_id,
                 ),
@@ -4197,19 +5320,21 @@ class LiveChatStore:
         run_id: str | None,
         state: Literal["banked", "failed", "unavailable"],
         *,
+        expected_generation: int,
         recipe_json: str | None = None,
         error: str | None = None,
     ) -> bool:
-        """Land a recipe outcome — a compare-and-set on `(state = 'pending' AND run_id = run_id)`.
-        `banked` stores the validated body and stamps `banked_at` (only banked rows reach the
-        Recipe book); the round's `rev` moves so both screens and the card summary re-read."""
+        """Land a recipe outcome — a compare-and-set on `(generation = expected_generation AND
+        state = 'pending' AND run_id = run_id)`. `banked` stores the validated body and stamps
+        `banked_at` (only banked rows reach the Recipe book); the round's `rev` moves so both
+        screens and the card summary re-read."""
         with self._write_txn() as conn:
             now_s = time.time()
             cursor = conn.execute(
                 "UPDATE cookout_recipes SET state = ?, recipe_json = ?, error = ?, "
                 "banked_at = ?, updated_at = ? "
-                "WHERE anchor_message_seq = ? AND concept_id = ? AND state = 'pending' "
-                "AND run_id IS ?",
+                "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
+                "AND state = 'pending' AND run_id IS ?",
                 (
                     state,
                     recipe_json if state == "banked" else None,
@@ -4217,6 +5342,7 @@ class LiveChatStore:
                     now_s if state == "banked" else None,
                     now_s,
                     anchor_seq,
+                    expected_generation,
                     concept_id,
                     run_id,
                 ),
@@ -4227,69 +5353,298 @@ class LiveChatStore:
             return True
 
     def retry_cookout_recipe(
-        self, anchor_seq: int, concept_id: str, *, now: float | None = None
+        self,
+        anchor_seq: int,
+        concept_id: str,
+        *,
+        generation: int | None,
+        now: float | None = None,
     ) -> bool:
         """Try a recipe again (spec §3.5): valid for a `finished` round with `ready` concepts whose
-        recipe row is `failed` or `unavailable`. Back to `pending`, run/error/body cleared,
-        `banked_at` left NULL, a fresh 900 s window. `False` = not applicable."""
+        CURRENT-generation recipe row is `failed` or `unavailable`. Back to `pending`,
+        run/error/body cleared, `banked_at` left NULL, a fresh 900 s window. A mismatching
+        `generation`, or a swap that is `proposed` (the retry would hold the swap hostage with a
+        pending recipe), is `CookoutBadStateError`. `False` = not applicable."""
         with self._write_txn() as conn:
             now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
+            self._cx_guard_generation(round_, generation)
+            if round_.swap_state == "proposed":
+                raise CookoutBadStateError("finish or cancel the swap first")
             if round_.state != "finished" or round_.concepts != "ready":
                 return False
             cursor = conn.execute(
                 "UPDATE cookout_recipes SET state = 'pending', run_id = NULL, error = NULL, "
                 "recipe_json = NULL, banked_at = NULL, started_at = ?, tries = 1, "
                 "deadline_at = ?, updated_at = ? "
-                "WHERE anchor_message_seq = ? AND concept_id = ? "
+                "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
                 "AND state IN ('failed', 'unavailable')",
-                (now, now + RECIPE_DEADLINE_S, now, anchor_seq, concept_id),
+                (now, now + RECIPE_DEADLINE_S, now, anchor_seq, round_.generation, concept_id),
             )
             if cursor.rowcount != 1:
                 return False
             self._cx_update(conn, anchor_seq, now, {})
             return True
 
-    def cookout_recipe_state(self, anchor_seq: int, concept_id: str) -> str | None:
-        """A concept's recipe state, `None` when it was never requested."""
+    def cookout_recipe_state(
+        self, anchor_seq: int, concept_id: str, generation: int | None = None
+    ) -> str | None:
+        """A concept's recipe state in `generation` (default: the round's current one), `None`
+        when it was never requested."""
         with self._read_txn() as conn:
+            if generation is None:
+                round_row = conn.execute(
+                    "SELECT generation FROM cookout_rounds WHERE anchor_message_seq = ?",
+                    (anchor_seq,),
+                ).fetchone()
+                if round_row is None:
+                    return None
+                generation = int(round_row["generation"])
             row = conn.execute(
-                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? AND concept_id = ?",
-                (anchor_seq, concept_id),
+                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? "
+                "AND generation = ? AND concept_id = ?",
+                (anchor_seq, generation, concept_id),
             ).fetchone()
             return str(row["state"]) if row is not None else None
 
-    def cookout_pending_recipes(self) -> list[tuple[int, str, str | None]]:
-        """Startup/sweep recovery: every `pending` recipe as `(anchor seq, concept id, run id or
-        None)`."""
+    def cookout_pending_recipes(self) -> list[tuple[int, int, str, str | None]]:
+        """Startup/sweep recovery: every `pending` recipe as `(anchor seq, generation, concept id,
+        run id or None)`."""
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT anchor_message_seq, concept_id, run_id FROM cookout_recipes "
-                "WHERE state = 'pending' ORDER BY anchor_message_seq, concept_id"
+                "SELECT anchor_message_seq, generation, concept_id, run_id FROM cookout_recipes "
+                "WHERE state = 'pending' ORDER BY anchor_message_seq, generation, concept_id"
             ).fetchall()
-            return [(int(r["anchor_message_seq"]), str(r["concept_id"]), r["run_id"]) for r in rows]
-
-    def list_cookout_bank(
-        self,
-    ) -> list[tuple[CookoutRoundRow, CookoutRecipeRow, tuple[AttachmentRow, ...]]]:
-        """The Recipe book: every `banked` recipe, newest first (`banked_at DESC,
-        anchor_message_seq DESC, concept_id ASC`), with its round and the round's attachments."""
-        with self._read_txn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM cookout_recipes WHERE state = 'banked' "
-                "ORDER BY banked_at DESC, anchor_message_seq DESC, concept_id ASC"
-            ).fetchall()
-            seqs = sorted({int(r["anchor_message_seq"]) for r in rows})
-            rounds = {seq: self._cx_load(conn, seq) for seq in seqs}
-            attachments = _load_attachments_for(conn, seqs)
             return [
                 (
-                    rounds[int(r["anchor_message_seq"])],
-                    _row_to_cookout_recipe(r),
-                    tuple(attachments.get(int(r["anchor_message_seq"]), [])),
+                    int(r["anchor_message_seq"]),
+                    int(r["generation"]),
+                    str(r["concept_id"]),
+                    r["run_id"],
                 )
                 for r in rows
             ]
+
+    # -- Cookout: We cooked it! (T4) --------------------------------------------------------------
+
+    def _cx_banked_recipe(
+        self, conn: sqlite3.Connection, anchor_seq: int, generation: int, concept_id: str
+    ) -> CookoutRecipeRow:
+        """The banked `(anchor, generation, concept)` recipe of ANY generation — never "the current
+        one" (spec 09a §1.10): editing a banked generation-1 recipe after a swap is the point."""
+        row = conn.execute(
+            "SELECT * FROM cookout_recipes WHERE anchor_message_seq = ? AND generation = ? "
+            "AND concept_id = ? AND state = 'banked'",
+            (anchor_seq, generation, concept_id),
+        ).fetchone()
+        if row is None:
+            raise CookoutBadStateError("that recipe is not in the Recipe book")
+        return _row_to_cookout_recipe(row)
+
+    def mark_cookout_cooked(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        generation: int,
+        concept_id: str,
+        cooked: bool,
+        now: float | None = None,
+    ) -> Moved:
+        """ "We cooked it!": stamp a banked recipe cooked (idempotent), or unmark it — which also
+        clears both ratings and the photo link. Either player; any generation."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if slot_of(round_, key, email) is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            recipe = self._cx_banked_recipe(conn, anchor_seq, generation, concept_id)
+            if cooked:
+                if recipe.cooked_at is not None:
+                    return round_, False
+                conn.execute(
+                    "UPDATE cookout_recipes SET cooked_at = ?, cooked_by = ?, updated_at = ? "
+                    "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
+                    "AND state = 'banked'",
+                    (now_s, sender, now_s, anchor_seq, generation, concept_id),
+                )
+            else:
+                if recipe.cooked_at is None:
+                    return round_, False
+                conn.execute(
+                    "UPDATE cookout_recipes SET cooked_at = NULL, cooked_by = NULL, "
+                    "rating1 = NULL, rating2 = NULL, photo_message_seq = NULL, "
+                    "photo_attachment_id = NULL, updated_at = ? "
+                    "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
+                    "AND state = 'banked'",
+                    (now_s, anchor_seq, generation, concept_id),
+                )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def rate_cookout_recipe(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        generation: int,
+        concept_id: str,
+        rating: int | None,
+        now: float | None = None,
+    ) -> Moved:
+        """Set the CALLER's own slot rating (1-5, or `None` to clear) on a cooked banked recipe.
+        Ratings are visible to both players at once (a memory book, not a blind game)."""
+        if rating is not None and not (1 <= rating <= 5):
+            raise CookoutInvalidError("a rating is 1 to 5 hearts")
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            recipe = self._cx_banked_recipe(conn, anchor_seq, generation, concept_id)
+            if recipe.cooked_at is None:
+                raise CookoutBadStateError("mark the recipe cooked before rating it")
+            if (recipe.rating1 if slot == 1 else recipe.rating2) == rating:
+                return round_, False
+            column = "rating1" if slot == 1 else "rating2"
+            conn.execute(
+                f"UPDATE cookout_recipes SET {column} = ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND generation = ? AND concept_id = ? "
+                "AND state = 'banked'",
+                (rating, now_s, anchor_seq, generation, concept_id),
+            )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def link_cookout_photo(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        generation: int,
+        concept_id: str,
+        message_seq: int | None,
+        attachment_id: str | None,
+        now: float | None = None,
+    ) -> Moved:
+        """Link — or (both `None`) unlink — "our plate" on a cooked banked recipe. The request
+        names the EXACT `attachment_id` the chooser showed on `message_seq`; the server validates
+        that attachment (a ready photo on that message, which is in THIS round's mini chat and not
+        view-once) and stores exactly it — it never re-selects one (spec 09a §1.8). Anything stale
+        or invalid is `CookoutBadStateError`; exactly one `None` is `CookoutInvalidError`."""
+        if (message_seq is None) != (attachment_id is None):
+            raise CookoutInvalidError("name both the message and the photo, or neither")
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if slot_of(round_, key, email) is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            recipe = self._cx_banked_recipe(conn, anchor_seq, generation, concept_id)
+            if recipe.cooked_at is None:
+                raise CookoutBadStateError("mark the recipe cooked before adding a photo")
+            if message_seq is not None:
+                valid = conn.execute(
+                    "SELECT 1 FROM messages m JOIN wyr_chat c ON c.message_seq = m.seq "
+                    "JOIN attachments a ON a.message_seq = m.seq "
+                    "WHERE m.seq = ? AND c.anchor_seq = ? AND m.view_once_s IS NULL "
+                    "AND a.id = ? AND a.kind = 'photo' AND a.status = 'ready'",
+                    (message_seq, anchor_seq, attachment_id),
+                ).fetchone()
+                if valid is None:
+                    raise CookoutBadStateError("that photo changed - pick again")
+            if (
+                recipe.photo_message_seq == message_seq
+                and recipe.photo_attachment_id == attachment_id
+            ):
+                return round_, False
+            conn.execute(
+                "UPDATE cookout_recipes SET photo_message_seq = ?, photo_attachment_id = ?, "
+                "updated_at = ? WHERE anchor_message_seq = ? AND generation = ? "
+                "AND concept_id = ? AND state = 'banked'",
+                (message_seq, attachment_id, now_s, anchor_seq, generation, concept_id),
+            )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def cookout_round_photos(self, *, anchor_seq: int) -> list[tuple[MessageRow, AttachmentRow]]:
+        """The round's linkable mini-chat photos — ONE entry per non-view-once message that has at
+        least one ready photo, represented by its lowest-ordinal ready photo AT THE TIME OF THIS
+        READ (the client posts that exact `attachmentId` back), newest first, at most 50."""
+        with self._read_txn() as conn:
+            self._cx_load(conn, anchor_seq)
+            seqs = [
+                int(r["seq"])
+                for r in conn.execute(
+                    "SELECT m.seq FROM messages m JOIN wyr_chat c ON c.message_seq = m.seq "
+                    "WHERE c.anchor_seq = ? AND m.view_once_s IS NULL ORDER BY m.seq DESC",
+                    (anchor_seq,),
+                ).fetchall()
+            ]
+            attachments = _load_attachments_for(conn, seqs)
+            out: list[tuple[MessageRow, AttachmentRow]] = []
+            for seq in seqs:
+                ready = [a for a in attachments[seq] if a.kind == "photo" and a.status == "ready"]
+                if not ready:
+                    continue
+                out.append((_load_message(conn, seq), min(ready, key=lambda a: a.ordinal or 0)))
+                if len(out) >= MAX_ROUND_PHOTOS:
+                    break
+            return out
+
+    def list_cookout_bank(self) -> list[CookoutBankData]:
+        """The Recipe book: every `banked` recipe of every generation, newest first (`banked_at
+        DESC, anchor_message_seq DESC, generation DESC, concept_id ASC`), each with its round, the
+        round's turns and attachments, its archived dish set when it belongs to a superseded
+        generation, and its linked "our plate" photo."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM cookout_recipes WHERE state = 'banked' "
+                "ORDER BY banked_at DESC, anchor_message_seq DESC, generation DESC, "
+                "concept_id ASC"
+            ).fetchall()
+            seqs = sorted({int(r["anchor_message_seq"]) for r in rows})
+            rounds = {seq: self._cx_load(conn, seq) for seq in seqs}
+            turns = {seq: tuple(self._cx_turns(conn, seq)) for seq in seqs}
+            attachments = _load_attachments_for(conn, seqs)
+            photo_seqs = sorted(
+                {int(r["photo_message_seq"]) for r in rows if r["photo_message_seq"] is not None}
+            )
+            photos = _load_attachments_for(conn, photo_seqs)
+            archived = {
+                (int(g["anchor_message_seq"]), int(g["generation"])): _row_to_cookout_generation(g)
+                for g in conn.execute(
+                    "SELECT * FROM cookout_generations WHERE anchor_message_seq IN "
+                    f"({','.join('?' for _ in seqs)})",
+                    tuple(seqs),
+                ).fetchall()
+            }
+            out: list[CookoutBankData] = []
+            for r in rows:
+                seq = int(r["anchor_message_seq"])
+                recipe = _row_to_cookout_recipe(r)
+                out.append(
+                    CookoutBankData(
+                        round=rounds[seq],
+                        recipe=recipe,
+                        attachments=tuple(attachments.get(seq, [])),
+                        turns=turns[seq],
+                        generation_row=(
+                            None
+                            if recipe.generation == rounds[seq].generation
+                            else archived.get((seq, recipe.generation))
+                        ),
+                        photo_attachments=tuple(
+                            photos[recipe.photo_message_seq]
+                            if recipe.photo_message_seq is not None
+                            else []
+                        ),
+                    )
+                )
+            return out
 
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:
@@ -4331,6 +5686,8 @@ class LiveChatStore:
             attachment_ids = [str(row["id"]) for row in attachment_rows]
             self._queue_deleted_storage(conn, kind="attachment", ids=attachment_ids, now=now)
             self._queue_deleted_storage(conn, kind="upload", ids=attachment_ids, now=now)
+            if exists:
+                self._cx_unlink_message(conn, seq, now)
             conn.execute(
                 "DELETE FROM uploads WHERE id IN ("
                 "SELECT id FROM attachments WHERE message_seq = ?)",
@@ -4352,6 +5709,39 @@ class LiveChatStore:
             if mark_scrub_pending:
                 pending_token = self._upsert_pending_scrub(conn)
         return attachment_ids, pending_token
+
+    def _cx_unlink_message(self, conn: sqlite3.Connection, seq: int, now: float) -> None:
+        """Before a message goes (spec 09a §2.5): unlink it from every Cookout recipe that shows it
+        as "our plate" and from every encore that continues from it (as a source round), bumping
+        each touched round's `rev` with a `message_updated` so both screens drop it. The foreign
+        keys' `SET NULL` is the backstop for a delete issued by an older overlapping process."""
+        touched: set[int] = set()
+        for row in conn.execute(
+            "SELECT DISTINCT anchor_message_seq FROM cookout_recipes WHERE photo_message_seq = ?",
+            (seq,),
+        ).fetchall():
+            touched.add(int(row["anchor_message_seq"]))
+        conn.execute(
+            "UPDATE cookout_recipes SET photo_message_seq = NULL, photo_attachment_id = NULL "
+            "WHERE photo_message_seq = ?",
+            (seq,),
+        )
+        for row in conn.execute(
+            "SELECT anchor_message_seq FROM cookout_rounds WHERE encore_from_seq = ?", (seq,)
+        ).fetchall():
+            touched.add(int(row["anchor_message_seq"]))
+        conn.execute(
+            "UPDATE cookout_rounds SET encore_from_seq = NULL, encore_generation = NULL, "
+            "encore_concept_id = NULL, encore_kind = NULL WHERE encore_from_seq = ?",
+            (seq,),
+        )
+        for anchor in sorted(touched - {seq}):
+            conn.execute(
+                "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ?",
+                (now, anchor),
+            )
+            self._cx_event(conn, anchor, now)
 
     def wipe(self, *, now: float) -> tuple[list[str], list[str]]:
         attachment_ids, upload_ids, _, _ = self._wipe(now=now, mark_scrub_pending=False)
@@ -4405,6 +5795,7 @@ class LiveChatStore:
             # before its anchor message. The cascades already do this; explicit here so wipe's
             # intent is never left implicit.
             conn.execute("DELETE FROM cookout_recipes")
+            conn.execute("DELETE FROM cookout_generations")
             conn.execute("DELETE FROM cookout_turns")
             conn.execute("DELETE FROM cookout_rounds")
             # `adv_settings` (the shared include-advised preference) names no place and no person,
