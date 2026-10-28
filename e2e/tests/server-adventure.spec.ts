@@ -228,6 +228,26 @@ async function dragGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () =
   await page.mouse.up();
 }
 
+/**
+ * A drag that MUST turn into a spin: a real mouse flick's speed comes from the time between its last
+ * events, and on a busy machine one of those can arrive late and make it a weak swipe ("Flick it
+ * harder!"). A person would simply flick again, and so does this: up to four attempts, the finger-down
+ * hook only on the first.
+ */
+async function flickGlobe(page: Page, axis: "lng" | "lat", whileFingerDown?: () => Promise<void>): Promise<void> {
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    await dragGlobe(page, axis, attempt === 1 ? whileFingerDown : undefined);
+    const turned = Date.now() + 1500;
+    while (Date.now() < turned) {
+      const phase = await fact(page, "phase");
+      if (phase === "spin1" || phase === "spin2") return;
+      await page.waitForTimeout(60);
+    }
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100); // (a person's pause; and no accidental multi-tap)
+  }
+  throw new Error(`the ${axis} flick never turned into a spin`);
+}
+
 /** Remembers which item was lit the instant Stop is pressed (what you see is what you get). */
 async function armLitAtPress(page: Page): Promise<void> {
   await page.evaluate(() => {
@@ -279,7 +299,7 @@ async function playToChosen(
   if (options.shots === true) await shot(a, "01-idle");
 
   // Spin 1: Alice drags sideways. Bob sees her finger (a live swipe) and then the same spin.
-  await dragGlobe(a, "lng", async () => {
+  await flickGlobe(a, "lng", async () => {
     await eventually(pages, async () => (await fact(b, "remote")) === "1", "Bob sees Alice's finger");
     if (options.shots === true) await shot(b, "02-watcher-sees-trail");
   });
@@ -288,7 +308,7 @@ async function playToChosen(
 
   // Spin 2: up/down. The landing is stored once, so both screens show the same one.
   await eventually(pages, async () => (await a.locator('.wx-srv-adv-stage[data-interactive="spin"]').count()) > 0, "Alice may spin again");
-  await dragGlobe(a, "lat");
+  await flickGlobe(a, "lat");
   await waitFact(pages, "state", "country", 30_000);
   await waitFactSet(pages, "landing-unit");
   expect(await fact(b, "landing-unit")).toBe(await fact(a, "landing-unit"));
@@ -345,7 +365,34 @@ test.describe("Adventure Time", () => {
       await expect(links.nth(i)).toHaveAttribute("target", "_blank");
       expect(await links.nth(i).getAttribute("rel")).toContain("noopener");
     }
+
+    // The pack's pictures: the server finds and fetches them (the fixture's fake web) and the pane lays
+    // them out when they arrive. Every picture the pane loads is on THIS origin (the browser never contacts
+    // a third-party image host from a private chat), each carries its credit, and a tap opens the viewer.
+    const origin = new URL(a.url()).origin;
+    const requestedExternally: string[] = [];
+    a.on("request", (request) => {
+      const url = new URL(request.url());
+      if (url.protocol.startsWith("http") && url.origin !== origin) requestedExternally.push(request.url());
+    });
+    await eventually(pages, async () => (await a.locator(".wx-srv-adv-hero-slide img").count()) > 0, "the pack's photos arrive", 60_000);
+    await eventually(pages, async () => (await a.locator(".wx-srv-adv-pic-pending").count()) === 0, "no placeholders left", 30_000);
+    const sources = (await a.locator(".wx-srv-adv img").evaluateAll((els) => els.map((el) => (el as HTMLImageElement).src))).filter((src) => src !== ""); // (the viewer's image has no file until it opens)
+    expect(sources.length).toBeGreaterThan(0);
+    for (const src of sources) expect(new URL(src).origin, src).toBe(origin);
+    expect(await a.locator(".wx-srv-adv-hero-slide img").first().evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0)).toBe(true);
+    await expect(a.locator(".wx-srv-adv-hero-credit").first()).toContainText("Photo:");
     await shot(a, "05-pack");
+    await humanPause(a);
+    await a.locator(".wx-srv-adv-hero-pic").first().click();
+    await expect(a.locator(".wx-srv-adv-viewer")).toBeVisible();
+    await expect(a.locator(".wx-srv-adv-viewer-credit")).toContainText("Photo:");
+    await shot(a, "05b-photo-viewer");
+    await humanPause(a);
+    await a.locator(".wx-srv-adv-viewer-close").click();
+    await expect(a.locator(".wx-srv-adv-viewer")).toBeHidden();
+    expect(requestedExternally).toEqual([]);
+    await humanPause(a);
 
     // The destination has its own mini chat (the shared one): a message lands in the other mini chat,
     // the pop-up shows the history with the one composer, and the main chat tags it "Adventure".
