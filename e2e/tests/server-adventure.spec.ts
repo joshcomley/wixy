@@ -367,7 +367,7 @@ test.describe("Adventure Time", () => {
     const sources = (await a.locator(".wx-srv-adv img").evaluateAll((els) => els.map((el) => (el as HTMLImageElement).src))).filter((src) => src !== ""); // (the viewer's image has no file until it opens)
     expect(sources.length).toBeGreaterThan(0);
     for (const src of sources) expect(new URL(src).origin, src).toBe(origin);
-    expect(await a.locator(".wx-srv-adv-hero-slide img").first().evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0)).toBe(true);
+    await expect.poll(() => a.locator(".wx-srv-adv-hero-slide img").first().evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0), { message: "the hero photo has loaded" }).toBe(true);
     await expect(a.locator(".wx-srv-adv-hero-credit").first()).toContainText("Photo:");
     await shot(a, "05-pack");
     await humanPause(a);
@@ -436,7 +436,7 @@ test.describe("Adventure Time", () => {
     await expect(a.locator(".wx-srv-adv-viewer-credit-line")).toContainText("Photo:");
     await expect(a.locator(".wx-srv-adv-viewer-count")).toHaveText("2 / 5");
     expect(await a.locator(".wx-srv-adv-viewer-img").evaluate((el) => new URL((el as HTMLImageElement).src).origin)).toBe(origin);
-    expect(await a.locator(".wx-srv-adv-viewer-img").evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0)).toBe(true);
+    await expect.poll(() => a.locator(".wx-srv-adv-viewer-img").evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0), { message: "the viewer photo has loaded" }).toBe(true);
     await shot(a, "05d-dish-viewer");
     // The next dishes in the same viewer: Bacalhau (a photo), Ginjinha, then Bifana, which has none: a tile.
     for (const [name, hasPhoto] of [["Bacalhau com natas", true], ["Ginjinha", true], ["Bifana", false]] as const) {
@@ -481,7 +481,7 @@ test.describe("Adventure Time", () => {
     // The card shows the first dish photo now that the pack has one (same origin, loaded) above the little map.
     const dishPhoto = card.locator("img.wx-srv-adv-mcard-dish");
     await expect(dishPhoto).toBeVisible();
-    expect(await dishPhoto.evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0 && new URL((el as HTMLImageElement).src).origin === location.origin)).toBe(true);
+    await expect.poll(() => dishPhoto.evaluate((el) => (el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth > 0 && new URL((el as HTMLImageElement).src).origin === location.origin), { message: "the dish photo has loaded from this origin" }).toBe(true);
     await card.scrollIntoViewIfNeeded();
     await shot(a, "06-card-in-main-chat");
 
