@@ -119,3 +119,37 @@ test("in game mode the multi-tap lock (on a non-globe area) and Escape still loc
     await context.close();
   }
 });
+
+// The tab bar is DOCKED: edge to edge and flush with the bottom of the screen, in the Chat tab and a game
+// tab, on phones and desktop (the safe-area inset is padding INSIDE the bar, never a gap under it).
+for (const vp of [
+  { name: "360x740", viewport: { width: 360, height: 740 }, mobile: true },
+  { name: "390x844", viewport: { width: 390, height: 844 }, mobile: true },
+  { name: "1280x800", viewport: { width: 1280, height: 800 }, mobile: false },
+]) {
+  test(`the tab bar is docked to the screen edges (${vp.name})`, async ({ browser }) => {
+    const ctx = await browser.newContext({
+      viewport: vp.viewport,
+      hasTouch: vp.mobile,
+      isMobile: vp.mobile,
+      permissions: ["microphone"],
+    });
+    const page = await ctx.newPage();
+    try {
+      await unlock(page, "Docker");
+      await startWyr(page);
+      const shot = process.env["DOCK_SHOTS"];
+      for (const tab of [".wx-srv-tab-wyr", ".wx-srv-tab-chat"]) {
+        await page.locator(tab).click();
+        await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+        if (shot) await page.screenshot({ path: `${shot}/${vp.name}-${tab.slice(12)}.png` });
+        const bar = (await page.locator(".wx-srv-tabs").boundingBox())!;
+        expect(Math.abs(bar.x)).toBeLessThanOrEqual(1);
+        expect(Math.abs(bar.x + bar.width - vp.viewport.width)).toBeLessThanOrEqual(1);
+        expect(Math.abs(bar.y + bar.height - vp.viewport.height)).toBeLessThanOrEqual(1);
+      }
+    } finally {
+      await ctx.close();
+    }
+  });
+}
