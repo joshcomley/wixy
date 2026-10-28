@@ -1211,7 +1211,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // improvement to the per-item chat reaches every game (spec/server-chat/08-adventure-time.md §5.1).
   let savedThreadScrollTop = 0;
   let threadHiddenForGame = false;
+  /**
+   * The Adventure pane is in the chat only while its game is open (one game at a time, so at most one
+   * game pane besides Would you rather's): no idle canvas, WebGL layer or hidden controls sit in a chat
+   * that is not playing it. Called on every layout change, which every open, offer, close and reset makes.
+   */
+  function syncAdventurePane(): void {
+    const open = gameTabs.seqOf("adventure") !== null;
+    if (open && adventureGame.pane.parentElement === null) game.pane.after(adventureGame.pane);
+    else if (!open && adventureGame.pane.parentElement !== null) adventureGame.pane.remove();
+  }
   function applyGameLayout(): void {
+    if (gameMounted) syncAdventurePane();
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
@@ -1300,7 +1311,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
   gameMounted = true;
   threadWrap.after(game.pane);
-  game.pane.after(adventureGame.pane);
   element.appendChild(gameTabs.tabBar);
   element.appendChild(itemChat.popup);
 

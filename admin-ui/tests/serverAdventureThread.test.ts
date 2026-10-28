@@ -208,6 +208,22 @@ describe("adventure: starting a round", () => {
     thread.teardown();
   });
 
+  it("the pane is in the chat only while its game is open: no idle canvas or hidden controls otherwise", async () => {
+    createAdventure.mockResolvedValue({ ok: true, message: adventureMessage(9) });
+    getAdventure.mockResolvedValue(answer(view("spin_lng", { seq: 9 })));
+    const { thread } = await mount();
+    expect(thread.element.querySelector(".wx-srv-adv")).toBeNull();
+    expect(thread.element.querySelector("canvas")).toBeNull();
+    startAdventure(thread);
+    await flush();
+    expect(thread.element.querySelector(".wx-srv-adv")).not.toBeNull();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    expect(thread.element.querySelector(".wx-srv-adv")).not.toBeNull(); // open, just not showing
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-adv-close")!.click();
+    expect(thread.element.querySelector(".wx-srv-adv")).toBeNull();
+    thread.teardown();
+  });
+
   it("explains when the server cannot start one, and opens no tab", async () => {
     const { thread } = await mount();
     for (const [kind, text] of [["unavailable", "Couldn't start an adventure"], ["unsupported", "isn't available yet"], ["game_unavailable", "no places left"]] as const) {
