@@ -205,6 +205,20 @@ The pen's (livechat.md §19) is `admin-ui/tests/server/{drawings,drawingGeometry
 — `drawings.test.ts` is the TS half of the palette drift guard (it parses
 `wixy_server/livechat/drawings.py`), and `drawingLayer.test.ts` stubs every measured box
 because jsdom lays nothing out.
+Adventure Time's client (livechat.md §23.1) is covered by
+`admin-ui/tests/adventure/{api,model,live,scene,packView,card,bank,pane}.test.ts` (over `adventureFixtures.ts`: a three-country
+world and one view per state of the round; jsdom with the renderer stubbed — the pane tests drive it with real `PointerEvent`s
+carrying explicit timestamps and a manual clock, and read the `GlobeFrame`s it draws) and `admin-ui/tests/serverAdventureThread.test.ts`
+(the ⋯ menu, starting a round, the offer, the one-game replacement with Would you rather, the game chat's `wyrSeq` and tags, the Holiday
+bank with older history paged in, lock and wipe); `serverGameTabs.test.ts` pins the one-game-at-a-time rule. A mock that REJECTS (say a
+`serverFetch` that throws the lock error) must attach a `.catch(() => {})` to the promise it returns, or vitest reports the promise the
+mock keeps as an unhandled error. `e2e/tests/server-adventure.spec.ts` plays the whole game with two people and REAL mouse drags on the
+Classic map (a flat map keeps frames fast, so a flick's timing holds on a software-GL runner): a slow part a watcher sees as a live
+finger, then a quick flick; both Stops (what is lit when Stop is pressed is what both screens settle on), the fake cmd's canned pack, the
+destination's mini chat and pop-up, the bank and its screen, reject + "never again", Adventure and Would you rather replacing each
+other, the Options switch, and 360 px and desktop layouts. It reads the pane's `data-*` facts (a canvas has no DOM to assert on) and
+keeps both pages awake with a Shift key press (a mouse move would disturb a drag). Set `WIXY_E2E_SHOTS=<dir>` to run the main flow on
+the real Satellite map, flicking with timestamped in-page pointer events, and save 390 px screenshots.
 `serverThread.test.ts` holds the reaction rendering and the in-place-patch tests (a playing
 `<audio>` keeps its identity and `currentTime`; a stale response never overwrites a newer frame).
 jsdom's selector engine mishandles astral-plane emoji inside an attribute selector, so those tests

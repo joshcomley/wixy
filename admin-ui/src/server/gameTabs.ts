@@ -7,7 +7,10 @@
 //   [ the chat composer — the ordinary one, now sending into this game's item ]
 //   [ Chat | WYR | Adventure ]                      <- this bar
 //
-// With only the Chat tab left (no game open) the bar disappears. Two games can be open at once.
+// With only the Chat tab left (no game open) the bar disappears. ONE GAME AT A TIME (operator,
+// 2026-10-28: "it would replace the Would You Rather tab… there's only ever two tabs at the bottom"):
+// opening or offering a game while ANOTHER game is open closes that other game first, so the bar
+// only ever holds Chat plus one game tab.
 //
 // This module is the FRAME and knows nothing of any particular game: each game registers its own
 // pane, tab label and a few callbacks (`GameRegistration`), and the frame decides which pane
@@ -57,10 +60,11 @@ export interface GameTabs {
   readonly tabBar: HTMLElement;
   /** Adds a game. Its tab sits in the bar in registration order, appearing once it is opened. */
   register(game: GameRegistration): void;
-  /** Opens the game's tab for `seq` and shows it (clears the dismissal of that game). */
+  /** Opens the game's tab for `seq` and shows it (clears the dismissal of that game). Another game
+   * that is open is replaced (see `replaceOthers`). */
   open(key: GameKey, seq: number): void;
   /** An item started elsewhere: the tab appears (with a dot) without taking over the screen. A
-   * `seq` the person closed is not offered again. */
+   * `seq` the person closed is not offered again. Another game that is open is replaced. */
   offer(key: GameKey, seq: number): void;
   /** Closes the game: its tab goes (the dismissal is remembered), Chat shows if it was active,
    * and the pop-up chat closes if it belonged to it. */
@@ -197,6 +201,28 @@ export function createGameTabs(deps: GameTabsDeps): GameTabs {
     deps.onLayoutChange();
   }
 
+  /**
+   * One game at a time: before `key` takes the bar, every OTHER open game is retired — its pop-up
+   * closes, its pane hides, its `reset()` runs (so a spin animation, a live relay or an idle-lock
+   * suspension it holds stops) and its tab goes. Unlike `close`, no dismissal is recorded: the
+   * person did not turn that game away, a newer one simply took its place, and its own card in the
+   * chat still opens it again.
+   */
+  function replaceOthers(key: GameKey): void {
+    for (const other of entries.values()) {
+      if (other.game.key === key || other.seq === null) continue;
+      other.game.reset();
+      if (itemChat.isPopupOpen() && itemChat.popupSeq() === other.seq) itemChat.closePopup();
+      other.seq = null;
+      other.dot = false;
+      // Like `close`, `reset()` already stands for "the pane left the screen": no `onHide` on top.
+      if (active === other.game.key) {
+        active = "chat";
+        chatDot = false;
+      }
+    }
+  }
+
   /** Points a game at another item. The pop-up closes if it was about the old one. */
   function setSeq(entry: Entry, next: number): void {
     if (entry.seq === next) return;
@@ -210,6 +236,7 @@ export function createGameTabs(deps: GameTabsDeps): GameTabs {
     const entry = entries.get(key);
     if (entry === undefined) return;
     entry.dismissed = null;
+    replaceOthers(key);
     setSeq(entry, seq);
     showTab(key);
   }
@@ -218,6 +245,7 @@ export function createGameTabs(deps: GameTabsDeps): GameTabs {
     const entry = entries.get(key);
     if (entry === undefined) return;
     if (entry.dismissed === seq || entry.seq === seq) return;
+    replaceOthers(key);
     setSeq(entry, seq);
     if (active !== key) entry.dot = true;
     sync();

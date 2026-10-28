@@ -1115,11 +1115,14 @@ retains the audio and transcript (a rolling `dictation-audio/` buffer, the ASR s
 delete and wipe cannot reach them, so wixy uses it only through cmd's **private mode**: form fields
 `private=1` and `cleanup=0` (no LLM sees the text), multipart `audio`, and **no `session_id`, no
 `context`**. It first calls `GET /api/transcribe/capabilities` and needs a literal
-`{"private": true}` (cached 60 s both ways; the cache is dropped on a transport failure or any
-unexpected status — 404, 401, a 5xx other than `asr_warming` — but not on a timeout, a rejection or
-`warming`; the probe has a whole-call time limit). False, missing, malformed or unreachable ⇒
-unavailable. `available(fresh=True)` skips the cache: a job uses it immediately before any audio
-leaves. Response mapping: 200 with `text` (or `raw`) → ok (an empty
+`{"private": true}` (a definitive answer is cached 60 s; a NON-answer — timeout, transport error,
+5xx — is cached 5 s and the cheap questions keep answering yes for 10 min after cmd's last definitive
+yes; the cache is also dropped on a transport failure or unexpected status from the transcribe call;
+the probe has a whole-call time limit). A definitive false or missing/malformed answer ⇒ unavailable.
+`available(fresh=True)` skips the cache and memory: a job uses it immediately before any audio
+leaves, retries a non-answer 3 × (8 s timeout, 1 s apart) and sends nothing if cmd still cannot
+answer (decisions/00190). The client never hides Transcribe/Retry/Re-transcribe on the availability
+flag: a tap answered "unavailable" shows the red line AND a fresh pop-up each time. Response mapping: 200 with `text` (or `raw`) → ok (an empty
 string is a valid "nothing said"; more than 200,000 characters is refused as invalid); 503
 `asr_warming` → `warming`; other 503/5xx/transport → `unavailable`; 400/413/415/422 → `rejected`;
 budget exceeded → `timeout`. No retries. `create_app(..., transcriber=)` is the injection seam
@@ -1967,7 +1970,15 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
     `chatTarget()` (the active game's item while a game tab shows, else the pop-up's item while the pop-up is open, else
     `null` = the main chat), `noteChatActivity()` (dots Chat while a game tab shows), `refresh()` (closes any game whose item
     vanished, refreshes the active pane, then the item chat), `reset()` (lock/wipe: forgets everything AND runs
-    `onLayoutChange` so a hidden thread comes back). Two games can be open at once (both tabs present).
+    `onLayoutChange` so a hidden thread comes back). **One game at a time** (operator, 2026-10-28: "there's only ever two tabs at
+    the bottom"): `open(key, seq)` and `offer(key, seq)` first RETIRE every other open game (`replaceOthers`): its pop-up chat
+    closes, its pane hides, its `reset()` runs (so a spin animation, a live relay or an idle-lock suspension it holds stops), its
+    tab goes and the screen falls back to Chat if it was showing — and, unlike `close`, **no dismissal is recorded** (the person
+    did not turn it away; a newer game took its place, and its card in the chat still opens it again). `onHide` is not called on
+    a retired game (`reset` stands for it). The bar therefore only ever holds Chat plus one game tab. `thread.ts`'s `syncGames`
+    offers a game tab once per NEW anchor (`seenAnchor`, reset by a lock/wipe), choosing the newer anchor when a first load has an
+    unfinished round of both games, so an older unfinished round of one game never keeps pushing the other game's tab out on every
+    redraw.
   - `itemChat.ts` (`createItemChat`) is the **per-item chat**: `createStrip()` returns a `MiniStrip {element, draw(seq|null)}`
     (the fixed 60 px mini chat strip — each game embeds its own in its own pane) and `openPopup(seq, title)` /
     `closePopup()` / `isPopupOpen()` / `popupSeq()` drive the ONE pop-up (`.wx-srv-gamepop`) all games share; `refresh()`
@@ -2124,7 +2135,7 @@ screen as she sends it and on the other person's as it arrives. Nothing is sent 
   swallow it, so the lock still happens. `prefers-reduced-motion: reduce` skips the scene for a static starfield.
 - **Tests.** `admin-ui/tests/server/goodnight{Match,Dither,Timeline,Scene}.test.ts`, `threadGoodnight.test.ts`.
 
-## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00190, Inv 56)
+## 23. Adventure Time: the globe holiday game, server half (workspace 00056; spec `spec/server-chat/08-adventure-time.md`, decisions/00192, Inv 56)
 
 The header's ... menu has **Adventure Time**: one person spins a globe sideways, the other sees the finger as a
 fading trail, the globe lands (the second spin is up/down), the camera zooms 30 % inland and countries light up at
@@ -2257,6 +2268,91 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   answer) in its hidden ledger and transcript, which delete/wipe cannot reach (Inv 56, operator decision #2113). Live
   frames reach only streams on the same blue/green process (like live drawing). A pack still researching when its
   message is deleted costs the research it already spent (the job notices and cancels the run on its next poll).
+### 23.1 The client half (`admin-ui/src/server/adventure/`; spec §3, §4.4, §5)
+
+The pane, the card and the Holiday bank sit on the globe ENGINE (`world/land/physics/roulette/trail/camera/fastmap/imagery/
+basemap/globe.ts`, spec §3) and the shared game frame (§20).
+
+- **Modules.** `api.ts` (every call and every parser: nothing in the game trusts a shape; a pack link is kept only when it is
+  http(s), a PICTURE only when its URL is on THIS origin), `model.ts` (the per-round view cache and the server clock), `live.ts`
+  (the finger-trail sender and receiver), `scene.ts` (the picture and the words, derived from the view and the clock),
+  `packView.ts` (the holiday-pack panel and the photo viewer), `adventureGame.ts` (the pane: DOM, frame loop, pointer input,
+  calls), `adventureCard.ts` (the main-chat card), `holidayBank.ts` (the Holiday bank screen). `stream.ts` maps the
+  `adventure_live` SSE event; `types.ts` gained the idle-lock reason `"adventureAnimating"`.
+- **The model** (`createAdventureModel`). A message's `adventure` summary (`{state, pack, rev}`) only TRIGGERS a read of
+  `GET /adventure/{seq}`; a mutation answers with the fresh view (`model.run` times it and applies it). A view is never replaced
+  by an older one. A server that answers with something OLDER than its own summary is asked again on the retry ladder (2, 5, 15,
+  30 s), never in a tight loop (a regression test pins it). A renewed unlock token re-reads every held view (the pack's picture
+  URLs are signed). **The clock** (spec §4.4): every view carries `serverNow`; the model keeps `offset = serverNow − localNow`
+  from the response with the SMALLEST round trip (a round trip over 5 s says nothing; an old best sample is let go after 10
+  minutes so drift is followed) and `serverNowS()` is local time plus that offset.
+- **The scene** (`AdventureScene`: no DOM, no timers; `update(nowMs)` returns the `GlobeFrame` and the `Hud`). Everything timed
+  comes from stored SERVER timestamps, so two screens agree and a screen that opens the tab late jumps to the right point: a spin
+  is `from + delta · easeOutCubic((now − at) / duration)`; the ripple, the dotted glide ("Nearest land: X") and the zoom to the
+  candidate countries run from the end of the second spin; the country roulette from `country.rouletteAt`; the Stop that picked
+  the country happened at `destination.rouletteAt − 3.5 s`, so the settle pulse and the flight to the places are timed from there.
+  The one thing the server never stores is when the LAST Stop happened: the zoom to the place starts when this screen sees
+  `chosen` (or when the person pressed Stop); a screen that opens later shows the place at once. Local state: the finger (the
+  globe follows it, axis-locked), the spin THIS screen just made (it animates from the release, before the server answers; the
+  lat spin's POST carries the landing `computeLanding` made at release), the Stop just pressed (the settle shows at once and the
+  roulette freezes on the choice until the server answers), and the explorable map (drag, pinch/wheel, "Back to the place"; zoom-in
+  floor `MIN_VIEW_RADIUS_DEG`, or `MIN_VIEW_RADIUS_TEXTURED_DEG` while imagery shows). Where a local timeline hands over to the
+  server's (a watcher's live drag becoming the committed spin; a spin that lost a race) the displayed angle is BLENDED over
+  `CATCHUP_MS` (400 ms), never jumped; the first sight of a round is not blended. Reduced motion: a spin shows at its end at once,
+  camera moves cut, no ripple/glide, no trail. Whose turn: the starter spins sideways, then the other person than whoever moved
+  last ("Your turn" / "<Name>'s turn"); nothing is ever refused for being the "wrong" person.
+- **The pane** (`createAdventureGame`; tab "Adventure", `data-game="adventure"`, registered as `"adventure"`). Header 🌍 Adventure
+  Time · Options · Bank · New · ✕; the stage (canvas, hint pill, toast, "Nearest land", the big lit name, "Back to the place"); the
+  pack area (the stage shrinks to 38 % when the pack is ready or has failed; "Preparing holiday pack…" with an elapsed timer and the
+  stage at full size while it is pending; the Explore map toggle); the action dock (the big coral **Stop**, **Bank this ✓** /
+  **No thanks ✕** — the reject asks once, "Never show <name> again?" with *Never show again* / *Keep it* —, Play again); the shared
+  mini chat strip. **Stop fires on the press** (what you saw lit is what you get; a click that follows a press within 700 ms is
+  ignored). A spin POST is retried up to 3 times on a network failure (the same move is idempotent on the server), then taken back
+  with a message and a re-read; a 409 says "Somebody else got there first." and re-reads; `exhausted` names the country; a 401 locks
+  the chat. The Options sheet holds the shared "Include places the UK says not to travel to" switch (`GET/PUT /adventure/settings`,
+  off by default, lists the units it governs) and the per-DEVICE **Map style** (Satellite / Atlas / Classic, `imagery.ts`, default
+  Satellite; disabled with a plain note where there is no WebGL 2) with the imagery credit line. The sheet closes by Done or its
+  backdrop, NEVER by Escape (the panic key; nothing in the game listens for it).
+- **Where the pane lives.** `thread.ts` inserts the pane into the chat only while the game is open and removes it when it closes
+  (`syncAdventurePane`, called from `applyGameLayout`): a chat that is not playing carries no canvas, WebGL layer or hidden
+  controls (and `.wx-srv-game` stays one element, which the would-you-rather specs rely on). The canvas joins the stage when the
+  pane is first shown; `reset()` (the game closing, a lock, a wipe) DESTROYS the renderer (its WebGL context and imagery texture)
+  and the next opening builds a new one over the cached world.
+- **The idle lock** (R7). `hooks.suspend("adventureAnimating")` is held ONLY while something moves on screen (a finger on the
+  globe, a spin, the landing, a roulette, a settle, the arrival zoom) — never during the pack wait, which is minutes long — and a
+  roulette left flickering holds it for at most `ROULETTE_SUSPEND_CAP_MS` (90 s): the lock is a privacy feature, a phone put down
+  mid-roulette must still lock. It is released on another tab, on close, and on every lock/wipe. Every control and the stage carry
+  `data-srv-gesture-boundary`.
+- **The live trail** (`live.ts`, spec §3.5). The sender is `drawingLive.ts`'s pacing: one request in flight, at most one frame
+  every 50 ms (20/s), at most 32 points a frame (each point travels with the rotation it was made at), a 429's Retry-After is
+  waited out, a still finger re-sends every 2 s, every drag has its OWN id (`clientId`) and frame counter, and a drag ends with an
+  `end` frame (a cancel sends one only if something already went out; a lock posts the owed `end` before the session goes). The
+  receiver ignores its own ids, frames for another round or axis, frames for a spin the round no longer waits for
+  (`waitingForSpin`), and stale frames; it keeps a 160 ms JITTER BUFFER (it shows the dragger's state as it was 160 ms ago,
+  interpolating the rotation between frames and moving each finger point onto the fading stroke when the buffer reaches it,
+  back-dated), so ~20 Hz unevenly arriving frames drive a smooth globe and a stroke that keeps the finger's own pace. A finished
+  drag's last rotation is held (8 s) for the committed spin to take over; a silent finger is dropped after 5 s.
+- **The card** (`adventureCard.ts`): a 96×72 map of the country (d3 orthographic over the unit's `detail` shape, widened to hold a
+  far destination) with the destination dot once known, one line of status per state (text first; the map appears when the world has
+  loaded), and Play / Open. **The Holiday bank** (`holidayBank.ts`, `GET /adventure/bank`): a full-height screen like Links/Gallery
+  (under the header, closed by every lock and wipe), newest first; a tap closes it and opens that trip — `thread.ts`
+  `openAdventureTrip` first pages older history in until the trip's message is loaded (a trip may be months back), so its card and
+  its whole chat are there.
+- **Wiring** (`thread.ts`): the ⋯ menu's *Adventure Time — Spin the globe, find your next holiday* (after Would you rather?) and
+  *Holiday bank — Places you've saved*; `addAdventure` (the starter lands in the tab; `syncGames` OFFERS the other person a dot);
+  `message_updated` with `adventure` patches the card in place and re-reads the view; `adventure_live` frames go to the pane;
+  `gameLabelFor(anchorSeq, wyrRefKind)` tags a game-chat message "Adventure" or "WYR" in the main chat (`.wx-srv-bubble-gametag`,
+  `data-game`; the server's `wyrRefKind` wins, the loaded anchor is the fallback, "WYR" the last resort); every send path still
+  spreads `gameTabs.chatTarget()` as `wyrSeq`. Facts the pane keeps in step with what it draws (a canvas has no DOM to assert on, so
+  e2e reads them): `data-state`, `data-phase`, `data-lit`, `data-landing-unit`, `data-country`, `data-place`, `data-pack-state`,
+  `data-remote`, `data-map`.
+- **Files.** `admin-ui/src/server/adventure/{api,model,live,scene,packView,adventureGame,adventureCard,holidayBank}.ts`; tests
+  `admin-ui/tests/adventure/{api,model,live,scene,packView,card,bank,pane}.test.ts` (+ `adventureFixtures.ts`),
+  `admin-ui/tests/serverAdventureThread.test.ts`, `serverGameTabs.test.ts` (the one-game rule) and
+  `e2e/tests/server-adventure.spec.ts`.
+
+### 23.2 The server half's tests
+
 - **Tests.** `test_livechat_adventure.py`, `test_routes_livechat_adventure.py`, `test_livechat_adventure_live.py`,
   `test_livechat_adventure_pack.py`, `test_adventure_bank_loader.py` + `test_adventure_bank.py` (+ the shared helpers in `adventure_testkit.py` and the
   chat-spawn endpoints in `fake_cmd.py`), and for the pictures `test_livechat_safe_fetch.py`,

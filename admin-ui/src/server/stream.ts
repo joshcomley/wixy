@@ -4,6 +4,7 @@
 // module hand-parses `text/event-stream` frames off a plain `fetch()` body
 // reader instead.
 
+import { parseAdventureLiveFrame, type AdventureLiveFrame } from "./adventure/api";
 import { parseLiveFrame, type LiveFrame } from "./api/drawings";
 import { SERVER_API_BASE } from "./api/http";
 import type { Message } from "./api/messages";
@@ -16,6 +17,9 @@ export type ServerStreamEvent =
    * Sent with NO `id:` line, so it never moves the replay cursor (see `connect` below), and
    * validated here before anything can render it (a malformed frame is simply skipped). */
   | { readonly type: "drawing_live"; readonly frame: LiveFrame }
+  /** spec/server-chat/08-adventure-time.md §3.5: the Adventure Time swipe trail of the person who is
+   * spinning the globe. Id-less like `drawing_live` (never moves the cursor), lossy, never stored. */
+  | { readonly type: "adventure_live"; readonly frame: AdventureLiveFrame }
   /** §17.2's A1 amendment — P1 already emits the schema/stream headroom for
    * this; nothing produces it for real until P8. Handled here defensively so
    * this parser never chokes on it once P8 lands. */
@@ -100,6 +104,10 @@ export function mapSseEvent(frame: SseFrame): ServerStreamEvent | null {
       case "drawing_live": {
         const parsed = parseLiveFrame(JSON.parse(frame.data));
         return parsed === null ? null : { type: "drawing_live", frame: parsed };
+      }
+      case "adventure_live": {
+        const parsed = parseAdventureLiveFrame(JSON.parse(frame.data));
+        return parsed === null ? null : { type: "adventure_live", frame: parsed };
       }
       case "locked":
         return { type: "locked" };

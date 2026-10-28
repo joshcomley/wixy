@@ -1,7 +1,7 @@
 # Server chat — Adventure Time (the globe holiday game)
 
 Workspace 00056. Decided brief: implement faithfully. Where reality contradicts a cited fact, prefer
-reality and record it in the decision entry (`decisions/00190-server-chat-adventure-time/`).
+reality and record it in the decision entry (`decisions/00192-server-chat-adventure-time/`).
 
 ## 0. The ask (operator, verbatim summary)
 
@@ -337,6 +337,36 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   string; keep only `http(s)` URLs with a host (≤ 500 chars); drop unknown keys; a pack with no
   sections is a failure. Stored as canonical JSON in `pack_json`.
 
+### 4.3b Local food to try, with pictures (operator request 2026-10-28: "please add cuisine pictures, local cuisine examples… food is essential… I'm looking forward to the food")
+
+- **A dedicated `dishes` section, FIRST in the pack** (section key `dishes`, title "Local food to try"):
+  4–6 signature local dishes and drinks (the dish itself — not a restaurant), each item
+  `{name, detail ≤400 (what it is, how it tastes, where/when to try it), wikipedia: "<the English
+  Wikipedia article title OF THE DISH, exactly, when one exists>"}`. The existing `food` section
+  stays, retitled "Where to eat" (specific places). Section key enum becomes
+  `dishes|food|stay|culture|sights|do|practical`; a pack with no `dishes` section is still valid.
+- **Pictures for dishes** (same server-side pipeline, §4.3a safety rules unchanged): (1) the
+  Wikipedia REST summary lead image — accepted ONLY when the summary's `description` or the first
+  sentence of `extract` reads as food/drink (a food-term check: dish, food, cuisine, bread, pastry,
+  cake, dessert, cheese, ham, sausage, meat, fish, seafood, soup, stew, rice, pasta, sauce, wine,
+  beer, drink, beverage, liqueur, spirit, coffee, tea, snack, …); (2) else a Commons file search
+  for `"<dish>"` then `"<dish> <unit name>"`, accepting a file ONLY when its title contains a
+  significant token of the dish name (accent-folded, ≥ 4 letters) AND its Commons `Categories` or
+  `ImageDescription` (extmetadata) contain a food term; JPEG, short side ≥ 480. NO
+  "other images of the article" fallback. A dish with no qualifying photo stays text-only — a
+  wrong photo is worse than none. **Measured 2026-10-28 (Kotor dishes):** the lead-image path
+  found 5 of 8; "Buzara" on English Wikipedia is a genus of MOTHS and both the
+  article-images fallback and a title-only Commons match returned moth photos — the food-term
+  checks reject them (Buzara stays text-only); title + category checks found correct photos for
+  black risotto ("Black Risotto.jpg") and priganice ("Crnogorske priganice 1.jpg", category
+  "Doughnuts of Montenegro").
+- **Budget**: hero ≤ 6, dishes ≤ 6, all other items ≤ 10 — at most 22 pictures per pack.
+- **Client**: the pack panel shows "Local food to try" straight after the hero carousel and summary,
+  as a photo-forward grid (two columns on a phone: square photo, dish name, one-line detail; tap →
+  the dish's full detail and the full-screen photo viewer with credit); dishes without a photo get
+  a tasteful text card in the same grid. The main-chat card shows the first dish photo when the
+  pack is ready.
+
 ### 4.3a Pictures in the pack (operator request 2026-10-28: "make the holiday pack … include pictures")
 
 - (Superseded by the measured design below: the AI names things, the server finds the pictures.) The first draft had the JSON gain `hero: [{url, caption ≤120, credit ≤120, page}] ≤ 6` (photos of the place) and,
@@ -528,6 +558,6 @@ the panic key.
 `docs/ai/livechat.md` (new §23 + the generalised game frame), `contracts.md` (routes, SSE event,
 `Message.adventure`, `wyrSeq`/`wyrRef` meaning), `invariants.md` (**Inv 56** — an adventure round is
 chat content; the never-again list; cmd's retained research copy; live frames never stored),
-`glossary.md` (states), `testing.md`, `CLAUDE.md` store table, `decisions/00190-…`.
+`glossary.md` (states), `testing.md`, `CLAUDE.md` store table, `decisions/00192-…`.
 Commits carry `Release-note: General bug fixes and improvements.` (R14a: Server chat stays
 discreet).

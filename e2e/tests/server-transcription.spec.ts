@@ -120,10 +120,15 @@ test("recovers a temporarily unavailable Transcribe button without automatically
   try {
     available = false;
     await control.click();
-    await expect(control).toBeHidden();
+    await expect(note(page, seq)).toContainText("Transcription isn't available right now");
+    await expect(control).toBeVisible(); // the button never goes away
     available = true;
-    await expect(control).toBeVisible({ timeout: 20_000 });
-    await expect(note(page, seq)).not.toContainText("Transcription isn't available right now");
+    // The button is permanent now (workspace 00057), so recovery is the NOTICE clearing, not the
+    // button coming back. The probe markUnavailable() starts may read `available` before the line
+    // above flips it (the route reads it after route.fetch()); then the client's next probe is its
+    // 15 s retry (thread.ts retryTranscriptionProbe). Wait past that, not the 5 s default.
+    await expect(note(page, seq)).not.toContainText("Transcription isn't available right now", { timeout: 20_000 });
+    await expect(control).toBeVisible();
     expect(posts).toBe(1);
     expect(await stats(page)).toMatchObject({ requests: 0, retained: 0 });
   } finally { clearInterval(activity); }
@@ -136,12 +141,16 @@ for (const [label, viewport] of [
   test.describe(`server-transcription.spec.ts (${label} ${viewport.width}x${viewport.height})`, () => {
     test.use({ viewport });
 
-    test("offers no control, and sends nothing, while cmd cannot promise private mode", async ({ page }) => {
+    test("keeps the control, but sends nothing, while cmd cannot promise private mode", async ({ page }) => {
       const seq = await seedVoice(page, `Nopriv ${label}`);
       await unlock(page, "Watcher");
 
       await expect(note(page, seq).locator(".wx-srv-voice")).toBeVisible();
-      await expect(note(page, seq).getByRole("button", { name: "Transcribe this voice note" })).toHaveCount(0);
+      const control = note(page, seq).getByRole("button", { name: "Transcribe this voice note" });
+      await expect(control).toBeVisible();
+      await control.click();
+      await expect(note(page, seq)).toContainText("Transcription isn't available right now");
+      await expect(control).toBeVisible();
       expect(await stats(page)).toMatchObject({ requests: 0, retained: 0 });
     });
 

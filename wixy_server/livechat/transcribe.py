@@ -37,6 +37,11 @@ logger = logging.getLogger(__name__)
 DEFAULT_TRANSCRIBE_BASE_URL: Final = "http://127.0.0.1:9320"
 PROBE_TTL_S: Final = 60.0
 PROBE_TIMEOUT_S: Final = 2.0
+FRESH_PROBE_TIMEOUT_S: Final = 8.0
+FRESH_PROBE_ATTEMPTS: Final = 3
+FRESH_PROBE_RETRY_DELAY_S: Final = 1.0
+TRANSIENT_RETRY_S: Final = 5.0
+LAST_GOOD_GRACE_S: Final = 600.0
 _CONNECT_TIMEOUT_S: Final = 5.0
 MAX_TRANSCRIPT_CHARS: Final = 200_000
 """A 15-minute note is a few thousand words; anything past this is a runaway ASR loop or a
@@ -77,6 +82,15 @@ class CmdTranscriber:
     immediately before it sends any audio, so a cmd that has just stopped promising private mode
     receives nothing even inside the 60 s window.
 
+    A probe that could not get an ANSWER (a timeout, a refused connection, a 5xx — cmd is busy,
+    restarting or briefly stalled) is not the same as cmd answering "no": only a definitive
+    answer is cached for 60 s. A non-answer is cached for `TRANSIENT_RETRY_S`, and while cmd's
+    last definitive answer was yes less than `LAST_GOOD_GRACE_S` ago the cheap questions keep
+    answering yes through it (the button stays; the job decides). The job's `fresh=True` ask is
+    the authority and is never answered from memory: it retries a non-answer a few times with a
+    longer timeout, and if cmd still cannot be reached NO audio is sent. A definitive "no" is
+    never retried and never softened.
+
     No retries: a transcription is GPU/CPU work on a shared box, and repeating one whose
     response was merely lost would just do it twice; the user's Retry button is the retry.
     """
@@ -95,6 +109,7 @@ class CmdTranscriber:
         self._client = httpx.AsyncClient(transport=transport)
         self._probe_result: bool | None = None
         self._probe_expires_at = 0.0
+        self._last_good_at: float | None = None
 
     async def aclose(self) -> None:
         await self._client.aclose()
@@ -105,23 +120,52 @@ class CmdTranscriber:
     async def available(self, *, fresh: bool = False) -> bool:
         if not fresh and self._probe_result is not None and self._clock() < self._probe_expires_at:
             return self._probe_result
-        result = await self._probe()
-        self._probe_result = result
-        self._probe_expires_at = self._clock() + self._probe_ttl_s
-        return result
+        answer = await (self._probe_fresh() if fresh else self._probe(PROBE_TIMEOUT_S))
+        now = self._clock()
+        if answer is None:
+            # No answer is not a "no": keep the last definitive yes for a while (cheap questions
+            # only — a job's fresh ask already retried and is not served from memory).
+            result = (
+                not fresh
+                and self._last_good_at is not None
+                and now - self._last_good_at < LAST_GOOD_GRACE_S
+            )
+            self._probe_result = result
+            self._probe_expires_at = now + TRANSIENT_RETRY_S
+            return result
+        if answer:
+            self._last_good_at = now
+        self._probe_result = answer
+        self._probe_expires_at = now + self._probe_ttl_s
+        return answer
 
-    async def _probe(self) -> bool:
+    async def _probe_fresh(self) -> bool | None:
+        answer: bool | None = None
+        for attempt in range(FRESH_PROBE_ATTEMPTS):
+            answer = await self._probe(FRESH_PROBE_TIMEOUT_S)
+            if answer is not None:
+                return answer
+            if attempt + 1 < FRESH_PROBE_ATTEMPTS:
+                await anyio.sleep(FRESH_PROBE_RETRY_DELAY_S)
+        logger.warning("livechat: cmd gave no answer to the capability probe")
+        return None
+
+    async def _probe(self, timeout_s: float) -> bool | None:
+        """`True`/`False` is cmd's definitive answer; `None` means it gave none (busy, restarting,
+        unreachable, 5xx)."""
         try:
             # `httpx` timeouts are per phase; `fail_after` bounds the whole probe, so a cmd that
             # trickles bytes cannot stall `GET /usage` or a job waiting for its turn.
-            with anyio.fail_after(PROBE_TIMEOUT_S):
+            with anyio.fail_after(timeout_s):
                 response = await self._client.get(
-                    f"{self._base_url}/api/transcribe/capabilities", timeout=PROBE_TIMEOUT_S
+                    f"{self._base_url}/api/transcribe/capabilities", timeout=timeout_s
                 )
         except TimeoutError:
-            return False
+            return None
         except httpx.HTTPError:
-            return False
+            return None
+        if response.status_code >= 500:
+            return None
         if response.status_code != 200:
             return False
         data = _json_object(response)

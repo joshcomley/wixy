@@ -1,9 +1,9 @@
 // The opt-in voice-note transcript control (spec/server-chat/05-voice-transcription.md).
 //
 // A ready voice note gets one `.wx-srv-transcript` block beneath it. It is never automatic and
-// never on upload: the block starts as a "Transcribe" button (offered only while the server says
-// cmd's private mode is live), becomes a spinner while the job runs, then the text with a
-// per-device Hide/Show — or a plain error with Retry.
+// never on upload: the block starts as a "Transcribe" button (always offered — if the speech
+// service is down when it is tapped the block says so and keeps the button), becomes a spinner
+// while the job runs, then the text with a per-device Hide/Show — or a plain error with Retry.
 //
 // Both devices render the SAME server state from the stream. When a `message_updated` event
 // changes only a transcript, `thread.ts` does NOT rebuild the bubble (that would dispose a note
@@ -45,6 +45,32 @@ const MESSAGES = {
 function rateLimitedMessage(retryAfterS: number): string {
   const seconds = Math.max(1, Math.ceil(retryAfterS));
   return `That's a lot of transcripts — try again in ${seconds} second${seconds === 1 ? "" : "s"}.`;
+}
+
+const POPUP_MS = 4000;
+const popups = new WeakMap<Document, { el: HTMLElement; timer: number }>();
+
+/** A short pop-up, so every tap on a control that cannot work right now is visibly answered
+ * (the red line in the block looks identical on the second tap). Each call replaces the previous
+ * pop-up and restarts its timer, so the user always sees a fresh one. */
+function showPopup(documentRef: Document, text: string): void {
+  const win = documentRef.defaultView;
+  if (win === null || documentRef.body === null) return;
+  const previous = popups.get(documentRef);
+  if (previous !== undefined) {
+    win.clearTimeout(previous.timer);
+    previous.el.remove();
+  }
+  const el = documentRef.createElement("div");
+  el.className = "wx-srv-transcript-popup";
+  el.setAttribute("role", "alert");
+  el.textContent = text;
+  documentRef.body.appendChild(el);
+  const timer = win.setTimeout(() => {
+    el.remove();
+    popups.delete(documentRef);
+  }, POPUP_MS);
+  popups.set(documentRef, { el, timer });
 }
 
 function action(documentRef: Document, className: string, label: string, ariaLabel: string): HTMLButtonElement {
@@ -94,6 +120,7 @@ export function renderTranscriptBlock(
           break;
         case "unavailable":
           notice = MESSAGES.unavailable;
+          showPopup(documentRef, MESSAGES.unavailable);
           context.markUnavailable();
           break;
         case "rate_limited":
@@ -164,7 +191,7 @@ export function renderTranscriptBlock(
         message.textContent = notice;
         children.push(message);
       }
-      if (context.available() && !hidden && text !== "") {
+      if (!hidden && text !== "") {
         const retranscribe = action(
           documentRef,
           "wx-srv-transcript-retranscribe",
@@ -203,17 +230,16 @@ export function renderTranscriptBlock(
       message.setAttribute("role", "status");
       message.textContent = notice ?? (hasPriorText ? "Couldn't update transcript." : MESSAGES.failed);
       children.push(message);
-      if (context.available()) {
-        const retry = action(
-          documentRef,
-          "wx-srv-transcript-retry",
-          "Retry",
-          hasPriorText ? "Retry updating this transcript" : "Retry transcribing this voice note",
-        );
-        retry.addEventListener("click", () => start(hasPriorText ? { retranscribe: true } : undefined));
-        children.push(retry);
-      }
-    } else if (context.available()) {
+      // Never gated on availability: a blip in the speech service must not take Retry away.
+      const retry = action(
+        documentRef,
+        "wx-srv-transcript-retry",
+        "Retry",
+        hasPriorText ? "Retry updating this transcript" : "Retry transcribing this voice note",
+      );
+      retry.addEventListener("click", () => start(hasPriorText ? { retranscribe: true } : undefined));
+      children.push(retry);
+    } else {
       state = notice === null ? "idle" : "error";
       if (notice !== null) {
         const message = documentRef.createElement("p");
@@ -225,15 +251,6 @@ export function renderTranscriptBlock(
       const button = action(documentRef, "wx-srv-transcript-start", "Transcribe", "Transcribe this voice note");
       button.addEventListener("click", () => start());
       children.push(button);
-    } else {
-      state = notice === null ? "none" : "error";
-      if (notice !== null) {
-        const message = documentRef.createElement("p");
-        message.className = "wx-srv-transcript-error";
-        message.setAttribute("role", "status");
-        message.textContent = notice;
-        children.push(message);
-      }
     }
 
     const hasVisibleText = children.some(el => el.classList.contains("wx-srv-transcript-text"));

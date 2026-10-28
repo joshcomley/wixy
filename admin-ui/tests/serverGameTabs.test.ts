@@ -128,22 +128,18 @@ describe("game tabs: the bar", () => {
     expect(wyr.getAttribute("aria-selected")).toBe("false");
   });
 
-  it("two games can be open at once: both tabs, in registration order, only the active pane visible", () => {
+  it("holds Chat and ONE game tab: the open game's pane shows only while its tab is the active one", () => {
     const h = make();
     h.tabs.open("adventure", 30);
-    h.tabs.open("wyr", 7);
-    expect(visibleTabs(h.tabs)).toEqual(["Chat", "WYR", "Adventure"]); // registration order, not open order
-    expect(h.tabs.activeTab()).toBe("wyr");
-    expect(h.wyr.pane.hidden).toBe(false);
-    expect(h.adventure.pane.hidden).toBe(true);
-    h.tabs.showTab("adventure");
-    expect(h.wyr.pane.hidden).toBe(true);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Adventure"]);
+    expect(h.tabs.activeTab()).toBe("adventure");
     expect(h.adventure.pane.hidden).toBe(false);
-    h.tabs.showTab("chat");
     expect(h.wyr.pane.hidden).toBe(true);
+    h.tabs.showTab("chat");
     expect(h.adventure.pane.hidden).toBe(true);
-    expect(h.tabs.seqOf("wyr")).toBe(7);
     expect(h.tabs.seqOf("adventure")).toBe(30);
+    h.tabs.showTab("adventure");
+    expect(h.adventure.pane.hidden).toBe(false);
   });
 
   it("a tab button switches to its game; asking for a game that is not open shows Chat", () => {
@@ -186,21 +182,17 @@ describe("game tabs: offer, dots and dismissal", () => {
     expect(h.wyr.onShow).toHaveBeenCalledWith(7);
   });
 
-  it("each game has its own dot, cleared only by showing that game", () => {
+  it("an offered game's dot is cleared only by showing it, and a newer offer dots it again", () => {
     const h = make();
-    h.tabs.offer("wyr", 7);
     h.tabs.offer("adventure", 30);
-    expect(dotted(h.tabs, ".wx-srv-tab-wyr")).toBe(true);
     expect(dotted(h.tabs, ".wx-srv-tab-adventure")).toBe(true);
     h.tabs.showTab("adventure");
     expect(dotted(h.tabs, ".wx-srv-tab-adventure")).toBe(false);
-    expect(dotted(h.tabs, ".wx-srv-tab-wyr")).toBe(true);
-    h.tabs.showTab("wyr");
-    expect(dotted(h.tabs, ".wx-srv-tab-wyr")).toBe(false);
-    h.tabs.showTab("adventure");
-    h.tabs.offer("wyr", 8); // a new item for a game that is not showing: dotted again
-    expect(dotted(h.tabs, ".wx-srv-tab-wyr")).toBe(true);
-    expect(h.tabs.activeTab()).toBe("adventure"); // an offer never takes over the screen
+    h.tabs.showTab("chat");
+    h.tabs.offer("adventure", 31); // a new item for a game that is not showing: dotted again
+    expect(dotted(h.tabs, ".wx-srv-tab-adventure")).toBe(true);
+    expect(h.tabs.activeTab()).toBe("chat"); // an offer never takes over the screen
+    expect(h.tabs.seqOf("adventure")).toBe(31);
   });
 
   it("offering the item that is already open, or a new item of the showing game, adds no dot", () => {
@@ -267,26 +259,25 @@ describe("game tabs: close", () => {
     expect(h.layout).toHaveBeenCalled();
   });
 
-  it("with another game still open the bar stays and Chat shows when the active game closes", () => {
+  it("closing the game that replaced another leaves the bar hidden and Chat showing", () => {
     const h = make();
     h.tabs.open("wyr", 7);
     h.tabs.open("adventure", 30);
     h.tabs.close("adventure");
-    expect(h.tabs.tabBar.hidden).toBe(false);
-    expect(visibleTabs(h.tabs)).toEqual(["Chat", "WYR"]);
-    expect(h.tabs.activeTab()).toBe("chat");
-    h.tabs.close("wyr");
     expect(h.tabs.tabBar.hidden).toBe(true);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat"]);
+    expect(h.tabs.activeTab()).toBe("chat");
+    expect(h.tabs.seqOf("wyr")).toBeNull(); // the replaced game does not come back by itself
   });
 
-  it("closing a game that is not showing leaves the active tab and the Chat dot alone", () => {
+  it("closing an offered game that is not showing leaves the active tab and the Chat dot alone", () => {
     const h = make();
-    h.tabs.open("wyr", 7);
     h.tabs.offer("adventure", 30);
-    h.tabs.noteChatActivity();
+    h.tabs.showTab("chat");
+    h.tabs.noteChatActivity(); // no game tab showing: no Chat dot
     h.tabs.close("adventure");
-    expect(h.tabs.activeTab()).toBe("wyr");
-    expect(dotted(h.tabs, ".wx-srv-tab-chat")).toBe(true);
+    expect(h.tabs.activeTab()).toBe("chat");
+    expect(dotted(h.tabs, ".wx-srv-tab-chat")).toBe(false);
   });
 
   it("closing a game closes the pop-up chat when it belonged to that game, and only then", () => {
@@ -305,14 +296,13 @@ describe("game tabs: close", () => {
 
   it("closes a game whose item has vanished (deleted or wiped) on the next refresh", () => {
     const h = make();
-    h.tabs.open("wyr", 7);
     h.tabs.open("adventure", 30);
-    h.wyr.exists.mockReturnValue(false);
+    h.adventure.exists.mockReturnValue(false);
     h.tabs.refresh();
-    expect(h.tabs.seqOf("wyr")).toBeNull();
-    expect(h.tabs.seqOf("adventure")).toBe(30);
-    expect(h.tabs.activeTab()).toBe("adventure"); // the vanished game was not the showing one
-    expect(h.adventure.refresh).toHaveBeenLastCalledWith(30);
+    expect(h.tabs.seqOf("adventure")).toBeNull();
+    expect(h.tabs.activeTab()).toBe("chat");
+    expect(h.tabs.tabBar.hidden).toBe(true);
+    expect(h.adventure.reset).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -322,13 +312,12 @@ describe("game tabs: which chat a message belongs to", () => {
     expect(h.tabs.chatTarget()).toBeNull();
     h.tabs.open("wyr", 7);
     expect(h.tabs.chatTarget()).toBe(7);
-    h.tabs.open("adventure", 30);
+    h.tabs.open("adventure", 30); // replaces WYR: the target moves to the new game's item
     expect(h.tabs.chatTarget()).toBe(30);
-    h.tabs.showTab("wyr");
-    expect(h.tabs.chatTarget()).toBe(7);
     h.tabs.showTab("chat");
     expect(h.tabs.chatTarget()).toBeNull();
-    h.tabs.close("wyr");
+    h.tabs.showTab("adventure");
+    expect(h.tabs.chatTarget()).toBe(30);
     h.tabs.close("adventure");
     expect(h.tabs.chatTarget()).toBeNull();
   });
@@ -361,14 +350,13 @@ describe("game tabs: the pop-up follows the tab", () => {
     expect(h.popup.closePopup).toHaveBeenCalledTimes(1);
   });
 
-  it("switching from one game to another closes the first game's pop-up", () => {
+  it("a game replaced by another takes its pop-up chat with it", () => {
     const h = make();
     h.tabs.open("wyr", 7);
-    h.tabs.open("adventure", 30);
-    h.tabs.showTab("wyr");
     h.popup.openFor(7);
-    h.tabs.showTab("adventure");
+    h.tabs.open("adventure", 30);
     expect(h.popup.closePopup).toHaveBeenCalledTimes(1);
+    expect(h.popup.isPopupOpen()).toBe(false);
   });
 
   it("pointing a game at another item closes the pop-up of the old one", () => {
@@ -382,11 +370,9 @@ describe("game tabs: the pop-up follows the tab", () => {
 });
 
 describe("game tabs: refresh and the game callbacks", () => {
-  it("refreshes only the showing game's pane, then the shared item chat once", () => {
+  it("refreshes the open game's pane only while its tab shows, and the shared item chat once", () => {
     const h = make();
-    h.tabs.open("wyr", 7);
     h.tabs.open("adventure", 30);
-    h.wyr.refresh.mockClear();
     h.adventure.refresh.mockClear();
     h.popup.refresh.mockClear();
     h.tabs.refresh();
@@ -394,6 +380,10 @@ describe("game tabs: refresh and the game callbacks", () => {
     expect(h.adventure.refresh).toHaveBeenCalledWith(30);
     expect(h.wyr.refresh).not.toHaveBeenCalled();
     expect(h.popup.refresh).toHaveBeenCalledTimes(1);
+    h.tabs.showTab("chat");
+    h.adventure.refresh.mockClear();
+    h.tabs.refresh(); // Chat shows: the pane is not on screen, nothing to redraw
+    expect(h.adventure.refresh).not.toHaveBeenCalled();
   });
 
   it("does nothing when no game is open", () => {
@@ -410,12 +400,17 @@ describe("game tabs: refresh and the game callbacks", () => {
     h.tabs.showTab("wyr");
     expect(h.wyr.onShow).toHaveBeenCalledTimes(1);
     expect(h.wyr.onHide).not.toHaveBeenCalled();
+    h.tabs.showTab("chat");
+    expect(h.wyr.onHide).toHaveBeenCalledTimes(1);
+    h.tabs.showTab("wyr");
+    expect(h.wyr.onShow).toHaveBeenCalledTimes(2);
+    // A game replaced by another is reset (which stands for "hidden"), not also hidden.
     h.tabs.open("adventure", 30);
+    expect(h.wyr.reset).toHaveBeenCalledTimes(1);
     expect(h.wyr.onHide).toHaveBeenCalledTimes(1);
     expect(h.adventure.onShow).toHaveBeenCalledWith(30);
     h.tabs.showTab("chat");
     expect(h.adventure.onHide).toHaveBeenCalledTimes(1);
-    expect(h.wyr.onHide).toHaveBeenCalledTimes(1);
   });
 
   it("showing a tab, opening, offering and closing all tell the thread to re-lay-out", () => {
@@ -437,14 +432,12 @@ describe("game tabs: reset (lock or wipe)", () => {
   it("forgets every game, the dots and the dismissals, closes the pop-up, and tells the thread", () => {
     const h = make();
     h.tabs.open("wyr", 7);
-    h.tabs.open("adventure", 30);
-    h.tabs.noteChatActivity();
-    h.tabs.close("adventure"); // a dismissal to forget
+    h.tabs.close("wyr"); // a dismissal to forget
     h.tabs.open("adventure", 31);
+    h.tabs.noteChatActivity();
     h.popup.openFor(31);
     h.layout.mockClear();
     h.tabs.reset();
-    expect(h.wyr.reset).toHaveBeenCalled();
     expect(h.adventure.reset).toHaveBeenCalled();
     expect(h.popup.closePopup).toHaveBeenCalled();
     expect(h.tabs.seqOf("wyr")).toBeNull();
@@ -456,14 +449,111 @@ describe("game tabs: reset (lock or wipe)", () => {
     expect(dotted(h.tabs, ".wx-srv-tab-chat")).toBe(false);
     // A hidden thread must come back (decisions/00184, audit round 3 F3): the layout hook runs.
     expect(h.layout).toHaveBeenCalled();
-    h.tabs.offer("adventure", 30); // the dismissed item is offerable again
-    expect(h.tabs.seqOf("adventure")).toBe(30);
+    h.tabs.offer("wyr", 7); // the dismissed item is offerable again
+    expect(h.tabs.seqOf("wyr")).toBe(7);
   });
 
   it("tells the thread even when nothing was open", () => {
     const h = make();
     h.tabs.reset();
     expect(h.layout).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("game tabs: one game at a time (spec 08 5.1, operator 2026-10-28)", () => {
+  it("opening a game while another is open closes the other first: pane hidden, reset run, tab gone", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    expect(h.wyr.pane.hidden).toBe(false);
+    h.layout.mockClear();
+    h.tabs.open("adventure", 30);
+    expect(h.wyr.reset).toHaveBeenCalledTimes(1);
+    expect(h.wyr.pane.hidden).toBe(true);
+    expect(h.tabs.seqOf("wyr")).toBeNull();
+    expect(h.tabs.seqOf("adventure")).toBe(30);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Adventure"]); // only ever Chat + one game tab
+    expect(h.tabs.activeTab()).toBe("adventure");
+    expect(h.adventure.pane.hidden).toBe(false);
+    expect(h.adventure.onShow).toHaveBeenCalledWith(30);
+    expect(h.layout).toHaveBeenCalled();
+    // ...and the other way round.
+    h.tabs.open("wyr", 8);
+    expect(h.adventure.reset).toHaveBeenCalledTimes(1);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "WYR"]);
+    expect(h.adventure.pane.hidden).toBe(true);
+  });
+
+  it("opening a game replaces the other whether or not it was the tab showing", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.tabs.showTab("chat"); // WYR is open but Chat shows
+    h.tabs.open("adventure", 30);
+    expect(h.wyr.reset).toHaveBeenCalledTimes(1);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Adventure"]);
+    expect(h.tabs.activeTab()).toBe("adventure");
+  });
+
+  it("offering a game replaces the open one too; the offered tab appears with a dot and does not take over", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.tabs.offer("adventure", 30);
+    expect(h.wyr.reset).toHaveBeenCalledTimes(1);
+    expect(h.wyr.pane.hidden).toBe(true);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Adventure"]);
+    expect(dotted(h.tabs, ".wx-srv-tab-adventure")).toBe(true);
+    expect(h.tabs.activeTab()).toBe("chat"); // the showing game was retired; the screen falls back to Chat
+    expect(h.adventure.pane.hidden).toBe(true);
+    expect(h.tabs.chatTarget()).toBeNull();
+  });
+
+  it("the replaced game's pop-up chat closes, its pane showing or not", () => {
+    const h = make();
+    h.tabs.offer("wyr", 7);
+    h.popup.openFor(7);
+    h.tabs.open("adventure", 30);
+    expect(h.popup.closePopup).toHaveBeenCalledTimes(1);
+  });
+
+  it("records NO dismissal: the replaced round can be offered and opened again", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.tabs.open("adventure", 30); // replaces WYR 7
+    h.tabs.offer("wyr", 7); // not dismissed, so it is offerable (and, again, replaces the adventure)
+    expect(h.tabs.seqOf("wyr")).toBe(7);
+    expect(h.tabs.seqOf("adventure")).toBeNull();
+    // A dismissal is still recorded by an explicit close, though.
+    h.tabs.close("wyr");
+    h.tabs.offer("wyr", 7);
+    expect(h.tabs.seqOf("wyr")).toBeNull();
+  });
+
+  it("does not call onHide on the replaced game (its reset already stands for it) and leaves other dots alone", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.wyr.onHide.mockClear();
+    h.tabs.open("adventure", 30);
+    expect(h.wyr.onHide).not.toHaveBeenCalled();
+    expect(dotted(h.tabs, ".wx-srv-tab-wyr")).toBe(false);
+    expect(dotted(h.tabs, ".wx-srv-tab-adventure")).toBe(false);
+  });
+
+  it("pointing the SAME game at another item retires nothing", () => {
+    const h = make();
+    h.tabs.open("adventure", 30);
+    h.tabs.offer("adventure", 31);
+    h.tabs.open("adventure", 32);
+    expect(h.adventure.reset).not.toHaveBeenCalled();
+    expect(h.wyr.reset).not.toHaveBeenCalled();
+    expect(h.tabs.seqOf("adventure")).toBe(32);
+  });
+
+  it("a Chat dot from the retired game does not outlive the replacement", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.tabs.noteChatActivity(); // WYR shows: Chat is dotted
+    expect(dotted(h.tabs, ".wx-srv-tab-chat")).toBe(true);
+    h.tabs.open("adventure", 30); // the new game is shown: Chat's dot is cleared by showing a tab
+    expect(dotted(h.tabs, ".wx-srv-tab-chat")).toBe(false);
   });
 });
 

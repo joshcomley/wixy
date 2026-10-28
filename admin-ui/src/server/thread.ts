@@ -44,11 +44,27 @@ import { createWyrControls, type WyrControls } from "./wyrControls";
 import { createGallery, type GalleryView } from "./gallery";
 import { createLinksView, type LinksView } from "./linksView";
 import { createDownloadMarkStore } from "./galleryMark";
-import { createGameTabs, type GameTabs } from "./gameTabs";
+import { createGameTabs, type GameKey, type GameTabs } from "./gameTabs";
 import { createItemChat, type ItemChat } from "./itemChat";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
 import { createWyrTopics, type WyrTopicsView } from "./wyrTopics";
+import {
+  createAdventure,
+  decideAdventure,
+  getAdventure,
+  getAdventureSettings,
+  postAdventureLive,
+  putAdventureSettings,
+  retryAdventurePack,
+  spinAdventure,
+  stopAdventure,
+} from "./adventure/api";
+import { createAdventureCards, type AdventureCards } from "./adventure/adventureCard";
+import { createAdventureGame, type AdventureGame } from "./adventure/adventureGame";
+import { createHolidayBank, type HolidayBank } from "./adventure/holidayBank";
+import { createAdventureModel, type AdventureModel } from "./adventure/model";
+import { loadWorld } from "./adventure/world";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -295,6 +311,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   wyrItemHint.textContent = "Pick one, guess theirs, reveal together";
   wyrItem.append(wyrItemTitle, wyrItemHint);
   moreMenu.appendChild(wyrItem);
+  const adventureItem = documentRef.createElement("button");
+  adventureItem.type = "button";
+  adventureItem.className = "wx-srv-more-item wx-srv-more-adventure";
+  adventureItem.setAttribute("role", "menuitem");
+  adventureItem.setAttribute("data-srv-gesture-boundary", "");
+  const adventureItemTitle = documentRef.createElement("span");
+  adventureItemTitle.className = "wx-srv-more-item-title";
+  adventureItemTitle.textContent = "Adventure Time";
+  const adventureItemHint = documentRef.createElement("span");
+  adventureItemHint.className = "wx-srv-more-item-hint";
+  adventureItemHint.textContent = "Spin the globe, find your next holiday";
+  adventureItem.append(adventureItemTitle, adventureItemHint);
+  moreMenu.appendChild(adventureItem);
+  const bankItem = documentRef.createElement("button");
+  bankItem.type = "button";
+  bankItem.className = "wx-srv-more-item wx-srv-more-bank";
+  bankItem.setAttribute("role", "menuitem");
+  bankItem.setAttribute("data-srv-gesture-boundary", "");
+  const bankItemTitle = documentRef.createElement("span");
+  bankItemTitle.className = "wx-srv-more-item-title";
+  bankItemTitle.textContent = "Holiday bank";
+  const bankItemHint = documentRef.createElement("span");
+  bankItemHint.className = "wx-srv-more-item-hint";
+  bankItemHint.textContent = "Places you've saved";
+  bankItem.append(bankItemTitle, bankItemHint);
+  moreMenu.appendChild(bankItem);
   const topicsItem = documentRef.createElement("button");
   topicsItem.type = "button";
   topicsItem.className = "wx-srv-more-item wx-srv-more-topics";
@@ -359,6 +401,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   wyrItem.addEventListener("click", () => {
     closeMoreMenu();
     void addWyrRound();
+  });
+  adventureItem.addEventListener("click", () => {
+    closeMoreMenu();
+    void addAdventure();
+  });
+  bankItem.addEventListener("click", () => {
+    closeMoreMenu();
+    holidayBank.open(header.offsetHeight);
   });
   fryItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -490,6 +540,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     document: documentRef,
     openGame: (seq) => gameTabs.open("wyr", seq),
     openLightbox: (src, alt) => lightbox.open(src, alt),
+  });
+  // Adventure Time (workspace 00056): the model holds each round's view and the server's clock; the
+  // card draws it in the main chat and the pane (created with the other games below) plays it.
+  const adventureModel: AdventureModel = createAdventureModel({
+    session: () => currentSession,
+    fetchRound: (session, seq) => getAdventure(session, seq),
+    onChange: (seq) => {
+      patchAdventure(seq);
+      gameTabs.refresh();
+    },
+    setTimeout: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimeout: (id) => win.clearTimeout(id),
+  });
+  const adventureCards: AdventureCards = createAdventureCards({
+    model: adventureModel,
+    document: documentRef,
+    openGame: (seq) => gameTabs.open("adventure", seq),
+    loadWorld: () => loadWorld(),
   });
   let voiceRecorder: VoiceRecorder | null = null;
   let callBusy = false;
@@ -1143,7 +1211,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // improvement to the per-item chat reaches every game (spec/server-chat/08-adventure-time.md §5.1).
   let savedThreadScrollTop = 0;
   let threadHiddenForGame = false;
+  /**
+   * The Adventure pane is in the chat only while its game is open (one game at a time, so at most one
+   * game pane besides Would you rather's): no idle canvas, WebGL layer or hidden controls sit in a chat
+   * that is not playing it. Called on every layout change, which every open, offer, close and reset makes.
+   */
+  function syncAdventurePane(): void {
+    const open = gameTabs.seqOf("adventure") !== null;
+    if (open && adventureGame.pane.parentElement === null) game.pane.after(adventureGame.pane);
+    else if (!open && adventureGame.pane.parentElement !== null) adventureGame.pane.remove();
+  }
   function applyGameLayout(): void {
+    if (gameMounted) syncAdventurePane();
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
@@ -1193,6 +1272,43 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     afterChange: () => threadScroll.afterContentChange(false),
     openLightbox: (src, alt) => lightbox.open(src, alt),
   });
+  function adventureSession(): ServerSession {
+    if (currentSession === null) throw new ServerLockedError();
+    return currentSession;
+  }
+  const adventureGame: AdventureGame = createAdventureGame({
+    document: documentRef,
+    win,
+    model: adventureModel,
+    tabs: gameTabs,
+    itemChat,
+    hooks,
+    api: {
+      spin: (seq, input) => spinAdventure(adventureSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      stop: (seq, input) => stopAdventure(adventureSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      decide: (seq, decision) => decideAdventure(adventureSession(), seq, { sender: identity.getName() ?? "", decision }),
+      retryPack: (seq) => retryAdventurePack(adventureSession(), seq, { sender: identity.getName() ?? "" }),
+      getSettings: () => getAdventureSettings(adventureSession()),
+      putSettings: (includeAdvised) => putAdventureSettings(adventureSession(), includeAdvised),
+      postLive: async (frame) => {
+        // The live trail is lossy: a send that cannot be made is simply a missed frame, and a 401
+        // is the chat's lock like any other call's.
+        if (currentSession === null) return { kind: "failed" };
+        try {
+          return await postAdventureLive(currentSession, frame);
+        } catch (error) {
+          return error instanceof ServerLockedError ? "locked" : { kind: "failed" };
+        }
+      },
+    },
+    loadWorld: () => loadWorld(),
+    roundMessage: (seq) => confirmedBySeq.get(seq),
+    viewer: () => identity.getName(),
+    partner: () => partnerName,
+    startNextRound: () => void addAdventure(),
+    openBank: () => holidayBank.open(header.offsetHeight),
+    afterChange: () => threadScroll.afterContentChange(false),
+  });
   gameMounted = true;
   threadWrap.after(game.pane);
   element.appendChild(gameTabs.tabBar);
@@ -1204,7 +1320,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function resetGames(): void {
     itemChat.reset();
     gameTabs.reset();
+    seenAnchor.wyr = 0;
+    seenAnchor.adventure = 0;
   }
+
+  /** The other person's display name, as the latest message from anyone else shows it (the two
+   * players are the only senders, bar the system's own empty one). */
+  let partnerName: string | null = null;
+  let partnerSeq = 0;
+  /** The newest game anchor of each game this tab has already considered offering: a game tab is
+   * offered once per NEW round, never again for one already seen — with one game at a time, an
+   * older unfinished round of one game must not keep pushing out the other game's tab. */
+  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0 };
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
@@ -1329,6 +1456,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     disposeMedia: (root) => disposeAttachmentMedia(root),
   });
   element.appendChild(links.element);
+
+  // The Holiday bank (workspace 00056): every banked Adventure Time trip, a tap opens it in the game.
+  const holidayBank: HolidayBank = createHolidayBank({
+    document: documentRef,
+    hooks,
+    getSession: () => currentSession,
+    openTrip: (seq) => void openAdventureTrip(seq),
+  });
+  element.appendChild(holidayBank.element);
 
   // The game's topic picker (workspace 00052): opened from the ⋯ menu and from the game tab.
   const wyrTopics: WyrTopicsView = createWyrTopics({
@@ -1603,6 +1739,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       message = { ...message, replyTo: null };
     }
     confirmedBySeq.set(message.seq, message);
+    if (message.sender !== "" && !identity.isMine(message.sender) && message.seq > partnerSeq) {
+      partnerSeq = message.seq;
+      partnerName = message.sender;
+    }
     latestKnownMessageSeq = Math.max(latestKnownMessageSeq, message.seq);
     confirmedClientIds.add(message.clientId);
     contentRevision += 1;
@@ -2017,34 +2157,136 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     gameTabs.open("wyr", result.message.seq);
   }
 
-  /** Keeps the game tabs in step with the thread: a round someone ELSE started (or the newest
-   * unfinished one at load) offers its tab; a closed or vanished round leaves it. */
-  function syncWyrGame(messages: readonly Message[]): void {
-    let newest: Message | undefined;
-    for (const m of messages) if (m.wyr !== undefined && m.wyr !== null) newest = m;
-    if (newest !== undefined && newest.wyr !== undefined && newest.wyr !== null) {
-      const active = newest.wyr.state !== "revealed" && newest.wyr.state !== "skipped";
+  /** Starts an Adventure Time round: the server abandons the unfinished ones and the anchor
+   * message appears at once; the starter lands in the Adventure tab (the other person is OFFERED
+   * it, with a dot, by `syncGames`). */
+  async function addAdventure(): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    const requestGeneration = contentGeneration;
+    let result: Awaited<ReturnType<typeof createAdventure>>;
+    try {
+      result = await createAdventure(session, {
+        clientId: cryptoRandomId(win),
+        sender: identity.getName() ?? "",
+        deviceId: identity.getDeviceId(),
+      });
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return;
+    }
+    if (requestGeneration !== contentGeneration || currentSession === null) return;
+    if (!result.ok) {
+      composer.setError(
+        result.kind === "unsupported"
+          ? "Adventure Time isn't available yet — try again in a moment."
+          : result.kind === "game_unavailable"
+            ? "Adventure Time has no places left to visit."
+            : "Couldn't start an adventure — try again.",
+      );
+      return;
+    }
+    addConfirmed(result.message);
+    renderThreadList();
+    threadScroll.scrollToBottom();
+    gameTabs.open("adventure", result.message.seq);
+  }
+
+  /** Pages older history in until the message `seq` is loaded (a banked trip may be months back),
+   * so its card, its chat and its round are all there when its tab opens. */
+  async function ensureMessageLoaded(seq: number): Promise<boolean> {
+    const generation = contentGeneration;
+    while (!confirmedBySeq.has(seq)) {
+      if (currentSession === null || generation !== contentGeneration || !hasMoreHistory) return false;
+      const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
+      if (generation !== contentGeneration || currentSession === null) return false;
+      if (result === "loaded") continue;
+      if (result === "blocked") {
+        await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
+        continue;
+      }
+      return false;
+    }
+    return true;
+  }
+
+  /** The Holiday bank's tap: open that trip in the Adventure tab, loading its message first. */
+  async function openAdventureTrip(seq: number): Promise<void> {
+    if (await ensureMessageLoaded(seq)) {
+      gameTabs.open("adventure", seq);
+      return;
+    }
+    if (currentSession !== null) composer.setError("Couldn't open that trip — try again.");
+  }
+
+  /**
+   * Keeps the game tabs in step with the thread. A round someone ELSE started (or the newest
+   * unfinished one at load) is OFFERED as a tab; a closed or vanished round leaves it. With one game
+   * at a time a game tab is offered once per NEW round — an older unfinished round of one game must
+   * not keep pushing the other game's tab out — and when both games have a new round in the same
+   * batch (a first load) the newer anchor is the one offered.
+   */
+  function syncGames(messages: readonly Message[]): void {
+    let newestWyr: Message | undefined;
+    let newestAdventure: Message | undefined;
+    for (const m of messages) {
+      if (m.wyr !== undefined && m.wyr !== null) newestWyr = m;
+      if (m.adventure !== undefined && m.adventure !== null) newestAdventure = m;
+    }
+    const offers: Array<{ readonly key: GameKey; readonly seq: number }> = [];
+    if (newestWyr !== undefined && newestWyr.wyr !== undefined && newestWyr.wyr !== null && newestWyr.seq > seenAnchor.wyr) {
+      seenAnchor.wyr = newestWyr.seq;
+      const active = newestWyr.wyr.state !== "revealed" && newestWyr.wyr.state !== "skipped";
       const current = gameTabs.seqOf("wyr");
-      if (newest.seq !== current && (active || (current !== null && newest.seq > current))) {
-        gameTabs.offer("wyr", newest.seq);
+      if (newestWyr.seq !== current && (active || (current !== null && newestWyr.seq > current))) {
+        offers.push({ key: "wyr", seq: newestWyr.seq });
       }
     }
+    if (
+      newestAdventure !== undefined &&
+      newestAdventure.adventure !== undefined &&
+      newestAdventure.adventure !== null &&
+      newestAdventure.seq > seenAnchor.adventure
+    ) {
+      seenAnchor.adventure = newestAdventure.seq;
+      const state = newestAdventure.adventure.state;
+      const active = state !== "banked" && state !== "rejected" && state !== "abandoned";
+      const current = gameTabs.seqOf("adventure");
+      if (newestAdventure.seq !== current && (active || (current !== null && newestAdventure.seq > current))) {
+        offers.push({ key: "adventure", seq: newestAdventure.seq });
+      }
+    }
+    const newest = offers.reduce<(typeof offers)[number] | undefined>((a, b) => (a === undefined || b.seq > a.seq ? b : a), undefined);
+    if (newest !== undefined) gameTabs.offer(newest.key, newest.seq);
     gameTabs.refresh();
   }
 
   /** The tag a game-chat message wears in the main chat — the name of the game its anchor
-   * message (`wyrRef`) belongs to — or null when it is not a game's chat. This is the one place
-   * that knows which kind of item an anchor is; a new game adds its branch here (its anchor
-   * message carries its own summary field, like `wyr`). */
-  function gameLabelFor(anchorSeq: number): string | null {
+   * message (`wyrRef`) belongs to — or null when it is not a game's chat. The server says which
+   * game (`wyrRefKind`, resolved at read time, so it is right even when the anchor is older than
+   * the loaded history); an older server does not, and the anchor message itself is asked. */
+  function gameLabelFor(anchorSeq: number, kind?: "wyr" | "adventure" | null): string | null {
+    if (kind === "adventure") return "Adventure";
+    if (kind === "wyr") return "WYR";
     const anchor = confirmedBySeq.get(anchorSeq);
     if (anchor === undefined) {
-      // The anchor is older than the loaded history (or already gone): no game other than
-      // would-you-rather existed when this tag was introduced, so keep its answer.
+      // The anchor is older than the loaded history (or already gone) and the server did not say:
+      // would-you-rather was the only game when this tag began, so keep its answer.
       return "WYR";
     }
+    if (anchor.adventure !== undefined && anchor.adventure !== null) return "Adventure";
     if (anchor.wyr !== undefined && anchor.wyr !== null) return "WYR";
     return null;
+  }
+
+  /** Redraws one adventure's main-chat card in place (no bubble rebuild). */
+  function patchAdventure(seq: number): void {
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return;
+    const container = rendered.element.querySelector<HTMLElement>(".wx-srv-adv-mcard");
+    if (container === null) return;
+    adventureCards.render(container, rendered.message);
+    threadScroll.afterContentChange(false);
   }
 
   /** Redraws one round's card in place (no bubble rebuild). */
@@ -2073,11 +2315,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (typeof message.wyrRef === "number") {
       // Sent in a game item's chat (a would-you-rather round, ...): a small tag names the game and
       // keeps the context in the thread.
-      const label = gameLabelFor(message.wyrRef);
+      const label = gameLabelFor(message.wyrRef, message.wyrRefKind);
       if (label !== null) {
         const tag = documentRef.createElement("span");
         // The WYR tag keeps its original class too: styles and e2e select on it.
         tag.className = label === "WYR" ? "wx-srv-bubble-gametag wx-srv-bubble-wyrtag" : "wx-srv-bubble-gametag";
+        tag.dataset["game"] = label === "WYR" ? "wyr" : "adventure";
         tag.textContent = label;
         bubble.appendChild(tag);
       }
@@ -2090,6 +2333,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (message.wyr !== undefined && message.wyr !== null) {
       bubble.classList.add("wx-srv-bubble-wyr");
       bubble.appendChild(wyrCards.create(message));
+    } else if (message.adventure !== undefined && message.adventure !== null) {
+      bubble.classList.add("wx-srv-bubble-adv");
+      bubble.appendChild(adventureCards.create(message));
     } else if (message.canvas === true) {
       bubble.classList.add("wx-srv-bubble-canvas");
       const surface = documentRef.createElement("div");
@@ -2281,6 +2527,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         patchReactions(message.seq);
         patchQuote(message.seq);
         if (message.wyr !== undefined && message.wyr !== null) patchWyr(message.seq);
+        if (message.adventure !== undefined && message.adventure !== null) patchAdventure(message.seq);
       }
       if (rendered !== undefined && rendered.message !== message) {
         teardownMessageActions(message.seq);
@@ -2361,7 +2608,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
     drawingLayer.syncMessages(messages);
     wyrModel.observe(messages);
-    syncWyrGame(messages);
+    adventureModel.observe(messages);
+    syncGames(messages);
     threadScroll.afterContentChange(revealPillIfNotStuck);
     updateUnheard();
   }
@@ -2434,7 +2682,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
     wyrModel.reset();
+    adventureModel.reset();
     resetGames();
+    holidayBank.close();
+    partnerName = null;
+    partnerSeq = 0;
     contentGeneration += 1;
     contentRevision += 1;
     scrollToOriginalGeneration += 1; // §(4): a wipe aborts any in-flight scroll-to-original
@@ -3190,11 +3442,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
       wyrModel.reset();
+      adventureModel.reset();
       resetGames();
       closeUnheardView();
       closeMoreMenu();
       gallery.close();
       links.close();
+      holidayBank.close();
       wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3229,6 +3483,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           const isArrival = !confirmedBySeq.has(event.message.seq);
           addConfirmed(event.message);
           links.messageChanged(event.message);
+          holidayBank.messageChanged(event.message);
           renderThreadList(
             isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
           );
@@ -3251,6 +3506,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
           links.messageDeleted(event.seq);
+          holidayBank.messageDeleted(event.seq);
           // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
           drawingLayer.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
@@ -3274,6 +3530,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           // spec 07 §4: another screen's stroke while it is being drawn — lossy, never stored.
           drawingLayer.handleLive(event.frame);
           return;
+        case "adventure_live":
+          // spec 08 §3.5: the other person's swipe while they spin the globe — lossy, never stored.
+          adventureGame.handleLive(event.frame);
+          return;
         case "locked":
           // The stream's own `locked` event is handled by the caller
           // (chatView.ts), which owns the `ServerStreamHandle` — nothing to
@@ -3287,6 +3547,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       stopTranscriptionProbe();
       drawingLayer.teardown();
       wyrModel.reset();
+      adventureModel.reset();
       resetGames();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3304,6 +3565,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       closeMoreMenu();
       gallery.close();
       links.close();
+      holidayBank.close();
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
