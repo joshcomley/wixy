@@ -140,6 +140,8 @@ export class Game {
   private remoteAt = 0;
   private toast: { text: string; until: number } | null = null;
   private avoid: AvoidRect[] = [];
+  /** How far in the explorable map may zoom: imagery turns to mush below ~0.8 degrees (set by the page). */
+  minViewRadius = 0.3;
 
   // Camera
   private cam: Camera | null = null;
@@ -397,7 +399,7 @@ export class Game {
   exploreZoom(factor: number): void {
     const cam = this.cam;
     if (!this.canExplore || cam === null) return;
-    this.cam = { ...cam, viewRadiusDeg: Math.max(0.3, Math.min(90, cam.viewRadiusDeg / factor)) };
+    this.cam = { ...cam, viewRadiusDeg: Math.max(this.minViewRadius, Math.min(90, cam.viewRadiusDeg / factor)) };
   }
 
   backToPlace(now: number): void {

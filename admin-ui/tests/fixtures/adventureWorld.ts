@@ -5,12 +5,12 @@
 // real map.
 
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { parseWorld, type World } from "../../src/server/adventure/world";
 
 export function fixtureJson(): Record<string, unknown> {
-  const url = new URL("./adventure-world.fixture.json", import.meta.url);
-  return JSON.parse(readFileSync(fileURLToPath(url), "utf8")) as Record<string, unknown>;
+  // vitest runs from admin-ui/ (jsdom's `import.meta.url` is not a file URL).
+  return JSON.parse(readFileSync(join(process.cwd(), "tests", "fixtures", "adventure-world.fixture.json"), "utf8")) as Record<string, unknown>;
 }
 
 export function fixtureWorld(): World {

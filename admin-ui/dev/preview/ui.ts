@@ -2,7 +2,8 @@
 // holiday pack panel and the two sheets (Options, Holiday bank). Plain DOM, no framework, text always
 // set with textContent (the sample pack comes from a file: never innerHTML).
 
-import type { Dest, Memory, Pack } from "./data";
+import type { MapStyle } from "../../src/server/adventure/imagery";
+import type { Memory } from "./data";
 import type { Hud } from "./game";
 
 type Child = Node | string | null | undefined | false;
@@ -26,75 +27,6 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el;
 }
 
-function safeUrl(url: string | null): string | null {
-  if (url === null) return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : null;
-  } catch {
-    return null;
-  }
-}
-
-function link(url: string | null, label: string): HTMLElement | null {
-  const href = safeUrl(url);
-  if (href === null) return null;
-  const a = h("a", { class: "pk-link", href, target: "_blank", rel: "noopener noreferrer" }, label);
-  return a;
-}
-
-export function renderPack(pack: Pack, dest: Dest, unitName: string, isSample: boolean): HTMLElement {
-  const root = h("div", { class: "pk" });
-  if (isSample) {
-    root.append(
-      h(
-        "div",
-        { class: "pk-sample" },
-        "Sample pack. The real game researches the place you land on; this one is the example for ",
-        h("b", null, "Kotor"),
-        ".",
-      ),
-    );
-  }
-  root.append(
-    h("div", { class: "pk-place" }, `${dest.name}, ${unitName}`),
-    h("h2", { class: "pk-headline" }, pack.headline),
-    h("p", { class: "pk-summary" }, pack.summary),
-  );
-  for (const section of pack.sections) {
-    const card = h("section", { class: `pk-card pk-${section.key}` }, h("h3", null, section.title));
-    const list = h("ul", { class: "pk-items" });
-    for (const item of section.items) {
-      list.append(
-        h(
-          "li",
-          null,
-          h("div", { class: "pk-item-name" }, item.name),
-          h("div", { class: "pk-item-detail" }, item.detail),
-          link(item.url, "Open link"),
-        ),
-      );
-    }
-    card.append(list);
-    root.append(card);
-  }
-  const facts: Array<[string, string]> = [
-    ["Best time to go", pack.bestTime],
-    ["Getting there", pack.gettingThere],
-    ["Travel advice", pack.travelAdvice],
-  ];
-  for (const [title, text] of facts) {
-    if (text === "") continue;
-    root.append(h("section", { class: "pk-card pk-fact" }, h("h3", null, title), h("p", null, text)));
-  }
-  if (pack.sources.length > 0) {
-    const list = h("ul", { class: "pk-sources" });
-    for (const s of pack.sources) list.append(h("li", null, link(s.url, s.title) ?? s.title));
-    root.append(h("section", { class: "pk-card pk-src" }, h("h3", null, "Sources"), list));
-  }
-  return root;
-}
-
 // -- The page ----------------------------------------------------------------------------------------
 
 export interface UiHandlers {
@@ -106,6 +38,10 @@ export interface UiHandlers {
   onAgain(): void;
   onBackToPlace(): void;
   onOptionsChanged(what: "advised" | "other" | "motion" | "debug"): void;
+  /** The map style in use, whether imagery can be shown at all, and a style being picked. */
+  getMapStyle(): MapStyle;
+  imageryAvailable(): boolean;
+  onMapStyle(style: MapStyle): void;
   onForget(): void;
 }
 
@@ -137,7 +73,7 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
   // Action dock.
   const stop = h("button", { class: "stop", type: "button" }, "Stop");
   const dockStop = h("div", { class: "dock-row dock-stop" }, stop);
-  const yes = h("button", { class: "big yes", type: "button" }, "Let's go there ✓");
+  const yes = h("button", { class: "big yes", type: "button" }, "Bank this ✓");
   const no = h("button", { class: "big no", type: "button" }, "No thanks ✕");
   const decideRow = h("div", { class: "dock-row dock-decide-row" }, yes, no);
   const askText = h("div", { class: "ask" });
@@ -206,6 +142,47 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
     memory.settings.reducedMotion ?? systemReducedMotion,
   );
   const debugOpt = toggleRow("opt-debug", "Show the debug corner", "Landing point, candidates and frame times.", memory.settings.showDebug);
+  // Map style: a three-way switch (Satellite / Atlas / Classic).
+  const styleButtons = (["satellite", "atlas", "classic"] as const).map((style) => {
+    const label = style === "satellite" ? "Satellite" : style === "atlas" ? "Atlas" : "Classic";
+    return h("button", { class: "seg-btn", type: "button", role: "radio", "data-style": style }, label);
+  });
+  const styleHelp = h("div", { class: "opt-help" });
+  const syncStyle = (): void => {
+    const available = handlers.imageryAvailable();
+    for (const b of styleButtons) {
+      const style = b.getAttribute("data-style");
+      b.disabled = style !== "classic" && !available;
+      b.setAttribute("aria-checked", style === handlers.getMapStyle() ? "true" : "false");
+    }
+    styleHelp.textContent = available
+      ? "Satellite and Atlas show real geography under the borders. Classic is the flat illustrated map."
+      : "Satellite and Atlas need WebGL 2, which this browser does not offer, so the Classic map is used.";
+  };
+  const styleRow = h(
+    "div",
+    { class: "opt opt-style" },
+    h(
+      "div",
+      { class: "opt-text" },
+      h("div", { class: "opt-title" }, "Map style"),
+      styleHelp,
+      h(
+        "div",
+        { class: "opt-help opt-credit" },
+        "Satellite: NASA Visible Earth, Blue Marble Next Generation (July, with topography and bathymetry). Atlas: Natural Earth II shaded relief. Both public domain.",
+      ),
+    ),
+    h("div", { class: "seg", role: "radiogroup", "aria-label": "Map style" }, ...styleButtons),
+  );
+  for (const b of styleButtons) {
+    b.addEventListener("click", () => {
+      const style = b.getAttribute("data-style");
+      if (style !== "satellite" && style !== "atlas" && style !== "classic") return;
+      handlers.onMapStyle(style);
+      syncStyle();
+    });
+  }
   const forget = h("button", { class: "big no forget", type: "button" }, "Forget my banked and rejected places");
   const optionsClose = h("button", { class: "chip sheet-close", type: "button" }, "Done");
   const optionsSheet = h(
@@ -217,6 +194,7 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
       h("div", { class: "sheet-head" }, h("h2", null, "Options"), optionsClose),
       advised.row,
       other.row,
+      styleRow,
       motion.row,
       debugOpt.row,
       forget,
@@ -225,7 +203,7 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
 
   // Bank sheet.
   const bankList = h("ul", { class: "bank-list" });
-  const bankEmpty = h("p", { class: "bank-empty" }, "Nothing saved yet. Bank a place with “Let's go there”.");
+  const bankEmpty = h("p", { class: "bank-empty" }, "Nothing saved yet. Bank a place with “Bank this”.");
   const bankClose = h("button", { class: "chip sheet-close", type: "button" }, "Done");
   const bankSheet = h(
     "div",
@@ -243,7 +221,10 @@ export function buildUi(memory: Memory, systemReducedMotion: boolean, handlers: 
   function closeSheet(sheet: HTMLElement): void {
     sheet.hidden = true;
   }
-  optionsBtn.addEventListener("click", () => openSheet(optionsSheet));
+  optionsBtn.addEventListener("click", () => {
+    syncStyle();
+    openSheet(optionsSheet);
+  });
   optionsClose.addEventListener("click", () => closeSheet(optionsSheet));
   bankBtn.addEventListener("click", () => {
     refreshBank();
