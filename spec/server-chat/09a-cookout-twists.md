@@ -322,19 +322,26 @@ Applies to any **banked** recipe of any generation of the round.
   sets **the caller's own** slot rating (`rating1` for Slot 1, `rating2` for Slot 2); requires
   cooked (`409 bad_state`). Ratings are visible to both players at once (it is a memory book, not a
   blind game).
-- `POST /cookout/{seq}/recipes/{generation}/{conceptId}/photo {sender, messageSeq: int | null}` —
-  either player links (or with `null` unlinks) **an ordinary photo message from this round's mini
-  chat**: the message must exist, be in `wyr_chat` with `anchor_seq = seq`, not be view-once
-  (`view_once_s IS NULL`; Inv 52 — a view-once attachment is never linkable), and carry at least one
-  **ready** `photo` attachment. The linked attachment is the message's **lowest-ordinal ready photo**
-  (`photo_message_seq`, `photo_attachment_id`) — exactly the attachment the chooser showed for that
-  message. A message with no ready photo → `422 invalid`. Requires cooked.
+- `POST /cookout/{seq}/recipes/{generation}/{conceptId}/photo {sender, messageSeq: int | null,
+  attachmentId: string | null}` — either player links **the exact photo the chooser showed**: the
+  request carries the `messageSeq` **and** the `attachmentId` that `GET /cookout/{seq}/photos`
+  returned. In the write transaction the server validates that exact attachment: it exists, belongs
+  to that message, is `kind = 'photo'` and `status = 'ready'`; the message exists, is in `wyr_chat`
+  with `anchor_seq = seq`, and is not view-once (`view_once_s IS NULL`; Inv 52 — a view-once
+  attachment is never linkable). It then stores exactly that id (`photo_message_seq`,
+  `photo_attachment_id`). The server **never re-selects** an attachment (no "lowest ordinal" at link
+  time: readiness can change between the chooser's GET and this POST, e.g. an earlier photo on the
+  same message finishing processing). Any failed check — stale, deleted, not ready, wrong message,
+  wrong round, view-once — is an explicit `409 bad_state`, and the client re-opens the chooser.
+  **Unlinking** sends `messageSeq: null, attachmentId: null` (both null; exactly one null →
+  `422 invalid`). Requires cooked (`409 bad_state`).
 - **No new upload path.** "Add our photo" opens the round's mini-chat pop-up composer; the photo is
   sent as an ordinary mini-chat message (so it lives in the chat, the main thread and the Gallery like
   any photo), then linked. `GET /cookout/{seq}/photos` lists the round's linkable mini-chat photos,
-  **one entry per message**, showing that message's lowest-ordinal ready photo — the same selection
-  rule as the linker, so the thumbnail tapped is always the attachment stored (a multi-photo message
-  offers one choice; a failed-first/ready-second message offers and links the ready one).
+  **one entry per message**, showing that message's lowest-ordinal ready photo **at the time of the
+  GET**, with its `attachmentId`. The POST sends that `attachmentId` back, so the thumbnail tapped is
+  always the attachment stored (a multi-photo message offers one choice; a failed-first/ready-second
+  message offers and links the ready one).
 - **Deletion:** deleting the linked message removes the link (FK `ON DELETE SET NULL` as the backstop
   for older processes; the new `_delete_message` path also clears `photo_attachment_id` and bumps the
   round's `rev` with a `message_updated` for the anchor so both screens drop the photo). The view
@@ -370,11 +377,21 @@ Applies to any **banked** recipe of any generation of the round.
 Concept ids `a`/`b`/`c` are reused by generation 2, so "whatever generation is current when the write
 runs" is never a stale-request guard. Two fences, both decided:
 
-- **Every chef-stage request names the generation the player saw.** Bank
-  (`/concepts/{conceptId}/bank`), vote, concepts retry, pictures retry and recipe retry carry
-  `generation: int` (the view's `generation`); the T4 routes already carry it in the path. Inside the
-  write transaction: `generation` ≠ the round's current generation → `409 bad_state` (no write, no
-  event, no job). A request **without** `generation` (a core-era client) is accepted only while the
+- **Two different generation contracts.**
+  - **Current-generation actions:** Bank (`/concepts/{conceptId}/bank`), vote, concepts retry,
+    pictures retry and recipe retry act on the dishes on the table now. They carry
+    `generation: int` (the view's `generation`). Inside the write transaction: `generation` ≠ the
+    round's current generation → `409 bad_state` (no write, no event, no job) — except a recorded
+    Bank replay (below), which is recognised first.
+  - **T4 "We cooked it!" actions (any generation):** mark/unmark cooked, rate, and link/unlink photo
+    name `(generation, conceptId)` in the path and resolve exactly that `(anchor, generation,
+    concept_id)` **banked** recipe of **any** generation. They check the caller is a bound player of
+    the round and apply the T4 prerequisites (banked; cooked for rating and photo), but **never**
+    require the named generation to equal the current one — editing a banked generation-1 recipe
+    after a swap is the point. Every T4 SQL predicate keeps the explicit generation; it is never
+    redirected to the current generation. A named row that does not exist or is not banked →
+    `409 bad_state`.
+  For the current-generation actions: A request **without** `generation` (a core-era client) is accepted only while the
   round is still at generation 1; on a generation-2 round a missing `generation` is `409 bad_state` —
   it can never select a generation-2 target. The updated client always sends it.
 - **Bank replays are recognised across all generations.** `cookout_rounds.bank_move_ids` is a
@@ -509,9 +526,12 @@ CREATE INDEX IF NOT EXISTS idx_cookout_recipes_photo ON cookout_recipes(photo_me
 ```
 
 - Generation 2 may bank concept `a` again while generation 1's banked `a` stays: the key says so.
-- Every recipe statement names the generation **explicitly**: route-driven writes
-  (`bank_cookout_concept`, `retry_cookout_recipe`, the T4 writes) use the request's generation after
-  checking it is current (§1.10); job-driven writes (`set_cookout_recipe_run`,
+- Every recipe statement names the generation **explicitly**: Bank and recipe retry
+  (`bank_cookout_concept`, `retry_cookout_recipe`) use the request's generation after checking it is
+  current (§1.10, with the recorded-Bank replay exception); the T4 writes (`mark_cookout_cooked`,
+  `rate_cookout_recipe`, `link_cookout_photo`) use the request's generation **as named, of any
+  generation, without a current-generation check** (`WHERE anchor_message_seq = ? AND generation = ?
+  AND concept_id = ? AND state = 'banked'`); job-driven writes (`set_cookout_recipe_run`,
   `finish_cookout_recipe`) use the job's captured `expected_generation`. No statement picks "the
   current generation" by subquery on behalf of a caller that did not name one.
 - `get_cookout_round()['recipes']` is the current generation only.
@@ -842,12 +862,14 @@ current-generation recipe is being written). All others reuse the core set: `404
 - `POST /cookout/{seq}/swap/cancel {sender}` → view.
 - `POST /cookout/{seq}/recipes/{generation}/{conceptId}/cooked {sender, cooked: bool}` → view.
 - `POST /cookout/{seq}/recipes/{generation}/{conceptId}/rating {sender, rating: int | null}` → view.
-- `POST /cookout/{seq}/recipes/{generation}/{conceptId}/photo {sender, messageSeq: int | null}` → view.
+- `POST /cookout/{seq}/recipes/{generation}/{conceptId}/photo {sender, messageSeq: int | null,
+  attachmentId: string | null}` → view (exact attachment validated and stored, never re-selected;
+  stale/invalid → `409 bad_state`; both null = unlink; exactly one null → `422 invalid`).
 - `GET /cookout/{seq}/photos?as=<sender>` →
   `{photos: [{messageSeq, attachmentId, sender, createdAt, picture: Picture}]}` — **one entry per
   message**: each non-view-once message in this round's mini chat that has at least one ready photo,
-  represented by its **lowest-ordinal ready** photo (the exact attachment `link_cookout_photo` will
-  store for that `messageSeq`), newest first, ≤ 50. Players only (`409 not_player` otherwise).
+  represented by its **lowest-ordinal ready** photo at the time of the GET (the client posts that
+  `attachmentId` back to link it), newest first, ≤ 50. Players only (`409 not_player` otherwise).
 
 Idempotency: `lucky` shares `pick_move_id`; `chaos`/`veto` use `twist_move_ids` matched on
 `(moveId, actor slot)`; `wildcard` uses `wildcard_move_id` (a replay → `200`; a different move after
@@ -1192,9 +1214,17 @@ class RecipeTwists:
   two-connection retry/choose race never leaves a pending recipe in an archived generation;
   **archived votes**: a swap after only one vote — the partner's and a non-player's responses (and the
   vitest DOM) contain no voted concept id; a both-voted archive reveals its result;
-  **photos**: a message with two ready photos and one with failed-first/ready-second — the chooser
-  entry's `attachmentId` equals the stored `photo_attachment_id`; a message with no ready photo is
-  `422`;
+  **photos**: the two static cases (a message with two ready photos; failed-first/ready-second) —
+  the chooser entry's `attachmentId` equals the stored `photo_attachment_id`; and the race case
+  **GET → earlier photo finishes → POST** (processing-first/ready-second: GET offers the ready second
+  photo, then the first photo's `finish_attachment` commits, then POST with the second photo's id) —
+  the second photo is linked exactly, never the newly ready first; a POST with a stale id (deleted,
+  not ready, other message, other round, view-once) is `409 bad_state` and links nothing; both-null
+  unlinks; exactly one null is `422`;
+  **T4 on any generation**: after a swap, with generation 2 also holding a banked `a`, mark, unmark,
+  rate, link and unlink the generation-1 `a` through the store and the routes — each succeeds on the
+  generation-1 row and leaves every generation-2 recipe column, the generation-2 view slot and its
+  events untouched; T4 naming a generation/concept that is not banked is `409 bad_state`;
   starters (one and two, with fridge + encore; Turn-2 wait; Turn-3 drawn at once; role schedule
   head; draw exclusions; encore validation inside the txn after a `clientId` replay; deleted source);
   races with two store connections: veto/pick (swept → `409 bad_state`, stayed → success),
@@ -1266,8 +1296,10 @@ recipe Try again disabled while a swap is proposed; star toggles disabled once r
   the `generation` of the view the button was rendered from (never re-read at send time), so a
   delayed tap after a swap is refused instead of landing on a different dish. Bank and recipe
   **Try again** are disabled while a swap is proposed; star toggles are disabled once
-  `stars.revealed`; the cooked-photo chooser shows one entry per message (its `attachmentId` is what
-  gets linked).
+  `stars.revealed`; the cooked-photo chooser shows one entry per message and posts back that entry's
+  `messageSeq` **and** `attachmentId`; on `409 bad_state` it shows "That photo changed - pick again"
+  and re-opens the chooser with a fresh GET. T4 controls on Earlier dishes call the T4 routes with
+  that recipe's own generation (1), never the current one.
 - **Chef stage:** each concept card gains **🍽️ I'd eat this tonight** (own vote, changeable until
   revealed), a vote banner, and on reveal voter badges plus **🎯 Tonight's dinner!** on a match; the
   `challengeNote` and `totalMinutes` show as a small rule badge. A **🔄 Rescue swap (once)** button
@@ -1530,8 +1562,17 @@ def link_cookout_photo(
     generation: int,
     concept_id: str,
     message_seq: int | None,
+    attachment_id: str | None,
     now: float | None = None,
 ) -> Moved: ...
+
+
+# T4 exception: mark_cookout_cooked, rate_cookout_recipe and link_cookout_photo resolve the named
+# (anchor, generation, concept_id) BANKED recipe of ANY generation - they never require `generation`
+# to equal the round's current generation, and every T4 SQL predicate keeps that explicit generation.
+# link_cookout_photo validates exactly `attachment_id` (a ready photo on that ordinary, non-view-once
+# message in this round's mini chat) and stores exactly it, never re-selecting; stale or invalid ->
+# CookoutBadStateError; both None = unlink; exactly one None -> CookoutInvalidError.
 def cookout_round_photos(self, *, anchor_seq: int) -> list[tuple[MessageRow, AttachmentRow]]: ...
 ```
 
@@ -1667,6 +1708,8 @@ interface VetoInput extends MoveInput { readonly ingredientId: string }
 interface VoteInput { readonly sender: string; readonly generation: number; readonly conceptId: ConceptId }
 // bankCookoutConcept / retryCookoutConcepts / retryCookoutPictures / retryCookoutRecipe inputs gain
 // `readonly generation: number` (always sent from the view's generation)
+interface LinkPhotoInput { readonly sender: string; readonly messageSeq: number | null;
+                           readonly attachmentId: string | null }   // both null = unlink
 interface RoundPhoto { readonly messageSeq: number; readonly attachmentId: string; readonly sender: string;
                        readonly createdAt: number; readonly picture: Picture }
 ```
