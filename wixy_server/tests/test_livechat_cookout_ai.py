@@ -1316,3 +1316,121 @@ class TestFoldIns:
         _drive_concepts(_runner(store, _client(state), tmp_path))
         assert store.rounds[1]["concepts"] == "failed"
         assert not state.chat_spawn_runs
+
+
+# -- M3: every spec 3.2 lexical case against the REAL CookoutBank ------------------
+
+REAL_PICKS = [
+    "beef-ribeye-steak",
+    "thick-cut-white-toast",
+    "flat-leaf-parsley",
+    "tenderstem-broccoli",
+    "smoked-paprika",
+    "peanut-butter",
+    "gruyere",
+    "espresso",
+    "coconut-milk",
+    "white-miso",
+]
+
+
+@pytest.fixture(scope="module")
+def real_bank() -> Any:
+    from wixy_server.livechat.cookout_bank import load_cookout_bank
+
+    return load_cookout_bank()
+
+
+def _real_concepts(bank: Any) -> dict[str, Any]:
+    from wixy_server.livechat.cookout_ai import basket_payload
+
+    basket = basket_payload(bank, REAL_PICKS)
+    assert basket is not None
+    value = canned_cookout_concepts(build_concepts_prompt(basket))
+    assert value is not None
+    return value
+
+
+def _real_parse(bank: Any, obj: dict[str, Any]) -> Any:
+    return parse_concepts(json.dumps(obj), bank=bank, picked_ids=REAL_PICKS)
+
+
+class TestRealBankLexicalCases:
+    def test_the_canned_concepts_pass_against_the_real_bank(self, real_bank: Any) -> None:
+        parsed = _real_parse(real_bank, _real_concepts(real_bank))
+        assert parsed.violations == ()
+
+    def _with_description(self, bank: Any, extra: str, *, staples: list[str] | None = None) -> Any:
+        obj = _real_concepts(bank)
+        obj["concepts"][0]["description"] += " " + extra
+        if staples is not None:
+            obj["concepts"][0]["stapleIds"] = staples
+        return _real_parse(bank, obj)
+
+    @pytest.mark.parametrize("food", ["mango", "Streaky bacon", "BACON LARDONS"])
+    def test_unpicked_bank_foods_are_contraband(self, real_bank: Any, food: str) -> None:
+        parsed = self._with_description(real_bank, f"Served with {food}.")
+        assert parsed.value is None
+        assert any("does not use" in v for v in parsed.violations)
+
+    def test_peanut_butter_is_fine_but_an_extra_bare_butter_is_not(self, real_bank: Any) -> None:
+        obj = _real_concepts(real_bank)
+        concept = obj["concepts"][0]
+        used = [i for i in concept["pickedIngredientIds"] if i != "white-miso"]
+        if "peanut-butter" not in used:
+            used = [*used[:7], "peanut-butter"]
+        concept["pickedIngredientIds"] = used
+        concept["omitted"] = [
+            {"id": i, "reason": "Saved for later."} for i in REAL_PICKS if i not in used
+        ]
+        for sentence, ok in (
+            ("Peanut butter and Beef ribeye steak with salt.", True),
+            ("Peanut butter with extra butter and Beef ribeye steak.", False),
+        ):
+            concept["description"] = sentence
+            parsed = _real_parse(real_bank, obj)
+            banned = [v for v in parsed.violations if "concept a description" in v]
+            assert (banned == []) is ok, (sentence, parsed.violations)
+
+    def test_coconut_milk_is_fine_but_an_extra_bare_milk_is_not(self, real_bank: Any) -> None:
+        obj = _real_concepts(real_bank)
+        concept = obj["concepts"][0]
+        assert "coconut-milk" in concept["pickedIngredientIds"]
+        for sentence, ok in (
+            ("Coconut milk curry with Beef ribeye steak and salt.", True),
+            ("Coconut milk plus milk with Beef ribeye steak.", False),
+        ):
+            concept["description"] = sentence
+            parsed = _real_parse(real_bank, obj)
+            bad = [v for v in parsed.violations if "concept a description" in v]
+            assert (bad == []) is ok, (sentence, parsed.violations)
+
+    def test_a_fifth_undeclared_staple_in_prose_is_rejected(self, real_bank: Any) -> None:
+        four = ["butter", "plain-flour", "cooking-oil", "granulated-sugar"]
+        parsed = self._with_description(real_bank, "Finished with a splash of milk.", staples=four)
+        assert any("'Milk'" in v for v in parsed.violations)
+
+    def test_an_omitted_pick_in_prose_is_rejected_but_allowed_in_its_reason(
+        self, real_bank: Any
+    ) -> None:
+        parsed = self._with_description(real_bank, "No white miso is used here.")
+        assert any("White miso" in v for v in parsed.violations)
+        obj = _real_concepts(real_bank)
+        omitted = obj["concepts"][0]["omitted"][0]
+        name = real_bank.ingredient(omitted["id"]).name
+        omitted["reason"] = f"{name} would overpower the rest."
+        assert _real_parse(real_bank, obj).value is not None
+
+    def test_stop_words_never_hide_a_staple_name(self, real_bank: Any) -> None:
+        assert not {"butter", "flour", "milk", "oil", "sugar", "salt", "pepper"} & set(
+            real_bank.stop_words
+        )
+
+    def test_the_real_bank_validates_a_recipe_and_rejects_contraband_in_it(
+        self, real_bank: Any
+    ) -> None:
+        concept = _real_concepts(real_bank)["concepts"][0]
+        recipe = _recipe(concept)
+        assert parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept).value is not None
+        recipe["steps"][0]["text"] = "Fold in some mango."
+        assert parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept).value is None
