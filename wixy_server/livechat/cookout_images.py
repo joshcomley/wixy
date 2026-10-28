@@ -294,11 +294,15 @@ class CookoutPictureJob:
         if stale_before is not None and stale_before == float("inf"):
             stale_before = None
         now = self._clock()
-        status, generation = await anyio.to_thread.run_sync(
-            lambda: self._store.claim_cookout_pictures(
-                anchor_seq, stale_before=stale_before, now=now
+        try:
+            status, generation = await anyio.to_thread.run_sync(
+                lambda: self._store.claim_cookout_pictures(
+                    anchor_seq, stale_before=stale_before, now=now
+                )
             )
-        )
+        except Exception:
+            _LOGGER.exception("could not claim round %s's picture wait", anchor_seq)
+            return
         if status == "gave_up":
             _LOGGER.warning("cookout pictures: round %s keeps dying; giving up", anchor_seq)
             self._notifier.publish()

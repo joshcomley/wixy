@@ -1236,3 +1236,83 @@ class TestFactory:
         runner = _runner(FakeStore(), None, tmp_path)
         runner.prepare_directory()
         assert (tmp_path / "cookout-jobs").is_dir()
+
+
+# -- checkpoint 2 fold-ins (M1, M2, M4, L5, L8) ------------------------------------------
+
+
+class TestFoldIns:
+    def test_m2_malformed_types_are_violations_not_crashes(self) -> None:
+        bads: list[Any] = [[], {}, ["a"], 7]
+        for bad in bads:
+            obj = canned_concepts_obj()
+            obj["concepts"][0]["dishType"] = bad
+            obj["concepts"][1]["technique"] = bad
+            parsed = _parse(obj)
+            assert parsed.value is None
+            assert any("dishType must be one of" in v for v in parsed.violations)
+        obj = canned_concepts_obj()
+        obj["concepts"][0]["id"] = ["a"]
+        assert _parse(obj).value is None
+
+    def test_l8_a_repeated_id_in_a_step_is_deduplicated_not_rejected(self) -> None:
+        recipe = _recipe(_concept())
+        first = recipe["steps"][0]["uses"][0]
+        recipe["steps"][0]["uses"] = [first, first, *recipe["steps"][0]["uses"]]
+        parsed = _parse_recipe(recipe)
+        assert parsed.value is not None
+        assert parsed.value["steps"][0]["uses"].count(first) == 1
+
+    def test_l8_repeated_ids_elsewhere_are_still_rejected(self) -> None:
+        obj = canned_concepts_obj()
+        obj["concepts"][0]["pickedIngredientIds"].append(
+            obj["concepts"][0]["pickedIngredientIds"][0]
+        )
+        assert any("must not repeat" in v for v in _parse(obj).violations)
+
+    def test_m1_a_rejected_resumed_run_is_failed_not_repaired_again(self, tmp_path: Path) -> None:
+        bad = json.dumps({"concepts": []})
+        state = FakeCmdState(chat_spawn_plans=[FakeSpawnPlan(response_text=bad)])
+        client = _client(state)
+        store = FakeStore()
+
+        async def go() -> None:
+            run = await client.spawn_run(
+                caller=CONCEPTS_CALLER,
+                prompt="the repair run, in a previous process",
+                model="m",
+                effort="medium",
+                cwd="/x",
+                timeout_secs=300,
+                disallowed_tools=[],
+            )
+            store.add_round(run_id=run.run_id)
+            await _run_with_group(_runner(store, client, tmp_path).resume)
+
+        anyio.run(go)
+        assert store.rounds[1]["concepts"] == "failed"
+        assert len(state.chat_spawn_runs) == 1  # no second repair spawned
+
+    def test_m4_no_early_retry_after_a_repair_was_issued(self, tmp_path: Path) -> None:
+        bad = json.dumps({"concepts": []})
+        state = FakeCmdState(
+            chat_spawn_plans=[
+                FakeSpawnPlan(response_text=bad),
+                FakeSpawnPlan(final_status="error"),
+            ]
+        )
+        store = FakeStore()
+        store.add_round()
+        _drive_concepts(_runner(store, _client(state), tmp_path))
+        assert store.rounds[1]["concepts"] == "failed"
+        assert len(state.chat_spawn_runs) == 2  # the run and ONE repair; nothing respawned
+
+    def test_l5_a_pending_job_past_its_deadline_fails_without_spawning(
+        self, tmp_path: Path
+    ) -> None:
+        state = FakeCmdState()
+        store = FakeStore()
+        store.add_round()["concepts_deadline_at"] = time.time() - 5
+        _drive_concepts(_runner(store, _client(state), tmp_path))
+        assert store.rounds[1]["concepts"] == "failed"
+        assert not state.chat_spawn_runs
