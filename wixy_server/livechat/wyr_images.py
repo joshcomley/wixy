@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import logging
 import os
+import random
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -81,6 +83,8 @@ IMAGE_MODELS: dict[str, ImageModelConfig] = {
 }
 DEFAULT_IMAGE_MODEL = "krea2-turbo-nvfp4"
 FILE_PREFIX = "wyr_"
+SLOT_TAGS = ("a", "b", "c")
+"""Output-name suffix of sampling chains 0, 1, 2 (`<prefix>_a`, `_b`, `_c`; SaveImage 16/26/36)."""
 
 _SUBMIT_TIMEOUT_S = 30.0
 _DOWNLOAD_TIMEOUT_S = 60.0
@@ -326,6 +330,32 @@ class ComfyImageGenerator:
         """Render both options' scenes; returns the two downloaded PNG paths inside
         `out_dir` (which must exist). Raises `ImageGenerationError` on any failure —
         nothing partial is returned."""
+        paths = self.generate_many([prompt_a, prompt_b], out_dir, seeds=[seed_a, seed_b])
+        first, second = paths
+        if first is None or second is None:
+            made = [tag for tag, path in zip(SLOT_TAGS, paths, strict=False) if path is not None]
+            raise ImageGenerationError(f"missing outputs: {made}")
+        return first, second
+
+    def generate_many(
+        self,
+        prompts: Sequence[str],
+        out_dir: Path,
+        *,
+        seeds: Sequence[int] | None = None,
+    ) -> list[Path | None]:
+        """Render `1..3` prompts in ONE `/prompt` submission (one sampling chain each, sharing the
+        loaded UNET/CLIP/VAE) and return one downloaded PNG path per prompt inside `out_dir`
+        (which must exist), `None` for a slot whose picture ComfyUI did not produce or whose
+        download failed. A whole-run failure (submit refused or unreachable, a failed or timed-out
+        generation, an output-directory mismatch, no picture at all) raises
+        `ImageGenerationError`. Slot `i` is written as `<prefix>_<a|b|c>`."""
+        if not 1 <= len(prompts) <= len(SLOT_TAGS):
+            raise ValueError(f"generate_many takes 1..{len(SLOT_TAGS)} prompts, got {len(prompts)}")
+        if seeds is None:
+            seeds = [random.SystemRandom().randrange(2**32) for _ in prompts]
+        elif len(seeds) != len(prompts):
+            raise ValueError("generate_many needs one seed per prompt")
         cfg = self._config
         prefix = f"{FILE_PREFIX}{uuid.uuid4().hex[:12]}"
         graph: dict[str, dict[str, object]] = {
@@ -339,7 +369,9 @@ class ComfyImageGenerator:
             },
             "3": {"class_type": "VAELoader", "inputs": {"vae_name": cfg.vae}},
         }
-        for tag, prompt, seed, base in (("a", prompt_a, seed_a, 10), ("b", prompt_b, seed_b, 20)):
+        for index, (prompt, seed) in enumerate(zip(prompts, seeds, strict=True)):
+            tag = SLOT_TAGS[index]
+            base = 10 * (index + 1)
             graph[str(base + 1)] = {
                 "class_type": "CLIPTextEncode",
                 "inputs": {"text": prompt, "clip": ["2", 0]},
@@ -375,6 +407,7 @@ class ComfyImageGenerator:
                 "class_type": "SaveImage",
                 "inputs": {"images": [str(base + 5), 0], "filename_prefix": f"{prefix}_{tag}"},
             }
+        wanted = SLOT_TAGS[: len(prompts)]
 
         with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
             prompt_id: str | None = None
@@ -422,15 +455,14 @@ class ComfyImageGenerator:
                     for node_out in entry.get("outputs", {}).values():
                         for image in node_out.get("images", []):
                             filename = image.get("filename", "")
-                            if filename.startswith(f"{prefix}_a"):
-                                images["a"] = filename
-                            elif filename.startswith(f"{prefix}_b"):
-                                images["b"] = filename
+                            for tag in wanted:
+                                if filename.startswith(f"{prefix}_{tag}"):
+                                    images[tag] = filename
                     break
                 else:
                     raise ImageGenerationError("generation timed out")
-                if "a" not in images or "b" not in images:
-                    raise ImageGenerationError(f"missing outputs: {sorted(images)}")
+                if not images:
+                    raise ImageGenerationError("missing outputs: none")
                 if self._output_dir is not None and not all(
                     (self._output_dir / name).is_file() for name in images.values()
                 ):
@@ -444,21 +476,35 @@ class ComfyImageGenerator:
                     )
                     raise ImageGenerationError("output directory mismatch")
 
-                paths: dict[str, Path] = {}
-                for tag in ("a", "b"):
+                paths: list[Path | None] = []
+                downloaded = 0
+                for tag in wanted:
+                    if tag not in images:
+                        paths.append(None)
+                        continue
                     try:
                         view = client.get(
                             "/view",
                             params={"filename": images[tag], "subfolder": "", "type": "output"},
                             timeout=_DOWNLOAD_TIMEOUT_S,
                         )
+                        usable = view.status_code == 200 and bool(view.content)
                     except httpx.HTTPError as exc:
-                        raise ImageGenerationError(f"download failed: {exc}") from exc
-                    if view.status_code != 200 or not view.content:
-                        raise ImageGenerationError(f"download refused: HTTP {view.status_code}")
+                        _LOGGER.warning("wyr: download of slot %s failed: %s", tag, exc)
+                        paths.append(None)
+                        continue
+                    if not usable:
+                        _LOGGER.warning(
+                            "wyr: download of slot %s refused: HTTP %s", tag, view.status_code
+                        )
+                        paths.append(None)
+                        continue
                     target = out_dir / f"{prefix}_{tag}.png"
                     target.write_bytes(view.content)
-                    paths[tag] = target
-                return paths["a"], paths["b"]
+                    paths.append(target)
+                    downloaded += 1
+                if downloaded == 0:
+                    raise ImageGenerationError("download failed: no picture could be fetched")
+                return paths
             finally:
                 self._forget_run(client, prompt_id, prefix, cancel=not completed)
