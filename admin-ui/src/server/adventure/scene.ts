@@ -137,6 +137,8 @@ export interface Hud {
   readonly animating: boolean;
   /** A roulette is flickering (the idle-lock wait for it is capped by the pane). */
   readonly roulette: boolean;
+  /** The other person's finger is on the globe right now (their live swipe is being shown). */
+  readonly remote: boolean;
 }
 
 /** A spin the person just made, for the pane to post. */
@@ -1152,6 +1154,7 @@ export class AdventureScene {
       interactive,
       animating,
       roulette,
+      remote: remoteDown,
     };
   }
 

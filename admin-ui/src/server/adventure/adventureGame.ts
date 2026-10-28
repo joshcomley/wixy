@@ -186,6 +186,8 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const lit = el("div", "wx-srv-adv-lit");
   lit.setAttribute("aria-live", "polite");
   lit.append(litName, litSub);
+  // The overlays start invisible (the first frame would otherwise flash them while their fade-out runs).
+  for (const overlay of [hint, toast, nearest, lit]) overlay.dataset["show"] = "0";
   const backButton = button("wx-srv-adv-chip wx-srv-adv-back", "Back to the place", "Back to the place", () => scene?.backToPlace(clock.now()));
   backButton.hidden = true;
   const note = el("div", "wx-srv-adv-note");
@@ -609,6 +611,8 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     setAttr("country", pane, "data-country", view?.country?.chosen?.id ?? "");
     setAttr("place", pane, "data-place", view?.destination?.chosen?.id ?? "");
     setAttr("packState", pane, "data-pack-state", view?.pack.state ?? "");
+    setAttr("remote", pane, "data-remote", hud.remote ? "1" : "0");
+    setAttr("map", pane, "data-map", renderer === null ? "" : `${renderer.mapStyle}${renderer.textured ? "-textured" : ""}`);
     void nowMs;
   }
 

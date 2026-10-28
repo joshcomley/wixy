@@ -5647,9 +5647,12 @@ video.wx-srv-gallery-media {
   .wx-srv-adv-title-globe {
     display: none;
   }
+  .wx-srv-adv-bar-actions {
+    gap: 3px;
+  }
   .wx-srv-adv-chip {
-    padding: 6px 8px;
-    font-size: 12.5px;
+    padding: 6px 7px;
+    font-size: 12px;
   }
   .wx-srv-adv-hint-main {
     font-size: 16.5px;
