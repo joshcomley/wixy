@@ -24,308 +24,308 @@ Ficelle | thin baguette | base | baguette | uncommon | A slender French stick wi
 Batard | bâtard | base | baguette | uncommon | A short, fat French loaf with a tender, open crumb
 Pain de campagne | country loaf | base | sourdough | uncommon | Rustic French country loaf with a mild tang
 Sourdough loaf | sourdough bread | base | sourdough | everyday | Tangy, chewy and blistered, brilliant under avocado or cheese
-Rye sourdough | | base | sourdough | uncommon | Deep, sour and earthy, lovely with smoked fish
-Seeded sourdough | | base | sourdough | uncommon | Tangy crumb studded with a mix of toasted seeds
-Wholemeal sourdough | | base | sourdough | uncommon | Dense, tangy and nutty, hearty under soup
+Rye sourdough |  | base | sourdough | uncommon | Deep, sour and earthy, lovely with smoked fish
+Seeded sourdough |  | base | sourdough | uncommon | Tangy crumb studded with a mix of toasted seeds
+Wholemeal sourdough |  | base | sourdough | uncommon | Dense, tangy and nutty, hearty under soup
 Sourdough boule | boule | base | sourdough | uncommon | A round artisan loaf with a deeply caramelised crust
 Ciabatta | ciabatta loaf | base | italian-bread | everyday | Holey Italian slipper bread, great for panini and dipping
-Ciabatta roll | | base | italian-bread | everyday | Individual chewy, crusty roll that begs for fillings
+Ciabatta roll |  | base | italian-bread | everyday | Individual chewy, crusty roll that begs for fillings
 Focaccia | focaccia bread | base | italian-bread | uncommon | Dimpled olive oil bread sprinkled with sea salt and rosemary
 Pane carasau | carasau; music paper bread | base | flatbread | exotic | Wafer-thin crisp Sardinian flatbread that shatters beautifully
 Grissini | breadsticks | base | crisp-bread | uncommon | Crisp Italian breadsticks, good with cured meats
-Piadina | | base | flatbread | uncommon | Thin Italian flatbread, griddled and folded round fillings
-Pizza base | | base | pizza-base | everyday | Ready-rolled round to top with sauce, cheese and plenty more
-Thin and crispy pizza base | | base | pizza-base | everyday | Cracker-thin base that bakes up crisp at the edges
-Deep pan pizza base | | base | pizza-base | everyday | Thick and doughy base with a golden, fried-bottomed crust
-Sourdough pizza base | | base | pizza-base | uncommon | Chewy, tangy, blistered base for a proper pizzeria pie
-Pizza dough ball | | base | pizza-dough | uncommon | Fresh dough to stretch by hand and bake in a hot oven
-Calzone dough | | base | pizza-dough | uncommon | Dough ready to fold over a molten filling
+Piadina |  | base | flatbread | uncommon | Thin Italian flatbread, griddled and folded round fillings
+Pizza base |  | base | pizza-base | everyday | Ready-rolled round to top with sauce, cheese and plenty more
+Thin and crispy pizza base |  | base | pizza-base | everyday | Cracker-thin base that bakes up crisp at the edges
+Deep pan pizza base |  | base | pizza-base | everyday | Thick and doughy base with a golden, fried-bottomed crust
+Sourdough pizza base |  | base | pizza-base | uncommon | Chewy, tangy, blistered base for a proper pizzeria pie
+Pizza dough ball |  | base | pizza-dough | uncommon | Fresh dough to stretch by hand and bake in a hot oven
+Calzone dough |  | base | pizza-dough | uncommon | Dough ready to fold over a molten filling
 Crumpet | crumpets | base | griddle-bread | everyday | Spongy and pocked, designed to soak up melted butter
 English muffin | breakfast muffin | base | griddle-bread | everyday | Split, toast and top with eggs or smoked salmon
-Pikelet | | base | griddle-bread | uncommon | A thinner cousin of the crumpet, griddled and buttered
-Welsh cake | | base | griddle-bread | uncommon | Sweet griddled cake with currants, served warm
+Pikelet |  | base | griddle-bread | uncommon | A thinner cousin of the crumpet, griddled and buttered
+Welsh cake |  | base | griddle-bread | uncommon | Sweet griddled cake with currants, served warm
 Potato farl | potato bread | base | griddle-bread | uncommon | Griddled potato bread, fried golden for an Ulster fry
 Soda bread | Irish soda bread | base | quick-bread | everyday | Crumbly, tangy Irish loaf made without yeast
-Cornbread | | base | quick-bread | uncommon | Golden, crumbly and slightly sweet, perfect with chilli
+Cornbread |  | base | quick-bread | uncommon | Golden, crumbly and slightly sweet, perfect with chilli
 Scone | scones | base | quick-bread | everyday | Crumbly and light, split and heaped with jam and cream
-Hot cross bun | | base | enriched-bread | everyday | Spiced, fruity and crossed, best toasted at Easter
-Chelsea bun | | base | enriched-bread | uncommon | Sticky spiral bun with dried fruit and a sugar glaze
+Hot cross bun |  | base | enriched-bread | everyday | Spiced, fruity and crossed, best toasted at Easter
+Chelsea bun |  | base | enriched-bread | uncommon | Sticky spiral bun with dried fruit and a sugar glaze
 Bagel | plain bagel | base | bagel | everyday | Dense, chewy and boiled, made for cream cheese and salmon
-Sesame bagel | | base | bagel | everyday | Chewy bagel with a toasted sesame seed crust
-Everything bagel | | base | bagel | uncommon | Crusted with seeds, onion and garlic for maximum savour
+Sesame bagel |  | base | bagel | everyday | Chewy bagel with a toasted sesame seed crust
+Everything bagel |  | base | bagel | uncommon | Crusted with seeds, onion and garlic for maximum savour
 Pumpernickel | pumpernickel bread | base | rye-bread | uncommon | Dark, dense, slow-baked German rye with a hint of sweetness
-Rye bread | | base | rye-bread | everyday | Earthy and dense, lovely with pickles and smoked fish
+Rye bread |  | base | rye-bread | everyday | Earthy and dense, lovely with pickles and smoked fish
 Danish rye bread | rugbrod; rugbrød | base | rye-bread | uncommon | Dark seeded Danish loaf, the base for open sandwiches
 Vollkornbrot | German wholegrain rye | base | rye-bread | exotic | Dense wholegrain German loaf packed with seeds
-Spelt bread | | base | specialty-bread | uncommon | Nutty, easy-to-slice loaf with a gentle sweetness
+Spelt bread |  | base | specialty-bread | uncommon | Nutty, easy-to-slice loaf with a gentle sweetness
 Malt loaf | malted fruit loaf | base | specialty-bread | uncommon | Sticky, chewy and sweet, lovely sliced with butter
-Fruit loaf | | base | specialty-bread | uncommon | Sliced loaf with raisins, wonderful toasted
-Gluten-free white bread | | base | specialty-bread | uncommon | Soft sandwich slices that toast surprisingly well
-Cheese and onion loaf | | base | specialty-bread | uncommon | Savoury loaf studded with melted cheddar and onion
-Olive bread | | base | specialty-bread | uncommon | Mediterranean loaf scattered with salty olives
-Walnut bread | | base | specialty-bread | uncommon | Nutty, rustic loaf that pairs beautifully with cheese
-Cranberry and walnut sourdough | | base | specialty-bread | exotic | Tangy sourdough dotted with sweet-tart fruit and toasted nuts
+Fruit loaf |  | base | specialty-bread | uncommon | Sliced loaf with raisins, wonderful toasted
+Gluten-free white bread |  | base | specialty-bread | uncommon | Soft sandwich slices that toast surprisingly well
+Cheese and onion loaf |  | base | specialty-bread | uncommon | Savoury loaf studded with melted cheddar and onion
+Olive bread |  | base | specialty-bread | uncommon | Mediterranean loaf scattered with salty olives
+Walnut bread |  | base | specialty-bread | uncommon | Nutty, rustic loaf that pairs beautifully with cheese
+Cranberry and walnut sourdough |  | base | specialty-bread | exotic | Tangy sourdough dotted with sweet-tart fruit and toasted nuts
 Challah | challah bread | base | enriched-bread | uncommon | Braided golden loaf, soft and slightly sweet
 Milk bread | shokupan | base | enriched-bread | uncommon | Feather-soft Japanese loaf, wonderful as thick toast
-Hokkaido milk toast | | base | enriched-bread | exotic | Cloud-like, creamy slices that pull apart in layers
+Hokkaido milk toast |  | base | enriched-bread | exotic | Cloud-like, creamy slices that pull apart in layers
 Bao bun | steamed bun | base | asian-bun | uncommon | Fluffy steamed bun for folding around glazed pork
 Mantou | steamed bread | base | asian-bun | uncommon | Plain Chinese steamed bun, soft and faintly sweet
-Wholemeal pitta | | base | pocket-bread | everyday | Nutty pocket bread for stuffing with salad and meats
-Mini pitta | | base | pocket-bread | everyday | Little pockets perfect for dips and filling
-Lebanese flatbread | | base | flatbread | uncommon | Thin, soft round bread for mezze and wraps
+Wholemeal pitta |  | base | pocket-bread | everyday | Nutty pocket bread for stuffing with salad and meats
+Mini pitta |  | base | pocket-bread | everyday | Little pockets perfect for dips and filling
+Lebanese flatbread |  | base | flatbread | uncommon | Thin, soft round bread for mezze and wraps
 Khubz | Arabic bread | base | flatbread | uncommon | Soft Middle Eastern flatbread, ideal for scooping
-Lavash | | base | flatbread | uncommon | Thin, pliable Armenian flatbread, perfect for rolling
+Lavash |  | base | flatbread | uncommon | Thin, pliable Armenian flatbread, perfect for rolling
 Manakish | man'oushe | base | flatbread | exotic | Levantine flatbread with a thyme and sesame topping
-Peshwari naan | | base | flatbread | uncommon | Sweet naan stuffed with almonds, coconut and sultanas
-Keema naan | | base | flatbread | exotic | Naan stuffed with spiced lamb mince
+Peshwari naan |  | base | flatbread | uncommon | Sweet naan stuffed with almonds, coconut and sultanas
+Keema naan |  | base | flatbread | exotic | Naan stuffed with spiced lamb mince
 Paratha | parantha | base | flatbread | uncommon | Flaky, buttery layered Indian flatbread
 Puri | poori | base | flatbread | uncommon | Puffy, deep-fried Indian bread that balloons dramatically
-Bhatura | | base | flatbread | exotic | Fluffy fried bread served with spiced chickpeas
-Dosa | | base | flatbread | exotic | Crisp South Indian fermented crepe for filling or dipping
-Appam | | base | flatbread | exotic | Lacy-edged fermented rice pancake with a soft centre
-Injera | | base | flatbread | exotic | Spongy, sour Ethiopian flatbread used as plate and spoon
-Roti canai | | base | flatbread | uncommon | Flaky, stretchy Malaysian flatbread, perfect for curry sauce
+Bhatura |  | base | flatbread | exotic | Fluffy fried bread served with spiced chickpeas
+Dosa |  | base | flatbread | exotic | Crisp South Indian fermented crepe for filling or dipping
+Appam |  | base | flatbread | exotic | Lacy-edged fermented rice pancake with a soft centre
+Injera |  | base | flatbread | exotic | Spongy, sour Ethiopian flatbread used as plate and spoon
+Roti canai |  | base | flatbread | uncommon | Flaky, stretchy Malaysian flatbread, perfect for curry sauce
 Soft flour tortilla | flour tortilla | base | tortilla | everyday | Soft, foldable wrap for burritos and fajitas
-Corn tortilla | | base | tortilla | everyday | Earthy, corn-scented tortilla for tacos
-Wholemeal wrap | | base | tortilla | everyday | Wholesome wrap that rolls up a packed lunch neatly
-Spinach wrap | | base | tortilla | uncommon | Green-tinged wrap that gives sandwiches a vibrant look
-Tomato wrap | | base | tortilla | uncommon | Red-tinted wrap with a gentle sweetness
-Mini tortilla | | base | tortilla | everyday | Small tortillas for snacks and bite-sized tacos
+Corn tortilla |  | base | tortilla | everyday | Earthy, corn-scented tortilla for tacos
+Wholemeal wrap |  | base | tortilla | everyday | Wholesome wrap that rolls up a packed lunch neatly
+Spinach wrap |  | base | tortilla | uncommon | Green-tinged wrap that gives sandwiches a vibrant look
+Tomato wrap |  | base | tortilla | uncommon | Red-tinted wrap with a gentle sweetness
+Mini tortilla |  | base | tortilla | everyday | Small tortillas for snacks and bite-sized tacos
 Taco shell | hard taco shell | base | taco-shell | everyday | Crunchy corn shell that holds spiced mince and salsa
-Tostada | | base | taco-shell | uncommon | Flat, crisp corn disc piled high with toppings
-Pancake wrap | | base | crepe | everyday | Thin, flexible pancake ready for sweet or savoury fillings
+Tostada |  | base | taco-shell | uncommon | Flat, crisp corn disc piled high with toppings
+Pancake wrap |  | base | crepe | everyday | Thin, flexible pancake ready for sweet or savoury fillings
 Buckwheat galette | galette bretonne | base | crepe | uncommon | Lacy buckwheat crepe from Brittany with a savoury bite
-Crepe | | base | crepe | everyday | Paper-thin French pancake, folded round anything sweet
-Blini | | base | crepe | uncommon | Small yeasted pancakes, classically topped with soured cream
-Yorkshire pudding | | base | batter-pudding | everyday | Crisp, puffed batter that catches gravy beautifully
+Crepe |  | base | crepe | everyday | Paper-thin French pancake, folded round anything sweet
+Blini |  | base | crepe | uncommon | Small yeasted pancakes, classically topped with soured cream
+Yorkshire pudding |  | base | batter-pudding | everyday | Crisp, puffed batter that catches gravy beautifully
 Chinese pancake | mandarin pancake | base | crepe | uncommon | Thin steamed pancake for rolling crispy duck
-Rice paper | | base | wrapper | uncommon | Translucent sheets that soften into fresh spring rolls
-Spring roll wrapper | | base | wrapper | uncommon | Thin sheets that fry up shatteringly crisp
-Gyoza wrapper | | base | wrapper | uncommon | Round dumpling skin that pleats and pan-fries crisp
-Wonton wrapper | | base | wrapper | uncommon | Square, silky skin for soup dumplings and deep-fried parcels
-Rye crispbread | | base | crisp-bread | everyday | Sturdy, nutty, slightly sour crispbread
+Rice paper |  | base | wrapper | uncommon | Translucent sheets that soften into fresh spring rolls
+Spring roll wrapper |  | base | wrapper | uncommon | Thin sheets that fry up shatteringly crisp
+Gyoza wrapper |  | base | wrapper | uncommon | Round dumpling skin that pleats and pan-fries crisp
+Wonton wrapper |  | base | wrapper | uncommon | Square, silky skin for soup dumplings and deep-fried parcels
+Rye crispbread |  | base | crisp-bread | everyday | Sturdy, nutty, slightly sour crispbread
 Water biscuit | water cracker | base | cracker | everyday | Plain and crisp, the gentle partner for strong cheese
-Cream cracker | | base | cracker | everyday | Light, buttery cracker, lovely with cheddar
-Oatcake | | base | cracker | everyday | Rustic Scottish oat biscuit, good with cheese
-Cheese cracker | | base | cracker | everyday | Savoury, crisp cracker with a cheddar tang
-Sesame breadsticks | | base | crisp-bread | uncommon | Slender sesame-crusted sticks for dipping
+Cream cracker |  | base | cracker | everyday | Light, buttery cracker, lovely with cheddar
+Oatcake |  | base | cracker | everyday | Rustic Scottish oat biscuit, good with cheese
+Cheese cracker |  | base | cracker | everyday | Savoury, crisp cracker with a cheddar tang
+Sesame breadsticks |  | base | crisp-bread | uncommon | Slender sesame-crusted sticks for dipping
 Matzo | matzah | base | cracker | uncommon | Crisp unleavened flatbread with a satisfying snap
 Wafer | wafer sheets | base | wafer | uncommon | Thin crisp sheets, layered with cream or sauces
 Ice cream cone | wafer cone | base | wafer | everyday | Crisp wafer cone, ready for scoops
-Ice cream cornet | | base | wafer | everyday | Classic crisp cornet for a classic 99
+Ice cream cornet |  | base | wafer | everyday | Classic crisp cornet for a classic 99
 Vol-au-vent case | vol au vent | base | pastry-case | uncommon | Ready-baked puff pastry cups for creamy fillings
-Pitta crisps | | base | cracker | everyday | Seasoned crunchy pitta shards for dips
-Pretzel roll | | base | burger-bun | uncommon | Chewy lye-bitten roll that makes a stellar sandwich
-Cinnamon roll | | base | enriched-bread | uncommon | Swirled, sticky spiral bun scented with cinnamon
-Croissant | | base | viennoiserie | everyday | Buttery, flaky crescent that shatters at the first bite
-Pain aux raisins | | base | viennoiserie | uncommon | Spiralled pastry with custard and plump raisins
-Long grain rice | | base | rice | everyday | Dependable separate grains, perfect with curry
-Basmati rice | | base | rice | everyday | Fragrant, slender grains that steam up light and fluffy
-Brown basmati rice | | base | rice | uncommon | Nutty whole grain version of the aromatic Indian rice
+Pitta crisps |  | base | cracker | everyday | Seasoned crunchy pitta shards for dips
+Pretzel roll |  | base | burger-bun | uncommon | Chewy lye-bitten roll that makes a stellar sandwich
+Cinnamon roll |  | base | enriched-bread | uncommon | Swirled, sticky spiral bun scented with cinnamon
+Croissant |  | base | viennoiserie | everyday | Buttery, flaky crescent that shatters at the first bite
+Pain aux raisins |  | base | viennoiserie | uncommon | Spiralled pastry with custard and plump raisins
+Long grain rice |  | base | rice | everyday | Dependable separate grains, perfect with curry
+Basmati rice |  | base | rice | everyday | Fragrant, slender grains that steam up light and fluffy
+Brown basmati rice |  | base | rice | uncommon | Nutty whole grain version of the aromatic Indian rice
 Jasmine rice | Thai fragrant rice | base | rice | everyday | Softly floral and slightly sticky, ideal with Thai dishes
 Brown rice | wholegrain rice | base | rice | everyday | Chewy and nutty, a wholesome bed for stir-fries
-Easy cook rice | | base | rice | everyday | Parboiled grains that stay firm and never clump
+Easy cook rice |  | base | rice | everyday | Parboiled grains that stay firm and never clump
 Pudding rice | short grain rice | base | rice | everyday | Plump, starchy grains that turn creamy in rice pudding
 Arborio rice | risotto rice | base | risotto-rice | everyday | Creamy, starchy Italian grains for risotto
-Carnaroli rice | | base | risotto-rice | uncommon | The chef's risotto rice, firm yet beautifully creamy
+Carnaroli rice |  | base | risotto-rice | uncommon | The chef's risotto rice, firm yet beautifully creamy
 Vialone nano rice | vialone nano | base | risotto-rice | exotic | Venetian rice that absorbs stock for a wavy, loose risotto
 Paella rice | bomba rice | base | paella-rice | uncommon | Spanish short grain that drinks up broth without turning mushy
-Calasparra rice | | base | paella-rice | exotic | Protected-origin Spanish rice with great absorbency
-Sushi rice | | base | sticky-rice | everyday | Short, sticky grains seasoned with vinegar
+Calasparra rice |  | base | paella-rice | exotic | Protected-origin Spanish rice with great absorbency
+Sushi rice |  | base | sticky-rice | everyday | Short, sticky grains seasoned with vinegar
 Glutinous rice | sticky rice; sweet rice | base | sticky-rice | uncommon | Sticky when steamed, essential for mango sticky rice
 Black rice | forbidden rice | base | coloured-rice | exotic | Deep purple grains with a nutty, slightly sweet taste
 Red camargue rice | camargue rice | base | coloured-rice | exotic | Chewy red-brown French rice with a nutty flavour
-Wild rice | | base | coloured-rice | uncommon | Long dark grains of an aquatic grass with a smoky chew
-Mixed wild rice | | base | coloured-rice | uncommon | Blend of white, brown and wild rice for texture
+Wild rice |  | base | coloured-rice | uncommon | Long dark grains of an aquatic grass with a smoky chew
+Mixed wild rice |  | base | coloured-rice | uncommon | Blend of white, brown and wild rice for texture
 Flattened rice | poha; rice flakes | base | rice | exotic | Flattened rice flakes for quick Indian poha
-Puffed rice | | base | rice | uncommon | Light, crisp grains for Indian snacks and bhel puri
-Pearl barley | | base | grain | everyday | Soft, chewy grains for stews and soups
-Pot barley | | base | grain | uncommon | Less polished barley with extra nutty chew
+Puffed rice |  | base | rice | uncommon | Light, crisp grains for Indian snacks and bhel puri
+Pearl barley |  | base | grain | everyday | Soft, chewy grains for stews and soups
+Pot barley |  | base | grain | uncommon | Less polished barley with extra nutty chew
 Bulgur wheat | bulgur | base | cracked-wheat | everyday | Quick-soaking cracked wheat for tabbouleh
-Cracked wheat | | base | cracked-wheat | uncommon | Coarse wheat pieces for hearty pilafs
-Freekeh | | base | grain | uncommon | Smoky roasted green wheat with a chewy bite
+Cracked wheat |  | base | cracked-wheat | uncommon | Coarse wheat pieces for hearty pilafs
+Freekeh |  | base | grain | uncommon | Smoky roasted green wheat with a chewy bite
 Farro | emmer | base | grain | uncommon | Ancient wheat that stays pleasantly chewy in salads
-Spelt grains | | base | grain | uncommon | Nutty ancient wheat for pilafs and salads
-Wheat berries | | base | grain | uncommon | Whole wheat kernels with a satisfying chew
+Spelt grains |  | base | grain | uncommon | Nutty ancient wheat for pilafs and salads
+Wheat berries |  | base | grain | uncommon | Whole wheat kernels with a satisfying chew
 Kamut | khorasan wheat | base | grain | exotic | Buttery ancient wheat grains, large and chewy
-Quinoa | | base | grain | everyday | Quick-cooking seeds with a light, nutty pop
-Red quinoa | | base | grain | uncommon | Slightly crunchier quinoa that holds its shape in salads
-Black quinoa | | base | grain | exotic | Earthier, crunchier quinoa with a dramatic colour
-Millet | | base | grain | uncommon | Tiny golden grains that steam up light and fluffy
+Quinoa |  | base | grain | everyday | Quick-cooking seeds with a light, nutty pop
+Red quinoa |  | base | grain | uncommon | Slightly crunchier quinoa that holds its shape in salads
+Black quinoa |  | base | grain | exotic | Earthier, crunchier quinoa with a dramatic colour
+Millet |  | base | grain | uncommon | Tiny golden grains that steam up light and fluffy
 Buckwheat groats | kasha | base | grain | uncommon | Toasted triangular seeds with a rich earthy flavour
-Amaranth | | base | grain | exotic | Tiny peppery seeds that cook up porridge-like
-Teff | | base | grain | exotic | Minuscule Ethiopian grain with a malty flavour
-Sorghum | | base | grain | exotic | Chewy gluten-free grain, like a tiny wheat berry
+Amaranth |  | base | grain | exotic | Tiny peppery seeds that cook up porridge-like
+Teff |  | base | grain | exotic | Minuscule Ethiopian grain with a malty flavour
+Sorghum |  | base | grain | exotic | Chewy gluten-free grain, like a tiny wheat berry
 Rolled oats | porridge oats | base | oats | everyday | Creamy porridge, flapjacks and crumble toppings
-Jumbo oats | | base | oats | everyday | Big flakes for chewy flapjacks and rustic porridge
+Jumbo oats |  | base | oats | everyday | Big flakes for chewy flapjacks and rustic porridge
 Steel-cut oats | pinhead oatmeal | base | oats | uncommon | Chewy chopped oat groats for slow, nutty porridge
-Medium oatmeal | | base | oats | uncommon | Ground oats for oatcakes and haggis
-Oat bran | | base | oats | uncommon | Fine, fibre-rich flakes to stir into porridge
-Pearl semolina | | base | semolina | everyday | Cooked into a creamy milk pudding
+Medium oatmeal |  | base | oats | uncommon | Ground oats for oatcakes and haggis
+Oat bran |  | base | oats | uncommon | Fine, fibre-rich flakes to stir into porridge
+Pearl semolina |  | base | semolina | everyday | Cooked into a creamy milk pudding
 Coarse polenta | cornmeal polenta | base | polenta | everyday | Golden maize that cooks into creamy Italian comfort
-Instant polenta | | base | polenta | everyday | Quick-cooking cornmeal ready in five minutes
-Polenta slices | | base | polenta | uncommon | Firm set polenta to grill or fry until crisp
-Fine cornmeal | | base | cornmeal | uncommon | Soft maize meal for cakes and cornbread
+Instant polenta |  | base | polenta | everyday | Quick-cooking cornmeal ready in five minutes
+Polenta slices |  | base | polenta | uncommon | Firm set polenta to grill or fry until crisp
+Fine cornmeal |  | base | cornmeal | uncommon | Soft maize meal for cakes and cornbread
 Grits | hominy grits | base | cornmeal | uncommon | Southern coarse maize, creamy with butter and cheese
-Hominy | | base | cornmeal | exotic | Nixtamalised maize kernels with a pleasantly chewy bite
-Masa harina | | base | cornmeal | exotic | Lime-treated maize flour for tortillas and tamales
+Hominy |  | base | cornmeal | exotic | Nixtamalised maize kernels with a pleasantly chewy bite
+Masa harina |  | base | cornmeal | exotic | Lime-treated maize flour for tortillas and tamales
 Plain flour | all-purpose flour | base | wheat-flour | everyday | Everyday soft flour for sauces, batters and cakes
-Self-raising flour | | accent | wheat-flour | everyday | Flour with raising agent built in, for light sponges
+Self-raising flour |  | accent | wheat-flour | everyday | Flour with raising agent built in, for light sponges
 Strong white bread flour | bread flour | accent | wheat-flour | everyday | High-protein flour for chewy, well-risen loaves
-Strong wholemeal flour | | accent | wheat-flour | everyday | Wholegrain flour for rustic, nutty loaves
-Wholemeal plain flour | | accent | wheat-flour | uncommon | Nutty flour for rustic pastry and bakes
+Strong wholemeal flour |  | accent | wheat-flour | everyday | Wholegrain flour for rustic, nutty loaves
+Wholemeal plain flour |  | accent | wheat-flour | uncommon | Nutty flour for rustic pastry and bakes
 Italian 00 flour | doppio zero | accent | wheat-flour | uncommon | Ultra-fine flour for silky pasta and pizza dough
-Rye flour | | accent | wheat-flour | uncommon | Earthy dark flour for dense sourdough
-Spelt flour | | accent | wheat-flour | uncommon | Mild, nutty flour for cakes and breads
+Rye flour |  | accent | wheat-flour | uncommon | Earthy dark flour for dense sourdough
+Spelt flour |  | accent | wheat-flour | uncommon | Mild, nutty flour for cakes and breads
 Durum wheat semolina | semolina | accent | wheat-flour | everyday | Gritty golden flour for pasta, gnocchi and dusting
-Rice flour | | accent | gluten-free-flour | uncommon | Fine flour for crisp tempura and shortbread
-Glutinous rice flour | | accent | gluten-free-flour | exotic | Flour that makes chewy mochi and sweet dumplings
+Rice flour |  | accent | gluten-free-flour | uncommon | Fine flour for crisp tempura and shortbread
+Glutinous rice flour |  | accent | gluten-free-flour | exotic | Flour that makes chewy mochi and sweet dumplings
 Chickpea flour | gram flour; besan | accent | gluten-free-flour | uncommon | Earthy flour for pakoras and socca
-Buckwheat flour | | accent | gluten-free-flour | uncommon | Nutty flour for blinis, pancakes and soba
-Corn flour | | accent | starch | everyday | Fine maize starch for thickening and crisp coatings
+Buckwheat flour |  | accent | gluten-free-flour | uncommon | Nutty flour for blinis, pancakes and soba
+Corn flour |  | accent | starch | everyday | Fine maize starch for thickening and crisp coatings
 Potato starch | potato flour | accent | starch | uncommon | Silky thickener for glossy sauces and crisp coatings
-Tapioca starch | | accent | starch | uncommon | Cassava starch for chewy breads and pearls
-Arrowroot | | accent | starch | exotic | Gentle clear thickener that stays glossy
-Baking powder | | accent | raising-agent | everyday | The lift in cakes and scones
+Tapioca starch |  | accent | starch | uncommon | Cassava starch for chewy breads and pearls
+Arrowroot |  | accent | starch | exotic | Gentle clear thickener that stays glossy
+Baking powder |  | accent | raising-agent | everyday | The lift in cakes and scones
 Bicarbonate of soda | baking soda | accent | raising-agent | everyday | Alkaline raising agent for soda bread and gingerbread
-Fresh yeast | | accent | raising-agent | uncommon | Soft, crumbly block for a lively rise
+Fresh yeast |  | accent | raising-agent | uncommon | Soft, crumbly block for a lively rise
 Dried yeast | active dry yeast | accent | raising-agent | everyday | Convenient granules to set dough rising
 Fine breadcrumbs | dried breadcrumbs | base | crumb | everyday | Crisp coating for fish cakes and croquettes
-Fresh white breadcrumbs | | base | crumb | everyday | Soft crumbs for stuffing and toppings
+Fresh white breadcrumbs |  | base | crumb | everyday | Soft crumbs for stuffing and toppings
 Panko breadcrumbs | panko | base | crumb | everyday | Light, airy Japanese flakes for extra crispness
-Matzo meal | | base | crumb | uncommon | Fine ground matzo for dumplings and coatings
-Croutons | | base | crumb | everyday | Golden crunchy bread cubes for soup and salad
+Matzo meal |  | base | crumb | uncommon | Fine ground matzo for dumplings and coatings
+Croutons |  | base | crumb | everyday | Golden crunchy bread cubes for soup and salad
 Suet | shredded suet | base | pastry | uncommon | Hard fat for dumplings and steamed puddings
-Choux pastry | | base | pastry | uncommon | Light, airy pastry for eclairs and profiteroles
+Choux pastry |  | base | pastry | uncommon | Light, airy pastry for eclairs and profiteroles
 Kataifi pastry | kadaif | base | pastry | exotic | Shredded filo strands for crisp, golden desserts
 Brick pastry | feuille de brick | base | pastry | exotic | Thin North African pastry leaf for crisp parcels
 Pie crust | pie shell | base | pastry-case | everyday | Ready-made case waiting for a hearty filling
-Suet dumplings | | base | pastry | uncommon | Light herbed dumplings to float on stew
-Spaghetti | | base | long-pasta | everyday | The classic long strand for bolognese, carbonara and aglio e olio
+Suet dumplings |  | base | pastry | uncommon | Light herbed dumplings to float on stew
+Spaghetti |  | base | long-pasta | everyday | The classic long strand for bolognese, carbonara and aglio e olio
 Wholewheat spaghetti | wholemeal spaghetti | base | wholewheat-pasta | everyday | Nutty, hearty strands with extra bite
-Spaghettini | | base | thin-long-pasta | uncommon | Slimmer spaghetti that suits light oil and seafood sauces
-Linguine | | base | flat-long-pasta | everyday | Flat ribbons that cling to clams, pesto and lemon
-Tagliatelle | | base | ribbon-pasta | everyday | Silky egg ribbons made for ragu
-Fettuccine | | base | ribbon-pasta | everyday | Broad ribbons that hold creamy Alfredo sauce well
-Pappardelle | | base | wide-ribbon-pasta | uncommon | Wide ribbons for slow-cooked game and beef ragu
-Tagliolini | | base | thin-ribbon-pasta | uncommon | Fine egg ribbons, wonderful with butter and truffle
-Bucatini | | base | hollow-long-pasta | uncommon | Thick hollow spaghetti that soaks up amatriciana
-Vermicelli pasta | | base | thin-long-pasta | uncommon | Thin nests of pasta for broths and light sauces
+Spaghettini |  | base | thin-long-pasta | uncommon | Slimmer spaghetti that suits light oil and seafood sauces
+Linguine |  | base | flat-long-pasta | everyday | Flat ribbons that cling to clams, pesto and lemon
+Tagliatelle |  | base | ribbon-pasta | everyday | Silky egg ribbons made for ragu
+Fettuccine |  | base | ribbon-pasta | everyday | Broad ribbons that hold creamy Alfredo sauce well
+Pappardelle |  | base | wide-ribbon-pasta | uncommon | Wide ribbons for slow-cooked game and beef ragu
+Tagliolini |  | base | thin-ribbon-pasta | uncommon | Fine egg ribbons, wonderful with butter and truffle
+Bucatini |  | base | hollow-long-pasta | uncommon | Thick hollow spaghetti that soaks up amatriciana
+Vermicelli pasta |  | base | thin-long-pasta | uncommon | Thin nests of pasta for broths and light sauces
 Angel hair pasta | capellini | base | thin-long-pasta | uncommon | Delicate strands that cook in a flash
-Capellini d'angelo | | base | thin-long-pasta | exotic | Hair-fine pasta, cooked barely a minute in broth
+Capellini d'angelo |  | base | thin-long-pasta | exotic | Hair-fine pasta, cooked barely a minute in broth
 Spaghetti alla chitarra | chitarra | base | square-long-pasta | exotic | Square-cut strands from Abruzzo that carry hearty sauce
-Trenette | | base | flat-long-pasta | exotic | Ligurian ribbons, classically served with pesto
+Trenette |  | base | flat-long-pasta | exotic | Ligurian ribbons, classically served with pesto
 Mafaldine | reginette | base | wide-ribbon-pasta | exotic | Ruffled-edged ribbons that catch every drop of sauce
 Penne | penne rigate | base | tube-pasta | everyday | Ridged quills that trap chunky sauces
-Penne lisce | | base | tube-pasta | uncommon | Smooth quills, a good match for creamy sauces
-Rigatoni | | base | tube-pasta | everyday | Wide, ridged tubes for baked dishes and meaty sauces
-Mezze maniche | | base | tube-pasta | exotic | Short fat tubes, a chunky partner for rich sauces
+Penne lisce |  | base | tube-pasta | uncommon | Smooth quills, a good match for creamy sauces
+Rigatoni |  | base | tube-pasta | everyday | Wide, ridged tubes for baked dishes and meaty sauces
+Mezze maniche |  | base | tube-pasta | exotic | Short fat tubes, a chunky partner for rich sauces
 Maccheroni | macaroni | base | elbow-pasta | everyday | Small curved tubes, the heart of cheesy bakes
-Elbow macaroni | | base | elbow-pasta | everyday | Short curved tubes for mac and cheese
-Ziti | | base | tube-pasta | uncommon | Smooth medium tubes, classic baked with ricotta
-Paccheri | | base | tube-pasta | exotic | Giant smooth tubes that swallow chunks of seafood
-Cannelloni | | base | stuffing-pasta | uncommon | Large tubes to fill with spinach and ricotta and bake
-Manicotti | | base | stuffing-pasta | uncommon | Ridged tubes for stuffing and baking under sauce
-Fusilli | | base | spiral-pasta | everyday | Tight spirals that clutch pesto and vegetables
-Fusilli lunghi | | base | spiral-pasta | exotic | Long spring-like strands, playful and sauce-hungry
-Rotini | | base | spiral-pasta | everyday | Tightly twisted spirals perfect for pasta salad
-Eliche | | base | spiral-pasta | uncommon | Chunky propeller spirals with great sauce grip
+Elbow macaroni |  | base | elbow-pasta | everyday | Short curved tubes for mac and cheese
+Ziti |  | base | tube-pasta | uncommon | Smooth medium tubes, classic baked with ricotta
+Paccheri |  | base | tube-pasta | exotic | Giant smooth tubes that swallow chunks of seafood
+Cannelloni |  | base | stuffing-pasta | uncommon | Large tubes to fill with spinach and ricotta and bake
+Manicotti |  | base | stuffing-pasta | uncommon | Ridged tubes for stuffing and baking under sauce
+Fusilli |  | base | spiral-pasta | everyday | Tight spirals that clutch pesto and vegetables
+Fusilli lunghi |  | base | spiral-pasta | exotic | Long spring-like strands, playful and sauce-hungry
+Rotini |  | base | spiral-pasta | everyday | Tightly twisted spirals perfect for pasta salad
+Eliche |  | base | spiral-pasta | uncommon | Chunky propeller spirals with great sauce grip
 Farfalle | bow tie pasta | base | shaped-pasta | everyday | Pretty butterfly bows, good with cream and peas
 Conchiglie | pasta shells | base | shell-pasta | everyday | Hollow shells that cup sauce and little bits of filling
 Conchiglioni | jumbo shells | base | shell-pasta | uncommon | Giant shells for stuffing and baking
 Orecchiette | little ears | base | shaped-pasta | uncommon | Puglian ear-shaped cups, classically with broccoli and sausage
-Cavatappi | | base | spiral-pasta | uncommon | Corkscrew tubes that hold on to cheese sauce
-Gemelli | | base | spiral-pasta | uncommon | Twin strands twisted into a gentle spiral
-Strozzapreti | | base | shaped-pasta | exotic | Hand-twisted rolls from Romagna, chewy and rustic
-Trofie | | base | shaped-pasta | exotic | Tiny twists from Liguria, the true partner of pesto
-Casarecce | | base | shaped-pasta | uncommon | Rolled S-shaped twists with a groove for sauce
-Cavatelli | | base | shaped-pasta | exotic | Small curled shells with a soft, chewy bite
-Radiatori | | base | shaped-pasta | exotic | Radiator-shaped fins that trap thick sauce
-Campanelle | | base | shaped-pasta | exotic | Bell-shaped ruffled pasta that cups cream sauces
-Gigli | | base | shaped-pasta | exotic | Lily-shaped ruffled cones for rich sauces
+Cavatappi |  | base | spiral-pasta | uncommon | Corkscrew tubes that hold on to cheese sauce
+Gemelli |  | base | spiral-pasta | uncommon | Twin strands twisted into a gentle spiral
+Strozzapreti |  | base | shaped-pasta | exotic | Hand-twisted rolls from Romagna, chewy and rustic
+Trofie |  | base | shaped-pasta | exotic | Tiny twists from Liguria, the true partner of pesto
+Casarecce |  | base | shaped-pasta | uncommon | Rolled S-shaped twists with a groove for sauce
+Cavatelli |  | base | shaped-pasta | exotic | Small curled shells with a soft, chewy bite
+Radiatori |  | base | shaped-pasta | exotic | Radiator-shaped fins that trap thick sauce
+Campanelle |  | base | shaped-pasta | exotic | Bell-shaped ruffled pasta that cups cream sauces
+Gigli |  | base | shaped-pasta | exotic | Lily-shaped ruffled cones for rich sauces
 Lumache | snail pasta | base | shell-pasta | uncommon | Snail-shaped shells that capture sauces
-Garganelli | | base | tube-pasta | exotic | Hand-rolled ridged tubes from Emilia-Romagna
-Sedanini | | base | tube-pasta | uncommon | Slim ridged tubes that suit baked pasta
-Tortiglioni | | base | tube-pasta | uncommon | Grooved spiral tubes that clasp thick sauces
-Calamarata | | base | tube-pasta | exotic | Ring-shaped pasta resembling squid, ideal with seafood
-Anelli | | base | ring-pasta | uncommon | Small rings, often found in soups
-Anelletti | | base | ring-pasta | exotic | Sicilian rings, the star of timballo
-Ditalini | | base | soup-pasta | everyday | Tiny tubes for minestrone and pasta e fagioli
-Tubetti | | base | soup-pasta | uncommon | Small tubes that perfectly suit hearty soups
+Garganelli |  | base | tube-pasta | exotic | Hand-rolled ridged tubes from Emilia-Romagna
+Sedanini |  | base | tube-pasta | uncommon | Slim ridged tubes that suit baked pasta
+Tortiglioni |  | base | tube-pasta | uncommon | Grooved spiral tubes that clasp thick sauces
+Calamarata |  | base | tube-pasta | exotic | Ring-shaped pasta resembling squid, ideal with seafood
+Anelli |  | base | ring-pasta | uncommon | Small rings, often found in soups
+Anelletti |  | base | ring-pasta | exotic | Sicilian rings, the star of timballo
+Ditalini |  | base | soup-pasta | everyday | Tiny tubes for minestrone and pasta e fagioli
+Tubetti |  | base | soup-pasta | uncommon | Small tubes that perfectly suit hearty soups
 Orzo | risoni | base | soup-pasta | everyday | Rice-shaped pasta for salads, soups and pilafs
-Stelline | | base | soup-pasta | uncommon | Tiny stars that charm in chicken broth
-Alphabet pasta | | base | soup-pasta | uncommon | Letter-shaped pasta for playful bowls of soup
-Acini di pepe | | base | soup-pasta | exotic | Peppercorn-sized beads, good in broth and pasta salad
+Stelline |  | base | soup-pasta | uncommon | Tiny stars that charm in chicken broth
+Alphabet pasta |  | base | soup-pasta | uncommon | Letter-shaped pasta for playful bowls of soup
+Acini di pepe |  | base | soup-pasta | exotic | Peppercorn-sized beads, good in broth and pasta salad
 Fregola | fregula | base | soup-pasta | exotic | Toasted Sardinian semolina pearls with a nutty chew
-Pastina | | base | soup-pasta | uncommon | Tiny pasta for broths, a childhood comfort
-Cappelletti | | base | filled-pasta | uncommon | Little hats filled with meat or cheese, served in broth
-Tortellini | | base | filled-pasta | everyday | Folded rings stuffed with cheese or meat
-Tortelloni | | base | filled-pasta | uncommon | Larger tortellini with a generous ricotta and spinach filling
-Ravioli | | base | filled-pasta | everyday | Plump square pillows with a savoury or sweet filling
-Agnolotti | | base | filled-pasta | uncommon | Piedmontese pinched parcels filled with roast meat
+Pastina |  | base | soup-pasta | uncommon | Tiny pasta for broths, a childhood comfort
+Cappelletti |  | base | filled-pasta | uncommon | Little hats filled with meat or cheese, served in broth
+Tortellini |  | base | filled-pasta | everyday | Folded rings stuffed with cheese or meat
+Tortelloni |  | base | filled-pasta | uncommon | Larger tortellini with a generous ricotta and spinach filling
+Ravioli |  | base | filled-pasta | everyday | Plump square pillows with a savoury or sweet filling
+Agnolotti |  | base | filled-pasta | uncommon | Piedmontese pinched parcels filled with roast meat
 Mezzelune | half-moon ravioli | base | filled-pasta | uncommon | Half-moon pasta stuffed with creamy fillings
-Pansotti | | base | filled-pasta | exotic | Ligurian triangles filled with wild greens
-Casoncelli | | base | filled-pasta | exotic | Bergamo's folded ravioli with a sweet-savoury filling
+Pansotti |  | base | filled-pasta | exotic | Ligurian triangles filled with wild greens
+Casoncelli |  | base | filled-pasta | exotic | Bergamo's folded ravioli with a sweet-savoury filling
 Cappellacci | cappellacci di zucca | base | filled-pasta | exotic | Ferrarese pumpkin-filled pasta hats
-Mushroom ravioli | | base | filled-pasta | uncommon | Pillows stuffed with earthy mushrooms
-Spinach and ricotta tortellini | | base | filled-pasta | everyday | Green-flecked, creamy filling in neat little rings
-Butternut squash ravioli | | base | filled-pasta | uncommon | Sweet squash filling, lovely with sage butter
+Mushroom ravioli |  | base | filled-pasta | uncommon | Pillows stuffed with earthy mushrooms
+Spinach and ricotta tortellini |  | base | filled-pasta | everyday | Green-flecked, creamy filling in neat little rings
+Butternut squash ravioli |  | base | filled-pasta | uncommon | Sweet squash filling, lovely with sage butter
 Lasagne sheets | lasagna | base | sheet-pasta | everyday | Flat sheets to layer with ragu and bechamel
-Fresh lasagne sheets | | base | sheet-pasta | uncommon | Silky egg pasta sheets, tender with no pre-cooking
+Fresh lasagne sheets |  | base | sheet-pasta | uncommon | Silky egg pasta sheets, tender with no pre-cooking
 Spinach lasagne sheets | green lasagne | base | sheet-pasta | uncommon | Green-tinted sheets for a vibrant bake
 Pasta sfoglia | egg pasta sheet | base | sheet-pasta | exotic | Hand-rolled sheet of egg pasta, as thin as silk
-Maltagliati | | base | sheet-pasta | exotic | Rough hand-cut pasta pieces, ideal for beans and broths
-Pizzoccheri | | base | ribbon-pasta | exotic | Buckwheat ribbons from Valtellina, baked with cabbage and cheese
+Maltagliati |  | base | sheet-pasta | exotic | Rough hand-cut pasta pieces, ideal for beans and broths
+Pizzoccheri |  | base | ribbon-pasta | exotic | Buckwheat ribbons from Valtellina, baked with cabbage and cheese
 Egg pasta nests | nidi | base | ribbon-pasta | uncommon | Dried ribbons curled into tidy nests
-Fresh egg tagliatelle | | base | ribbon-pasta | uncommon | Tender, golden ribbons that cook in two minutes
-Fresh spaghetti | | base | long-pasta | uncommon | Soft, springy fresh strands with lovely bite
-Gluten-free penne | | base | tube-pasta | uncommon | Tubes made from corn and rice, good in a tomato bake
-Gluten-free spaghetti | | base | long-pasta | uncommon | Long strands from rice and corn
-Red lentil pasta | | base | legume-pasta | uncommon | Earthy, protein-rich pasta with a nutty flavour
-Chickpea pasta | | base | legume-pasta | uncommon | Firm, nutty pasta made from ground chickpeas
+Fresh egg tagliatelle |  | base | ribbon-pasta | uncommon | Tender, golden ribbons that cook in two minutes
+Fresh spaghetti |  | base | long-pasta | uncommon | Soft, springy fresh strands with lovely bite
+Gluten-free penne |  | base | tube-pasta | uncommon | Tubes made from corn and rice, good in a tomato bake
+Gluten-free spaghetti |  | base | long-pasta | uncommon | Long strands from rice and corn
+Red lentil pasta |  | base | legume-pasta | uncommon | Earthy, protein-rich pasta with a nutty flavour
+Chickpea pasta |  | base | legume-pasta | uncommon | Firm, nutty pasta made from ground chickpeas
 Squid ink pasta | nero di seppia | base | flavoured-pasta | exotic | Jet-black strands with a briny kiss of the sea
-Spinach tagliatelle | | base | flavoured-pasta | uncommon | Emerald ribbons with a gentle green flavour
-Beetroot pasta | | base | flavoured-pasta | exotic | Vivid magenta ribbons with a subtle earthy sweetness
-Saffron pasta | | base | flavoured-pasta | exotic | Golden fresh pasta perfumed with saffron
+Spinach tagliatelle |  | base | flavoured-pasta | uncommon | Emerald ribbons with a gentle green flavour
+Beetroot pasta |  | base | flavoured-pasta | exotic | Vivid magenta ribbons with a subtle earthy sweetness
+Saffron pasta |  | base | flavoured-pasta | exotic | Golden fresh pasta perfumed with saffron
 Ricotta gnocchi | gnudi | base | gnocchi | uncommon | Feather-light dumplings of ricotta, barely held together
 Semolina gnocchi | gnocchi alla romana | base | gnocchi | exotic | Baked discs of semolina, cheesy and golden
-Sweet potato gnocchi | | base | gnocchi | uncommon | Soft orange dumplings with a gently sweet flavour
-Pumpkin gnocchi | | base | gnocchi | uncommon | Silky, golden dumplings that love brown butter and sage
+Sweet potato gnocchi |  | base | gnocchi | uncommon | Soft orange dumplings with a gently sweet flavour
+Pumpkin gnocchi |  | base | gnocchi | uncommon | Silky, golden dumplings that love brown butter and sage
 Spaetzle | spätzle | base | german-noodle | uncommon | Tiny, soft German egg dumplings for gravy and cheese
-Egg noodles | | base | wheat-noodle | everyday | Golden strands that suit stir-fries and soups
-Medium egg noodles | | base | wheat-noodle | everyday | Springy noodles, ideal for chow mein
+Egg noodles |  | base | wheat-noodle | everyday | Golden strands that suit stir-fries and soups
+Medium egg noodles |  | base | wheat-noodle | everyday | Springy noodles, ideal for chow mein
 Thread egg noodles | fine egg noodles | base | wheat-noodle | everyday | Quick-cooking fine strands for broths and stir-fries
-Wholewheat noodles | | base | wheat-noodle | uncommon | Nutty, filling noodles for stir-fries
-Chow mein noodles | | base | wheat-noodle | everyday | Springy egg noodles that crisp up in a wok
-Lo mein noodles | | base | wheat-noodle | uncommon | Soft, chewy egg noodles for saucy stir-fries
+Wholewheat noodles |  | base | wheat-noodle | uncommon | Nutty, filling noodles for stir-fries
+Chow mein noodles |  | base | wheat-noodle | everyday | Springy egg noodles that crisp up in a wok
+Lo mein noodles |  | base | wheat-noodle | uncommon | Soft, chewy egg noodles for saucy stir-fries
 Ramen noodles | fresh ramen | base | wheat-noodle | uncommon | Chewy, alkaline noodles made for rich bowls of broth
 Udon noodles | udon | base | wheat-noodle | uncommon | Fat, bouncy Japanese wheat noodles, great in dashi
 Somen noodles | somen | base | wheat-noodle | uncommon | Delicate, thin Japanese noodles served chilled in summer
-Hiyamugi | | base | wheat-noodle | exotic | Japanese noodles between somen and udon, served cold
+Hiyamugi |  | base | wheat-noodle | exotic | Japanese noodles between somen and udon, served cold
 Soba noodles | soba | base | buckwheat-noodle | uncommon | Nutty Japanese buckwheat noodles, served hot or cold
 Cha soba | green tea noodles | base | buckwheat-noodle | exotic | Soba flecked with green tea, subtly fragrant
-Jiu soba | | base | buckwheat-noodle | exotic | Premium soba made largely from buckwheat, with a delicate flavour
+Jiu soba |  | base | buckwheat-noodle | exotic | Premium soba made largely from buckwheat, with a delicate flavour
 Naengmyeon | cold noodles | base | buckwheat-noodle | exotic | Chewy Korean noodles for icy broth in summer
 Dangmyeon | Korean glass noodles | base | glass-noodle | exotic | Springy sweet potato starch noodles for japchae
 Glass noodles | cellophane noodles | base | glass-noodle | uncommon | Slippery transparent noodles that soak up flavour
 Mung bean vermicelli | bean thread noodles | base | glass-noodle | uncommon | Fine, slippery strands for spring rolls and salads
 Rice vermicelli | rice sticks | base | rice-noodle | everyday | Thin, delicate noodles for salads and stir-fries
-Flat rice noodles | | base | rice-noodle | everyday | Broad noodles for pad thai and pho
-Pad thai noodles | | base | rice-noodle | uncommon | Medium-flat rice noodles that stir-fry beautifully
+Flat rice noodles |  | base | rice-noodle | everyday | Broad noodles for pad thai and pho
+Pad thai noodles |  | base | rice-noodle | uncommon | Medium-flat rice noodles that stir-fry beautifully
 Pho noodles | banh pho | base | rice-noodle | uncommon | Silky flat rice noodles for Vietnamese broth
 Fresh rice noodles | ho fun | base | rice-noodle | uncommon | Slippery, wide fresh noodles for wok-fried beef
 Bun noodles | bún | base | rice-noodle | uncommon | Round Vietnamese vermicelli for grilled meats and herbs
-Laksa noodles | | base | rice-noodle | uncommon | Thick round rice noodles that hold up in spicy coconut broth
+Laksa noodles |  | base | rice-noodle | uncommon | Thick round rice noodles that hold up in spicy coconut broth
 Tteok | rice cake sticks | base | rice-noodle | exotic | Chewy Korean rice cylinders for spicy stir-fried dishes
 Shirataki noodles | konjac noodles | base | glass-noodle | exotic | Translucent, near-zero calorie Japanese yam noodles
 Yi mein | e-fu noodles | base | wheat-noodle | exotic | Springy fried noodles for celebratory long-life dishes
-Biang biang noodles | | base | wheat-noodle | exotic | Wide, hand-pulled belt noodles from Shaanxi
+Biang biang noodles |  | base | wheat-noodle | exotic | Wide, hand-pulled belt noodles from Shaanxi
 Lamian | hand-pulled noodles | base | wheat-noodle | exotic | Stretchy hand-pulled noodles with a springy bite
-Dan dan noodles | | base | wheat-noodle | exotic | Thin Sichuan noodles for a numbing chilli sauce
-Kluski | | base | german-noodle | exotic | Polish egg noodles, tender and buttery
-Pierogi | | base | filled-pasta | uncommon | Plump Polish dumplings filled with potato and cheese
-Dumpling wrappers | | base | wrapper | uncommon | Round dough circles for dumplings and pot stickers
-Couscous | | base | couscous | everyday | Quick-steaming semolina grains, light and fluffy
-Wholewheat couscous | | base | couscous | everyday | Nutty couscous with extra fibre
+Dan dan noodles |  | base | wheat-noodle | exotic | Thin Sichuan noodles for a numbing chilli sauce
+Kluski |  | base | german-noodle | exotic | Polish egg noodles, tender and buttery
+Pierogi |  | base | filled-pasta | uncommon | Plump Polish dumplings filled with potato and cheese
+Dumpling wrappers |  | base | wrapper | uncommon | Round dough circles for dumplings and pot stickers
+Couscous |  | base | couscous | everyday | Quick-steaming semolina grains, light and fluffy
+Wholewheat couscous |  | base | couscous | everyday | Nutty couscous with extra fibre
 Pearl couscous | Israeli couscous; ptitim | base | couscous | uncommon | Chewy toasted pearls that stay plump in salads
 Giant couscous | moghrabieh | base | couscous | exotic | Large pearls with a toasty flavour

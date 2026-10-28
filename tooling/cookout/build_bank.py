@@ -28,7 +28,7 @@ CATEGORIES = [
     ("vegetables", "Vegetables & Greens", "🥦"),
     ("fungi", "Mushrooms & Fungi", "🍄"),
     ("fruit", "Fruit & Citrus", "🍋"),
-    ("dairy-eggs", "Dairy, Cream & Cheese", "🧀"),
+    ("dairy-eggs", "Dairy, Cream & Eggs", "🧀"),
     ("grains-bakery", "Bread, Pasta & Grains", "🍞"),
     ("legumes-nuts-seeds", "Beans, Nuts & Seeds", "🥜"),
     ("herbs-aromatics", "Fresh Herbs & Aromatics", "🌿"),
@@ -49,6 +49,13 @@ STAPLES = [
     ("granulated-sugar", "Granulated sugar", True),
     ("milk", "Milk", True),
 ]
+GENERATED = "2026-10-28"
+STOP_WORDS = [
+    "bake", "board", "bowl", "crust", "dish", "dough", "filling", "garnish",
+    "glaze", "grill", "jar", "layer", "marinade", "meal", "oven", "pan", "pie", "plate", "pot",
+    "roast", "salad", "sandwich", "sauce", "skillet", "soup", "stew", "topping", "tray", "wok",
+    "wrap", "water", "coating",
+]  # fmt: skip
 ROLES = {"base", "protein", "produce", "accent"}
 RARITIES = {"everyday", "uncommon", "exotic"}
 KEBAB = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
@@ -165,8 +172,10 @@ def main() -> int:
     rows.sort(key=lambda r: (order[str(r["category"])], str(r["name"]).casefold()))
     doc = {
         "version": 1,
+        "generated": GENERATED,
         "categories": [{"id": i, "name": n, "emoji": e} for i, n, e in CATEGORIES],
         "staples": [{"id": i, "name": n, "pickable": p} for i, n, p in STAPLES],
+        "stopWords": STOP_WORDS,
         "ingredients": rows,
     }
     OUT.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")
