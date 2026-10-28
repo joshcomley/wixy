@@ -1,0 +1,265 @@
+# fish-seafood
+Cod fillet |  | protein | cod | everyday | Thick white flakes that hold together in batter, crumb or a gentle poach
+Cod loin |  | protein | cod | everyday | The thick centre cut, meaty and succulent, perfect roasted or pan-seared
+Cod cheeks |  | protein | cod | exotic | Little tender morsels, quick to fry in butter and sweetly rich
+Salt cod | bacalao; baccalà | protein | cod | exotic | Dried and salted, soaked then flaked into fritters, stews and brandade
+Haddock fillet |  | protein | haddock | everyday | Sweet, firm white fish with a faint smoky depth in chowder or pie
+Pollock fillet | pollack | protein | pollock | everyday | Mild and flaky, a frugal white fish for pies and fish cakes
+Coley fillet | saithe | protein | pollock | everyday | Greyish raw, white when cooked, a budget fish for curries and pies
+Whiting fillet |  | protein | whiting | everyday | Delicate and soft, best fried gently or steamed
+Hake fillet |  | protein | hake | everyday | Silky white flesh that loves olive oil, garlic and a squeeze of lemon
+Hake steak |  | protein | hake | everyday | A bone-in cutlet that stays juicy on the grill or in a Basque pan
+Ling fillet |  | protein | ling | uncommon | Firm, meaty white fish that stands up to robust stews
+Pouting | bib | protein | cod | uncommon | Small cod relative, sweet when fried whole and eaten fresh
+Monkfish tail | angler fish | protein | monkfish | everyday | Firm, lobster-like meat that roasts or skewers beautifully
+Monkfish cheeks |  | protein | monkfish | exotic | Tiny sweet medallions, a bargain treat sautéed in butter
+John Dory | St Peter's fish | protein | dory | exotic | Prized fillets with a fine sweet flavour, simply pan-fried in butter
+Turbot |  | protein | turbot | exotic | The king of flatfish, rich and meaty, roasted whole on the bone
+Brill |  | protein | brill | uncommon | Delicate cousin of turbot, lovely with a buttery sauce
+Halibut fillet |  | protein | halibut | everyday | Dense, clean white flesh that sears and roasts without drying
+Halibut steak |  | protein | halibut | everyday | A thick cross-cut slice for grilling with herb butter
+Dover sole |  | protein | sole | exotic | Prized flatfish, sweet and delicate, grilled on the bone or meunière
+Lemon sole |  | protein | sole | everyday | Soft, sweet and quick to cook, wonderful pan-fried with capers
+Plaice fillet |  | protein | plaice | everyday | Sweet flatfish with orange-spotted skin, ideal for the seaside fry
+Dab |  | protein | plaice | everyday | Small flatfish, tasty fried whole in a hot pan
+Flounder |  | protein | flounder | everyday | Mild flatfish that suits pan-frying and baking
+Witch sole | Torbay sole | protein | sole | exotic | Slim flatfish with delicate sweet flesh, quick to grill
+Megrim |  | protein | megrim | exotic | Lean flatfish with fine flakes, good grilled whole
+Skate wing | ray wing | protein | skate | everyday | Ribbons of sweet flesh pulled from cartilage, superb with brown butter
+Sea bass fillet |  | protein | sea-bass | everyday | Crisp-skinned and sweet, a dinner party favourite
+Whole sea bass |  | protein | sea-bass | everyday | Roasted whole with fennel and lemon, or baked in a salt crust
+Sea bream fillet |  | protein | sea-bream | everyday | Delicate, slightly sweet flesh with a skin that crisps nicely
+Whole sea bream |  | protein | sea-bream | everyday | Stuffed with herbs and grilled over coals
+Red mullet |  | protein | mullet | everyday | Small, rosy fish with a shellfish sweetness, pan-fried whole
+Grey mullet |  | protein | mullet | everyday | Firm, mild flesh, good grilled or baked with citrus
+Gurnard |  | protein | gurnard | uncommon | Firm, sweet flesh that suits bouillabaisse and the grill
+Red snapper |  | protein | snapper | everyday | Sweet, moist flesh, lovely whole with chilli and lime
+Grouper |  | protein | grouper | uncommon | Thick, mild, meaty white fish that suits curries and steaming
+Barramundi | Asian sea bass | protein | barramundi | everyday | Buttery flesh with crisp skin, great pan-seared or steamed
+Mahi-mahi | dorado; dolphinfish | protein | mahi-mahi | everyday | Firm, sweet and mild, brilliant on the grill with tropical salsa
+Wahoo |  | protein | wahoo | uncommon | Lean, firm white steaks that grill like swordfish
+Swordfish steak |  | protein | swordfish | everyday | Meaty, dense steak that takes a bold marinade on the grill
+Marlin steak |  | protein | marlin | uncommon | Rich, firm steak for the barbecue
+Pomfret |  | protein | pomfret | uncommon | Flat, sweet fish popular fried whole with spices
+Tilapia |  | protein | tilapia | everyday | Mild white fillets, a blank canvas for spice rubs
+Pangasius | basa | protein | pangasius | everyday | Soft, mild white fillets, handy for quick curries and crumbing
+Nile perch |  | protein | perch | uncommon | Large firm-flaked fillets, good baked or in a curry
+Orange roughy |  | protein | roughy | uncommon | Firm white flesh with a mild sweetness, bakes well
+Patagonian toothfish | Chilean sea bass | protein | toothfish | exotic | Buttery, oily white flakes that stay moist when roasted
+Black cod | sablefish | protein | sablefish | exotic | Silky, buttery fish, marvellous in a miso glaze
+Lingcod |  | protein | lingcod | uncommon | Firm white fish that bakes and fries well
+Rockfish |  | protein | rockfish | uncommon | Mild, lean flesh good for tacos and soups
+Ocean perch |  | protein | perch | uncommon | Sweet, tender flakes suited to baking
+Hoki |  | protein | hoki | everyday | Tender mild fillets for crumbing and fish fingers at home
+Corvina |  | protein | corvina | uncommon | Mild, firm fish, fabulous for ceviche
+Cobia |  | protein | cobia | exotic | Rich, buttery flesh that grills and sears well
+Amberjack |  | protein | amberjack | uncommon | Firm and clean-tasting, lovely raw or grilled
+Yellowtail | hamachi | protein | amberjack | uncommon | Fatty, buttery slices prized as sashimi
+Kingfish |  | protein | amberjack | uncommon | Rich firm steaks perfect for barbecue
+Tuna steak |  | protein | tuna | everyday | Meaty fresh steak best seared pink in the middle
+Yellowfin tuna | ahi | protein | tuna | everyday | Lean ruby flesh, wonderful seared or in poke
+Bluefin tuna |  | protein | tuna | exotic | Luxuriously fatty and rich, a sushi counter treasure
+Bigeye tuna |  | protein | tuna | uncommon | Deep red and rich, excellent seared or raw
+Albacore tuna |  | protein | tuna | uncommon | Pale, mild flesh that suits light grilling
+Tuna belly | toro | protein | tuna | exotic | Marbled, melting fat, a decadent raw delicacy
+Bonito |  | protein | tuna | uncommon | Robust, oily flesh good grilled or pickled
+Atlantic salmon fillet |  | protein | salmon | everyday | Rich, pink and forgiving, roasted, poached or pan-seared
+Whole salmon |  | protein | salmon | everyday | A centrepiece for poaching or baking whole
+Salmon steak |  | protein | salmon | everyday | Bone-in cutlet that grills beautifully
+Wild salmon |  | protein | salmon | everyday | Leaner and deeper in flavour than farmed, cook gently
+Sockeye salmon | red salmon | protein | salmon | uncommon | Deep red, strongly flavoured flesh for grilling
+Coho salmon | silver salmon | protein | salmon | uncommon | Milder wild salmon with a delicate texture
+Chinook salmon | king salmon | protein | salmon | exotic | The richest salmon, oily and silky
+Pink salmon |  | protein | salmon | uncommon | Light, delicate flesh used in cakes and bakes
+Salmon belly |  | protein | salmon | everyday | The fattiest cut, wonderful grilled with a little salt
+Sea trout | salmon trout | protein | trout | everyday | Delicate pink flesh between salmon and trout
+Rainbow trout |  | protein | trout | everyday | Mild pink fillets, fine pan-fried with almonds
+Brown trout |  | protein | trout | uncommon | Stronger, gamier freshwater trout best cooked simply
+Arctic char |  | protein | trout | uncommon | Delicate rich flesh like a cross between salmon and trout
+Mackerel fillet |  | protein | mackerel | everyday | Rich, oily and quick to grill, superb with gooseberry or horseradish
+Whole mackerel |  | protein | mackerel | everyday | Slash and grill it whole over a hot flame
+Spanish mackerel |  | protein | mackerel | uncommon | Firm, meaty mackerel suited to grilling in steaks
+Horse mackerel | scad | protein | mackerel | uncommon | Lean, firm and tasty when grilled or pickled
+Herring |  | protein | herring | everyday | Oily and flavourful, pan-fried in oatmeal or grilled
+Fresh sardines | pilchard | protein | sardine | everyday | Grill them whole until the skin blisters, then squeeze lemon
+Sprats |  | protein | sprat | everyday | Tiny oily fish fried crisp and eaten whole
+Whitebait |  | protein | sprat | everyday | Tiny fish floured and deep-fried until crunchy
+Fresh anchovies |  | protein | anchovy | everyday | Silvery fresh fish, marinated white or fried crisp
+Smelt |  | protein | smelt | uncommon | Tiny silvery fish fried whole with a cucumber scent
+Garfish |  | protein | garfish | uncommon | Slender fish with green bones and sweet flesh
+Shad |  | protein | shad | uncommon | Rich, bony fish celebrated for its roe and smoky grilling
+Opah | moonfish | protein | opah | exotic | Large rich fish with firm, steak-like cuts
+Escolar |  | protein | escolar | exotic | Very rich, buttery white fish, enjoy in small portions
+Pike |  | protein | pike | uncommon | Lean freshwater fish, often turned into quenelles
+Zander | pike-perch | protein | perch | uncommon | Delicate, firm freshwater fillet that crisps well
+Perch fillet |  | protein | perch | everyday | Sweet small freshwater fillets for the pan
+Carp |  | protein | carp | everyday | Traditional festive freshwater fish, braised or fried
+Catfish fillet |  | protein | catfish | everyday | Mild, firm fillets, famous cornmeal-fried
+Tench |  | protein | tench | exotic | Old-fashioned freshwater fish with sweet flesh
+Bream |  | protein | bream | uncommon | Freshwater fish with sweet flesh, best baked whole
+Whitefish |  | protein | whitefish | uncommon | Mild, delicate lake fish for smoking and frying
+Walleye |  | protein | perch | uncommon | Prized lake fish, sweet and flaky
+Eel |  | protein | eel | everyday | Rich, fatty fish for stewing, grilling or smoking
+Conger eel |  | protein | eel | exotic | Large sea eel for hearty stews and soups
+Jellied eels |  | protein | eel | exotic | A cold East End classic in set savoury jelly
+Unagi | grilled freshwater eel | protein | eel | exotic | Sweet-glazed grilled eel, rich and smoky over rice
+Anago | sea eel | protein | eel | uncommon | Soft, delicate sea eel, steamed or grilled
+Lamprey |  | protein | lamprey | exotic | A medieval delicacy, stewed in wine and blood
+Smoked haddock | Finnan haddie | protein | smoked-fish | everyday | Golden, gently smoky fillets for kedgeree, chowder and poached eggs
+Smoked cod |  | protein | smoked-fish | everyday | Smoky white fillet that flavours chowders and pies
+Smoked salmon |  | protein | smoked-fish | everyday | Silky cold-smoked slices for blinis, bagels and scrambled eggs
+Hot-smoked salmon |  | protein | smoked-fish | everyday | Flaky, fully cooked smoked salmon for salads and pasta
+Smoked salmon trimmings |  | protein | smoked-fish | everyday | Thrifty offcuts perfect for pasta, quiche and pâté
+Gravadlax |  | protein | cured-fish | everyday | Salmon cured in salt, sugar and dill, sliced thin
+Lox |  | protein | cured-fish | uncommon | Brine-cured salmon, draped over cream cheese bagels
+Kippers |  | protein | smoked-fish | everyday | Split, smoked herring for a classic Victorian breakfast
+Smoked mackerel fillet |  | protein | smoked-fish | everyday | Peppery, oily and ready to eat, flaked into pâté or salads
+Smoked trout |  | protein | smoked-fish | everyday | Delicate and moist, lovely with horseradish and beetroot
+Smoked eel |  | protein | smoked-fish | exotic | Rich, oily fillets, a luxurious partner for potato and apple
+Arbroath smokie |  | protein | smoked-fish | exotic | Hot-smoked haddock pair, tender and smoky, served warm with butter
+Bloater |  | protein | smoked-fish | uncommon | Lightly smoked whole herring with a gamey, rich flavour
+Buckling |  | protein | smoked-fish | uncommon | Hot-smoked whole herring ready to eat
+Smoked sprats |  | protein | smoked-fish | uncommon | Tiny smoky fish enjoyed on toast or with a drink
+Smoked sturgeon |  | protein | smoked-fish | uncommon | Dense, buttery smoked flesh served in thin slices
+Smoked halibut |  | protein | smoked-fish | uncommon | Delicate, mild smoked slices, rich and silky
+Rollmop herring | rollmops | protein | pickled-fish | everyday | Pickled herring fillets rolled around onion and gherkin
+Pickled herring |  | protein | pickled-fish | everyday | Sweet-sour fillets with onion, a Scandinavian smorgasbord essential
+Matjes herring |  | protein | pickled-fish | uncommon | Mild, lightly salted young herring, sweet and tender
+Soused herring |  | protein | pickled-fish | everyday | Fillets baked in spiced vinegar and served cold
+Salted herring |  | protein | salted-fish | uncommon | Firm, briny fish, desalted before pickling or poaching
+Anchovy fillets in oil |  | protein | tinned-fish | everyday | Savoury salty fillets that melt into sauces and pizzas
+Salted anchovies |  | protein | salted-fish | everyday | Whole preserved anchovies packed in salt, rinsed and boned
+White anchovies | boquerones | protein | tinned-fish | everyday | Mild vinegar-marinated anchovies with garlic and parsley
+Tinned tuna in oil |  | protein | tinned-fish | everyday | Soft, rich flakes for pasta, salads and sandwiches
+Tinned tuna in brine |  | protein | tinned-fish | everyday | Lean, firm flakes for mayo-based fillings
+Tuna in olive oil jar | ventresca | protein | tinned-fish | uncommon | Premium tuna belly packed in a glass jar
+Tinned sardines |  | protein | tinned-fish | everyday | Whole oily sardines on toast with lemon
+Tinned mackerel |  | protein | tinned-fish | everyday | Meaty fillets in tomato or oil, quick and rich
+Tinned salmon |  | protein | tinned-fish | everyday | Pink flakes for fishcakes and sandwiches
+Tinned pilchards |  | protein | tinned-fish | everyday | Hearty fish in tomato sauce on buttered toast
+Tinned herring |  | protein | tinned-fish | everyday | Rich herring fillets in tomato or mustard sauce
+Tinned crab meat |  | protein | tinned-fish | everyday | Shelf-stable white meat for cakes and dips
+Tinned smoked oysters |  | protein | tinned-fish | uncommon | Tiny smoky morsels in oil, a savoury snack
+Tinned mussels |  | protein | tinned-fish | everyday | Smoked or pickled mussels, ready for tapas
+Tinned cockles |  | protein | tinned-fish | uncommon | Bite-sized and briny, tossed into pasta
+Tinned baby squid |  | protein | tinned-fish | everyday | Tender squid in ink or oil, quick to serve
+Tinned octopus |  | protein | tinned-fish | everyday | Soft Galician-style octopus ready for salads
+Cod liver |  | protein | tinned-fish | uncommon | Smooth, rich liver served on toast with lemon
+Ankimo | monkfish liver | protein | tinned-fish | exotic | Silky steamed liver, the foie gras of the sea
+Stockfish |  | protein | dried-fish | exotic | Air-dried cod needing days of soaking, for Nordic and Italian stews
+Dried anchovies | ikan bilis | protein | dried-fish | everyday | Crunchy tiny fish fried for sambal and noodle toppings
+Dried shrimp |  | protein | dried-fish | everyday | Concentrated sea sweetness for stir-fries, congee and broths
+Dried squid |  | protein | dried-fish | everyday | Chewy, toasted strips eaten as a snack or shredded into soup
+Dried scallops | conpoy | protein | dried-fish | exotic | Intensely savoury, rehydrated into XO sauce and congee
+Dried salted fish |  | protein | salted-fish | everyday | Fierce, savoury fish used in tiny amounts with rice
+Salt fish |  | protein | salted-fish | everyday | Salted fish soaked and flaked for Caribbean ackee dishes
+Lutefisk |  | protein | salted-fish | exotic | Lye-treated dried cod, gelatinous and mild
+Fish maw |  | protein | dried-fish | exotic | Dried swim bladder, spongy and silky in soups
+Gefilte fish |  | protein | prepared-fish | uncommon | Poached fish dumplings from carp and pike, served with horseradish
+Fish balls |  | protein | fish-paste | everyday | Bouncy fish paste spheres for noodle soups
+Crab sticks | surimi | protein | fish-paste | everyday | Sweet, flaky pressed fish sticks tinted like crab legs
+Kamaboko |  | protein | fish-paste | everyday | Steamed fish paste cake, sliced into noodle bowls
+Chikuwa |  | protein | fish-paste | uncommon | Hollow grilled fish paste tubes, good in stews
+Salmon roe | ikura | protein | roe | everyday | Bright orange pearls that burst with a briny pop
+Lumpfish roe |  | protein | roe | everyday | Small black pearls, a thrifty garnish for blinis
+Beluga caviar |  | protein | roe | exotic | The most prized sturgeon eggs, large, creamy and delicate
+Oscietra caviar |  | protein | roe | exotic | Nutty, golden-brown eggs with a firm pop
+Sevruga caviar |  | protein | roe | exotic | Small grey eggs with an intense briny flavour
+Trout roe |  | protein | roe | everyday | Delicate orange eggs for canapés
+Tobiko | flying fish roe | protein | roe | uncommon | Crunchy tiny orange eggs that decorate sushi
+Masago | capelin roe | protein | roe | uncommon | Soft small roe for sushi and rolls
+Cod roe |  | protein | roe | uncommon | Soft roe poached, sliced and fried or turned into dips
+Smoked cod roe |  | protein | roe | uncommon | Salty, smoky roe, the base of a proper taramasalata
+Herring roe |  | protein | roe | uncommon | Delicate eggs, popular on toast or in Japanese kazunoko
+Bottarga |  | protein | roe | exotic | Salted, pressed mullet roe grated over pasta
+Soft herring roes | milt | protein | roe | uncommon | Creamy soft roes fried on toast in butter
+Sea urchin roe | uni | protein | roe | exotic | Custardy golden tongues with a briny sweetness
+Shad roe |  | protein | roe | exotic | A seasonal delicacy, pan-fried with bacon
+Prawns |  | protein | prawn | everyday | Sweet and quick-cooking, tossed in garlic, chilli and butter
+Cooked prawns |  | protein | prawn | everyday | Ready to eat for cocktails and salads
+King prawns |  | protein | prawn | everyday | Plump and meaty, ideal grilled in the shell
+Tiger prawns |  | protein | prawn | everyday | Large striped prawns with a firm bite
+Raw peeled prawns |  | protein | prawn | everyday | Convenient for curries and stir-fries
+North Atlantic prawns |  | protein | prawn | everyday | Small sweet cold-water prawns for sandwiches and cocktails
+Brown shrimp |  | protein | shrimp | everyday | Tiny flavoursome shrimp, potted in nutmeg butter
+Pink shrimp |  | protein | shrimp | everyday | Tender sweet shrimp, good in salads and sauces
+Sweet shrimp | amaebi | protein | shrimp | exotic | Raw sushi shrimp that tastes naturally sweet
+Langoustine | Dublin Bay prawn; scampi | protein | langoustine | exotic | Sweet, delicate claws, grilled or served in a bisque
+Crayfish |  | protein | crayfish | everyday | Small freshwater crustaceans boiled with dill or Cajun spices
+Yabby |  | protein | crayfish | uncommon | Australian freshwater crayfish, sweet and tender
+Lobster |  | protein | lobster | exotic | The luxury crustacean, steamed or grilled with butter
+Lobster tail |  | protein | lobster | exotic | Meaty tail meat, split and grilled with garlic butter
+Cooked lobster meat |  | protein | lobster | uncommon | Picked lobster for rolls and bisques
+Spiny lobster | rock lobster | protein | lobster | exotic | Clawless warm-water lobster with sweet tail meat
+Moreton Bay bug | slipper lobster | protein | lobster | exotic | Flat-headed crustacean with sweet, rich tail meat
+Brown crab |  | protein | crab | everyday | Rich brown meat and sweet white claw meat for dressed crab
+White crab meat |  | protein | crab | everyday | Sweet, delicate flakes for cakes and salads
+Brown crab meat |  | protein | crab | everyday | Intensely rich, creamy meat for sauces and pâtés
+Spider crab |  | protein | crab | exotic | Sweet delicate meat from long spiny legs
+Blue crab |  | protein | crab | uncommon | American crab steamed with Old Bay and picked by hand
+Soft-shell crab |  | protein | crab | exotic | Moulted crab fried whole and eaten shell and all
+Dungeness crab |  | protein | crab | exotic | Sweet Pacific crab, steamed and cracked
+King crab legs |  | protein | crab | exotic | Giant sweet legs, steamed and dipped in melted butter
+Snow crab legs |  | protein | crab | exotic | Slender legs with delicate sweet flesh
+Stone crab claws |  | protein | crab | exotic | Sweet claws served chilled with mustard sauce
+Mud crab |  | protein | crab | exotic | Meaty tropical crab, superb in chilli or black pepper sauce
+Velvet crab |  | protein | crab | exotic | Tiny crab prized for deeply flavoured stock
+Crab claws |  | protein | crab | everyday | Pre-cracked claws for dipping or frying with garlic
+Mantis shrimp |  | protein | shrimp | uncommon | Peculiar and sweet, steamed and split
+Mussels |  | protein | mussel | everyday | Steam open in white wine and garlic with a heap of parsley
+Green-lipped mussels |  | protein | mussel | everyday | Large, plump mussels from New Zealand, good grilled
+Clams |  | protein | clam | everyday | Sweet briny shells for spaghetti vongole and chowder
+Palourde clams |  | protein | clam | everyday | Large, tender clams that steam in minutes
+Razor clams |  | protein | clam | exotic | Long sweet shells quickly grilled with garlic and parsley
+Cockles |  | protein | cockle | everyday | Small sweet shells boiled and eaten with vinegar
+Surf clams |  | protein | clam | uncommon | Sweet, tender strips used in sushi and chowders
+Geoduck |  | protein | clam | exotic | Giant crunchy-sweet clam, sliced raw or in hotpot
+Quahog |  | protein | clam | uncommon | Large hard-shell clams for chowder and stuffing
+Pacific oysters |  | protein | oyster | everyday | Mild plump oysters, eaten raw or grilled
+Native oysters |  | protein | oyster | exotic | Flat, mineral shellfish with a nutty, intense flavour
+Kumamoto oysters |  | protein | oyster | exotic | Small, deep-cupped and creamy, sweet and mild
+Shucked oysters |  | protein | oyster | everyday | Ready for frying, stew or Rockefeller
+King scallops |  | protein | scallop | everyday | Fat, sweet scallops seared in a hot pan
+Queen scallops | queenies | protein | scallop | everyday | Small sweet scallops, quick to pan-fry
+Diver scallops |  | protein | scallop | exotic | Hand-collected scallops, sweet and large
+Scallop roe | coral | protein | scallop | uncommon | The orange coral, rich and soft
+Whelks |  | protein | whelk | everyday | Chewy sea snails from the seaside stall, boiled and dressed with vinegar
+Winkles | periwinkles | protein | whelk | uncommon | Tiny sea snails, picked out with a pin
+Limpets |  | protein | limpet | uncommon | Rocky shore shellfish, grilled or stewed
+Abalone |  | protein | abalone | exotic | Prized chewy mollusc, braised or sliced thin
+Conch |  | protein | conch | uncommon | Firm sweet meat, popular in Caribbean fritters and salads
+Goose barnacles | percebes | protein | barnacle | exotic | Odd-looking Atlantic delicacy, tasting of ocean and lobster
+Sea cucumber |  | protein | sea-cucumber | exotic | Gelatinous prized ingredient in Chinese banquets
+Jellyfish |  | protein | jellyfish | exotic | Crunchy cured strips tossed in sesame dressing
+Sea snails | escargots de mer | protein | whelk | uncommon | Small marine snails stewed with garlic
+Squid | calamari | protein | squid | everyday | Quickly fried for rings or stuffed whole
+Squid tubes |  | protein | squid | everyday | Cleaned bodies for stuffing or slicing
+Baby squid |  | protein | squid | everyday | Tiny tender squid, a quick grill or fry
+Squid tentacles |  | protein | squid | everyday | Crisp and chewy when fried, delicious with aioli
+Cuttlefish |  | protein | cuttlefish | everyday | Thicker, sweeter than squid, braised or cooked in its own ink
+Octopus |  | protein | octopus | everyday | Slow-simmered until tender, then charred
+Baby octopus |  | protein | octopus | uncommon | Small and tender, quick to grill with chilli
+Humboldt squid |  | protein | squid | uncommon | Huge squid with thick flesh for steaks
+Firefly squid |  | protein | squid | exotic | Tiny glowing squid eaten whole in Japan
+Salmon collar |  | protein | salmon | uncommon | Cheap, fatty cut for grilling with salt
+Yellowtail collar | hamachi kama | protein | amberjack | uncommon | Fatty, smoky grilled collar with crisp skin
+Fish head |  | protein | fish-parts | everyday | Rich gelatinous cheeks for curries and soups
+Fish bones | fish frames | protein | fish-parts | everyday | Simmered for stock and rich chowders
+Fish skin |  | protein | fish-parts | uncommon | Fried crisp as a crunchy snack
+Salmon skin |  | protein | fish-parts | everyday | Crisp, salty skin for sushi rolls
+Shrimp heads |  | protein | fish-parts | uncommon | Packed with flavour, fried or simmered into bisque
+Whole fish |  | protein | whole-fish | everyday | Flexible fresh catch for roasting or steaming
+Fish pie mix |  | protein | fish-mix | everyday | A blend of salmon, smoked haddock and white fish
+Seafood mix |  | protein | fish-mix | everyday | Prawns, mussels and squid ready for paella or pasta
+Sashimi-grade salmon |  | protein | salmon | uncommon | Ultra-fresh cut for raw dishes and poke
+Sashimi-grade tuna |  | protein | tuna | uncommon | Sushi-quality loin sliced thin
+Salmon trim |  | protein | salmon | uncommon | Offcuts of fresh fish, handy for burgers and rillettes
+Barracuda |  | protein | barracuda | uncommon | Firm tropical fish, good grilled
+Sturgeon |  | protein | sturgeon | uncommon | Dense, meaty freshwater fish, roasted or smoked
+Milkfish | bangus | protein | milkfish | uncommon | Mild Filipino staple, usually marinated and fried
+Sea robin |  | protein | gurnard | uncommon | Sweet, firm flesh in stews
+Sand dab |  | protein | plaice | uncommon | Small flatfish, floured and pan-fried
+Pacific halibut |  | protein | halibut | uncommon | Large, mild and firm, ideal for grilling
+Greenland halibut |  | protein | halibut | uncommon | Rich, oily halibut often smoked
+Alaska pollock |  | protein | pollock | everyday | Mild, flaky fillets from the cold Pacific
+Atlantic cod loin |  | protein | cod | uncommon | Pristine thick white flesh from the North Atlantic

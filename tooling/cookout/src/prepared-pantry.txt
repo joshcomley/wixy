@@ -1,0 +1,337 @@
+# prepared-pantry
+Thick-cut white toast | doorstop toast | base | sliced-bread | everyday | Chunky slices toasted golden, built for butter, beans or a fried egg.
+Tinned baked beans | beans in tomato sauce | protein | tinned-beans | everyday | Haricot beans in sweet tomato sauce; the heart of beans on toast.
+Reduced-sugar baked beans | | protein | tinned-beans | uncommon | A lighter, less sweet take on the tinned classic.
+Baked beans with sausages | | protein | tinned-beans | uncommon | Tinned beans with small pork sausages floating in sauce.
+Tinned spaghetti hoops | spaghetti rings | base | tinned-pasta | everyday | Soft pasta rings in tomato sauce, nursery comfort on toast.
+Tinned spaghetti in tomato sauce | | base | tinned-pasta | everyday | Long soft spaghetti in a sweet tomato sauce straight from the can.
+Tinned ravioli | | base | tinned-pasta | uncommon | Soft meat-filled pasta squares in tomato sauce, student-flat classic.
+Tinned macaroni cheese | | base | tinned-pasta | uncommon | Ready-made macaroni in cheese sauce, just needs heating.
+Instant noodles | ramen block | base | instant-noodle | everyday | Dried noodle block with a seasoning sachet; ready in three minutes.
+Chicken-flavour instant noodles | | base | instant-noodle | everyday | Dried noodles with a savoury chicken-style seasoning packet.
+Curry-flavour instant noodles | | base | instant-noodle | uncommon | Instant noodles with a spiced curry seasoning.
+Instant noodle pot | noodle pot | base | instant-noodle | everyday | Dried noodles and flavouring in a pot; just add boiling water.
+Beef-flavour noodle pot | | base | instant-noodle | uncommon | Pot of dried noodles with a beefy seasoning.
+Instant rice noodles | | base | instant-noodle | uncommon | Thin dried rice noodles that soften with boiling water alone.
+Instant udon | | base | instant-noodle | uncommon | Thick pre-cooked udon noodles in a pouch, quick to heat.
+Egg noodle nests | | base | dried-noodle | everyday | Dried egg noodles coiled into portions for stir-fries.
+Instant miso soup sachet | | accent | instant-soup | uncommon | Dried miso paste and tofu bits that dissolve in hot water.
+Puff pastry | | base | pastry | everyday | Buttery laminated dough that rises into crisp flaky layers.
+Ready-rolled puff pastry | | base | pastry | everyday | A pre-rolled sheet of puff pastry, unroll and bake.
+All-butter puff pastry | | base | pastry | uncommon | Puff pastry made with real butter for richer flavour.
+Shortcrust pastry | short pastry | base | pastry | everyday | Crumbly buttery pastry for pies and tarts.
+Ready-rolled shortcrust pastry | | base | pastry | everyday | A rolled sheet of shortcrust, ready to line a tin.
+Sweet shortcrust pastry | pate sucree | base | pastry | uncommon | Sugary short pastry for fruit tarts and jam tarts.
+Filo pastry | phyllo | base | pastry | uncommon | Paper-thin sheets brushed with butter to bake crisp and shattering.
+Chilled pastry block | | base | pastry | everyday | A block of chilled dough, rolled out for pies.
+Frozen pastry sheets | | base | pastry | everyday | Frozen pastry sheets to defrost and use for pies and tarts.
+Ready-made pizza base | | base | pizza-dough | everyday | A par-baked or fresh base waiting for sauce and cheese.
+Frozen pizza dough ball | | base | pizza-dough | uncommon | Pre-portioned dough to defrost, stretch and bake.
+Frozen margherita pizza | | base | frozen-pizza | everyday | Tomato and mozzarella pizza baked from frozen.
+Frozen pepperoni pizza | | base | frozen-pizza | everyday | Spicy sausage slices on tomato and cheese, baked from frozen.
+Deep pan frozen pizza | | base | frozen-pizza | uncommon | A thick, bready frozen pizza with a soft crust.
+Stuffed crust frozen pizza | | base | frozen-pizza | uncommon | Frozen pizza with cheese baked into the rim.
+Garlic bread baguette | garlic baguette | base | garlic-bread | everyday | Part-baked baguette stuffed with garlic butter.
+Cheesy garlic bread | | base | garlic-bread | everyday | Garlic bread topped with melted cheese.
+Garlic flatbread | | base | garlic-bread | uncommon | Flat garlic-buttered bread, baked until blistered.
+Sausage roll | | protein | savoury-bake | everyday | Seasoned pork wrapped in flaky pastry, hot or cold.
+Vegan sausage roll | | protein | savoury-bake | uncommon | Plant-based filling in flaky puff pastry.
+Pork pie | | protein | savoury-bake | everyday | Hot-water crust packed with peppery pork and jelly.
+Mini pork pie | | protein | savoury-bake | everyday | A bite-sized pork pie for picnics and buffets.
+Melton Mowbray pork pie | | protein | savoury-bake | exotic | A bow-sided pie of uncured grey pork, regional pride.
+Scotch egg | | protein | savoury-bake | everyday | Boiled egg wrapped in sausagemeat and breadcrumbs, then fried.
+Mini scotch egg | | protein | savoury-bake | uncommon | Quail-egg-sized version for party platters.
+Cornish pasty | pasty | protein | savoury-bake | everyday | Crimped pastry parcel of beef, potato, swede and onion.
+Steak bake | | protein | savoury-bake | uncommon | Flaky pastry slice filled with steak in gravy.
+Cheese and onion pasty | | protein | savoury-bake | uncommon | Pastry parcel of cheese and softened onion.
+Chicken and mushroom pie | | protein | ready-pie | everyday | A pastry-topped pie of creamy chicken and mushrooms.
+Steak and ale pie | | protein | ready-pie | everyday | Slow-cooked beef in dark gravy under a pastry lid.
+Chicken balti pie | | protein | ready-pie | uncommon | Spiced curry filling in a pastry case.
+Individual meat and potato pie | | protein | ready-pie | everyday | Northern favourite of minced beef and potato in gravy.
+Cheese and onion pie | | protein | ready-pie | everyday | Pastry pie filled with cheese and onion.
+Stargazy pie | | protein | ready-pie | exotic | Cornish pie with pilchard heads poking through the crust.
+Quiche Lorraine | | protein | quiche | everyday | Egg custard tart with bacon and cheese.
+Cheese and onion quiche | | protein | quiche | everyday | Savoury egg tart with cheddar and sweet onion.
+Mini quiches | | protein | quiche | uncommon | Bite-sized quiches for lunchboxes and buffets.
+Spinach and feta tart | | protein | quiche | uncommon | Savoury tart of spinach and salty feta in short pastry.
+Cheese straws | | accent | savoury-bake | uncommon | Twisted cheese pastry sticks, crumbly and moreish.
+Vol-au-vent cases | | base | pastry | uncommon | Little puff pastry shells waiting for a creamy filling.
+Pastry case tartlets | tart cases | base | pastry | uncommon | Mini baked pastry cups for canapes and sweet tarts.
+Frozen fish fingers | fish fingers | protein | frozen-fish | everyday | Breaded cod or pollock fingers, crisp from the oven.
+Frozen breaded cod fillets | | protein | frozen-fish | everyday | Breadcrumbed fillets, simply oven baked.
+Frozen battered fish fillet | | protein | frozen-fish | everyday | Crisp battered white fish ready for the oven.
+Frozen fish cakes | fishcakes | protein | frozen-fish | everyday | Potato and fish patties in breadcrumb.
+Frozen scampi | | protein | frozen-fish | uncommon | Breaded langoustine tails for deep frying.
+Breaded calamari rings | | protein | frozen-fish | uncommon | Crisp-coated squid rings for dipping.
+Frozen fish pie mix | | protein | frozen-fish | uncommon | A pack of raw salmon, smoked haddock and white fish for pie.
+Chicken nuggets | | protein | frozen-chicken | everyday | Bite-sized breaded chicken pieces, nursery staple.
+Chicken dippers | | protein | frozen-chicken | everyday | Crisp strips of breaded chicken for dunking.
+Breaded chicken goujons | | protein | frozen-chicken | uncommon | Finger-shaped crumbed chicken strips.
+Chicken Kiev | | protein | frozen-chicken | everyday | Breaded chicken filled with garlic butter.
+Breaded chicken burger | | protein | frozen-chicken | everyday | A breaded chicken patty to fit a bun.
+Crispy chicken wings | | protein | frozen-chicken | uncommon | Seasoned wings baked crisp from frozen.
+Frozen beef burger patties | beef burgers | protein | frozen-meat | everyday | Frozen quarter-pound beef patties for the grill.
+Frozen meatballs | | protein | frozen-meat | everyday | Seasoned beef meatballs to simmer in sauce.
+Frozen sausages | | protein | frozen-meat | everyday | Pork sausages from the freezer ready to grill.
+Pigs in blankets | | protein | frozen-meat | everyday | Little sausages wrapped in streaky bacon.
+Frozen Yorkshire puddings | | base | yorkshire-pudding | everyday | Oven-ready batter puddings that puff up for roast dinners.
+Giant Yorkshire pudding | | base | yorkshire-pudding | uncommon | A plate-sized Yorkshire pudding to hold a whole roast.
+Toad in the hole batter mix | | base | yorkshire-pudding | uncommon | Ready-to-pour batter for sausages in the oven.
+Frozen oven chips | oven chips | base | frozen-potato | everyday | Chunky frozen chips baked golden.
+Crinkle-cut chips | | base | frozen-potato | everyday | Ridged frozen chips for oven or fryer.
+Skinny fries | | base | frozen-potato | everyday | Thin frozen fries that crisp up fast.
+Steak-cut chips | | base | frozen-potato | uncommon | Thick-cut frozen chips with the skin on.
+Potato waffles | | base | frozen-potato | everyday | Mashed potato pressed into a waffle shape, toasted crisp.
+Hash browns | | base | frozen-potato | everyday | Shredded potato patties fried until golden.
+Potato croquettes | | base | frozen-potato | uncommon | Creamy mashed potato in a crisp crumb coat.
+Frozen roast potatoes | | base | frozen-potato | everyday | Parboiled spuds ready to roast fluffy and crisp.
+Potato smiles | | base | frozen-potato | uncommon | Smiling-face potato shapes that the children love.
+Frozen potato wedges | | base | frozen-potato | everyday | Thick seasoned wedges baked from frozen.
+Frozen sweet potato fries | | base | frozen-potato | uncommon | Orange chips baked or fried from frozen.
+Potato gems | | base | frozen-potato | uncommon | Little crispy cylinders of grated potato.
+Frozen dauphinoise | | base | frozen-potato | exotic | Sliced potato baked in cream and garlic, ready to heat.
+Instant mash | | base | instant-potato | everyday | Dehydrated potato flakes whipped up with boiling water.
+Packet mash | | base | instant-potato | everyday | Powdered mash potato with a buttery flavour.
+Mashed potato pot | | base | instant-potato | uncommon | Ready-made creamy mash in a microwaveable pot.
+Beef gravy powder | | accent | gravy | everyday | Savoury beef-flavour powder for Sunday dinner.
+Onion gravy granules | | accent | gravy | everyday | Granules with sweet roasted onion flavour.
+Ready-made gravy pot | | accent | gravy | uncommon | Chilled gravy that only needs warming.
+Chicken gravy powder | | accent | gravy | everyday | A light poultry-flavoured gravy mix.
+Stuffing mix | | base | stuffing | everyday | Dried sage and onion crumbs, add water and bake.
+Sage and onion stuffing | | base | stuffing | everyday | Classic roast poultry stuffing with sage.
+Sausagemeat stuffing | | protein | stuffing | uncommon | Pork sausagemeat seasoned with herbs.
+Sage and onion stuffing balls | | base | stuffing | uncommon | Baked stuffing rolled into little rounds.
+Frozen spring rolls | spring rolls | base | frozen-snack | everyday | Crisp fried parcels of shredded vegetables.
+Duck spring rolls | | protein | frozen-snack | uncommon | Crisp rolls stuffed with shredded duck and hoisin.
+Frozen prawn toast | | protein | frozen-snack | uncommon | Fried bread spread with prawn paste and sesame.
+Frozen gyoza | potstickers | protein | dumplings | uncommon | Pan-fried Japanese dumplings stuffed with pork and cabbage.
+Frozen dim sum | | protein | dumplings | uncommon | Steamer baskets of assorted filled dumplings.
+Vegetable samosas | | base | frozen-snack | everyday | Crisp pastry triangles of spiced potato and peas.
+Onion bhajis | | produce | frozen-snack | everyday | Deep-fried onion fritters in gram flour batter.
+Frozen falafel | falafel | protein | frozen-snack | uncommon | Spiced chickpea balls to bake or fry.
+Frozen pakora | | produce | frozen-snack | uncommon | Vegetable fritters in spiced gram flour.
+Mozzarella sticks | | protein | frozen-snack | everyday | Breaded fried cheese fingers that stretch when bitten.
+Breaded camembert wedges | | protein | frozen-snack | uncommon | Crumbed cheese wedges served with cranberry.
+Jalapeno poppers | | produce | frozen-snack | uncommon | Breaded peppers stuffed with cheese.
+Frozen onion rings | onion rings | produce | frozen-snack | everyday | Battered onion rings, oven baked or fried.
+Frozen dumplings | | base | dumplings | uncommon | Soft doughy dumplings to drop into stews.
+Suet dumpling mix | | base | dumplings | uncommon | Flour and suet for traditional stew dumplings.
+Wontons | | protein | dumplings | uncommon | Square-wrapped pork parcels for soup.
+Frozen pancakes | | base | breakfast-bakery | uncommon | Ready-made pancakes warmed in a toaster or pan.
+Pancake mix | | base | batter | everyday | Flour mix for thin or fluffy pancakes, just add milk.
+Frozen waffles | waffles | base | breakfast-bakery | everyday | Square waffles popped in the toaster.
+Belgian waffles | | base | breakfast-bakery | uncommon | Deep-pocketed waffles that hold syrup.
+Toaster pastries | | accent | breakfast-bakery | uncommon | Jam-filled toaster treats with sugar icing.
+Pain au chocolat | | base | breakfast-bakery | uncommon | Flaky buttery roll with chocolate batons.
+Cinnamon swirl | | accent | breakfast-bakery | uncommon | Rolled sweet dough scented with cinnamon.
+Danish pastry | | accent | breakfast-bakery | uncommon | Sweet laminated pastry with jam or custard.
+Teacake | | base | breakfast-bakery | everyday | Soft fruited bun, split and buttered.
+Fruit scone | | base | breakfast-bakery | everyday | A crumbly scone studded with sultanas.
+Cheese scone | | base | breakfast-bakery | uncommon | Savoury scone with sharp cheddar.
+Pitta bread | pita | base | flatbread | everyday | Pocket flatbread for stuffing or dipping.
+Naan bread | naan | base | flatbread | everyday | Soft leavened flatbread, tandoor-style.
+Garlic and coriander naan | | base | flatbread | everyday | Naan flecked with garlic and green herbs.
+Chapati | | base | flatbread | uncommon | Thin unleavened wholemeal flatbread.
+Flour tortillas | wraps | base | tortilla | everyday | Soft wraps for fajitas and burritos.
+Tostada shells | | base | tortilla | uncommon | Flat crisp corn discs for loaded toppings.
+Tortilla chips | | accent | crisps-snack | everyday | Triangles of fried corn for scooping dips.
+Sour cream and chive tortilla chips | | accent | crisps-snack | uncommon | Tortilla chips with a tangy herby coating.
+Blue corn tortilla chips | | accent | crisps-snack | exotic | Chips made from blue maize.
+Ready salted crisps | plain crisps | accent | crisps | everyday | Thin fried potato slices with a pinch of salt.
+Salt and vinegar crisps | | accent | crisps | everyday | Sharp, tangy crisps that sting the lips.
+Cheese and onion crisps | | accent | crisps | everyday | Savoury, sweetly oniony crisps and a pub staple.
+Prawn cocktail crisps | | accent | crisps | everyday | Pink-dusted crisps tasting of tangy seafood sauce.
+Smoky bacon crisps | | accent | crisps | everyday | Crisps with a smoky, salty bacon seasoning.
+Roast chicken crisps | | accent | crisps | everyday | Savoury crisps flavoured like roast chicken skin.
+Beef and onion crisps | | accent | crisps | uncommon | Meaty crisps with fried onion notes.
+Worcestershire sauce crisps | | accent | crisps | uncommon | Dark, tangy, umami-rich crisps.
+Pickled onion crisps | | accent | crisps | uncommon | Sharp vinegary crisps in a pickle-jar style.
+Sweet chilli crisps | | accent | crisps | everyday | Sticky-sweet crisps with a gentle heat.
+Sour cream and chive crisps | | accent | crisps | everyday | Cool, creamy crisps with fresh oniony herbs.
+Ready salted ridged crisps | ridge-cut crisps | accent | crisps | everyday | Deep-ridged crisps that hold plenty of dip.
+Kettle-cooked crisps | | accent | crisps | uncommon | Hard-bite batch-fried crisps with a rugged crunch.
+Sea salt and black pepper crisps | | accent | crisps | uncommon | Crisps with a peppery bite.
+Crispy seaweed crisps | | accent | crisps | exotic | Light, salty crisps made from seaweed.
+Vegetable crisps | | accent | crisps | uncommon | Chips of beetroot, parsnip and carrot fried crisp.
+Parsnip crisps | | accent | crisps | uncommon | Sweet, earthy fried parsnip slices.
+Prawn crackers | | accent | crisps | everyday | Light, puffy shrimp-flavoured crisps from the takeaway.
+Poppadoms | papadum | accent | crisps | everyday | Thin spiced lentil crisps served before a curry.
+Cassava crisps | | accent | crisps | exotic | Fried cassava slices with a nutty, earthy crunch.
+Cheese puffs | cheese curls | accent | crisps | everyday | Light corn puffs dusted in orange cheese powder.
+Salted peanuts | | accent | nuts-snacks | everyday | Roasted peanuts with a coating of salt.
+Dry-roasted peanuts | | accent | nuts-snacks | everyday | Roasted peanuts with a savoury powder coating.
+Honey-roast peanuts | | accent | nuts-snacks | uncommon | Sweet sticky roasted peanuts.
+Bombay mix | | accent | nuts-snacks | uncommon | Crunchy spiced mix of lentils, peanuts and gram flour noodles.
+Mixed nuts and raisins | | accent | nuts-snacks | everyday | Pub bowl mix of nuts and dried fruit.
+Pretzels | | accent | nuts-snacks | everyday | Salted twisted baked snacks.
+Soft pretzel | | base | nuts-snacks | uncommon | Chewy salted bread twist with a dark crust.
+Popcorn kernels | | accent | popcorn | everyday | Hard maize that pops into fluffy snack when heated.
+Sweet popcorn | | accent | popcorn | everyday | Cinema-style popcorn tossed in sugar.
+Salted popcorn | | accent | popcorn | everyday | Light popped corn with butter and salt.
+Toffee popcorn | | accent | popcorn | uncommon | Popcorn coated in sticky caramel.
+Microwave popcorn bag | | accent | popcorn | everyday | A pouch of kernels that pops in the microwave.
+Rice cakes | | base | rice-snack | everyday | Puffed rice discs, light and crunchy.
+Chocolate rice cakes | | accent | rice-snack | uncommon | Puffed rice cakes covered in chocolate.
+Cheese biscuits | | base | crackers | everyday | Savoury crackers designed for cheese.
+Oatcakes | | base | crackers | everyday | Crumbly Scottish oat biscuits with cheese or pate.
+Crispbread | | base | crackers | everyday | Dry rye crackers, great with toppings.
+Melba toast | | base | crackers | uncommon | Wafer-thin crisp toast for pate.
+Digestive biscuits | digestives | accent | biscuits | everyday | Wheaty, crumbly biscuits for tea and cheesecake bases.
+Chocolate digestives | | accent | biscuits | everyday | Digestive biscuits with a chocolate coating.
+Rich tea biscuits | rich tea | accent | biscuits | everyday | Plain, dunkable biscuits.
+Ginger nuts | gingernuts | accent | biscuits | everyday | Hard, fiery biscuits that survive dunking.
+Shortbread fingers | shortbread | accent | biscuits | everyday | Buttery Scottish biscuits that crumble.
+Custard creams | | accent | biscuits | everyday | Vanilla cream sandwich biscuits.
+Jam sandwich biscuits | | accent | biscuits | uncommon | Shortbread sandwiches with a jam heart.
+Bourbon biscuits | | accent | biscuits | everyday | Chocolate cream sandwiches.
+Oat biscuits | | accent | biscuits | everyday | Oaty, crunchy biscuits with chocolate.
+Malted milk biscuits | | accent | biscuits | uncommon | Mild malty biscuits stamped with cows.
+Fig rolls | | accent | biscuits | uncommon | Soft biscuit wrapped round fig paste.
+Garibaldi biscuits | | accent | biscuits | uncommon | Flat biscuit sandwiching currants, known as squashed fly.
+Jaffa cakes | | accent | biscuits | uncommon | Sponge discs topped with orange jelly and chocolate.
+Amaretti biscuits | | accent | biscuits | exotic | Crisp Italian almond macaroons.
+Caramelised biscuits | | accent | biscuits | uncommon | Spiced caramelised biscuits served with coffee.
+Biscuit spread | speculoos spread | accent | biscuits | uncommon | Spreadable spiced biscuit paste.
+Sponge fingers | savoiardi | base | biscuits | uncommon | Light dry biscuits for trifle and tiramisu.
+Trifle sponges | | base | biscuits | everyday | Light sponge pieces to soak up sherry and jelly.
+Swiss roll | | accent | cake-pudding | everyday | Rolled sponge filled with jam.
+Madeira cake | | accent | cake-pudding | everyday | Plain buttery loaf with lemon notes.
+Victoria sponge | | accent | cake-pudding | everyday | Two layers of sponge with jam and cream.
+Fruit cake | | accent | cake-pudding | everyday | Dense boozy cake full of dried fruit.
+Christmas cake | | accent | cake-pudding | uncommon | Rich iced fruit cake for winter.
+Christmas pudding | plum pudding | accent | cake-pudding | uncommon | Dark boiled fruit pudding served flaming with brandy.
+Mince pies | | accent | cake-pudding | everyday | Small pies of spiced fruit mincemeat.
+Mincemeat | | accent | cake-pudding | uncommon | Boozy spiced dried fruit filling.
+Jam tarts | | accent | cake-pudding | everyday | Shortcrust cases filled with jam.
+Bakewell tart | | accent | cake-pudding | uncommon | Jam and almond sponge in pastry.
+Treacle tart | | accent | cake-pudding | uncommon | Golden syrup tart with breadcrumbs.
+Sticky toffee pudding | | accent | cake-pudding | uncommon | Date sponge with toffee sauce.
+Spotted dick | | accent | cake-pudding | uncommon | Steamed suet sponge with currants.
+Jam roly-poly | | accent | cake-pudding | uncommon | Suet pastry rolled with jam and steamed.
+Apple crumble topping | | accent | cake-pudding | everyday | A pack of buttery crumb to scatter over fruit.
+Tinned rice pudding | | base | tinned-pudding | everyday | Creamy sweet rice in a can.
+Tinned custard | | accent | custard | everyday | Ready-made vanilla custard from a can.
+Custard powder | | accent | custard | everyday | Yellow vanilla-flavour powder for making custard.
+Ready-made custard | | accent | custard | everyday | Chilled vanilla custard pot.
+Banana custard | | accent | custard | uncommon | Custard flavoured with sliced bananas.
+Strawberry jelly | | accent | jelly | everyday | Wobbly red fruit jelly cubes.
+Orange jelly | | accent | jelly | everyday | Set orange jelly for party dessert.
+Jelly cubes | | accent | jelly | everyday | Concentrated jelly in cubes, dissolve in hot water.
+Trifle | | accent | cake-pudding | uncommon | Layers of sponge, jelly, custard and cream.
+Instant whip dessert | | accent | cake-pudding | exotic | Instant whip dessert powder for whisking with milk.
+Tinned peaches | | produce | tinned-fruit | everyday | Soft peach halves in juice or syrup.
+Tinned pineapple rings | | produce | tinned-fruit | everyday | Sweet tinned pineapple for ham and upside-down cakes.
+Tinned fruit cocktail | | produce | tinned-fruit | everyday | Mixed diced fruit in syrup.
+Tinned mandarin segments | | produce | tinned-fruit | uncommon | Sweet soft orange segments.
+Tinned pears | | produce | tinned-fruit | uncommon | Soft pear halves in juice.
+Tinned cherries | | produce | tinned-fruit | uncommon | Sweet dark cherries in syrup.
+Tinned lychees | | produce | tinned-fruit | exotic | Fragrant white-fleshed fruit in syrup.
+Ice cream cones | | base | ice-cream-extras | everyday | Crisp wafer cones for scoops.
+Ice cream wafers | | base | ice-cream-extras | uncommon | Flat wafers for sandwiching ice cream.
+Vanilla ice cream | | accent | ice-cream | everyday | Classic creamy scoop for pudding.
+Chocolate ice cream | | accent | ice-cream | everyday | Rich cocoa scoop.
+Strawberry ice cream | | accent | ice-cream | everyday | Pink fruit-flavoured scoop.
+Raspberry ripple ice cream | | accent | ice-cream | uncommon | Vanilla ice cream with raspberry sauce.
+Neapolitan ice cream | | accent | ice-cream | everyday | Block of chocolate, vanilla and strawberry.
+Mint choc chip ice cream | | accent | ice-cream | uncommon | Cool mint ice cream with chocolate flecks.
+Ice lolly | | accent | ice-cream | everyday | Frozen fruit juice on a stick.
+Frozen yoghurt | | accent | ice-cream | uncommon | Tangy frozen yoghurt dessert.
+Meringue nests | | accent | meringue | uncommon | Crisp baked egg-white cases for cream and fruit.
+Chocolate sprinkles | | accent | sweets | everyday | Tiny chocolate strands for decorating.
+Hundreds and thousands | | accent | sweets | everyday | Tiny coloured sugar balls for fairy cakes.
+Marshmallows | | accent | sweets | everyday | Soft sugar puffs for toasting or hot chocolate.
+Mini marshmallows | | accent | sweets | everyday | Little pillows for cocoa and rocky road.
+Chocolate chips | | accent | sweets | everyday | Baking chips that hold their shape.
+Marzipan | | accent | sweets | uncommon | Sweet almond paste for Christmas cake.
+Ready-to-roll icing | fondant icing | accent | sweets | uncommon | Smooth sugar paste for covering cakes.
+Golden syrup | | accent | sweeteners | everyday | Thick amber syrup for puddings and flapjacks.
+Black treacle | | accent | sweeteners | uncommon | Dark bitter-sweet syrup for gingerbread.
+Condensed milk | | accent | tinned-dairy | everyday | Sweet thick milk for fudge and caramel.
+Evaporated milk | | accent | tinned-dairy | everyday | Unsweetened concentrated milk for savoury and sweet recipes.
+Tinned creamed rice | | base | tinned-pudding | everyday | Creamy rice pudding sold in a tin.
+Tinned tomato soup | | accent | tinned-soup | everyday | Sweet, smooth red soup for dunking toast.
+Tinned chicken soup | | accent | tinned-soup | everyday | Creamy chicken soup from a can.
+Tinned mushroom soup | | accent | tinned-soup | everyday | Creamy soup also used as pie sauce.
+Tinned vegetable soup | | accent | tinned-soup | everyday | Chunky vegetable broth in a can.
+Tinned oxtail soup | | accent | tinned-soup | uncommon | Dark, rich beef soup.
+Tinned Scotch broth | | accent | tinned-soup | uncommon | Barley and vegetable soup with lamb.
+Tinned minestrone | | accent | tinned-soup | uncommon | Italian vegetable and pasta soup.
+Tinned corned beef | | protein | tinned-meat | everyday | Salty pressed beef for hash and sandwiches.
+Tinned luncheon meat | luncheon meat | protein | tinned-meat | everyday | Pink tinned pork, sliced and fried crisp.
+Tinned hot dogs | tinned frankfurters | protein | tinned-meat | uncommon | Soft sausages preserved in brine.
+Tinned steak and kidney pudding | | protein | tinned-meat | uncommon | Suet pudding in a tin, steamed hot.
+Tinned minced beef and onion | | protein | tinned-meat | uncommon | Tinned savoury mince for pies.
+Tinned stewed steak | | protein | tinned-meat | uncommon | Tender beef in gravy from a tin.
+Tinned chicken in white sauce | | protein | tinned-meat | uncommon | Chicken pieces in creamy sauce.
+Tinned ham | | protein | tinned-meat | everyday | Pressed ham in jelly.
+Tinned meatballs | | protein | tinned-meat | uncommon | Beef meatballs in tomato sauce.
+Tinned chilli con carne | | protein | tinned-meat | everyday | Beef and kidney bean chilli, ready to heat.
+Tinned curry | | protein | tinned-meat | uncommon | Ready-made curry sauce with meat.
+Tinned steak and kidney pie | | protein | tinned-meat | uncommon | Pie in a can, heated through.
+Tinned chopped tomatoes | | produce | tinned-veg | everyday | Cooking base for sauces and curries.
+Tinned sweetcorn | | produce | tinned-veg | everyday | Sweet yellow kernels, ready to eat.
+Tinned processed peas | | produce | tinned-veg | uncommon | Bright green soft peas in brine.
+Tinned carrots | | produce | tinned-veg | everyday | Soft canned carrots.
+Tinned new potatoes | | base | tinned-veg | uncommon | Whole small potatoes in brine.
+Tinned sliced beetroot | | produce | tinned-veg | uncommon | Earthy purple slices in vinegar.
+Tinned mushrooms | | produce | tinned-veg | uncommon | Whole button mushrooms in brine.
+Tinned kidney beans | | protein | tinned-beans | everyday | Red beans for chilli.
+Tinned chickpeas | | protein | tinned-beans | everyday | Creamy peas for hummus and curry.
+Tinned black beans | | protein | tinned-beans | uncommon | Black beans for burritos.
+Tinned butter beans | | protein | tinned-beans | everyday | Large, creamy white beans.
+Tinned cannellini beans | | protein | tinned-beans | uncommon | Soft white beans for stews.
+Tinned lentils | | protein | tinned-beans | uncommon | Cooked lentils in water.
+Tinned mixed beans | | protein | tinned-beans | everyday | Medley of beans for salads.
+Tinned mushy peas | | protein | tinned-veg | everyday | Soft marrowfat peas for fish and chips.
+Tinned refried beans | | protein | tinned-beans | uncommon | Mashed seasoned pinto beans.
+Tinned coconut milk | | accent | tinned-dairy | everyday | Creamy base for curry and rice.
+Cornflakes | | base | cereal | everyday | Crisp toasted maize flakes for breakfast.
+Bran flakes | | base | cereal | everyday | Wholegrain wheat flakes with bran.
+Shredded wheat | | base | cereal | everyday | Biscuity wheat pillows.
+Puffed rice cereal | | base | cereal | everyday | Light crisp rice puffs.
+Chocolate cereal | | base | cereal | uncommon | Cocoa-flavoured breakfast loops.
+Honey-coated cereal | | base | cereal | everyday | Sweet golden breakfast cereal.
+Frosted flakes | | base | cereal | uncommon | Sugar-coated corn flakes.
+Granola | | base | cereal | everyday | Baked oats, nuts and honey clusters.
+Muesli | | base | cereal | everyday | Raw oats, fruit and nuts.
+Instant porridge sachet | | base | cereal | everyday | Single-serve oats cooked with hot water.
+Fine instant oatmeal | | base | cereal | uncommon | Fine oatmeal that goes creamy fast.
+Wheat breakfast biscuits | | base | cereal | everyday | Compressed wheat biscuits that soak up milk.
+Oat bars | flapjack | accent | cereal | everyday | Chewy oat and syrup tray bake.
+Cereal bar | | accent | cereal | everyday | Chewy bar of grain and sticky syrup.
+Microwave rice pouch | | base | ready-rice | everyday | Pre-cooked rice heated in two minutes.
+Microwave basmati rice pouch | | base | ready-rice | everyday | Fragrant basmati ready in a pouch.
+Microwave egg-fried rice pouch | | base | ready-rice | uncommon | Seasoned rice with egg flecks.
+Microwave pilau rice pouch | | base | ready-rice | uncommon | Spiced rice with cumin and cardamom.
+Microwave coconut rice pouch | | base | ready-rice | uncommon | Sweet creamy rice.
+Instant couscous | | base | ready-grain | everyday | Fine semolina that steams in minutes.
+Flavoured couscous sachet | | base | ready-grain | everyday | Couscous with dried herbs and lemon.
+Microwave quinoa pouch | | base | ready-grain | uncommon | Pre-cooked quinoa in a pouch.
+Microwave noodles | | base | ready-grain | uncommon | Fresh noodles in a pouch, just warm.
+Pasta sauce jar | | accent | pasta-sauce | everyday | Tomato sauce for quick spaghetti.
+Cheese pasta bake sauce | | accent | pasta-sauce | uncommon | Creamy cheese sauce for baking.
+Ready-made lasagne | | protein | ready-meal | everyday | Layered pasta, meat sauce and white sauce.
+Ready-made macaroni cheese | | base | ready-meal | everyday | Pasta in cheese sauce, heated in the oven.
+Ready-made cottage pie | | protein | ready-meal | everyday | Mince in gravy under mashed potato.
+Ready-made shepherd's pie | | protein | ready-meal | everyday | Lamb mince topped with mash.
+Ready-made fish pie | | protein | ready-meal | everyday | Creamy fish under a mash lid.
+Ready-made chicken curry | | protein | ready-meal | everyday | Curry in sauce, with rice on the side.
+Ready-made chilli con carne | | protein | ready-meal | everyday | Spiced beef and beans.
+Ready-made bangers and mash | | protein | ready-meal | uncommon | Sausages with mash and gravy.
+Ready-made roast dinner | | protein | ready-meal | uncommon | Meat, roasties and veg on one tray.
+Ready-made vegetable curry | | produce | ready-meal | everyday | Chunky vegetables in spiced sauce.
+Baked potato jacket | | base | ready-meal | uncommon | Ready-baked jacket potato to reheat.
+Ready-made coleslaw | | produce | ready-meal | everyday | Shredded cabbage and carrot in mayonnaise.
+Ready-made potato salad | | base | ready-meal | everyday | New potatoes in mayonnaise.
+Ready-made Scotch pie | | protein | ready-pie | exotic | Mutton pie in hot-water crust.
+Crumpet-style pikelets | pikelets | base | breakfast-bakery | uncommon | Thin holey griddle cakes, toasted and buttered.
+Frozen bao buns | bao | base | dumplings | exotic | Fluffy steamed buns to fill with pork belly.
+Fresh ravioli | | base | filled-pasta | uncommon | Chilled filled pasta squares for a quick sauce.
+Fresh tortellini | | base | filled-pasta | uncommon | Chilled ring-shaped pasta stuffed with cheese.
+Gnocchi | | base | filled-pasta | uncommon | Soft potato dumplings, pan-fried or sauced.
+Pot-ready dal | | base | ready-meal | exotic | Spiced lentil dal sold ready to heat.
+Frozen paratha | | base | flatbread | exotic | Flaky layered Indian flatbread cooked from frozen.
+Frozen Yorkshire pudding wraps | | base | yorkshire-pudding | exotic | Wrap-sized Yorkshire puddings for rolling up a roast.
+Frozen puff pastry vol-au-vent bites | | base | pastry | exotic | Frozen mini pastry shells for canape fillings.
+Sourdough crumpets | | base | breakfast-bakery | exotic | Chewy tangy crumpets with an open crumb.
+Frozen churros | | base | frozen-snack | exotic | Ridged fried dough sticks rolled in cinnamon sugar.

@@ -1,0 +1,330 @@
+# vegetables
+Maris Piper potato | Maris Piper | base | potato | everyday | Floury all-rounder that roasts crisp and mashes fluffy
+King Edward potato | | base | potato | everyday | Creamy-fleshed classic for roasting and mash
+Desiree potato | Desiree | base | potato | everyday | Red-skinned, waxy-floury, good for mash and wedges
+Charlotte potato | | base | potato | everyday | Firm salad potato that holds its shape
+Jersey Royal potato | Jersey Royals | base | potato | uncommon | Early new potato with a nutty, earthy sweetness
+Rooster potato | | base | potato | everyday | Red-skinned and versatile, great for chips and roasting
+Russet potato | Idaho potato; baking potato | base | potato | everyday | Fluffy starchy spud, made for baking and frying
+Yukon Gold potato | | base | potato | uncommon | Buttery yellow flesh, lovely mashed or roasted
+Estima potato | | base | potato | everyday | Yellow all-purpose potato that bakes and boils well
+Pink Fir Apple potato | Pink Fir Apple | base | potato | uncommon | Knobbly waxy salad potato with a rich nutty flavour
+Anya potato | | base | potato | uncommon | Slender, waxy, nutty potato ideal for salads
+Vivaldi potato | | base | potato | uncommon | Lower-starch potato that mashes and roasts well
+Kerr's Pink potato | Kerrs Pink | base | potato | uncommon | Floury pink-skinned potato, superb for mash and chips
+Shetland Black potato | Blue potato | base | potato | exotic | Deep violet flesh that keeps its colour when cooked
+Ratte potato | La Ratte | base | potato | uncommon | Fingerling with a chestnutty, buttery taste
+Salad potato | | base | potato | everyday | Small waxy potato for boiling and dressing warm
+New potato | New potatoes | base | potato | everyday | Thin-skinned and sweet, simply boil with mint
+Baby potato | Baby potatoes | base | potato | everyday | Bite-sized spuds for tray roasting
+Sweet potato | | base | sweet-potato | everyday | Orange-fleshed tuber, sweet when roasted
+White sweet potato | | base | sweet-potato | uncommon | Drier, chestnutty sweet potato with pale flesh
+Purple sweet potato | Okinawan sweet potato | base | sweet-potato | exotic | Vivid purple flesh with a dense, honeyed sweetness
+Japanese sweet potato | Satsumaimo | base | sweet-potato | uncommon | Red skin, creamy yellow flesh, superb baked
+Cassava | Manioc; Yuca | base | cassava | uncommon | Dense tropical root, boiled, fried or mashed
+Taro | Dasheen; Eddoe | base | taro | uncommon | Starchy corm with a nutty flavour when cooked through
+Yam | African yam | base | yam | uncommon | Starchy tuber for boiling, pounding or frying
+Ube | Purple yam | base | yam | exotic | Violet yam with a vanilla-like sweetness
+Plantain | Cooking banana | base | plantain | uncommon | Starchy banana, fried ripe for sweetness
+Green plantain | | base | plantain | uncommon | Unripe and starchy, fry into crisp tostones
+Breadfruit | | base | breadfruit | exotic | Starchy fruit cooked like potato or bread
+Jerusalem artichoke | Sunchoke; Topinambur | base | sunchoke | uncommon | Nutty knobbly tuber, lovely roasted or in soup
+Water chestnut | | base | water-chestnut | uncommon | Crisp white corm that stays crunchy in stir-fries
+Lotus root | Renkon | base | lotus-root | exotic | Lacy slices with a crunch, braised or fried
+Arrowroot tuber | | base | arrowroot | exotic | Starchy rhizome used as a mild boiled root
+Oca | New Zealand yam | base | andean-tuber | exotic | Tangy Andean tuber, tender when roasted
+Ulluco | Papalisa | base | andean-tuber | exotic | Colourful Andean tuber with a waxy bite
+Malanga | Yautia; Tannia | base | taro | exotic | Earthy tropical corm, boiled or made into fritters
+Konjac | Devil's tongue | base | konjac | exotic | Springy glucomannan corm, used for shirataki noodles
+Chinese yam | Nagaimo | base | yam | exotic | Slippery mountain yam, grated raw or simmered
+Mashua | Tuber nasturtium | base | andean-tuber | exotic | Peppery Andean tuber that mellows when cooked
+Cocoyam | Colocasia | base | taro | exotic | West African staple corm, boiled or pounded
+Jicama | Mexican turnip; Yam bean | base | jicama | uncommon | Crisp juicy root, refreshing raw with lime and chilli
+Parsnip | | produce | root | everyday | Sweet earthy root, glorious roasted with honey
+Carrot | | produce | carrot | everyday | Sweet crunchy root for everything from soup to cake
+Chantenay carrot | | produce | carrot | uncommon | Short stubby carrot with a deep sweet flavour
+Baby carrot | Baby carrots | produce | carrot | everyday | Tender little carrots, steam whole
+Purple carrot | | produce | carrot | uncommon | Purple skin with orange core and a spicy sweetness
+Heritage carrot | | produce | carrot | uncommon | Mixed-coloured roots for roasting and salads
+Turnip | | produce | root | everyday | Peppery white root, mellow when roasted
+Baby turnip | | produce | root | uncommon | Sweet tender turnips with edible tops
+Swede | Rutabaga; Neep | produce | root | everyday | Sweet golden root, mash with butter and pepper
+Celeriac | Celery root | produce | root | everyday | Knobbly root with a nutty celery flavour
+Beetroot | Beet | produce | beetroot | everyday | Earthy sweet root, roast or grate raw
+Golden beetroot | Yellow beetroot | produce | beetroot | uncommon | Milder, sweeter beet that does not stain
+Chioggia beetroot | Candy cane beetroot | produce | beetroot | uncommon | Pink-and-white rings, lovely sliced raw
+Radish | | produce | radish | everyday | Peppery crisp root for salads and butter
+French breakfast radish | | produce | radish | uncommon | Elongated mild radish with a white tip
+Daikon | Mooli; White radish | produce | radish | uncommon | Large mild radish, pickled, grated or simmered
+Watermelon radish | | produce | radish | exotic | Pale skin with a pink centre and gentle heat
+Black radish | Spanish radish | produce | radish | exotic | Fiery black-skinned winter radish
+Salsify | Oyster plant | produce | root | exotic | Long root tasting subtly of oyster and artichoke
+Scorzonera | Black salsify | produce | root | exotic | Black-skinned root with delicate nutty flavour
+Horseradish root | Fresh horseradish | produce | root | uncommon | Pungent root, grate for roast beef sauce
+Burdock root | Gobo | produce | root | exotic | Earthy crunchy root, braised in Japanese kinpira
+Parsley root | Hamburg parsley | produce | root | exotic | Sweet parsnip-like root with parsley notes
+Kohlrabi | German turnip | produce | brassica | uncommon | Crisp turnip-cabbage bulb, eat raw or roasted
+Brown onion | Yellow onion; Cooking onion | produce | onion | everyday | The all-purpose onion that sweetens as it browns
+Red onion | | produce | onion | everyday | Mild and sharp, lovely raw or pickled
+White onion | | produce | onion | everyday | Crisp, clean-tasting onion for salsas
+Spanish onion | | produce | onion | everyday | Large, mild onion for slicing into rings
+Shallot | Echalion | produce | onion | everyday | Delicate onion for dressings and sauces
+Banana shallot | Long shallot | produce | onion | uncommon | Large elongated shallot, easy to chop
+Pickling onion | Button onion | produce | onion | uncommon | Tiny onions for stews and glazing
+Pearl onion | | produce | onion | uncommon | Small sweet onion, glaze in butter
+Vidalia onion | Sweet onion | produce | onion | exotic | Very sweet low-pungency onion
+Spring onion | Scallion; Green onion | produce | onion | everyday | Fresh mild onion, white and green parts
+Welsh onion | Bunching onion | produce | onion | uncommon | Hollow-leaved onion for stir-fries
+Leek | | produce | leek | everyday | Gentle sweet allium for soups and gratins
+Baby leek | | produce | leek | uncommon | Tender small leeks, braise or grill whole
+Wild garlic leaves | Ramsons | produce | foraged-green | uncommon | Garlicky spring leaves for pesto
+Ramps | | produce | foraged-green | exotic | Foraged wild leek with garlicky bulbs
+Garlic scapes | | produce | onion | exotic | Curly garlic flower stalks, grill or pesto
+Broccoli | | produce | brassica | everyday | Florets and stems, steam or roast until charred
+Tenderstem broccoli | Broccolini | produce | brassica | everyday | Slender sweet stems, quick to cook
+Purple sprouting broccoli | | produce | brassica | uncommon | Winter-spring spears, tender and sweet
+Calabrese | | produce | brassica | everyday | Standard green headed broccoli
+Romanesco | Roman cauliflower | produce | brassica | uncommon | Fractal lime-green cauliflower with nutty flavour
+Cauliflower | | produce | brassica | everyday | Mild florets for roasting, cheese sauce or rice
+Purple cauliflower | | produce | brassica | uncommon | Violet heads that stay sweet and tender
+Orange cauliflower | | produce | brassica | exotic | Sweet golden florets, roast whole
+Brussels sprouts | Sprouts | produce | brassica | everyday | Mini cabbages, roast with bacon or chestnuts
+Brussels sprout tops | | produce | brassica | exotic | Leafy winter greens from the sprout stalk
+White cabbage | | produce | cabbage | everyday | Crunchy cabbage for coleslaw and sauerkraut
+Green cabbage | | produce | cabbage | everyday | Mild everyday cabbage for boiling or stir-frying
+Red cabbage | | produce | cabbage | everyday | Braise with apple and vinegar
+Savoy cabbage | | produce | cabbage | everyday | Crinkled, tender leaves ideal for stuffing
+January King cabbage | | produce | cabbage | uncommon | Hardy winter cabbage with purple-tinged leaves
+Hispi cabbage | Sweetheart cabbage; Pointed cabbage | produce | cabbage | everyday | Tender pointed cabbage, quick to char
+Spring greens | | produce | cabbage | everyday | Loose leafy cabbage, shred and steam
+Cavolo nero | Black kale; Tuscan kale; Lacinato kale | produce | kale | uncommon | Dark crinkly leaves for ribollita
+Curly kale | Kale | produce | kale | everyday | Frilly hardy green, crisp into chips
+Red Russian kale | | produce | kale | uncommon | Tender flat purple-stemmed kale
+Flower sprouts | Kalettes | produce | brassica | uncommon | Cross of sprout and kale, sweet and nutty
+Collard greens | Collards | produce | kale | uncommon | Sturdy southern greens, slow cooked until silky
+Pak choi | Bok choy | produce | asian-green | everyday | Juicy white stems and tender green leaves
+Baby pak choi | | produce | asian-green | uncommon | Whole tiny heads to steam or grill
+Choy sum | Flowering cabbage | produce | asian-green | uncommon | Yellow-flowered stalks, stir-fry with garlic
+Gai lan | Chinese broccoli; Kai-lan | produce | asian-green | uncommon | Bitter-sweet stems, lovely with oyster sauce
+Napa cabbage | Chinese leaf; Chinese cabbage | produce | asian-green | everyday | Crinkly mild cabbage for kimchi and soups
+Tatsoi | | produce | asian-green | exotic | Spoon-shaped rosette with mild mustardy taste
+Mizuna | | produce | salad-leaf | uncommon | Feathery peppery Japanese salad leaf
+Komatsuna | Japanese mustard spinach | produce | asian-green | exotic | Mild tender green similar to spinach
+Mustard greens | | produce | asian-green | uncommon | Peppery leaves for braising
+Water spinach | Kangkong; Morning glory | produce | asian-green | exotic | Hollow stems, stir-fried with chilli
+Yu choy | | produce | asian-green | exotic | Tender sweet Chinese greens
+Turnip tops | Cime di rapa; Rapini | produce | brassica | uncommon | Bitter leafy shoots, wonderful with orecchiette
+Spinach | | produce | leafy-green | everyday | Tender leaves that wilt in seconds
+Baby spinach | | produce | leafy-green | everyday | Mild small leaves for salads
+Chard | Swiss chard; Rainbow chard | produce | leafy-green | uncommon | Colourful stems with earthy leaves
+Perpetual spinach | Spinach beet | produce | leafy-green | uncommon | Hardy leaf beet with a mild spinach taste
+Beetroot leaves | Beet greens | produce | leafy-green | uncommon | Tender earthy tops, wilt like chard
+Amaranth leaves | Callaloo; Chinese spinach | produce | leafy-green | exotic | Soft, iron-rich leaves for Caribbean soups
+Malabar spinach | | produce | leafy-green | exotic | Succulent vine leaves that thicken stews
+Moringa leaves | Drumstick leaves | produce | leafy-green | exotic | Tiny fresh leaves for curries and dal
+Cassava leaves | | produce | leafy-green | exotic | West African greens, pounded and stewed
+Pumpkin leaves | Ugu | produce | leafy-green | exotic | Tender vine shoots for African and Asian stews
+Sweet potato leaves | Potato tips | produce | leafy-green | exotic | Stir-fry the tender tips with garlic
+Jute mallow | Molokhia; Ewedu | produce | leafy-green | exotic | Silky greens for a classic Egyptian soup
+Bitter leaf | Vernonia | produce | leafy-green | exotic | Washed leaves for Nigerian soup
+Fluted pumpkin leaves | | produce | leafy-green | exotic | Nigerian green for egusi
+Dandelion leaves | Dandelion greens | produce | foraged-green | uncommon | Bitter greens, wilt with bacon
+Nettles | Stinging nettle tops | produce | foraged-green | uncommon | Spring tops for soup, blanched to remove sting
+Sorrel | Garden sorrel | produce | foraged-green | uncommon | Lemony leaves for sauces with fish
+Wood sorrel | | produce | foraged-green | exotic | Tiny clover-like leaves, sharp and citrusy
+Fat hen | Lamb's quarters | produce | foraged-green | exotic | Foraged leaf with spinach-like softness
+Good King Henry | | produce | foraged-green | exotic | Old English perennial, cooked like spinach
+Alexanders | | produce | foraged-green | exotic | Coastal wild celery-flavoured stems and shoots
+Hairy bittercress | | produce | foraged-green | exotic | Peppery weedy cress leaves
+Chickweed | | produce | foraged-green | exotic | Sweet delicate foraged leaves for salads
+Hop shoots | | produce | foraged-green | exotic | Spring shoots, steam like asparagus
+Fiddlehead ferns | Fiddleheads | produce | foraged-green | exotic | Curled fern fronds, must be cooked well
+Sea beet | | produce | sea-vegetable | exotic | Wild coastal ancestor of chard
+Iceberg lettuce | | produce | salad-leaf | everyday | Crunchy watery lettuce for burgers
+Cos lettuce | Romaine | produce | salad-leaf | everyday | Sturdy sweet leaves for Caesar salad
+Little Gem lettuce | | produce | salad-leaf | everyday | Small crisp sweet hearts
+Butterhead lettuce | Round lettuce | produce | salad-leaf | everyday | Soft buttery leaves
+Lollo rosso | | produce | salad-leaf | everyday | Frilly red-edged leaf for mixed salads
+Oakleaf lettuce | | produce | salad-leaf | uncommon | Tender lobed leaves, mild and nutty
+Rocket | Arugula | produce | salad-leaf | everyday | Peppery leaves for pizza and pasta
+Wild rocket | | produce | salad-leaf | uncommon | Smaller leaves with a stronger pepperiness
+Watercress | | produce | salad-leaf | everyday | Peppery aquatic leaves for soup and salads
+Lamb's lettuce | Corn salad; Mache | produce | salad-leaf | uncommon | Mild nutty rosettes
+Radicchio | | produce | chicory | uncommon | Bitter ruby leaves, grill or toss in salad
+Treviso radicchio | Tardivo | produce | chicory | exotic | Elongated bittersweet radicchio, grill it
+Endive | Belgian endive; Witloof | produce | chicory | uncommon | Pale bitter-sweet spears, braise or serve raw
+Red endive | | produce | chicory | uncommon | Crisp red-tinged chicory
+Curly endive | Frisee | produce | chicory | uncommon | Frilly bitter heads for lardon salads
+Escarole | Batavia | produce | chicory | uncommon | Broad mildly bitter leaves for soups
+Puntarelle | | produce | chicory | exotic | Roman chicory shoots, served with anchovy dressing
+Pea shoots | | produce | sprout-micro | uncommon | Sweet tender pea tendrils
+Mustard cress | Cress | produce | sprout-micro | everyday | Peppery seedlings for egg sandwiches
+Mixed salad leaves | Salad bag | produce | salad-leaf | everyday | Handy mix of tender leaves
+Purslane | | produce | salad-leaf | exotic | Succulent lemony leaves
+Ice plant | | produce | salad-leaf | exotic | Salty crystal-covered succulent leaves
+Mung bean sprouts | Beansprouts | produce | sprout-micro | everyday | Crunchy shoots for stir-fries and pho
+Alfalfa sprouts | | produce | sprout-micro | uncommon | Fine mild sprouts for sandwiches
+Broccoli sprouts | | produce | sprout-micro | uncommon | Peppery tiny shoots
+Radish sprouts | | produce | sprout-micro | uncommon | Spicy delicate sprouts
+Sunflower shoots | | produce | sprout-micro | uncommon | Nutty crunchy shoots
+Microgreens | Micro leaves | produce | sprout-micro | uncommon | Tiny seedlings for garnish
+Pumpkin | | produce | squash | everyday | Sweet orange flesh for soup and pies
+Butternut squash | | produce | squash | everyday | Nutty sweet squash, roast in wedges
+Acorn squash | | produce | squash | uncommon | Ridged squash, roast halved with butter
+Spaghetti squash | Vegetable spaghetti | produce | squash | uncommon | Flesh separates into noodle-like strands
+Kabocha squash | Japanese pumpkin | produce | squash | uncommon | Chestnutty fluffy flesh, great in tempura
+Crown Prince squash | | produce | squash | uncommon | Blue-grey squash with dense sweet orange flesh
+Red kuri squash | Uchiki kuri; Hokkaido pumpkin | produce | squash | uncommon | Chestnut-flavoured edible-skinned squash
+Delicata squash | | produce | squash | exotic | Thin-skinned, creamy and sweet, roast in rings
+Patty pan squash | | produce | squash | uncommon | Scalloped summer squash
+Gem squash | | produce | squash | exotic | Small round squash for stuffing
+Tromboncino | | produce | squash | exotic | Long curved summer squash
+Marrow | | produce | squash | uncommon | Large mild courgette for stuffing
+Courgette | Zucchini | produce | squash | everyday | Quick-cooking summer squash
+Yellow courgette | | produce | squash | uncommon | Golden mild courgette
+Round courgette | | produce | squash | uncommon | Round ones to stuff and bake
+Courgette flowers | Squash blossoms | produce | squash | exotic | Delicate flowers for stuffing and frying
+Chayote | Christophene; Mirliton | produce | squash | exotic | Pale pear-shaped squash with a crisp texture
+Bitter melon | Karela; Bitter gourd | produce | gourd | exotic | Ridged bitter gourd for stir-fries and curry
+Bottle gourd | Calabash; Lauki | produce | gourd | exotic | Mild pale gourd for curries
+Winter melon | Wax gourd | produce | gourd | exotic | Mild gourd that soaks up broths
+Luffa | Ridge gourd; Angled loofah | produce | gourd | exotic | Young loofah, silky in curries
+Snake gourd | | produce | gourd | exotic | Long mild gourd for South Indian dishes
+Cucumber | | produce | cucumber | everyday | Cool crisp fruit used as a vegetable
+Mini cucumber | Snack cucumber | produce | cucumber | everyday | Sweet seedless small cucumbers
+Gherkin | Cornichon | produce | cucumber | uncommon | Small cucumbers for pickling
+Lebanese cucumber | | produce | cucumber | uncommon | Thin-skinned crisp cucumber
+Apple cucumber | | produce | cucumber | exotic | Round pale-skinned cucumber
+Bell pepper | Sweet pepper | produce | pepper | everyday | Juicy crunchy pepper, raw or roasted
+Red pepper | | produce | pepper | everyday | Sweetest mature bell pepper
+Yellow pepper | | produce | pepper | everyday | Fruity mild pepper
+Green pepper | | produce | pepper | everyday | Grassy, slightly bitter pepper
+Romano pepper | | produce | pepper | uncommon | Long sweet pointed pepper
+Sweet pointed pepper | Sweetheart pepper | produce | pepper | everyday | Thin-walled sweet pepper
+Padron pepper | Pimientos de Padron | produce | pepper | uncommon | Blister in oil with sea salt
+Piquillo pepper | | produce | pepper | exotic | Roasted Spanish peppers, sweet-smoky
+Shishito pepper | | produce | pepper | uncommon | Mild Japanese pepper, blistered
+Banana pepper | | produce | pepper | uncommon | Mild tangy yellow pepper
+Pimento | Cherry pepper | produce | pepper | uncommon | Sweet red pepper for stuffing
+Mini sweet peppers | Snacking peppers | produce | pepper | everyday | Little sweet peppers to eat raw
+Red chilli | Long red chilli | produce | chilli | everyday | Medium-hot fresh chilli
+Green chilli | | produce | chilli | everyday | Fresh hot grassy chilli
+Bird's eye chilli | Thai chilli | produce | chilli | everyday | Tiny fiercely hot chilli
+Jalapeno | | produce | chilli | everyday | Medium-hot green chilli for nachos
+Serrano chilli | | produce | chilli | uncommon | Sharper hotter than jalapeno
+Scotch bonnet | Habanero | produce | chilli | uncommon | Fruity, searingly hot chilli
+Poblano | Ancho fresh | produce | chilli | uncommon | Mild dark green chilli for stuffing
+Fresno chilli | | produce | chilli | uncommon | Fruity medium-heat red chilli
+Cayenne chilli | | produce | chilli | uncommon | Slim hot red chilli
+Anaheim chilli | New Mexico chilli | produce | chilli | uncommon | Mild long chilli for roasting
+Naga chilli | Ghost pepper; Bhut jolokia | produce | chilli | exotic | Extremely hot with a fruity edge
+Carolina Reaper | | produce | chilli | exotic | One of the hottest, sweet then scorching
+Aji amarillo | | produce | chilli | exotic | Peruvian yellow chilli, fruity and warm
+Rocoto | Manzano chilli | produce | chilli | exotic | Thick-walled fiery Peruvian chilli
+Tomato | | produce | tomato | everyday | Juicy staple of sauces and salads
+Vine tomato | Vine-ripened tomato | produce | tomato | everyday | Sweet tomato, picked on the vine
+Beef tomato | Beefsteak tomato | produce | tomato | everyday | Large meaty slicing tomato
+Cherry tomato | | produce | tomato | everyday | Sweet bite-sized tomatoes
+Plum tomato | | produce | tomato | everyday | Low-moisture tomato for sauce
+San Marzano tomato | | produce | tomato | uncommon | Sweet low-acid Italian plum tomato
+Datterini tomato | | produce | tomato | uncommon | Elongated, very sweet baby tomatoes
+Heirloom tomato | Heritage tomato | produce | tomato | uncommon | Misshapen ripe tomatoes in many colours
+Yellow tomato | | produce | tomato | uncommon | Mild sweet low-acid tomato
+Green tomato | | produce | tomato | uncommon | Firm tart tomatoes for chutney or frying
+Black Krim tomato | Black tomato | produce | tomato | exotic | Smoky deep-coloured tomato
+Tomatillo | | produce | tomato | exotic | Husked tart green fruit for salsa verde
+Sun-dried tomato | Sundried tomatoes | produce | tomato | uncommon | Intense chewy tomatoes
+Tinned tomatoes | Chopped tomatoes | produce | tomato | everyday | Pantry tomatoes for sauces
+Aubergine | Eggplant | produce | aubergine | everyday | Spongy fruit that melts when roasted
+Baby aubergine | | produce | aubergine | uncommon | Small tender aubergines for curries
+Thai aubergine | | produce | aubergine | exotic | Tiny green round aubergines for curry
+Japanese aubergine | Long aubergine | produce | aubergine | uncommon | Slender sweet aubergine
+White aubergine | | produce | aubergine | exotic | Creamy white aubergine, mild and tender
+Graffiti aubergine | Sicilian aubergine | produce | aubergine | exotic | Purple-striped with delicate flesh
+Celery | | produce | stalk | everyday | Crisp aromatic stalks for stocks and salads
+Celery hearts | | produce | stalk | everyday | Tender pale inner celery
+Fennel | Florence fennel | produce | stalk | everyday | Aniseed bulb, shave raw or roast
+Asparagus | Green asparagus | produce | asparagus | everyday | Tender spears, griddle or steam
+White asparagus | | produce | asparagus | exotic | Blanched spears, delicate and sweet
+Purple asparagus | | produce | asparagus | exotic | Sweeter spears that fade to green
+Wild asparagus | | produce | asparagus | exotic | Thin foraged spears with intense flavour
+Globe artichoke | Artichoke | produce | artichoke | uncommon | Edible heart and fleshy leaf bases
+Baby artichoke | Carciofi | produce | artichoke | uncommon | Tender small artichokes, fry whole
+Cardoon | | produce | artichoke | exotic | Thistle stalks, braise until tender
+Chinese celery | | produce | stalk | exotic | Thin pungent stems for stir-fries
+Garden peas | Fresh peas | produce | pea | everyday | Sweet green pearls, steam or purée
+Petits pois | | produce | pea | everyday | Small tender sweet peas
+Mangetout | Snow peas | produce | pea | everyday | Flat sweet pods, eat whole
+Sugar snap peas | | produce | pea | everyday | Plump crunchy edible pods
+Frozen peas | | produce | pea | everyday | Freezer staple, sweet and ready
+Marrowfat peas | | produce | pea | everyday | Mature peas for mushy peas
+Runner beans | | produce | bean | everyday | Long coarse pods, slice and boil
+Green beans | French beans | produce | bean | everyday | Slender tender pods
+Fine beans | Haricots verts | produce | bean | everyday | Very slim, tender beans
+Yellow wax beans | | produce | bean | uncommon | Buttery yellow stringless pods
+Dwarf beans | | produce | bean | everyday | Bushy beans with tender pods
+Borlotti beans fresh | Cranberry beans | produce | bean | uncommon | Speckled pods with creamy beans
+Yardlong beans | Snake beans | produce | bean | exotic | Very long beans, stir-fry in pieces
+Winged beans | | produce | bean | exotic | Four-flanged crunchy pods
+Okra | Ladies' fingers; Bhindi | produce | okra | uncommon | Ridged pods that thicken gumbo
+Sweetcorn | Corn on the cob | produce | corn | everyday | Sweet golden kernels, grill in husk
+Baby sweetcorn | | produce | corn | everyday | Tender mini cobs for stir-fries
+Frozen sweetcorn | | produce | corn | everyday | Handy kernels for fritters and soup
+Huitlacoche | Corn smut | produce | corn | exotic | Mexican corn fungus delicacy
+Samphire | Marsh samphire; Glasswort | produce | sea-vegetable | uncommon | Salty succulent shoots for fish
+Rock samphire | | produce | sea-vegetable | exotic | Aromatic coastal plant, pickled or boiled
+Sea purslane | | produce | sea-vegetable | exotic | Salty grey leaves, lovely with seafood
+Sea kale | | produce | sea-vegetable | exotic | Coastal brassica shoots, steamed like asparagus
+Nori | Laver sheets | produce | sea-vegetable | uncommon | Toasted seaweed sheets for sushi
+Kombu | Kelp | produce | sea-vegetable | uncommon | Savoury seaweed for dashi
+Wakame | | produce | sea-vegetable | uncommon | Silky seaweed for miso soup
+Dulse | | produce | sea-vegetable | uncommon | Smoky red seaweed
+Hijiki | | produce | sea-vegetable | exotic | Black seaweed strands, simmered
+Arame | | produce | sea-vegetable | exotic | Mild sweet seaweed shreds
+Sea lettuce | Ulva | produce | sea-vegetable | exotic | Bright green seaweed for salads
+Carrageen moss | Irish moss | produce | sea-vegetable | exotic | Seaweed that sets milk puddings
+Laverbread | Laver | produce | sea-vegetable | uncommon | Welsh cooked seaweed purée
+Banana blossom | Banana flower | produce | tropical-veg | exotic | Meaty petals, used in salads and curries
+Bamboo shoots | | produce | tropical-veg | uncommon | Crisp tender shoots
+Palm hearts | Hearts of palm | produce | tropical-veg | uncommon | Soft tender cores of palm
+Green papaya | | produce | tropical-veg | exotic | Unripe papaya shredded for salad
+Green jackfruit | Young jackfruit | produce | tropical-veg | uncommon | Stringy unripe fruit, a meaty shredder
+Drumstick | Moringa pods | produce | tropical-veg | exotic | Long ribbed pods for sambar
+Nopales | Cactus paddles | produce | tropical-veg | exotic | Tender cactus pads, grill or stew
+Cucamelon | Mouse melon | produce | cucumber | exotic | Grape-sized sour cucumbers
+Frozen mixed vegetables | | produce | frozen-veg | everyday | Freezer mix of carrot, peas and corn
+Frozen spinach | | produce | leafy-green | everyday | Pre-blanched leaves for curries
+Frozen broccoli | | produce | brassica | everyday | Handy florets
+Roasted red peppers | Jarred peppers | produce | pepper | everyday | Smoky sweet peppers from a jar
+Cooked beetroot | Beetroot cooked | produce | beetroot | everyday | Vacuum-packed ready beets
+Mushy peas | | produce | pea | everyday | Mashed marrowfat peas with a hint of mint
+Pentland Javelin potato | | base | potato | uncommon | Early waxy-ish potato for boiling and salads
+Nicola potato | | base | potato | uncommon | Waxy yellow potato that holds up in gratins
+Golden Wonder potato | | base | potato | uncommon | Old russet-skinned floury potato with rich flavour
+Red Duke of York potato | | base | potato | uncommon | Red-skinned heritage potato, good boiled or baked
+Fingerling potato | | base | potato | uncommon | Slender waxy tubers, roast whole
+Purple Majesty potato | | base | potato | exotic | Deep purple flesh with a vivid colour when baked
+Yacon | | base | yacon | exotic | Crisp sweet Andean root, eat raw or lightly cooked
+Water caltrop | Water chestnut pods | base | water-caltrop | exotic | Horned aquatic nut, boiled for a floury bite
+Skirret | | base | root | exotic | Medieval sweet root, boiled in clusters
+Chinese artichoke | Crosne | produce | root | exotic | Small crunchy tubers, sauteed in butter
+Celtuce | Stem lettuce | produce | stalk | exotic | Crisp lettuce stem, peeled and stir-fried
+Fresh wasabi root | Wasabi | produce | root | exotic | Grate finely for clean, quick-fading heat
+Cipollini onion | | produce | onion | uncommon | Flat sweet Italian onion, ideal braised
+Marmande tomato | | produce | tomato | uncommon | Ribbed, juicy tomato for stuffing and salads
+Sungold tomato | | produce | tomato | uncommon | Tangerine-orange cherry tomato, honey sweet
+Cubanelle pepper | | produce | pepper | uncommon | Long, thin-walled mild pepper for frying
+Hungarian wax pepper | | produce | pepper | uncommon | Waxy yellow pepper with mild to medium heat
+Peri-peri chilli | Piri piri chilli | produce | chilli | uncommon | Small African bird's eye chilli behind the famous marinade
+Korean green chilli | | produce | chilli | uncommon | Long crisp chilli with moderate heat for stews and ssam
+Hatch chile | | produce | chilli | exotic | New Mexico chile roasted for its smoky sweetness
+Agretti | Monk's beard | produce | sea-vegetable | exotic | Spiky Italian saltwort, blanch and dress with lemon
+Land cress | American cress | produce | salad-leaf | uncommon | Peppery cress that grows in garden soil
+Lentil sprouts | | produce | sprout-micro | uncommon | Nutty little sprouts for salads
+Soya bean sprouts | | produce | sprout-micro | uncommon | Nutty, firm sprouts essential to Korean cooking
+Ivy gourd | Tindora; Kundru | produce | gourd | exotic | Small crunchy gherkin-like gourd for Indian stir-fries
+Taro leaves | Arbi leaves; Callaloo leaves | produce | leafy-green | exotic | Large leaves cooked until silky, never raw
+Frozen green beans | | produce | bean | everyday | Freezer-fresh beans for quick sides
+Frozen cauliflower | | produce | brassica | everyday | Ready florets to roast or blitz into rice
+Lotus stem | | produce | lotus-root | exotic | Crisp hollow stems for salads and curries
+Pointed red cabbage | | produce | cabbage | uncommon | Tender conical red cabbage for slaws

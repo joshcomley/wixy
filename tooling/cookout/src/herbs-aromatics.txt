@@ -1,0 +1,117 @@
+# herbs-aromatics
+Flat-leaf Parsley | continental parsley; Italian parsley | accent | parsley | everyday | Clean, grassy leaves; chop into sauces, salads and finish almost any savoury dish.
+Curly Parsley | | accent | parsley | everyday | Frilly classic garnish with a fresh, mild bite; good in stuffings and butters.
+Fresh Basil | sweet basil | accent | basil | everyday | Sweet, peppery leaves; tear over tomatoes, pasta and pizza at the last moment.
+Thai Basil | | accent | basil | uncommon | Aniseed-scented purple-stemmed basil that holds up in curries and stir-fries.
+Holy Basil | tulsi; Thai holy basil | accent | basil | exotic | Peppery, clove-like leaves for fiery Thai stir-fries.
+Lemon Basil | | accent | basil | exotic | Citrus-scented basil, lovely with fish, fruit and light salads.
+Purple Basil | opal basil | accent | basil | uncommon | Deep-purple leaves with a spicy sweetness; striking in salads.
+Genovese Basil | | accent | basil | uncommon | Small-leaved, intensely fragrant basil, the classic choice for pesto.
+Fresh Thyme | | accent | thyme | everyday | Tiny woody-stemmed leaves that perfume roasts, stews and stocks.
+Lemon Thyme | | accent | thyme | uncommon | Thyme with a bright citrus note, perfect for chicken and fish.
+Dried Thyme | | accent | thyme | everyday | Concentrated and earthy; rub into meat or stir into slow braises.
+Fresh Rosemary | | accent | rosemary | everyday | Piney needles that stand up to roast lamb, potatoes and focaccia.
+Dried Rosemary | | accent | rosemary | everyday | Resinous and potent; crumble sparingly into marinades and breads.
+Fresh Sage | | accent | sage | everyday | Soft, musky leaves that crisp beautifully in brown butter.
+Dried Sage | rubbed sage | accent | sage | everyday | Earthy and warming, a stuffing and sausage essential.
+Pineapple Sage | | accent | sage | exotic | Fruity-scented red-flowered sage, used in drinks and fruit salads.
+Fresh Oregano | | accent | oregano | everyday | Warm, peppery leaves for tomato sauces and grilled meats.
+Dried Oregano | | accent | oregano | everyday | The pizza herb, robust and slightly bitter; best dried.
+Greek Oregano | rigani | accent | oregano | uncommon | Wild mountain oregano with a pungent, resinous punch.
+Mexican Oregano | | accent | oregano | uncommon | Citrusy, earthy oregano suited to chilli, beans and salsas.
+Sweet Marjoram | marjoram | accent | marjoram | uncommon | Gentler, sweeter cousin of oregano, lovely with vegetables and poultry.
+Spearmint | garden mint | accent | mint | everyday | Cool, sweet mint for peas, lamb, yoghurt and summer drinks.
+Peppermint | | accent | mint | uncommon | Sharp menthol-rich leaves for tea, desserts and chocolate.
+Moroccan Mint | | accent | mint | uncommon | Fragrant spearmint variety steeped in sweet green tea.
+Apple Mint | | accent | mint | uncommon | Soft, furry, fruity mint for sauces and fruit salads.
+Chocolate Mint | | accent | mint | exotic | Peppermint with a cocoa-like aroma; use in desserts and ice cream.
+Fresh Coriander | cilantro; coriander leaf | accent | coriander-herb | everyday | Bright, citrusy leaves for curries, salsas and noodle bowls.
+Coriander Root | cilantro root | accent | coriander-herb | exotic | Intensely aromatic root pounded into Thai curry pastes.
+Vietnamese Coriander | rau ram | accent | coriander-herb | exotic | Peppery, lemony leaves served with noodles and salads.
+Culantro | long coriander; sawtooth coriander | accent | coriander-herb | exotic | Stronger, spiky-leaved cousin of coriander used across the Caribbean.
+Fresh Dill | | accent | dill | everyday | Feathery, aniseedy fronds for salmon, potatoes and pickles.
+Dried Dill | dill weed | accent | dill | uncommon | Mild, grassy dill that keeps well; stir into dips and soups.
+Fennel Fronds | | accent | fennel-herb | uncommon | Wispy fennel tops with a soft aniseed flavour for fish and salads.
+Bronze Fennel | | accent | fennel-herb | exotic | Coppery-leaved fennel with a delicate liquorice scent.
+Fresh Chives | | accent | chives | everyday | Mild oniony stems snipped over eggs, potatoes and soups.
+Garlic Chives | Chinese chives | accent | chives | uncommon | Flat leaves with a gentle garlic bite, good in dumplings.
+Chive Flowers | | accent | chives | exotic | Pretty purple pompoms tasting of mild onion; sprinkle on salads.
+Fresh Tarragon | French tarragon | accent | tarragon | uncommon | Sweet aniseed leaves, essential to bearnaise and chicken dishes.
+Russian Tarragon | | accent | tarragon | exotic | Hardier, milder tarragon with a grassier flavour.
+Fresh Chervil | | accent | chervil | uncommon | Delicate, faintly aniseed herb for omelettes and spring sauces.
+Fresh Lovage | | accent | lovage | exotic | Powerful celery-like leaves for soups and stocks.
+Fresh Savory | summer savory | accent | savory | exotic | Peppery herb that pairs naturally with beans.
+Winter Savory | | accent | savory | exotic | Robust, resinous cousin of summer savory for hearty stews.
+Fresh Bay Leaf | | accent | bay | uncommon | Fresh bay is sweetly floral and gentler than dried; add to stocks.
+Dried Bay Leaf | bay leaves | accent | bay | everyday | The braiser's friend; simmer whole then remove before serving.
+Indian Bay Leaf | tej patta | accent | bay | exotic | Cinnamon-scented leaf with three veins, used in biryani and curry.
+Curry Leaves | kadi patta | accent | curry-leaf | uncommon | Nutty, citrusy leaves that crackle in hot oil for South Indian tempering.
+Makrut Lime Leaves | kaffir lime leaves | accent | citrus-leaf | uncommon | Double-lobed leaves with an intense lime perfume for Thai curries.
+Lemon Verbena | | accent | citrus-leaf | exotic | Strongly lemony leaves for infusing custards, teas and syrups.
+Lemon Balm | | accent | citrus-leaf | exotic | Soft lemon-scented leaves for teas, salads and fish.
+Lemon Myrtle | | accent | citrus-leaf | exotic | Australian leaf with a vivid lemon-lime oil; dried or fresh.
+Green Shiso | ao-jiso; perilla | accent | shiso | uncommon | Jagged Japanese leaf tasting of mint, basil and cumin.
+Red Shiso | aka-jiso; purple perilla | accent | shiso | exotic | Deep-red leaf used to colour and flavour pickled plums.
+Korean Perilla | kkaennip | accent | shiso | exotic | Broad, nutty leaves used to wrap grilled meats in Korea.
+Epazote | | accent | epazote | exotic | Pungent Mexican herb simmered with black beans.
+Hoja Santa | | accent | hoja-santa | exotic | Large velvety leaf tasting of root beer and anise; wraps fish and tamales.
+Pandan Leaf | screwpine leaf | accent | pandan | uncommon | Grassy, vanilla-like leaf that scents rice and South-East Asian sweets.
+Banana Leaf | | accent | banana-leaf | uncommon | Pliable leaf for wrapping and steaming; lends a subtle tea aroma.
+Fig Leaf | | accent | fig-leaf | exotic | Coconut-scented leaf for infusing creams or wrapping cheese.
+Salad Burnet | | accent | burnet | exotic | Cucumber-flavoured little leaves for salads and drinks.
+Borage | | accent | borage | exotic | Cucumber-tasting leaves and star-shaped blue flowers.
+Nasturtium Leaves | | accent | nasturtium | uncommon | Peppery round leaves that add a watercress kick.
+Nasturtium Flowers | | accent | nasturtium | uncommon | Bright, peppery blooms for decorating salads.
+Marigold Petals | calendula | accent | edible-flower | uncommon | Golden petals used as a cheap saffron colour in rice and soups.
+Elderflower | | accent | edible-flower | uncommon | Muscat-scented blossoms for cordial, fritters and gooseberry puddings.
+Violet Flowers | | accent | edible-flower | exotic | Sweet-scented purple blossoms, often candied.
+Pansies | | accent | edible-flower | uncommon | Mild, delicately minty flowers to dress cakes and salads.
+Cornflower Petals | | accent | edible-flower | exotic | Vivid blue petals with almost no flavour; pure decoration.
+Lavender Buds | culinary lavender | accent | edible-flower | uncommon | Floral and slightly resinous; use sparingly in shortbread and lamb rubs.
+Dried Rose Petals | | accent | edible-flower | uncommon | Perfumed petals scattered on rice, Persian sweets and tagines.
+Hibiscus Flowers | dried hibiscus; roselle | accent | edible-flower | exotic | Tart crimson petals that steep into a ruby, cranberry-like drink.
+Chamomile Flowers | | accent | edible-flower | uncommon | Apple-scented little daisies for infusions and custards.
+Sweet Woodruff | | accent | edible-flower | exotic | Hay-and-vanilla scented herb used in German May wine.
+Rose Water | | accent | flower-water | uncommon | Fragrant distilled petals for Middle Eastern sweets and bakes.
+Orange Blossom Water | orange flower water | accent | flower-water | uncommon | Delicate citrus-floral water for pastries and syrups.
+Kewra Water | pandanus flower water | accent | flower-water | exotic | Musky, sweet screwpine essence for biryani and Indian desserts.
+Fresh Garlic | garlic bulb | produce | garlic | everyday | Pungent bulb, mellow when slow-roasted and fierce when raw.
+Garlic Cloves | | produce | garlic | everyday | Peel, crush or slice to open every savoury dish with depth.
+New Season Garlic | wet garlic | produce | garlic | uncommon | Juicy, mild young garlic harvested in early summer.
+Smoked Garlic | | produce | garlic | uncommon | Cold-smoked bulbs with a deep, campfire savouriness.
+Elephant Garlic | | produce | garlic | uncommon | Giant, mild bulb that is really a leek relative.
+Garlic Powder | | accent | garlic | everyday | Dried and milled garlic for rubs and quick seasoning.
+Garlic Granules | | accent | garlic | everyday | Coarser dried garlic that rehydrates well in sauces.
+Garlic Flakes | | accent | garlic | uncommon | Dried slivers that soften in broths and stir-fries.
+Fresh Ginger | root ginger | produce | ginger | everyday | Zingy, warming root for stir-fries, curries and teas.
+Ground Ginger | ginger powder | accent | ginger | everyday | Spicy, warm powder for gingerbread, cakes and curries.
+Crystallised Ginger | candied ginger | accent | ginger | uncommon | Sugar-coated chewy ginger for baking and desserts.
+Young Ginger | spring ginger | produce | ginger | exotic | Tender, pink-tipped and mild, hardly any fibre.
+Galangal | Thai ginger | produce | galangal | uncommon | Piney, citrusy rhizome essential to Thai soups and pastes.
+Lesser Galangal | krachai; fingerroot | produce | galangal | exotic | Slender yellow rhizome with a camphor-like sharpness.
+Fresh Turmeric | turmeric root | produce | turmeric | uncommon | Orange-fleshed rhizome, earthy and peppery, stains everything gold.
+White Turmeric | amba haldi | produce | turmeric | exotic | Mango-scented pale rhizome used in pickles and chutneys.
+Lemongrass | | produce | lemongrass | everyday | Citrusy stalks to bruise into soups, curries and marinades.
+Dried Lemongrass | | accent | lemongrass | uncommon | Brittle strips that infuse teas and broths with lemony perfume.
+Wasabi Root | fresh wasabi | produce | horseradish | exotic | Real wasabi rhizome with clean, fleeting heat, grated at the table.
+Crispy Fried Onions | | accent | onion-aromatic | everyday | Golden crunchy topping for salads, curries and casseroles.
+Fried Shallots | crispy shallots | accent | onion-aromatic | uncommon | Sweet, crunchy slivers to scatter on noodles and rice.
+Onion Powder | | accent | onion-aromatic | everyday | Sweet savoury dust for rubs, dips and gravies.
+Dried Minced Onion | onion flakes | accent | onion-aromatic | everyday | Rehydrates into soups, burgers and sauces.
+Celery Leaf | | accent | celery-aromatic | uncommon | Strong-flavoured leafy tops, good chopped into stocks and salads.
+Lovage Seed Salt | | accent | celery-aromatic | exotic | Salt blended with aromatic lovage for soups and Bloody Marys.
+Fresh Fenugreek Leaves | methi | accent | fenugreek | uncommon | Slightly bitter green leaves in Indian curries and flatbreads.
+Kasuri Methi | dried fenugreek leaves | accent | fenugreek | uncommon | Dried fenugreek with a maple-and-celery aroma, crushed over curries.
+Mugwort | yomogi | accent | mugwort | exotic | Bitter, sagey herb used in Japanese and Korean rice cakes.
+Sweet Cicely | | accent | sweet-cicely | exotic | Anise-scented fern-like herb that sweetens tart fruit.
+Angelica | | accent | angelica | exotic | Candied stems add green sweetness to cakes; the root is musky.
+Hyssop | | accent | hyssop | exotic | Minty, bitter herb for game and liqueurs.
+Rue | | accent | rue | exotic | Bitter, pungent leaf used sparingly in Ethiopian and Italian dishes.
+Bouquet Garni | | accent | herb-bundle | everyday | Bundle of parsley, thyme and bay tied to flavour stocks and stews.
+Herbes de Provence | | accent | herb-blend | uncommon | Sun-warmed mix of thyme, savory, rosemary and oregano.
+Fines Herbes | | accent | herb-blend | uncommon | Delicate blend of parsley, chervil, tarragon and chives.
+Italian Salsa Verde Mix | | accent | herb-blend | exotic | Chopped parsley, mint and basil base for Italian green sauce.
+Mixed Herbs | | accent | herb-blend | everyday | Everyday dried blend of thyme, marjoram, oregano and basil.
+Italian Seasoning | | accent | herb-blend | everyday | Dried oregano, basil and rosemary mix for pasta and pizza.
+Poultry Seasoning | | accent | herb-blend | uncommon | Sage-forward blend for stuffing and roast birds.
+Persian Herb Mix | sabzi khordan | accent | herb-blend | exotic | Fresh platter of mint, tarragon and basil eaten with flatbread and cheese.

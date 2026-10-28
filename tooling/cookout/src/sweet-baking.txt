@@ -1,0 +1,220 @@
+# sweet-baking
+Granulated sugar | white sugar; table sugar | accent | sugar-white | everyday | The all-purpose sweetener for baking, caramel and sweetening anything
+Caster sugar | superfine sugar | accent | sugar-white | everyday | Fine crystals that dissolve fast, ideal for sponges and meringues
+Icing sugar | powdered sugar; confectioners sugar | accent | sugar-white | everyday | Powder-fine sugar for glazes, buttercream and dusting
+Preserving sugar | jam sugar | accent | sugar-white | everyday | Large crystals that dissolve slowly and keep jam clear
+Cube sugar | sugar cubes | accent | sugar-white | everyday | Compressed white cubes for tea, coffee and crushing into syrups
+Pearl sugar | nib sugar | accent | sugar-white | uncommon | Hard white nuggets that stay crunchy on buns and waffles
+Demerara sugar |  | accent | sugar-brown | everyday | Golden crunchy crystals with a light toffee note, great on crumbles
+Light soft brown sugar |  | accent | sugar-brown | everyday | Moist, fine and gently caramel-flavoured, for cakes and cookies
+Dark soft brown sugar |  | accent | sugar-brown | everyday | Damp and deep with molasses, for gingerbread and sticky puddings
+Light muscovado sugar |  | accent | sugar-brown | everyday | Sticky unrefined sugar with a mellow caramel depth
+Dark muscovado sugar |  | accent | sugar-brown | everyday | Rich, almost treacly sugar for brownies and fruitcake
+Turbinado sugar | raw cane sugar | accent | sugar-brown | everyday | Pale-gold coarse crystals with a hint of molasses
+Rapadura | panela | accent | sugar-unrefined | exotic | Whole pressed cane juice, earthy and caramelly
+Jaggery | gur | accent | sugar-unrefined | uncommon | Unrefined cane or palm sugar block with smoky molasses depth
+Palm sugar | coconut palm sugar | accent | sugar-unrefined | uncommon | Soft caramel sweetness, shaved into curries and Thai desserts
+Piloncillo |  | accent | sugar-unrefined | uncommon | Mexican cone of pressed cane sugar, smoky and rich
+Kokuto | Okinawan black sugar | accent | sugar-unrefined | exotic | Japanese dark cane sugar with mineral, almost savoury depth
+Maple sugar |  | accent | sugar-specialty | uncommon | Dried maple sap crystals, woody and delicate
+Date sugar |  | accent | sugar-specialty | exotic | Ground dried dates, coarse and fruity, does not fully dissolve
+Vanilla sugar |  | accent | sugar-specialty | everyday | Sugar scented with vanilla pods for custards and bakes
+Rock sugar | candy sugar | accent | sugar-specialty | uncommon | Large clear crystals used in Chinese braises and sweet soups
+Golden caster sugar | unrefined caster sugar | accent | sugar-white | everyday | Pale honey-coloured fine sugar with a faint caramel flavour
+Fondant icing sugar |  | accent | sugar-white | uncommon | Extra smooth icing sugar for glossy glazes and sugarpaste
+Light treacle |  | accent | syrup-cane | everyday | Mild golden treacle, sweeter and lighter than black
+Blackstrap molasses |  | accent | syrup-cane | uncommon | Intensely dark and mineral-bitter, a spoonful goes far
+Cane syrup |  | accent | syrup-cane | everyday | Pure pressed cane juice boiled down, mellow and clean
+Invert sugar syrup |  | accent | syrup-cane | exotic | Smooth sugar syrup that resists crystallising in sorbets and sweets
+Simple syrup | sugar syrup | accent | syrup-cane | everyday | Sugar dissolved in water for soaking cakes and sweetening drinks
+Birch syrup |  | accent | syrup-tree | uncommon | Rare tangy-sweet syrup tapped from birch trees
+Carob syrup | carob molasses | accent | syrup-plant | exotic | Dark chocolatey-sweet syrup from carob pods
+Brown rice syrup | rice malt syrup | accent | syrup-plant | everyday | Mildly sweet, sticky grain syrup with a butterscotch note
+Malt extract |  | accent | syrup-plant | everyday | Dark sticky barley syrup that gives bread and malt loaf depth
+Barley malt syrup |  | accent | syrup-plant | uncommon | Dark, thick and earthy, used in bagel water and brown breads
+Grape molasses | pekmez | accent | syrup-plant | exotic | Boiled-down grape must, dark and tangy-sweet
+Sorghum syrup |  | accent | syrup-plant | uncommon | Southern-American syrup with grassy, tangy molasses notes
+Glucose syrup | liquid glucose | accent | syrup-plant | everyday | Clear syrup that keeps sweets soft and sorbets smooth
+Corn syrup |  | accent | syrup-plant | everyday | Mild sticky syrup that stops sugar crystals forming
+Coconut nectar |  | accent | syrup-plant | exotic | Thin caramelly syrup from coconut blossom sap
+Orange blossom honey |  | accent | honey | uncommon | Light honey with citrus perfume
+Chestnut honey |  | accent | honey | uncommon | Dark, bitter-sweet honey that pairs with sharp cheese
+Lavender honey |  | accent | honey | exotic | Soft floral honey with a calming herbal note
+Honeycomb |  | accent | honey | everyday | Waxy chewy cells of raw honey, lovely on cheese and ice cream
+Hot honey |  | accent | honey | uncommon | Honey steeped with chilli for pizza, fried chicken and cheese
+Cinder toffee | honeycomb toffee | accent | candy | everyday | Brittle aerated toffee that shatters and melts on the tongue
+Milk chocolate |  | accent | chocolate | everyday | Sweet creamy chocolate for melting, snacking and sauces
+Dark chocolate | plain chocolate | accent | chocolate | everyday | Deep bitter-sweet chocolate for ganache, brownies and mousse
+White chocolate |  | accent | chocolate | everyday | Buttery sweet cocoa butter bar for blondies and cheesecake
+Ruby chocolate |  | accent | chocolate | uncommon | Pink berry-tart chocolate made from unroasted ruby cocoa beans
+Cocoa powder | unsweetened cocoa | accent | chocolate | everyday | Bitter, dry chocolate powder for cakes and hot chocolate
+Dutch-process cocoa | alkalised cocoa | accent | chocolate | everyday | Darker, smoother, less acidic cocoa for rich bakes
+Drinking chocolate | hot chocolate powder | accent | chocolate | everyday | Sweetened cocoa mix for milky drinks and quick sauces
+Cooking chocolate |  | accent | chocolate | everyday | Budget baking bar, perfectly good for melting into bakes
+Couverture chocolate |  | accent | chocolate | exotic | High cocoa butter chocolate that melts glossy for tempering
+Cocoa nibs |  | accent | chocolate | everyday | Crushed roasted cocoa beans, crunchy and bitter
+Cacao butter | cocoa butter | accent | chocolate | uncommon | Pale fat pressed from cocoa beans, silky in white chocolate
+Gianduja |  | accent | chocolate | exotic | Smooth hazelnut chocolate from Piedmont for truffles and pralines
+Chocolate buttons |  | accent | chocolate | everyday | Round melting drops, easy to scatter and melt
+Chocolate orange |  | accent | chocolate | everyday | Milk chocolate with orange oil, broken into segments
+Chocolate vermicelli |  | accent | decoration | everyday | Thin chocolate strands for cakes, ice cream and fridge bakes
+Chocolate shavings |  | accent | decoration | everyday | Delicate curls of chocolate for finishing cakes and desserts
+Plum jam |  | accent | jam | everyday | Rich deep jam with a pleasant tartness
+Blackberry jam | bramble jelly | accent | jam | everyday | Wild-tasting autumn jam, good with game and scones
+Cherry jam |  | accent | jam | everyday | Sweet-tart preserve for Black Forest layers and pastries
+Fig jam |  | accent | jam | everyday | Seedy honeyed jam, lovely with cheese and cured meats
+Gooseberry jam |  | accent | jam | uncommon | Tangy green-gold jam, traditional with fool and pork
+Greengage jam |  | accent | jam | exotic | Delicate honeyed jam from small green plums
+Rhubarb jam |  | accent | jam | everyday | Tart pink jam, often paired with ginger or vanilla
+Quince paste | membrillo; dulce de membrillo | accent | jam | uncommon | Firm ruby-orange fruit paste sliced alongside cheese
+Mixed fruit jam |  | accent | jam | everyday | Everyday multi-berry jam for sandwiches and baking
+Apple jelly |  | accent | jam | everyday | Clear pale jelly, delicate and good with pork
+Crab apple jelly |  | accent | jam | exotic | Rosy tart jelly from small wild apples
+Rowan jelly |  | accent | jam | uncommon | Bitter-sweet orange-red jelly for game and venison
+Medium cut marmalade |  | accent | marmalade | everyday | Classic bitter orange preserve for toast and puddings
+Lemon marmalade |  | accent | marmalade | everyday | Tangy sharp preserve with fine strips of peel
+Ginger marmalade |  | accent | marmalade | uncommon | Orange marmalade spiked with stem ginger
+Lime marmalade |  | accent | marmalade | everyday | Fragrant, sour-sweet and bright green-gold
+Lime curd |  | accent | curd | everyday | Sharp, bright, vividly green-tinged curd
+Passion fruit curd |  | accent | curd | uncommon | Tropical tangy curd, perfect on pavlova
+Orange curd |  | accent | curd | everyday | Sweet citrusy curd, softer than lemon
+Grapefruit curd |  | accent | curd | exotic | Sharp, slightly bitter curd for brunch and tarts
+Praline paste |  | accent | spread | uncommon | Caramelised hazelnut paste, rich and toasty
+Cream of tartar |  | accent | raising-agent | uncommon | Acidic powder that stabilises egg whites and activates bicarb
+Baker's ammonia | ammonium bicarbonate | accent | raising-agent | exotic | Old-fashioned raiser for very crisp biscuits and crackers
+Fast-action dried yeast | easy-bake yeast | accent | yeast | everyday | Mixes straight into flour for quick, reliable bread
+Sourdough starter |  | accent | yeast | uncommon | Living culture of wild yeast and bacteria for tangy bread
+Powdered gelatine |  | accent | setting-agent | everyday | Dissolved in hot liquid to set jellies, mousses and panna cotta
+Leaf gelatine | sheet gelatine | accent | setting-agent | everyday | Clear sheets soaked then melted for a clean, wobbly set
+Agar agar |  | accent | setting-agent | everyday | Seaweed-derived setting powder that gels firm even when warm
+Pectin |  | accent | setting-agent | everyday | Fruit-derived gelling agent that sets jams and glazes
+Xanthan gum |  | accent | setting-agent | uncommon | Tiny pinch thickens sauces and stabilises doughs
+Jelly crystals |  | accent | setting-agent | everyday | Flavoured sweet gelatine for trifles and wobbly desserts
+Vanilla extract |  | accent | flavouring | everyday | Deep, floral essence for custards, cakes and ice cream
+Almond extract | almond essence | accent | flavouring | everyday | Potent marzipan perfume for cherry bakes and frangipane
+Lemon extract |  | accent | flavouring | uncommon | Concentrated zest flavour for icing and sponges
+Peppermint extract | peppermint essence | accent | flavouring | everyday | Cooling mint for chocolate bakes and buttercream
+Coffee extract | coffee essence | accent | flavouring | everyday | Dark sweet concentrate for coffee cake and tiramisu
+Pandan extract |  | accent | flavouring | exotic | Grassy, vanilla-like green essence for South-East Asian sweets
+Maple flavouring |  | accent | flavouring | uncommon | Concentrated syrupy essence for icings and bakes
+Rum flavouring | rum essence | accent | flavouring | uncommon | Concentrated rum notes for fruitcake and icing
+Violet essence |  | accent | flavouring | uncommon | Perfumed floral flavouring for macarons and creams
+Edible glitter |  | accent | decoration | everyday | Sparkling dust for cakes and drinks
+Rainbow sprinkles | jimmies | accent | decoration | everyday | Bright rods for scattering on cupcakes and doughnuts
+Sugar strands |  | accent | decoration | uncommon | Fine coloured threads for decorating cakes
+Silver balls | dragees | accent | decoration | everyday | Hard shiny sugar pearls for celebration cakes
+Gold leaf |  | accent | decoration | exotic | Paper-thin edible gilding for luxurious desserts
+Food colouring gel |  | accent | decoration | everyday | Strongly pigmented paste for icing and batters
+Glacé icing | water icing | accent | icing | everyday | Simple icing sugar and water glaze for buns and drizzle cakes
+Royal icing |  | accent | icing | everyday | Hard-setting white icing for piping and Christmas cake
+Buttercream |  | accent | icing | everyday | Whipped butter and icing sugar frosting for cupcakes
+Cream cheese frosting |  | accent | icing | everyday | Tangy sweet topping for carrot cake and red velvet
+Fondant |  | accent | icing | everyday | Soft smooth sugar paste for glossy covering and sweet fillings
+Meringue powder |  | accent | icing | uncommon | Dried egg-white mix for royal icing and stable meringue
+Marshmallow fluff | marshmallow creme | accent | candy | everyday | Sticky whipped spread for fudge and sandwich fillings
+Toffee |  | accent | candy | everyday | Hard buttery caramel for sauces, brittle and pudding
+Fudge |  | accent | candy | everyday | Crumbly creamy sweet chunks for stirring into ice cream
+Salted caramel sauce |  | accent | candy | everyday | Pourable caramel with sea-salt edge for desserts
+Caramel |  | accent | candy | everyday | Cooked sugar of amber colour, bitter-sweet and glossy
+Butterscotch |  | accent | candy | uncommon | Brown sugar and butter toffee, rich and slightly salty
+Praline |  | accent | candy | everyday | Caramelised nuts crushed to a crunchy topping
+Nut brittle | peanut brittle | accent | candy | everyday | Thin crisp sheets of caramel and nuts
+Peppermint candy canes |  | accent | candy | uncommon | Striped mint sticks to crush over desserts and drinks
+Boiled sweets | hard candy | accent | candy | everyday | Hard glassy sweets crushed over bakes for colourful crunch
+Liquorice | licorice | accent | candy | everyday | Chewy aniseed-flavoured sweet with a bitter root edge
+Stem ginger in syrup |  | accent | candied | everyday | Tender preserved ginger with a pungent sweet syrup
+Candied orange slices |  | accent | candied | uncommon | Glossy sugar-simmered rounds for decorating cakes
+Marron glacé | candied chestnut | accent | candied | exotic | Whole chestnuts candied in vanilla syrup
+Candied violets | crystallised violets | accent | candied | uncommon | Tiny sugar-crusted flowers for delicate decoration
+Almond paste |  | accent | sweet-paste | uncommon | Coarser almond-rich paste for pastry fillings
+Halva | halwa | accent | sweet-paste | everyday | Crumbly sesame sweet from the Middle East
+Nougat | torrone | accent | sweet-paste | everyday | Chewy white sweet of honey, egg white and nuts
+Turkish delight | lokum | accent | sweet-paste | everyday | Soft rose-scented gel cubes dusted in sugar
+Persipan |  | accent | sweet-paste | exotic | Apricot kernel paste used as a cheaper marzipan
+Mochi |  | accent | sweet-paste | uncommon | Soft chewy rice dough for sweet wraps and ice cream
+Red bean paste |  | accent | sweet-paste | exotic | Sweetened adzuki beans for Japanese pastries
+Sweet chestnut puree |  | accent | sweet-paste | uncommon | Smooth sweet chestnut for Mont Blanc and cakes
+Dried fruit mix | mixed dried fruit | accent | sweet-paste | everyday | Sultanas, currants and raisins for fruitcake and puddings
+Crushed meringue |  | accent | baked | uncommon | Crunchy sugar shards for Eton mess
+Ginger biscuits |  | accent | baked | everyday | Snappy spiced biscuits for crumb bases and puddings
+Sticky toffee sauce |  | accent | candy | everyday | Dark date and sugar sauce poured over puddings
+Chocolate sauce |  | accent | chocolate | everyday | Glossy pourable sauce for ice cream and pancakes
+Hot fudge sauce |  | accent | candy | uncommon | Thick chocolate fudge sauce for sundaes
+Raspberry coulis |  | accent | jam | everyday | Smooth sieved berry sauce for plating desserts
+Strawberry sauce |  | accent | jam | everyday | Sweet strawberry topping for ice cream and cheesecake
+Freeze-dried raspberries |  | accent | decoration | exotic | Sharp crunchy berry shards and powder for desserts
+Dark chocolate chips |  | accent | chocolate | everyday | Bitter-sweet drops for cookies, muffins and brownies
+White chocolate chips |  | accent | chocolate | everyday | Creamy sweet drops for blondies and cookies
+Milk chocolate chips |  | accent | chocolate | everyday | Mild sweet drops that melt in the mouth
+Chocolate ganache |  | accent | chocolate | everyday | Chocolate and cream melted into a silky filling or glaze
+Mint chocolate |  | accent | chocolate | everyday | Dark chocolate with a cooling peppermint centre
+Carob powder |  | accent | chocolate | uncommon | Sweet roasted pod flour used as a cocoa alternative
+Malted milk powder |  | accent | flavouring | uncommon | Toasty malt and milk powder for shakes and biscuits
+Chocolate-coated coffee beans |  | accent | chocolate | uncommon | Crunchy espresso beans in dark chocolate
+Toffee bits |  | accent | candy | uncommon | Crunchy buttery pieces for cookies and ice cream
+Butterscotch chips |  | accent | candy | uncommon | Sweet brown-sugar drops for bars and cookies
+Popping candy |  | accent | candy | uncommon | Fizzing sugar crystals that crackle on the tongue
+Fruit pastilles |  | accent | candy | everyday | Chewy fruity gums to scatter on cakes
+Jelly babies |  | accent | candy | everyday | Soft fruit gums, fun on cakes and trifles
+Pear drops |  | accent | candy | everyday | Boiled sweets with sharp pear perfume
+Barley sugar |  | accent | candy | everyday | Amber boiled sweet twists, old-fashioned and mild
+Sherbet |  | accent | candy | everyday | Tart fizzing powder for dipping and decorating
+Candy floss | cotton candy | accent | candy | everyday | Spun sugar clouds for desserts and fairs
+Sugared almonds |  | accent | candy | everyday | Hard pastel coated almonds for celebrations
+Nut praline crunch |  | accent | candy | uncommon | Caramelised nut shards for layering in desserts
+Honeycomb pieces |  | accent | candy | uncommon | Crunchy golden shards for sprinkling over ice cream
+Cajeta |  | accent | candy | exotic | Mexican caramel made from slow-cooked goat milk
+Kaya | coconut jam | accent | jam | uncommon | Coconut and egg jam scented with pandan, for toast
+Ube halaya | ube jam | accent | jam | exotic | Purple yam jam, sweet and earthy
+Lingonberry jam |  | accent | jam | everyday | Tart red Nordic jam for meatballs and game
+Bilberry jam |  | accent | jam | uncommon | Deeply flavoured wild blueberry preserve
+Cloudberry jam |  | accent | jam | exotic | Rare amber Arctic berry jam, tangy and honeyed
+Peach jam |  | accent | jam | everyday | Soft sweet summer jam with a fragrant fruit note
+Pineapple jam |  | accent | jam | everyday | Tropical sweet-tart jam for tarts and thumbprints
+Blueberry jam |  | accent | jam | everyday | Dark sweet jam for pancakes and muffins
+Orange blossom jam |  | accent | jam | uncommon | Delicate floral citrus preserve
+Rose petal jam |  | accent | jam | exotic | Perfumed pink preserve of crushed rose petals
+Sour cherry preserve |  | accent | jam | uncommon | Intensely tart cherries in thick syrup
+Elderberry jelly |  | accent | jam | uncommon | Dark autumn jelly with a winey depth
+Quince jelly |  | accent | jam | exotic | Rosy clear jelly, perfumed and tart, for cheese and roasts
+Apricot glaze | nappage | accent | jam | uncommon | Clear shiny coating brushed over fruit tarts
+Mirror glaze |  | accent | icing | uncommon | Gleaming glossy coating for modern entremets
+Chocolate fudge icing |  | accent | icing | everyday | Dense sweet chocolate frosting for layer cakes
+Lemon glaze |  | accent | icing | everyday | Sharp icing sugar glaze to drizzle on cakes
+Chocolate syrup |  | accent | syrup-plant | everyday | Pourable cocoa syrup for milk and ice cream
+Caramel syrup |  | accent | syrup-cane | everyday | Amber sauce for lattes, puddings and cocktails
+Vanilla syrup |  | accent | syrup-cane | everyday | Sweet vanilla-scented syrup for coffee and baking
+Elderflower syrup |  | accent | syrup-plant | uncommon | Floral sweet syrup for sponges and fruit
+Rose syrup |  | accent | syrup-plant | uncommon | Perfumed pink syrup for sherbets and desserts
+Violet syrup |  | accent | syrup-plant | exotic | Delicate floral syrup, purple and sweet
+Ginger syrup |  | accent | syrup-plant | uncommon | Spicy sweet syrup from stem ginger or fresh root
+Chestnut spread | creme de marrons | accent | spread | uncommon | Sweet vanilla chestnut puree for desserts
+Mulberry molasses |  | accent | syrup-plant | exotic | Tangy dark Middle Eastern fruit syrup
+Sanding sugar | coarse sugar | accent | sugar-white | everyday | Large sparkling crystals for sprinkling on cookies
+Lavender sugar |  | accent | sugar-specialty | uncommon | Sugar scented with dried lavender buds
+Cardamom sugar |  | accent | sugar-specialty | exotic | Sweet spiced sugar for buns and coffee
+Citron peel |  | accent | candied | uncommon | Fragrant candied rind for panettone and cakes
+Candied pineapple |  | accent | candied | uncommon | Chewy golden rings of sugared pineapple
+Candied walnuts |  | accent | candied | uncommon | Sugar-glazed nuts for salads and cakes
+Tartaric acid |  | accent | baking-chemical | exotic | Acid crystal for sweets and wine-style bakes
+Glycerine | glycerol | accent | baking-chemical | uncommon | Sweet syrupy liquid keeping icing and cakes moist
+Egg white powder | dried egg white | accent | baking-chemical | uncommon | Dried albumen for meringue and royal icing
+Lecithin |  | accent | baking-chemical | uncommon | Emulsifier for smooth chocolate and bread
+Lemon oil |  | accent | flavouring | exotic | Intensely zesty oil for confectionery
+Orange oil |  | accent | flavouring | uncommon | Concentrated citrus oil for chocolate and cakes
+Cherry flavouring |  | accent | flavouring | uncommon | Sweet red fruit essence for icing and bakes
+Coconut extract |  | accent | flavouring | uncommon | Tropical flavouring for macaroons and cakes
+Banana flavouring |  | accent | flavouring | uncommon | Sweet banana essence for cakes and shakes
+Blancmange powder |  | accent | thickener | uncommon | Milk-set pudding mix for wobbly desserts
+Instant pudding mix |  | accent | thickener | uncommon | Quick-set creamy dessert powder
+Isinglass |  | accent | setting-agent | exotic | Old-fashioned fish-derived setting agent for clear jellies
+Wafer paper | edible rice paper | accent | decoration | uncommon | Thin edible sheet for printing and decorating cakes
+Edible flowers |  | accent | decoration | uncommon | Fresh blooms to decorate cakes and salads
+Freeze-dried strawberries |  | accent | decoration | exotic | Crunchy pink pieces and powder for icing
+Rainbow nonpareils |  | accent | decoration | everyday | Tiny round sprinkles on cupcakes
+Feuilletine |  | accent | decoration | uncommon | Crisp shattered crepe flakes in pralines and cakes
+Milk chocolate buttons |  | accent | chocolate | everyday | Smooth sweet melting discs
+Lemon drops |  | accent | candy | uncommon | Sharp lemon boiled sweets crushed for glazes
+Cinnamon hearts |  | accent | candy | exotic | Fiery red cinnamon-flavoured sweets
+Treacle toffee |  | accent | candy | uncommon | Dark brittle toffee, traditional on bonfire night
+Palm syrup |  | accent | syrup-tree | uncommon | Dark sap-derived sweet syrup

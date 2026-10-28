@@ -1,0 +1,218 @@
+# fruit
+Bramley Apple | cooking apple | produce | apple | everyday | Tart and fluffy when baked; the classic for pies, crumbles and apple sauce.
+Cox's Orange Pippin | cox apple | produce | apple | uncommon | Aromatic, sweet-sharp English dessert apple; superb eaten raw.
+Granny Smith Apple | granny smith | produce | apple | everyday | Crisp and bright green with a sharp bite; keeps shape in tarts.
+Gala Apple | gala | produce | apple | everyday | Sweet and mild with a crunch; lunchbox favourite and good in salads.
+Braeburn Apple | braeburn | produce | apple | everyday | Firm and balanced sweet-tart; roasts and bakes well.
+Pink Lady Apple | | produce | apple | everyday | Crisp, fizzy-sweet with a tang; slices beautifully for salads and cheeseboards.
+Golden Delicious Apple | golden delicious | produce | apple | everyday | Honeyed and soft; gentle in pies and sauces.
+Red Delicious Apple | | produce | apple | everyday | Sweet, mild and crisp; mostly for eating raw.
+Fuji Apple | fuji | produce | apple | everyday | Very sweet and juicy; good raw, in slaws and in baking.
+Jazz Apple | | produce | apple | everyday | Crunchy, tangy-sweet apple that holds up well in salads.
+Egremont Russet | russet apple | produce | apple | uncommon | Nutty, dry-fleshed russet; wonderful with cheese and in tarte tatin.
+Discovery Apple | | produce | apple | uncommon | Early-season red-flushed apple with strawberry notes; eat fresh.
+Worcester Pearmain Apple | | produce | apple | uncommon | Strawberry-scented early English apple; juicy and crisp.
+Cider Apple | | produce | apple | exotic | Bittersweet and tannic; pressed for cider rather than eaten.
+Crab Apple | crabapple | produce | apple | uncommon | Tiny, sharp and pectin-rich; simmer into jelly or serve with pork.
+Conference Pear | | produce | pear | everyday | Long, green-skinned and juicy; poach, bake or eat raw.
+Comice Pear | doyenne du comice | produce | pear | everyday | Buttery, honeyed and fragrant; ideal with blue cheese.
+Williams Pear | bartlett pear | produce | pear | everyday | Aromatic and juicy; good for canning, purees and eating fresh.
+Bosc Pear | | produce | pear | everyday | Firm, spicy and russeted; holds shape when poached or baked.
+Concorde Pear | | produce | pear | uncommon | Sweet, vanilla-edged and slender; excellent poached in wine.
+Rocha Pear | | produce | pear | uncommon | Soft, juicy and sweet; best eaten fresh at the ripe moment.
+Asian Pear | nashi pear; apple pear | produce | pear | everyday | Crisp, watery and floral; shred into slaws or serve chilled.
+Perry Pear | | produce | pear | exotic | Astringent and tannic; grown for perry rather than eating.
+Quince | | produce | quince | uncommon | Hard and perfumed; slow-cook into membrillo or with lamb until rosy.
+Medlar | | produce | medlar | exotic | Old English fruit eaten when bletted and soft; make into jelly or cheese.
+Victoria Plum | | produce | plum | everyday | Sweet-tart English plum; stew, bake or eat from the hand.
+Greengage | | produce | plum | everyday | Honey-sweet green plum; perfect for tarts and compotes.
+Damson | | produce | plum | everyday | Small, tart and inky; cook down for gin, jams and sauces for game.
+Mirabelle Plum | mirabelle | produce | plum | exotic | Tiny golden French plum; honeyed in tarts and brandy.
+Black Plum | | produce | plum | everyday | Dark-skinned, juicy and sweet; roast with star anise.
+Red Plum | | produce | plum | everyday | Juicy with a tart skin; good in crumbles and chutneys.
+Sloe | | produce | plum | exotic | Tiny and mouth-puckering; steep in gin after the first frost.
+Prune Plum | | produce | plum | uncommon | Sweet-fleshed freestone plum that dries into prunes; bake into cakes.
+Pluot | | produce | plum | uncommon | Plum-apricot cross, very sweet and juicy; eat fresh or grill.
+Peach | yellow peach | produce | peach | everyday | Juicy and fragrant; slice into salads, grill or bake into cobbler.
+White Peach | | produce | peach | everyday | Delicate, floral and low-acid; best eaten ripe, or in bellinis.
+Flat Peach | donut peach; saturn peach | produce | peach | uncommon | Squat, sweet and almond-scented; eat whole from the hand.
+Nectarine | | produce | peach | everyday | Smooth-skinned peach relative; slice fresh or grill.
+Apricot | | produce | apricot | everyday | Velvety, sweet-tart; halve and roast, or simmer into jam and tagines.
+Cherry | sweet cherry | produce | cherry | everyday | Glossy and sweet; eat fresh, bake in clafoutis or pit for cakes.
+Morello Cherry | sour cherry | produce | cherry | everyday | Tart and deep red; cook into pies, sauces and kirsch-laced desserts.
+Bing Cherry | | produce | cherry | everyday | Dark, plump and sweet; excellent fresh or in salsas.
+Rainier Cherry | | produce | cherry | exotic | Yellow-blushed and honeyed; delicate and sweet.
+Amarena Cherry | | produce | cherry | exotic | Italian sour cherry; steeped in syrup for ice cream and cocktails.
+Glace Cherry | | produce | cherry | everyday | Candied red cherry; adds colour to fruit cakes and bakes.
+Maraschino Cherry | cocktail cherry | produce | cherry | uncommon | Syrupy and sweet; garnish for cocktails and sundaes.
+Strawberry | | produce | berry-strawberry | everyday | Sweet and fragrant; eat with cream, or macerate with sugar and balsamic.
+Wild Strawberry | fraise des bois | produce | berry-strawberry | exotic | Tiny, intensely perfumed; scatter over desserts untouched.
+Raspberry | | produce | berry-raspberry | everyday | Delicate and tart-sweet; fold into cream or crush for coulis.
+Yellow Raspberry | golden raspberry | produce | berry-raspberry | uncommon | Honeyed and mild; use whole as a pretty garnish.
+Blackberry | bramble | produce | berry-blackberry | everyday | Rich, tart and wild-foraged in autumn; bake with apple.
+Loganberry | | produce | berry-blackberry | uncommon | Tart raspberry-blackberry cross; best cooked with sugar.
+Tayberry | | produce | berry-blackberry | uncommon | Large, sweet-sharp hybrid berry; superb with cream.
+Boysenberry | | produce | berry-blackberry | uncommon | Juicy, winey berry; excellent in jams and pies.
+Blueberry | | produce | berry-blueberry | everyday | Sweet and mildly tart; bake into muffins or pancakes.
+Bilberry | whortleberry; huckleberry | produce | berry-blueberry | exotic | Wild, small, intensely flavoured; stains purple in pies.
+Redcurrant | | produce | berry-currant | everyday | Glossy, sharp jewels; make jelly for roasts or garnish desserts.
+Blackcurrant | | produce | berry-currant | everyday | Deeply tart and musky; cook into cordial, sauces and sorbet.
+Whitecurrant | | produce | berry-currant | uncommon | Sweeter, paler cousin of the redcurrant; pretty on tarts.
+Gooseberry | | produce | berry-gooseberry | everyday | Sharp green berry; stew with elderflower for fools and crumbles.
+Cranberry | | produce | berry-cranberry | everyday | Tart and bright; simmer into sauce for turkey or pair with orange.
+Dried Cranberries | craisins | produce | berry-cranberry | everyday | Chewy and tangy-sweet; scatter in salads, granola and bakes.
+Lingonberry | cowberry | produce | berry-cranberry | exotic | Scandinavian tart red berry; serve with meatballs and game.
+Elderberry | | produce | berry-elder | exotic | Deep purple wild berry; always cook, then make syrup or jelly.
+Mulberry | | produce | berry-mulberry | uncommon | Sweet, staining and delicate; eat fresh or cook into pies.
+Goji Berry | wolfberry | produce | berry-goji | exotic | Dried red berry, tangy and chewy; add to congee, tea and granola.
+Physalis | cape gooseberry; golden berry | produce | berry-physalis | uncommon | Papery lantern with a tangy-sweet berry; dip in chocolate.
+Rosehip | | produce | berry-rosehip | uncommon | Tangy, vitamin-rich hips; simmer into syrup and jelly.
+Cloudberry | | produce | berry-cloudberry | exotic | Nordic amber berry, honeyed and tart; serve with cream.
+Sea Buckthorn | | produce | berry-sea-buckthorn | exotic | Bright orange, sharp berries; juice into syrups and sauces.
+Juniper Berry | | produce | berry-juniper | uncommon | Piney and peppery; crush into marinades for game and sauerkraut.
+Frozen Mixed Berries | summer fruits | produce | berry-mixed | everyday | Handy mix of berries; simmer into compote or blitz into smoothies.
+Frozen Raspberries | | produce | berry-raspberry | everyday | Ready to simmer into coulis or stir into porridge.
+Frozen Blueberries | | produce | berry-blueberry | everyday | Fold straight into muffin batter or warm into compote.
+Frozen Strawberries | | produce | berry-strawberry | everyday | Blend into smoothies and sauces; too soft for eating whole.
+Frozen Cherries | | produce | cherry | everyday | Pitted and ready for pies, compotes and clafoutis.
+Frozen Mango Chunks | | produce | mango | everyday | Blitz into smoothies and instant sorbet.
+Lemon | | produce | citrus-lemon | everyday | Bright acidity; zest and juice lift everything from fish to cakes.
+Meyer Lemon | | produce | citrus-lemon | uncommon | Mandarin-sweet, floral lemon; gentler in curds and dressings.
+Preserved Lemon | salted lemon | produce | citrus-lemon | uncommon | Salt-cured peel with intense fragrance; chop into tagines and dressings.
+Lime | | produce | citrus-lime | everyday | Sharp and aromatic; squeeze over curries, tacos and cocktails.
+Key Lime | mexican lime | produce | citrus-lime | exotic | Small, fiercely aromatic lime; the heart of Key lime pie.
+Kaffir Lime | makrut lime | produce | citrus-lime | everyday | Knobbly fruit with perfumed zest; essential in Thai pastes and curries.
+Finger Lime | citrus caviar | produce | citrus-lime | exotic | Pearly, popping vesicles; spoon over oysters and fish.
+Orange | | produce | citrus-orange | everyday | Sweet and juicy; segment into salads or zest into cakes and sauces.
+Navel Orange | | produce | citrus-orange | everyday | Seedless and sweet; easy to peel and segment.
+Seville Orange | bitter orange | produce | citrus-orange | everyday | Bitter and aromatic; the essential fruit for marmalade, short winter season.
+Blood Orange | | produce | citrus-orange | everyday | Crimson flesh with raspberry notes; stunning in salads and sorbet.
+Valencia Orange | | produce | citrus-orange | everyday | Juicy juicing orange with a balanced tang.
+Cara Cara Orange | | produce | citrus-orange | exotic | Pink-fleshed navel with low acidity and berry sweetness.
+Clementine | | produce | citrus-mandarin | everyday | Easy-peel, seedless and sweet; a winter staple for eating or desserts.
+Satsuma | | produce | citrus-mandarin | everyday | Loose-skinned, juicy and mild; peel and eat.
+Mandarin | tangerine | produce | citrus-mandarin | everyday | Small, sweet and fragrant; segment into salads and puddings.
+Kumquat | | produce | citrus-kumquat | everyday | Eat whole, peel and all; sweet-sour for marmalade and salads.
+Calamansi | calamondin | produce | citrus-kumquat | exotic | Tiny Filipino citrus, tart and floral; squeeze over noodles and grilled meats.
+Grapefruit | | produce | citrus-grapefruit | everyday | Tangy and slightly bitter; grill with sugar or segment for breakfast.
+Pink Grapefruit | ruby grapefruit | produce | citrus-grapefruit | everyday | Sweeter, blushing grapefruit; lovely in salads and cocktails.
+Pomelo | | produce | citrus-pomelo | uncommon | Giant, mild and sweet citrus with thick pith; peel and separate segments.
+Yuzu | | produce | citrus-yuzu | exotic | Fragrant Japanese citrus; juice and zest for ponzu, dressings and desserts.
+Bergamot | | produce | citrus-bergamot | exotic | Floral, bitter citrus; zest into cakes, custards and marmalade.
+Citron | cedro | produce | citrus-citron | exotic | Thick pith and fragrant zest; candy the peel or infuse into spirits.
+Buddha's Hand | fingered citron | produce | citrus-citron | exotic | Tentacled citron with no juice but heady zest; grate or candy.
+Sudachi | | produce | citrus-yuzu | exotic | Small green Japanese citrus; squeeze over grilled fish and noodles.
+Candied Peel | mixed peel | produce | citrus-peel | everyday | Sugared citrus peel; stud fruit cakes, hot cross buns and panettone.
+Candied Orange Peel | | produce | citrus-peel | uncommon | Chewy, bittersweet strips; dip in dark chocolate or chop into bakes.
+Candied Lemon Peel | | produce | citrus-peel | uncommon | Zesty, sugar-coated; chop into cakes and stollen.
+Candied Citron | | produce | citrus-peel | uncommon | Dense, fragrant peel used in panettone and fruit cake.
+Dried Orange Slices | | produce | citrus-orange | uncommon | Dried rounds for garnishing, infusing and baking.
+Dried Lime | black lime; loomi | produce | citrus-lime | uncommon | Sour, smoky Persian staple; pierce and simmer in stews.
+Watermelon | | produce | melon | everyday | Crisp and thirst-quenching; pair with feta and mint or grill in wedges.
+Cantaloupe Melon | cantaloupe | produce | melon | everyday | Orange, musky and sweet; serve with Parma ham.
+Galia Melon | | produce | melon | everyday | Green-fleshed, fragrant and sweet; excellent in fruit salads.
+Honeydew Melon | honeydew | produce | melon | everyday | Pale green, mellow and sugary; cube for breakfast bowls.
+Charentais Melon | | produce | melon | uncommon | Intensely perfumed French melon; eat simply, with port if you like.
+Piel de Sapo Melon | | produce | melon | uncommon | Spanish green-mottled melon with sweet, crisp flesh.
+Canary Melon | | produce | melon | uncommon | Yellow-skinned with pale, subtly sweet flesh; refreshing chilled.
+Mango | | produce | mango | everyday | Lush and tropical; slice into salsas, curries, lassi and sorbet.
+Alphonso Mango | | produce | mango | exotic | Famed Indian mango, saffron-sweet and buttery; eat on its own.
+Green Mango | unripe mango | produce | mango | uncommon | Sour and crisp; shred into Thai salads or pickle.
+Pineapple | | produce | pineapple | everyday | Sweet-sharp and juicy; grill, caramelise or add to curries and cakes.
+Tinned Pineapple | pineapple rings | produce | pineapple | everyday | Syrupy rings for upside-down cakes and glazed ham.
+Papaya | pawpaw | produce | papaya | everyday | Soft, musky orange flesh; squeeze lime over it.
+Banana | | produce | banana | everyday | Creamy and sweet; mash into bread or slice over porridge.
+Baby Banana | finger banana | produce | banana | everyday | Small, sweet and tender; eat whole or fry.
+Red Banana | | produce | banana | uncommon | Raspberry-tinged and creamy; eat fresh.
+Dried Banana Chips | banana chips | produce | banana | everyday | Crunchy, sweet snack; sprinkle over granola.
+Passion Fruit | | produce | passion-fruit | everyday | Wrinkled shell with tart, seedy pulp; spoon over pavlova.
+Guava | | produce | guava | uncommon | Perfumed pink or white flesh; stew, juice or make into paste.
+Lychee | | produce | lychee | everyday | Pearly, floral and juicy; peel and eat or add to cocktails.
+Rambutan | | produce | lychee | uncommon | Hairy red shell with lychee-like flesh; twist open and eat.
+Longan | dragon's eye | produce | lychee | uncommon | Small sweet translucent fruit; use in Asian desserts and soups.
+Dragon Fruit | pitaya | produce | dragon-fruit | everyday | Speckled, mildly sweet flesh; spoon from the shell into smoothies.
+Kiwi Fruit | kiwi; chinese gooseberry | produce | kiwi | everyday | Tangy green flesh with tiny seeds; slice onto pavlova.
+Golden Kiwi | | produce | kiwi | everyday | Smooth-skinned and honeyed; less acidic than green.
+Kiwiberry | | produce | kiwi | uncommon | Grape-sized smooth kiwi; pop whole.
+Pomegranate | | produce | pomegranate | everyday | Ruby seeds burst with sweet-sour juice; scatter over salads and rice.
+Persimmon | kaki | produce | persimmon | everyday | Honeyed orange fruit; eat when soft and ripe.
+Sharon Fruit | | produce | persimmon | uncommon | Firm, non-astringent persimmon; slice like an apple.
+Starfruit | carambola | produce | starfruit | uncommon | Waxy, juicy and tart-sweet; slice crosswise into stars for garnish.
+Tamarillo | tree tomato | produce | tamarillo | uncommon | Egg-shaped, tangy and sweet; scoop out the pulp or stew.
+Soursop | graviola | produce | custard-apple | uncommon | Creamy, tart and tropical; blend into drinks and ice cream.
+Custard Apple | cherimoya; sugar apple | produce | custard-apple | uncommon | Creamy white flesh with a pina-colada flavour; spoon from the skin.
+Jackfruit | | produce | jackfruit | uncommon | Giant fruit; sweet when ripe, shredded like pork when green.
+Durian | | produce | durian | exotic | Notoriously pungent, custardy flesh; adored across South-East Asia.
+Mangosteen | | produce | mangosteen | exotic | Purple shell, snowy segments; sweet-tart and fragrant.
+Salak | snake fruit | produce | salak | exotic | Scaly brown skin, crisp apple-pineapple flesh.
+Jujube | red date; chinese date | produce | jujube | uncommon | Sweet-tart red fruit; eat fresh, or simmer dried in teas and soups.
+Tamarind | | produce | tamarind | everyday | Sticky, sour pods; soak pulp for curries, chutney and drinks.
+Prickly Pear | cactus pear; tuna | produce | prickly-pear | uncommon | Vibrant sweet flesh with seeds; peel carefully, spines included.
+Ackee | | produce | ackee | exotic | Jamaican fruit with scrambled-egg texture; cook with saltfish.
+Sapodilla | | produce | sapodilla | exotic | Brown, malty-sweet flesh like caramel pear.
+Loquat | | produce | loquat | exotic | Apricot-sweet little fruit; eat fresh or poach.
+Feijoa | pineapple guava | produce | feijoa | uncommon | Green, perfumed fruit; scoop out the gritty-sweet pulp.
+Acerola | barbados cherry | produce | acerola | uncommon | Tart little cherry-like fruit; juice or puree.
+Fig | fresh fig | produce | fig | everyday | Soft and honeyed; roast with goat's cheese or wrap in ham.
+Black Fig | | produce | fig | everyday | Purple-skinned with jammy flesh; excellent roasted with honey.
+Green Fig | | produce | fig | everyday | Pale-skinned and delicately sweet; eat fresh with cheese.
+Dried Fig | | produce | fig | everyday | Chewy and sweet; poach in wine or chop into bakes.
+Medjool Date | | produce | date | everyday | Large, caramel-soft date; stuff with nuts or blend into sweet sauces.
+Deglet Noor Date | | produce | date | everyday | Firmer, drier date; chop into baking and sticky toffee pudding.
+Pitted Dates | dried dates | produce | date | everyday | Convenient for baking, tagines and energy balls.
+Fresh Dates | khalas | produce | date | uncommon | Sticky fresh-picked dates with crisp skin and honeyed pulp.
+Sultana | | produce | dried-vine-fruit | everyday | Plump pale dried grape; fold into cakes, scones and curries.
+Raisin | | produce | dried-vine-fruit | everyday | Dark and sweet; bake into puddings and sprinkle in couscous.
+Currant | zante currant | produce | dried-vine-fruit | everyday | Small, tart dried grapes; essential for Eccles cakes and Christmas pudding.
+Muscatel Raisin | | produce | dried-vine-fruit | uncommon | Large, aromatic raisins dried on the vine; treat as a dessert.
+Dried Apricot | | produce | apricot | everyday | Chewy and tangy; simmer in tagines or chop into flapjacks.
+Turkish Apricot | | produce | apricot | everyday | Plump, honeyed dried apricot; soft enough for stuffing.
+Prune | dried plum | produce | plum | everyday | Sticky and winey; stew with Armagnac or bake into cakes.
+Agen Prune | | produce | plum | everyday | Soft, fine-textured French prune; wrap in bacon or serve with ice cream.
+Dried Apple Rings | | produce | apple | uncommon | Chewy, tangy rings; snack or simmer.
+Dried Pear | | produce | pear | everyday | Dense and honeyed; poach in spiced wine.
+Dried Mango | | produce | mango | everyday | Chewy and sugary; eat as a snack or slice into muesli.
+Dried Pineapple | | produce | pineapple | everyday | Sweet-tart chewy rings; stir into trail mix.
+Dried Cherries | | produce | cherry | everyday | Tart and chewy; add to granola, salads and baking.
+Dried Blueberries | | produce | berry-blueberry | everyday | Concentrated sweetness; stir into oats and bakes.
+Dried Mixed Fruit | mixed vine fruit | produce | dried-vine-fruit | everyday | Fruit cake mix of raisins, sultanas and currants.
+Dried Peach | | produce | peach | uncommon | Chewy, caramel-tinged; stew gently or snack.
+Black Grapes | red grapes | produce | grape | everyday | Sweet and juicy; roast with sausages or freeze for snacking.
+Green Grapes | white grapes | produce | grape | everyday | Crisp and sweet; halve into salads or pair with cheese.
+Muscat Grapes | | produce | grape | uncommon | Perfumed, honeyed dessert grapes; eat on their own.
+Concord Grapes | | produce | grape | uncommon | Foxy, jammy purple grapes with a thick skin; juice or jelly.
+Vine Leaves | grape leaves | produce | grape | uncommon | Brined leaves to wrap rice, herbs and lamb for dolmades.
+Rhubarb | | produce | rhubarb | everyday | Tart pink stalks; poach with sugar for crumbles and fools.
+Forced Rhubarb | | produce | rhubarb | everyday | Pale pink, tender winter rhubarb; delicately tart.
+Avocado | | produce | avocado | everyday | Buttery and rich; mash for guacamole or slice onto toast.
+Hass Avocado | | produce | avocado | everyday | Creamy, nutty and dark-skinned; the best for guacamole.
+Fuerte Avocado | | produce | avocado | everyday | Smooth, green-skinned and mild; slice into salads.
+Green Olives | | produce | olive | everyday | Firm and brined; serve as a snack, or in martinis and tagines.
+Black Olives | | produce | olive | everyday | Mellow, briny and soft; scatter over pizza and pasta.
+Kalamata Olives | | produce | olive | everyday | Plump purple Greek olives, fruity and meaty; essential in Greek salad.
+Manzanilla Olives | | produce | olive | everyday | Spanish olives in brine, often pimiento-stuffed.
+Castelvetrano Olives | | produce | olive | everyday | Bright green Sicilian olives, buttery and mild.
+Nicoise Olives | | produce | olive | everyday | Tiny, nutty olives from Provence; classic in salade nicoise.
+Gaeta Olives | | produce | olive | uncommon | Wrinkled Italian olives, mellow and herbal.
+Cerignola Olives | | produce | olive | uncommon | Giant, mild and meaty Italian olives; great for stuffing.
+Stuffed Olives | | produce | olive | everyday | Olives filled with pimiento, garlic or almond; for martinis and boards.
+Dry-Cured Olives | | produce | olive | uncommon | Wrinkled and intense; rinse before serving with orange zest.
+Fresh Coconut | coconut | produce | coconut | uncommon | Crack for water and flesh; shave over curries and desserts.
+Young Coconut | | produce | coconut | uncommon | Tender jelly flesh and sweet water; scoop with a spoon.
+Desiccated Coconut | | produce | coconut | everyday | Finely shredded dried coconut; sprinkle into cakes and curries.
+Coconut Flakes | | produce | coconut | uncommon | Toast until golden for granola, curries and salads.
+Tinned Apricots | | produce | apricot | everyday | Soft halves for upside-down cakes and tagine sauces.
+Honeyberry | haskap | produce | berry-honeyberry | exotic | Elongated early blue berry, tart like blueberry and raspberry.
+Aronia Berry | chokeberry | produce | berry-aronia | exotic | Astringent dark berry; sweeten into jam and syrup.
+Jostaberry | | produce | berry-gooseberry | uncommon | Gooseberry-blackcurrant cross; use in jams and crumbles.
+Black Mulberry | | produce | berry-mulberry | exotic | Juicy and winey; stains everything it touches.
+Marionberry | | produce | berry-blackberry | exotic | Complex, wine-like blackberry; excellent in pies.
+Jabuticaba | | produce | jabuticaba | exotic | Grape-like berries that grow on the tree trunk; eat fresh.
+Pawpaw Fruit | | produce | pawpaw | exotic | Creamy American fruit like banana-mango custard.
+Ume Plum | japanese apricot | produce | plum | exotic | Sour Japanese fruit; pickle as umeboshi or steep in liqueur.
+Horned Melon | kiwano | produce | melon | exotic | Spiky orange shell with lime-green jelly; tangy cucumber-banana flavour.
+Oro Blanco | | produce | citrus-grapefruit | uncommon | Sweet, low-acid pomelo-grapefruit cross.
+Ugli Fruit | | produce | citrus-grapefruit | uncommon | Jamaican tangelo, loose skin and sweet-tart juice.
+Tangelo | | produce | citrus-mandarin | uncommon | Juicy mandarin-pomelo cross; tangy-sweet.
+Rangpur Lime | | produce | citrus-lime | uncommon | Orange-skinned sour mandarin-lime hybrid.
+Barhi Date | | produce | date | uncommon | Crunchy golden fresh date, softening to butterscotch.
