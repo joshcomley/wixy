@@ -1,4 +1,4 @@
-"""The Cookout ingredient bank (workspace 00058, spec/server-chat/09-cookout.md, ruling 12).
+"""The Cookout ingredient bank and draw engine (workspace 00058, spec/server-chat/09-cookout.md §2).
 
 The bank ships in the repo as `cookout_ingredients.json` beside this module: roughly three thousand
 genuine ingredients in 15 categories, each with a culinary `role` (what the pair draw schedules
@@ -8,33 +8,52 @@ and names nothing about anyone, so delete/wipe never touch it. What a round offe
 stored as immutable snapshots in the round's own tables.
 
 `load_cookout_bank` is STRICT: a typo in a committed bank is a broken asset, so every key, bound
-and identifier rule is checked and an unknown key is refused. `load_cookout_bank_or_none` is what
+and identifier rule is checked and an unknown key is refused. `load_cookout_bank_or_empty` is what
 `create_app` calls: a missing or malformed bank must not stop the whole app starting, so it logs
-the reason and returns None (the game is then unavailable, chat lives). CI's `test_cookout_bank.py`
-and `tooling/cookout/validate_bank.py` keep the shipped file honest.
+the reason and returns an empty bank (the game is then unavailable, chat lives). CI's
+`test_cookout_bank.py` and `tooling/cookout/validate_bank.py` keep the shipped file honest.
 
 Staples are the cupboard items every concept may use for free: `water`, `salt` and `black-pepper`
 are never offered as picks; the other five are ALSO ordinary bank entries (same ids), so "sugar"
 or "butter" can be offered and picked.
+
+Two engines live on the bank: `draw_pair` (§2.3, the server-authoritative pair draw) and
+`find_contraband_ingredients` (§3.2, the deterministic food-word scan of generated prose).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import random
 import re
+import secrets
 import unicodedata
-from collections.abc import Mapping
+from collections import Counter
+from collections.abc import Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 _LOGGER = logging.getLogger(__name__)
 
 BANK_PATH = Path(__file__).with_name("cookout_ingredients.json")
 BANK_VERSION = 1
 
-ROLES = ("base", "protein", "produce", "accent")
-RARITIES = ("everyday", "uncommon", "exotic")
+RoleKey = Literal["base", "protein", "produce", "accent"]
+RarityKey = Literal["everyday", "uncommon", "exotic"]
+
+ROLES: tuple[RoleKey, ...] = ("base", "protein", "produce", "accent")
+RARITIES: tuple[RarityKey, ...] = ("everyday", "uncommon", "exotic")
+RARITY_WEIGHTS: Mapping[RarityKey, int] = {"everyday": 8, "uncommon": 3, "exotic": 1}
+ROLE_SCHEDULE: tuple[RoleKey, RoleKey, RoleKey, RoleKey, RoleKey] = (
+    "base",
+    "protein",
+    "produce",
+    "produce",
+    "accent",
+)
 CATEGORY_IDS = (
     "meat-poultry",
     "fish-seafood",
@@ -63,28 +82,56 @@ STAPLE_IDS = (
     "milk",
 )
 UNPICKABLE_STAPLES = frozenset({"water", "salt", "black-pepper"})
+NON_SEASONING_STAPLES = frozenset(
+    {"butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"}
+)
+STAPLE_SHORT_FORMS: Mapping[str, str] = {
+    "butter": "butter",
+    "flour": "plain-flour",
+    "oil": "cooking-oil",
+    "sugar": "granulated-sugar",
+    "milk": "milk",
+}
+"""Bare words a cook says for a non-seasoning staple; the manifest pass (§3.2 pass 2) reads them."""
+FORBIDDEN_STOP_WORDS = frozenset({"butter", "flour", "milk", "oil", "sugar", "salt", "pepper"})
 
 MIN_INGREDIENTS = 2500
 MAX_INGREDIENTS = 4000
-MIN_PER_ROLE = 300
+MIN_PER_ROLE = 200
+MAX_STOP_WORDS = 200
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _MAX_ID = 64
 _MAX_NAME = 70
 _MAX_FAMILY = 48
 _MAX_BLURB = 90
 _MAX_ALIASES = 4
 
+_SYSTEM_RNG = secrets.SystemRandom()
+
 
 def fold(text: str) -> str:
     """Case- and accent-folded form used for every uniqueness check."""
-    decomposed = unicodedata.normalize("NFKD", text)
+    decomposed = unicodedata.normalize("NFKC", text)
+    decomposed = unicodedata.normalize("NFKD", decomposed)
     return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
+
+
+def tokenise(text: str) -> tuple[str, ...]:
+    """Folded word tokens: accents and case gone, apostrophes dropped ("bird's" -> "birds")."""
+    return tuple(_TOKEN_RE.findall(fold(text).replace("'", "").replace("’", "")))
 
 
 class CookoutBankError(ValueError):
     """The ingredient bank does not satisfy the schema. The message names the entry."""
+
+
+class CookoutExhaustedError(Exception):
+    """No feasible offer pair exists for the turn's role (spec §2.3); the server answers
+    `409 exhausted` without charging a skip or touching the round."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,10 +156,51 @@ class Ingredient:
     category: str
     category_name: str
     emoji: str
-    role: str
+    role: RoleKey
     family: str
-    rarity: str
+    rarity: RarityKey
     blurb: str
+
+    def to_snapshot(self) -> dict[str, str]:
+        """The immutable offer snapshot stored in `cookout_turns.offers` (§2.3 rule 5)."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "category": self.category,
+            "emoji": self.emoji,
+            "family": self.family,
+            "blurb": self.blurb,
+        }
+
+
+# A dictionary hit is (kind, key): an ingredient entry, a staple (a free seasoning, or the bare
+# word for a non-seasoning one), or a family (the bare food word "bacon" for "Streaky bacon").
+_Entity = tuple[str, str]
+
+
+def _plural_variants(tokens: tuple[str, ...]) -> list[tuple[str, ...]]:
+    """Naive singular/plural spellings of the last word, so "mangoes" and "mango" both read as the
+    food (no stemming beyond this: the scan is a dictionary, not a language model)."""
+    if not tokens:
+        return []
+    head, last = tokens[:-1], tokens[-1]
+    forms: set[str] = set()
+    if last.endswith("ies") and len(last) > 4:
+        forms.add(last[:-3] + "y")
+        forms.add(last[:-3] + "i")
+    if last.endswith("es") and len(last) > 3:
+        forms.add(last[:-2])
+    if last.endswith("s") and len(last) > 3:
+        forms.add(last[:-1])
+    forms.add(last + "s")
+    if last.endswith(("o", "s", "x", "ch", "sh")):
+        forms.add(last + "es")
+    if last.endswith("i") and len(last) > 3:
+        forms.add(last[:-1] + "ies")
+    if last.endswith("y") and len(last) > 3:
+        forms.add(last[:-1] + "ies")
+    forms.discard(last)
+    return [(*head, f) for f in forms]
 
 
 @dataclass(frozen=True, slots=True)
@@ -120,9 +208,11 @@ class CookoutBank:
     categories: tuple[Category, ...]
     staples: tuple[Staple, ...]
     ingredients: tuple[Ingredient, ...]
+    stop_words: frozenset[str] = frozenset()
     _by_id: Mapping[str, Ingredient] = field(init=False, repr=False, compare=False)
     _staples_by_id: Mapping[str, Staple] = field(init=False, repr=False, compare=False)
     _by_role: Mapping[str, tuple[Ingredient, ...]] = field(init=False, repr=False, compare=False)
+    _dictionary: Mapping[tuple[str, ...], _Entity] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_by_id", {i.id: i for i in self.ingredients})
@@ -132,6 +222,41 @@ class CookoutBank:
             "_by_role",
             {role: tuple(i for i in self.ingredients if i.role == role) for role in ROLES},
         )
+        dictionary: dict[tuple[str, ...], _Entity] = {}
+        variants: list[tuple[tuple[str, ...], _Entity]] = []
+
+        def add(text: str, entity: _Entity) -> None:
+            tokens = tokenise(text)
+            if not tokens:
+                return
+            dictionary.setdefault(tokens, entity)
+            variants.extend((v, entity) for v in _plural_variants(tokens))
+
+        for ingredient in self.ingredients:
+            entity: _Entity = ("ingredient", ingredient.id)
+            add(ingredient.name, entity)
+            for alias in ingredient.aliases:
+                add(alias, entity)
+        for staple in self.staples:
+            if staple.id in UNPICKABLE_STAPLES:
+                add(staple.name, ("staple", staple.id))
+        # "Salt and pepper": the bare word is the free seasoning, whatever other peppers exist.
+        dictionary[("pepper",)] = ("staple", "black-pepper")
+        for key, entity in variants:
+            dictionary.setdefault(key, entity)
+        for short, staple_id in STAPLE_SHORT_FORMS.items():
+            dictionary.setdefault((short,), ("staple", staple_id))
+        for family in sorted({i.family for i in self.ingredients}):
+            tokens = tokenise(family)
+            dictionary.setdefault(tokens, ("family", family))
+            for variant in _plural_variants(tokens):
+                dictionary.setdefault(variant, ("family", family))
+        object.__setattr__(self, "_dictionary", dictionary)
+
+    @staticmethod
+    def empty() -> CookoutBank:
+        """What a missing or malformed bank degrades to: the game is unavailable."""
+        return CookoutBank(categories=(), staples=(), ingredients=())
 
     def ingredient(self, ingredient_id: str) -> Ingredient | None:
         return self._by_id.get(ingredient_id)
@@ -146,8 +271,203 @@ class CookoutBank:
     def by_role(self, role: str) -> tuple[Ingredient, ...]:
         return self._by_role.get(role, ())
 
-    # -- draw_pair: second checkpoint -----------------------------------------------------------
-    # The server-authoritative pair draw (ruling 3) lands here once its signature is frozen.
+    # -- the pair draw (spec §2.3) --------------------------------------------------------------
+
+    def shuffle_role_schedule(
+        self, rng: random.Random | None = None
+    ) -> tuple[RoleKey, RoleKey, RoleKey, RoleKey, RoleKey]:
+        """The round's culinary-role schedule: one base, one protein, two produce, one accent in a
+        shuffled order. Role `schedule[(turn - 1) // 2]` serves turns 2k+1 and 2k+2 alike, so both
+        players get the same five opportunities."""
+        generator = rng or _SYSTEM_RNG
+        roles = list(ROLE_SCHEDULE)
+        generator.shuffle(roles)
+        a, b, c, d, e = roles
+        return (a, b, c, d, e)
+
+    def draw_pair(
+        self,
+        *,
+        role: RoleKey,
+        seen_ids: AbstractSet[str],
+        picked_families: AbstractSet[str],
+        offered_families: AbstractSet[str],
+        player_offered_categories: Sequence[str],
+        rng: random.Random | None = None,
+    ) -> tuple[Ingredient, Ingredient]:
+        """Draw the two options of one offer for `role`.
+
+        HARD (never relaxed): no id already offered this round (`seen_ids`), no family already
+        picked (`picked_families`), two different categories, two different families, and at least
+        one option whose own entry is `everyday`. SOFT: families already offered this round
+        (`offered_families`) are avoided while a feasible pairing exists without them. Feasibility
+        is decided BEFORE the least-shown tie-break, so the category choice can never strand the
+        pair. `player_offered_categories` is the category of every option already shown to the
+        active player this round (skips included). No feasible pair at all raises
+        `CookoutExhaustedError`.
+        """
+        generator = rng or _SYSTEM_RNG
+        eligible = [
+            i
+            for i in self.by_role(role)
+            if i.id not in seen_ids and i.family not in picked_families
+        ]
+        for pool in (
+            [i for i in eligible if i.family not in offered_families],
+            eligible,
+        ):
+            grouped = _group(pool)
+            feasible = _feasible_first_options(grouped)
+            if feasible:
+                break
+        else:
+            raise CookoutExhaustedError(f"no feasible {role} pair remains")
+
+        counts = Counter(player_offered_categories)
+        lowest = min(counts[c] for c in feasible)
+        cat_a = generator.choice(sorted(c for c in feasible if counts[c] == lowest))
+        fam_a = generator.choice(sorted(feasible[cat_a]))
+        option_one = generator.choice(
+            sorted((e for e in grouped[cat_a][fam_a] if e.rarity == "everyday"), key=lambda e: e.id)
+        )
+        counts[cat_a] += 1
+        partners = [c for c in grouped if c != cat_a and _has_other_family(grouped[c], fam_a)]
+        lowest_partner = min(counts[c] for c in partners)
+        cat_b = generator.choice(sorted(c for c in partners if counts[c] == lowest_partner))
+
+        by_tier: dict[RarityKey, dict[str, list[Ingredient]]] = {}
+        for family, entries in grouped[cat_b].items():
+            if family == fam_a:
+                continue
+            for entry in entries:
+                by_tier.setdefault(entry.rarity, {}).setdefault(family, []).append(entry)
+        tiers = [t for t in RARITIES if t in by_tier]
+        tier = generator.choices(tiers, weights=[RARITY_WEIGHTS[t] for t in tiers])[0]
+        fam_b = generator.choice(sorted(by_tier[tier]))
+        option_two = generator.choice(sorted(by_tier[tier][fam_b], key=lambda e: e.id))
+
+        if generator.random() < 0.5:
+            return (option_two, option_one)
+        return (option_one, option_two)
+
+    # -- the contraband scan (spec §3.2) --------------------------------------------------------
+
+    def find_contraband_ingredients(
+        self,
+        text: str,
+        *,
+        allowed_ingredient_ids: AbstractSet[str],
+        allowed_staple_ids: AbstractSet[str],
+        omitted_ingredient_ids: AbstractSet[str] = frozenset(),
+        allow_omitted_mentions: bool = False,
+    ) -> list[str]:
+        """Foods named in `text` that the concept/recipe may not name, as bank display names in
+        order of first appearance (so the repair run can be told the exact words).
+
+        The dictionary is every ingredient name and alias (with simple plurals) plus the free
+        seasonings; matching is word-boundary, case- and accent-folded, and the LONGEST span wins
+        before anything is judged ("peanut butter" is one food, not "butter"). A span is judged
+        once and consumes its words; an allowed compound protects only its own interior.
+
+        Pass 1 (dictionary): a hit is allowed when it is a used pick (`allowed_ingredient_ids`) or
+        shares a family with one, a free seasoning, a declared staple (`allowed_staple_ids`), or a
+        bare stop word. Pass 2 (manifest, never softened by stop words or families): any mention of
+        an omitted basket item, and any undeclared non-seasoning staple (including the bare words
+        butter/flour/oil/sugar/milk). `allow_omitted_mentions=True` is the `omitted[].reason`
+        mode: the omitted items count as allowed and pass 2 is off.
+        """
+        allowed_ids = set(allowed_ingredient_ids)
+        if allow_omitted_mentions:
+            allowed_ids |= set(omitted_ingredient_ids)
+        allowed_families = {
+            entry.family for i in allowed_ids if (entry := self._by_id.get(i)) is not None
+        }
+        declared_staples = set(allowed_staple_ids) | UNPICKABLE_STAPLES
+        omitted = set(omitted_ingredient_ids)
+        found: list[str] = []
+
+        def report(entity: _Entity) -> None:
+            kind, key = entity
+            name = key.replace("-", " ")
+            if kind == "ingredient":
+                found_ingredient = self._by_id.get(key)
+                name = found_ingredient.name if found_ingredient is not None else key
+            elif kind == "staple":
+                found_staple = self._staples_by_id.get(key)
+                name = found_staple.name if found_staple is not None else key
+            if name not in found:
+                found.append(name)
+
+        for entity, tokens in _spans(tokenise(text), self._dictionary):
+            kind, key = entity
+            if len(tokens) == 1 and tokens[0] in self.stop_words:
+                continue
+            if kind == "ingredient":
+                is_staple = key in NON_SEASONING_STAPLES
+                if not allow_omitted_mentions and key in omitted:
+                    report(entity)
+                elif key in allowed_ids or (is_staple and key in declared_staples):
+                    continue
+                elif self._by_id[key].family in allowed_families and not is_staple:
+                    continue
+                else:
+                    report(entity)
+            elif kind == "staple":
+                if key not in UNPICKABLE_STAPLES and key not in declared_staples:
+                    if key not in allowed_ids:
+                        report(entity)
+            elif key not in allowed_families:
+                report(entity)
+        return found
+
+
+def _spans(
+    tokens: tuple[str, ...], dictionary: Mapping[tuple[str, ...], _Entity]
+) -> list[tuple[_Entity, tuple[str, ...]]]:
+    """Left-to-right longest-first recognition: each hit consumes its tokens."""
+    longest = max((len(k) for k in dictionary), default=0)
+    hits: list[tuple[_Entity, tuple[str, ...]]] = []
+    i = 0
+    while i < len(tokens):
+        for length in range(min(longest, len(tokens) - i), 0, -1):
+            span = tokens[i : i + length]
+            entity = dictionary.get(span)
+            if entity is not None:
+                hits.append((entity, span))
+                i += length
+                break
+        else:
+            i += 1
+    return hits
+
+
+def _group(pool: Sequence[Ingredient]) -> dict[str, dict[str, list[Ingredient]]]:
+    grouped: dict[str, dict[str, list[Ingredient]]] = {}
+    for entry in pool:
+        grouped.setdefault(entry.category, {}).setdefault(entry.family, []).append(entry)
+    return grouped
+
+
+def _has_other_family(families: Mapping[str, list[Ingredient]], family: str) -> bool:
+    return any(f != family for f in families)
+
+
+def _feasible_first_options(
+    grouped: Mapping[str, Mapping[str, list[Ingredient]]],
+) -> dict[str, list[str]]:
+    """For each category that can supply the guaranteed-everyday option: the families that have an
+    `everyday` entry AND leave a valid partner (another category with a different family)."""
+    feasible: dict[str, list[str]] = {}
+    for category, families in grouped.items():
+        usable = [
+            family
+            for family, entries in families.items()
+            if any(e.rarity == "everyday" for e in entries)
+            and any(c != category and _has_other_family(grouped[c], family) for c in grouped)
+        ]
+        if usable:
+            feasible[category] = usable
+    return feasible
 
 
 # -- strict loading ----------------------------------------------------------------------------
@@ -243,13 +563,34 @@ def _ingredient(index: int, raw: object, categories: Mapping[str, Category]) -> 
     )
 
 
+def _stop_words(raw: object) -> frozenset[str]:
+    if not isinstance(raw, list) or len(raw) > MAX_STOP_WORDS:
+        raise CookoutBankError(f"stopWords must be a list of at most {MAX_STOP_WORDS}")
+    words: list[str] = []
+    for index, word in enumerate(raw):
+        text = _text(f"stopWord #{index + 1}", word, maximum=30)
+        if text != fold(text) or len(tokenise(text)) != 1:
+            raise CookoutBankError(f"stopWord {text!r}: must be one lowercase word")
+        if text in FORBIDDEN_STOP_WORDS:
+            raise CookoutBankError(f"stopWord {text!r}: a staple food name is never a stop word")
+        words.append(text)
+    if len(set(words)) != len(words):
+        raise CookoutBankError("stopWords: duplicates")
+    return frozenset(words)
+
+
 def parse_cookout_bank(raw: object) -> CookoutBank:
     """Validate an already-decoded bank document and build the typed bank."""
     if not isinstance(raw, dict):
         raise CookoutBankError("the bank must be a JSON object")
-    _expect_keys("bank", raw, {"version", "categories", "staples", "ingredients"})
+    _expect_keys(
+        "bank", raw, {"version", "generated", "categories", "staples", "stopWords", "ingredients"}
+    )
     if raw["version"] != BANK_VERSION or isinstance(raw["version"], bool):
         raise CookoutBankError(f"bank version must be {BANK_VERSION}")
+    generated = raw["generated"]
+    if not isinstance(generated, str) or not _DATE_RE.fullmatch(generated):
+        raise CookoutBankError("bank generated must be a YYYY-MM-DD date")
     categories_raw, staples_raw, ingredients_raw = (
         raw["categories"],
         raw["staples"],
@@ -271,6 +612,7 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
     for staple in staples:
         if staple.pickable == (staple.id in UNPICKABLE_STAPLES):
             raise CookoutBankError(f"staple {staple.id}: wrong pickable flag")
+    stop_words = _stop_words(raw["stopWords"])
 
     if not (MIN_INGREDIENTS <= len(ingredients_raw) <= MAX_INGREDIENTS):
         raise CookoutBankError(
@@ -312,23 +654,26 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
     for role in ROLES:
         if sum(1 for i in ingredients if i.role == role) < MIN_PER_ROLE:
             raise CookoutBankError(f"role {role} has fewer than {MIN_PER_ROLE} ingredients")
-    return CookoutBank(categories=categories, staples=staples, ingredients=ingredients)
+    return CookoutBank(
+        categories=categories, staples=staples, ingredients=ingredients, stop_words=stop_words
+    )
 
 
-def load_cookout_bank(path: Path = BANK_PATH) -> CookoutBank:
+def load_cookout_bank(path: Path | None = None) -> CookoutBank:
     """Load and strictly validate the bank at `path`; raises `CookoutBankError`."""
+    target = path or BANK_PATH
     try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise CookoutBankError(f"cannot read the bank {path}: {exc}") from exc
+        raise CookoutBankError(f"cannot read the bank {target}: {exc}") from exc
     return parse_cookout_bank(raw)
 
 
-def load_cookout_bank_or_none(path: Path = BANK_PATH) -> CookoutBank | None:
-    """What `create_app` uses: a broken bank is logged and the game is unavailable, but the rest
-    of Server chat still starts."""
+def load_cookout_bank_or_empty(path: Path | None = None) -> CookoutBank:
+    """What `create_app` uses: a broken bank is logged and replaced by an empty one so the rest of
+    Server chat still starts; the game is then unavailable (`bank.ingredients` is empty)."""
     try:
         return load_cookout_bank(path)
     except CookoutBankError:
         _LOGGER.exception("Cookout ingredient bank unusable — the game is DISABLED")
-        return None
+        return CookoutBank.empty()

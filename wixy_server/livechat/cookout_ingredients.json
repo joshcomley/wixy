@@ -1,5 +1,6 @@
 {
  "version": 1,
+ "generated": "2026-10-28",
  "categories": [
   {
    "id": "meat-poultry",
@@ -28,7 +29,7 @@
   },
   {
    "id": "dairy-eggs",
-   "name": "Dairy, Cream & Cheese",
+   "name": "Dairy, Cream & Eggs",
    "emoji": "🧀"
   },
   {
@@ -118,6 +119,54 @@
    "name": "Milk",
    "pickable": true
   }
+ ],
+ "stopWords": [
+  "bread",
+  "sauce",
+  "salad",
+  "soup",
+  "stew",
+  "roast",
+  "bake",
+  "pie",
+  "pan",
+  "pot",
+  "bowl",
+  "plate",
+  "crust",
+  "glaze",
+  "broth",
+  "water",
+  "dish",
+  "meal",
+  "topping",
+  "filling",
+  "batter",
+  "dough",
+  "stock",
+  "dressing",
+  "seasoning",
+  "spread",
+  "paste",
+  "juice",
+  "garnish",
+  "marinade",
+  "coating",
+  "sandwich",
+  "oven",
+  "grill",
+  "tray",
+  "board",
+  "skillet",
+  "wok",
+  "jar",
+  "layer",
+  "root",
+  "grain",
+  "grains",
+  "spirit",
+  "sweet",
+  "wrap"
  ],
  "ingredients": [
   {
