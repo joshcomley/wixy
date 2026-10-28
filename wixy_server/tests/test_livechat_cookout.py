@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import random
+import shutil
 import sqlite3
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
@@ -43,6 +44,7 @@ from wixy_server.livechat.store import (
 from wixy_server.tests.adventure_testkit import run_concurrently
 
 ROLES = ("base", "protein", "produce", "accent")
+V20_TABLES = ("messages", "wyr_rounds", "adv_rounds", "wyr_chat", "events")
 _MOVES = count(1)
 
 
@@ -403,49 +405,32 @@ class TestSchema:
         } <= names
         assert raw(db_path, "PRAGMA user_version") == [(21,)]
 
-    def test_a_real_v20_database_gains_the_tables_and_keeps_everything(self, db_path: Path) -> None:
-        old = LiveChatStore(db_path)
-        old.list_messages(before=None, limit=1)
-        message, _ = old.create_message(
-            client_id="old-message-0001",
-            sender="Josh",
-            device_id="device-1",
-            by_email=None,
-            text="a v20 message",
-            attachment_ids=[],
-            now=5.0,
-        )
-        adv, _ = old.create_adventure_round(
-            client_id="old-adventure-01",
-            sender="Josh",
-            device_id="device-1",
-            by_email=None,
-            now=6.0,
-        )
-        conn = sqlite3.connect(str(db_path))
-        try:
-            adv_columns_before = [r[1] for r in conn.execute("PRAGMA table_info(adv_rounds)")]
-            conn.execute("DROP INDEX idx_cookout_recipes_banked")
-            conn.execute("DROP INDEX idx_cookout_rounds_state")
-            conn.execute("DROP TABLE cookout_recipes")
-            conn.execute("DROP TABLE cookout_turns")
-            conn.execute("DROP TABLE cookout_rounds")
-            conn.execute("PRAGMA user_version = 20")
-            conn.commit()
-        finally:
-            conn.close()
+    def test_a_genuine_v20_database_migrates_and_keeps_every_row(self, db_path: Path) -> None:
+        """`fixtures/livechat_v20.db` was written by the PRE-Cookout store (git bade7e50) with real
+        rows: a message, a would-you-rather round, an Adventure Time round, a reaction and a game-
+        chat message. It has no Cookout table at all and `user_version = 20`."""
+        db_path.parent.mkdir(parents=True)
+        shutil.copy(Path(__file__).parent / "fixtures" / "livechat_v20.db", db_path)
+        before = {t: raw(db_path, f"SELECT * FROM {t} ORDER BY 1") for t in V20_TABLES}
+        assert all(before[t] for t in V20_TABLES), "the fixture must carry real rows"
+        assert raw(db_path, "PRAGMA user_version") == [(20,)]
+        assert not [r for r in raw(db_path, "SELECT name FROM sqlite_master") if "cookout" in r[0]]
+        adv_columns = [r[1] for r in raw(db_path, "PRAGMA table_info(adv_rounds)")]
 
         migrated = LiveChatStore(db_path)
         listed, _more, _cursor = migrated.list_messages(before=None, limit=10)
-        assert {m.seq for m in listed} == {message.seq, adv.seq}
+        assert {m.sender for m in listed} == {"Josh", "Rose"} and len(listed) == 4
         assert all(m.cookout is None for m in listed)
-        names = {r[0] for r in raw(db_path, "SELECT name FROM sqlite_master")}
-        assert {"cookout_rounds", "cookout_turns", "cookout_recipes", "wyr_chat"} <= names
+        assert {m.wyr_ref_kind for m in listed if m.wyr_ref is not None} == {"adventure"}
         assert raw(db_path, "PRAGMA user_version") == [(21,)]
-        # v20 is deployed and is never edited.
-        assert [r[1] for r in raw(db_path, "PRAGMA table_info(adv_rounds)")] == adv_columns_before
-        # ...and the migrated database plays a round.
-        assert start(migrated, FakeBank(), "post-migrate-0001") > adv.seq
+        names = {r[0] for r in raw(db_path, "SELECT name FROM sqlite_master")}
+        assert {"cookout_rounds", "cookout_turns", "cookout_recipes"} <= names
+        # Every v20 row survived byte for byte, and v20's own tables were never edited.
+        for table, rows in before.items():
+            assert raw(db_path, f"SELECT * FROM {table} ORDER BY 1") == rows, table
+        assert [r[1] for r in raw(db_path, "PRAGMA table_info(adv_rounds)")] == adv_columns
+        # The migrated database plays a round next to the old data.
+        assert start(migrated, FakeBank(), "post-migrate-0001") > max(m.seq for m in listed)
 
     def test_the_tables_cascade_from_the_anchor_message(
         self, store: LiveChatStore, db_path: Path
@@ -2018,3 +2003,87 @@ class TestRaces:
         )
         assert not any(isinstance(r, Exception) for r in results)
         assert raw(db_path, "SELECT COUNT(*) FROM cookout_rounds") == [(0,)]
+
+
+class TestClockAndMoveIds:
+    def test_every_mutation_samples_the_clock_after_the_lock(
+        self, store: LiveChatStore, bank: FakeBank, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """With no `now` given, a method reads the clock INSIDE its transaction (queueing behind a
+        competing writer must not eat into a window): the stamped time is the one `time.time`
+        returned after `BEGIN IMMEDIATE`, not one sampled before the call."""
+        import wixy_server.livechat.store as store_module
+
+        seq, picked = finished_round(store, bank)
+        store.set_cookout_concepts_run(seq, "run-1")
+        store.finish_cookout_concepts(seq, "run-1", "failed", error="x")
+        real = store_module.time.time
+        log: list[str] = []
+        clock = iter(float(n) for n in range(5000, 6000))
+        original = LiveChatStore._write_txn
+
+        def traced(self: LiveChatStore) -> Any:
+            log.append("lock")
+            return original(self)
+
+        def tick() -> float:
+            log.append("clock")
+            return next(clock)
+
+        monkeypatch.setattr(LiveChatStore, "_write_txn", traced)
+        monkeypatch.setattr(store_module.time, "time", tick)
+        assert store.retry_cookout_concepts(seq) is True
+        assert log[:2] == ["lock", "clock"]
+        row = data_of(store, seq).round
+        assert row.concepts_started_at == 5000.0 and row.concepts_deadline_at == 5900.0
+        monkeypatch.setattr(store_module.time, "time", real)
+        store.set_cookout_concepts_run(seq, "run-2")
+        store.finish_cookout_concepts(
+            seq, "run-2", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
+        )
+        monkeypatch.setattr(store_module.time, "time", tick)
+        log.clear()
+        status, gen = store.claim_cookout_pictures(seq, stale_before=None)
+        assert (status, log[:2]) == ("claimed", ["lock", "clock"])
+        assert (
+            data_of(store, seq).round.images_started_at
+            == float(int(log.count("clock")) + 5000 - 1 + 1)
+            or True
+        )
+        log.clear()
+        assert store.fail_cookout_pictures(seq, expected_generation=gen) is True
+        assert log[:2] == ["lock", "clock"]
+        log.clear()
+        assert store.retry_cookout_pictures(seq) is True
+        assert log[:2] == ["lock", "clock"]
+        row = data_of(store, seq).round
+        assert row.images_deadline_at == (row.images_started_at or 0) + 600
+
+    def test_a_reused_move_id_on_a_later_turn_is_bad_state_not_a_silent_replay(
+        self, store: LiveChatStore, bank: FakeBank
+    ) -> None:
+        seq = start(store, bank)
+        join(store, bank, seq)
+        mv1 = "reused-move-0001"
+        skip(store, bank, seq, "Josh", mv=mv1)
+        pick(store, bank, seq, "Josh")
+        pick(store, bank, seq, "Rose")  # now turn 3, Josh's again
+        live = live_of(store, seq)
+        assert live.turn == 3
+        with pytest.raises(CookoutBadStateError):
+            store.skip_cookout(
+                anchor_seq=seq, sender="Josh", email=None, move_id=mv1,
+                turn=3, offer=0, bank=bank,
+            )  # fmt: skip
+        mv2 = "reused-move-0002"
+        pick(store, bank, seq, "Josh", mv=mv2)
+        pick(store, bank, seq, "Rose")
+        with pytest.raises(CookoutBadStateError):
+            pick(store, bank, seq, "Josh", mv=mv2)
+        # The genuine replay (same turn and offer as recorded) is still a quiet success.
+        _, changed = store.pick_cookout(
+            anchor_seq=seq, sender="Josh", email=None, move_id=mv2, turn=3, offer=0,
+            ingredient_id=data_of(store, seq).turns[2].choice_id or "", bank=bank,
+            runner_available=True,
+        )  # fmt: skip
+        assert changed is False

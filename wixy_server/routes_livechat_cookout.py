@@ -17,7 +17,6 @@ Errors: 404 `not_found`, 409 `bad_state` / `not_your_turn` / `not_player` / `ski
 
 from __future__ import annotations
 
-import time
 from collections.abc import Callable
 from typing import Any
 
@@ -444,7 +443,7 @@ async def _retry(
     sender_raw: str,
     *,
     check: Callable[[LiveChatStore, dict[str, Any]], str],
-    run: Callable[[LiveChatStore, float], bool],
+    run: Callable[[LiveChatStore], bool],
     start: Callable[[ContainedTaskGroup], None],
 ) -> JSONResponse:
     """Shared body of the three retries. `check` reads the round (`get_cookout_round`) and answers
@@ -471,7 +470,7 @@ async def _retry(
         verdict = check(store, data)
         if verdict != "go":
             return verdict, False
-        if run(store, time.time()):
+        if run(store):
             return "go", True
         again = store.get_cookout_round(seq)
         if again is not None and check(store, again) == "noop":
@@ -511,7 +510,7 @@ async def retry_cookout_concepts(seq: int, body: CookoutSenderIn, request: Reque
         seq,
         body.sender,
         check=_check,
-        run=lambda store, now: store.retry_cookout_concepts(seq, now=now),
+        run=lambda store: store.retry_cookout_concepts(seq),
         start=lambda background: runner.start_concepts(background, seq),
     )
 
@@ -534,7 +533,7 @@ async def retry_cookout_pictures(seq: int, body: CookoutSenderIn, request: Reque
         seq,
         body.sender,
         check=_check,
-        run=lambda store, now: store.retry_cookout_pictures(seq, now=now),
+        run=lambda store: store.retry_cookout_pictures(seq),
         start=lambda background: runner.start_pictures(background, seq),
     )
 
@@ -566,6 +565,6 @@ async def retry_cookout_recipe(
         seq,
         body.sender,
         check=_check,
-        run=lambda store, now: store.retry_cookout_recipe(seq, concept_id, now=now),
+        run=lambda store: store.retry_cookout_recipe(seq, concept_id),
         start=lambda background: runner.start_recipe(background, seq, concept_id),
     )
