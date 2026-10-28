@@ -2225,7 +2225,8 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   write that stores a `ready` pack `finish_adventure_pack(pictures_pending=True)` sets `images = pending`;
   `AdventurePackRunner.run_job` then runs `AdventurePictureJob.run` (still a contained task, Inv 47,
   OUTSIDE the research slot), which plans the slots from the pack (`plan_pictures`: round-robin across
-  sights, food, stay, culture, do by item position, at most 20 attempts), hunts through the finder
+  dishes, sights, food, stay, culture, do by item position, the local dishes first; at most 6 dishes and
+  20 other items), hunts through the finder
   (`WebPictureFinder`; `create_app(adventure_picture_finder=...)` is the seam), stages each JPEG at
   `uploads/<id>/assembled` and attaches them all in ONE transaction
   (`create_adventure_picture_attachments`, modelled on `create_wyr_image_attachments`) as ordinary private
@@ -2244,19 +2245,42 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   `og:image` / `twitter:image` (HTML <= 1 MB, 403/429 skipped quietly), credited to `og:site_name` or the host;
   (3) hero and sights only: a Commons file-namespace search (`filemime:image/jpeg`, short side >= 900, no
   map/flag/logo titles, landscape first). The hero is the destination article's lead plus search photos up to
-  5 (cap 6); at most 16 pictures per pack; a file found twice (Commons title or content digest) is kept once —
+  5 (cap 6); at most 22 pictures per pack — hero 6, local dishes 6, every other item 10; a file found twice (Commons title or content digest) is kept once —
   the destination's lead first, then the items in plan order — and a slot that lost it tries its own
   fallbacks. Every picture is checked (`prepare_picture`: `image/*` content type before the body is read,
-  JPEG/PNG/WebP magic bytes, Pillow opens it as that format, <= 36 MP declared, one frame, short side >= 480,
-  aspect <= 3:1) and rebuilt as a metadata-free sRGB JPEG of <= 1600 px (`processing.reencode_still_as_jpeg`).
+  JPEG/PNG/WebP magic bytes, then the size the FILE'S OWN HEADER declares — PNG IHDR, the JPEG start-of-frame
+  (two refused), the WebP VP8X canvas / VP8 / VP8L frame header — is read from the bytes and checked BEFORE
+  `Image.open` (<= 16 MP, short side >= 480, aspect <= 3:1; libwebp allocates canvas buffers inside `open`),
+  Pillow must agree with the header, one frame) and rebuilt, shrink-first, as a metadata-free sRGB JPEG of
+  <= 1600 px (`processing.reencode_still_as_jpeg`: a JPEG decodes at reduced scale, everything is resized
+  before the orientation / colour / flatten / metadata copies; the chat-upload `process_photo` is untouched).
+  Decodes run ONE at a time; the measured worst case is ~280 MB transient (decisions/00191, Inv 44).
   The whole hunt gives up after 240 s and keeps what it has. **Fetching** is `livechat/safe_fetch.py`
   (`SafeFetcher`, Inv 56's SSRF rules) — nothing else fetches a URL the engine did not build. The view's
   `pack.images` is `"pending"` while the hunt runs or a stored picture is still processing, else `"done"`;
   `pack.pictures` is `{hero, items}` of `{thumbUrl, fullUrl, credit, page, caption}` built from the anchor's
   READY attachments (contracts.md). The round's `rev` moves as each picture becomes ready
-  (`finish_attachment`), and the view reads the round and its attachments in one transaction. **Restarts**:
-  `AdventurePackRunner.resume` also redoes the hunt for every round still `images = pending` (the attach is
-  all-or-nothing); a shutdown mid-hunt leaves it pending for that; rejecting ends the wait (`failed`).
+  (`finish_attachment`), and the view reads the round and its attachments in one transaction. **Restarts and
+  self-healing**: `AdventurePackRunner.resume` redoes the hunt for every round still `images = pending` (the
+  attach is all-or-nothing); a shutdown mid-hunt leaves it pending; rejecting ends the wait (`failed`). A
+  pending wait is never startup-only: `adv_rounds.images_started_at` / `images_tries` record the current hunt
+  and a supervised loop (`livechat-adventure-pictures-watch`, Inv 47) re-claims, by compare-and-set
+  (`claim_adventure_pictures`), any wait older than `JOB_BUDGET_S + 120 s` and hunts it again — the old side of
+  a blue/green hand-off being stopped mid-hunt, or `fail_adventure_pictures` itself failing — and ends a round
+  whose hunts keep dying after three tries. Third-party text (page `<meta>`, JSON, credits) is parsed in a
+  thread, the page's bytes cut to 200 KB and decoded only with a web charset (`punycode`, `idna`, ... are read
+  as UTF-8). A venue image tag on Wikimedia goes through the Commons thumbnail or is skipped.
+- **Local food to try** (spec §4.3b, decisions/00191 addendum). The first section of a pack is `dishes` ("Local
+  food to try": 4-6 signature dishes and drinks, each with `wikipedia` = the English article title OF THE DISH and
+  no link); `food` is "Where to eat"; the sanitiser puts `dishes` first and a pack without it is valid. A dish's
+  picture (`WebPictureFinder.wikipedia_picture(require_food=True)`, `dish_search_picture`, rules in
+  `livechat/adventure_dishes.py`) is its article's lead image ONLY when the summary's description or first
+  sentence reads as food, else a Commons search for `"<dish>"` then `<dish> <unit>` accepted ONLY when the file's
+  title contains a significant accent-folded token of the dish (>= 4 letters) AND its Commons categories or
+  description mention food (JPEG, short side >= 480, <= 3 downloads per dish); never an article's other images —
+  "Buzara" is a genus of moths on English Wikipedia, and both checks reject its photos. A dish with no
+  qualifying photo stays text-only. Keyed `dishes:<i>` in `pack.pictures.items`. Measured (Kotor, real services):
+  9 of 12 dishes pictured, all correct.
   No picture finder (standalone, no researcher, no media pipeline, or a test that injected a researcher
   without a finder) means a pack has no pictures and `images` stays `none`.
 - **Edition.** `create_app(adventure_researcher=...)` is the seam (plus `adventure_bank=`, `adventure_pack_timing=`

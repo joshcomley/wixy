@@ -229,6 +229,7 @@ real provisioning failure (decisions/00031).
   The wire's `pack.images` is `"pending"` or `"done"` only. Pictures are ordinary photo attachments on
   the anchor message plus a slot map (`adv_rounds.pictures`: slot -> attachment ordinal, credit, source
   page, caption); a slot is `hero:<n>` or `<section key>:<item index>`.
+- **Dishes section** (`dishes`, "Local food to try") — the pack's first section: 4-6 signature local dishes and drinks (the dish itself, not a restaurant; `food` is "Where to eat"). A dish's photo must pass two checks (`livechat/adventure_dishes.py`): its title names the dish and its categories/description mention food.
 - **Safe fetch** (`livechat/safe_fetch.py`) — the one SSRF-safe GET behind every picture and page fetch
   (public addresses only, vetted at connect time, bounded, polite); see Inv 56.
 - **Live trail** — the dragger's finger trail, relayed id-less as `adventure_live` SSE frames and

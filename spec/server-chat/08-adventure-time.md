@@ -424,8 +424,10 @@ CREATE TABLE IF NOT EXISTS adv_settings(
   standard step), a file narrower than the step comes back as its original, which is never fetched
   (the next standard step down is asked for instead); the hero is the destination article's lead image
   plus Commons-search photos up to 5 rather than only "if fewer than 3 survive"; a fetched picture may
-  declare at most 36 MP (tighter than the chat's 80 MP) and is decoded two at a time; the fetcher
-  drives `httpcore` directly. The wire is `pack.images` (`"pending"`/`"done"`) and `pack.pictures =
+  declare at most 16 MP in its own header (read before `Image.open`; tighter than the chat's 80 MP) and is
+  decoded one at a time by a shrink-first path (measured worst case ~280 MB, decisions/00191); the fetcher
+  drives `httpcore` directly; a pending picture wait heals itself (`images_started_at`/`images_tries`, a
+  supervised sweep); the budget with §4.3b is hero 6 + dishes 6 + others 10 = 22. The wire is `pack.images` (`"pending"`/`"done"`) and `pack.pictures =
   {hero:[Picture], items:{"<section>:<index>":Picture}}` (contracts.md).
 - Job: on entering `chosen` → `pack = pending` → start the run, store `pack_run_id` → poll every
   10 s (bounded) until terminal or 25 min → store `ready`/`failed` (error text short and generic:

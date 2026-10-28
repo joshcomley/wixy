@@ -67,9 +67,21 @@ directly: it reads no environment); one request at a time per host, at most four
 policy, the allowed ports and the TLS context are constructor arguments used ONLY by tests to reach a local
 fake server; **there is no environment variable, setting or module-level switch that relaxes any of it**, and
 production builds `SafeFetcher()` with the defaults. A fetched image must have an `image/*` content type AND
-sniff as JPEG/PNG/WebP, open in Pillow as that format with <= 36 MP declared (checked before decoding), be a
+sniff as JPEG/PNG/WebP, declare in their OWN HEADER (read from the bytes, BEFORE `Image.open` is called — libwebp
+allocates canvas buffers inside it) at most 16 MP, a short side >= 480 px and an aspect <= 3:1, open in Pillow as that
+format and size, be a
 single frame with a short side >= 480 px and aspect <= 3:1, and is rebuilt as a metadata-free JPEG of <=
-1600 px (decoded two at a time). What the picture hunt sends to third parties is only names and URLs from
+1600 px by a shrink-first path, decoded ONE at a time. **Measured worst case** (audit round 3; peak over a 61 MB
+baseline): ~280 MB working set / commit for the largest accepted input (a 16 MP lossless or alpha WebP, 0.31 s),
++158 MB for a 16 MP RGBA PNG, +53 MB for a JPEG — against +654 MB per decode, +1.3 GB for two, and a 140-byte
+WebP declaring a 16384 x 16384 canvas committing +2.05 GB, before the change; the bound does not grow with the
+number of pictures. A page's `<meta>` text is cut to 200 KB of BYTES, decoded only with an allow-listed web
+charset (`punycode` took 15.6 s per MB) and, like every other third-party parse, run off the event loop; Wikimedia
+is only ever asked for API thumbnails, even through a venue page's image tag. A pending picture wait is
+self-healing (`images_started_at`/`images_tries`, a supervised sweep, three tries) rather than startup-only.
+A local DISH's picture is accepted only when two independent signals agree — its title names the dish and its
+Commons categories/description (or, for an article's lead image, the article's description / first sentence)
+mention food — and never comes from an article's other images ("Buzara" is a genus of moths there). What the picture hunt sends to third parties is only names and URLs from
 the pack (the destination, item names, article titles, the venues' own URLs) plus the engine's User-Agent:
 nothing from the chat, and no sign-in, cookie or identity of either person.
 
@@ -91,12 +103,12 @@ every job outcome, restart resume, the overlap compare-and-set), `test_livechat_
 refused address class incl. IPv6 / mapped / NAT64 / 6to4 / Teredo, URL-parsing refusals, a name resolving
 to a private address, mixed records, rebinding, redirects to private hosts / schemes / ports, the redirect
 cap, byte / time / content-type / encoding bounds, Retry-After once, per-host serialisation and the
-four-host cap, no cookies / proxies, TLS name and SNI), `test_livechat_adventure_pictures.py` (the plan,
+four-host cap, no cookies / proxies, TLS name and SNI, non-ASCII-digit `Retry-After`, a malformed redirect `Location`, `refuse_host_suffixes`), `test_livechat_adventure_pictures.py` (the plan,
 the file-name parsing of the real thumb URL shape, never an original, source order, credits, de-duplication,
-the 16 cap, the image check incl. bombs / banners / animation / metadata stripping, no fetch ever targeting
-a private address even by redirect, politeness and budget), `test_livechat_adventure_pictures_job.py`
+the budget caps, the image check incl. bombs / banners / animation / metadata stripping, the header-declared size refused WITHOUT calling `Image.open` for PNG / JPEG / every WebP header kind, the lean shrink-first re-encode for every mode, hostile page charsets (a 1 MB `punycode` page), parsing off the event loop, Wikimedia originals never fetched through a venue page, no fetch ever targeting
+a private address even by redirect, politeness and budget), `test_livechat_adventure_dishes.py` (the food-term / title-token rules, the `dishes` section and its sources, a moth-named dish rejected by both checks), `test_livechat_adventure_pictures_job.py`
 (the compare-and-set attach, the Gallery exclusion, the job's outcomes incl. rejected / deleted mid-hunt, a
-blue/green overlap and restart, the view shape and signed URLs, erasure of pictures and credits by delete and
+blue/green overlap and restart, the self-healing sweep incl. the old side of a hand-off stopped mid-hunt, a failing `fail_adventure_pictures` and the try limit, the view shape and signed URLs, erasure of pictures and credits by delete and
 wipe, and the whole chain with the production finder over a fake Wikipedia / Commons / venue) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
 Decision: [00192](../../decisions/00192-server-chat-adventure-time/decision.md).
 
