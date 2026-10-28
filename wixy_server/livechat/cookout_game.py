@@ -19,7 +19,7 @@ from typing import Any, Literal, Protocol
 
 from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.background import ContainedTaskGroup
-from wixy_server.livechat import cookout_bank as _cookout_bank
+from wixy_server.livechat.cookout_bank import CookoutExhaustedError, load_cookout_bank_or_empty
 from wixy_server.livechat.models import (
     AttachmentRow,
     CookoutRecipeRow,
@@ -46,20 +46,9 @@ CONCEPTS_UNAVAILABLE_TEXT = "Recipe ideas are not available on this server."
 RECIPE_UNAVAILABLE_TEXT = "Writing recipes is not available on this server."
 
 
-class _FallbackExhausted(Exception):
-    """Stands in for the bank's own exhausted error until `cookout_bank` provides it."""
-
-
-def _resolve_exhausted() -> type[Exception]:
-    found = getattr(_cookout_bank, "CookoutExhaustedError", None)
-    if isinstance(found, type) and issubclass(found, Exception):
-        return found
-    return _FallbackExhausted
-
-
-CookoutDrawExhausted: type[Exception] = _resolve_exhausted()
-"""The error `CookoutBank.draw_pair` raises when no valid pair exists (ruling: the bank's
-`CookoutExhaustedError`); the store maps it to `409 exhausted`."""
+CookoutDrawExhausted = CookoutExhaustedError
+"""The error `CookoutBank.draw_pair` raises when no valid pair exists; the store maps it to
+`409 exhausted`."""
 
 
 class IngredientLike(Protocol):
@@ -150,15 +139,10 @@ class NullCookoutRunner:
         return None
 
 
-def default_bank() -> BankLike | None:
-    """The shipped ingredient bank, or None (the game is then unavailable, chat lives): whichever
-    of the bank module's tolerant loaders exists."""
-    for name in ("load_cookout_bank_or_none", "load_cookout_bank_or_empty"):
-        loader = getattr(_cookout_bank, name, None)
-        if callable(loader):
-            bank: BankLike | None = loader()
-            return bank
-    return None
+def default_bank() -> BankLike:
+    """The shipped ingredient bank. A missing or malformed file yields an EMPTY bank (the loader
+    logs why): the game is then unavailable (`503 game_unavailable`), chat lives."""
+    return load_cookout_bank_or_empty()
 
 
 def snapshot(ingredient: IngredientLike) -> dict[str, str]:

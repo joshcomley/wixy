@@ -3686,6 +3686,8 @@ class LiveChatStore:
                 raise CookoutNotPlayerError("you are not a player in this round")
             turns = self._cx_turns(conn, anchor_seq)
             if any(move_id in t.skip_move_ids and t.player == slot for t in turns):
+                if any(move_id in t.skip_move_ids and t.turn != turn for t in turns):
+                    raise CookoutBadStateError("that move id was used on another turn")
                 return round_, False
             live = self._cx_live_turn(round_, turns, slot, turn)
             if offer != len(live.offers) - 1:
@@ -3767,6 +3769,8 @@ class LiveChatStore:
                 raise CookoutNotPlayerError("you are not a player in this round")
             turns = self._cx_turns(conn, anchor_seq)
             if any(t.pick_move_id == move_id and t.player == slot for t in turns):
+                if any(t.pick_move_id == move_id and t.turn != turn for t in turns):
+                    raise CookoutBadStateError("that move id was used on another turn")
                 return round_, False
             live = self._cx_live_turn(round_, turns, slot, turn)
             if offer != len(live.offers) - 1:
@@ -3896,13 +3900,14 @@ class LiveChatStore:
             self._cx_event(conn, anchor_seq, now_s)
             return True
 
-    def retry_cookout_concepts(self, anchor_seq: int, *, now: float) -> bool:
+    def retry_cookout_concepts(self, anchor_seq: int, *, now: float | None = None) -> bool:
         """Try Stage 1 again (spec §3.5): valid for a `finished` round whose concepts are `failed`
         or `unavailable`. Back to `pending` with no run, data or error, a fresh 900 s window, and
         the picture job reset (its generation incremented so any late picture write is fenced).
         `False` = not applicable (the caller decides between an idempotent `pending` and a
         `bad_state`); `CookoutRoundNotFoundError` when there is no round."""
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
             if round_.state != "finished" or round_.concepts not in ("failed", "unavailable"):
                 return False
@@ -3933,7 +3938,7 @@ class LiveChatStore:
     # -- Cookout: pictures (partial-success aware, fenced by `images_generation`) ----------------
 
     def claim_cookout_pictures(
-        self, anchor_seq: int, *, stale_before: float | None, now: float
+        self, anchor_seq: int, *, stale_before: float | None, now: float | None = None
     ) -> tuple[Literal["claimed", "not_due", "gave_up", "gone"], int]:
         """Begin a picture attempt for a `pending` round — a compare-and-set, so two processes
         sweeping at once start one. It increments `images_generation` and returns the new value:
@@ -3941,6 +3946,7 @@ class LiveChatStore:
         claimed it or the attempt is young (`stale_before`); `gave_up` = `MAX_PICTURE_TRIES`
         attempts already began, the wait ended as `failed`; `gone` = nothing waits any more."""
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             row = conn.execute(
                 "SELECT state, concepts, images, images_started_at, images_tries, "
                 "images_generation FROM cookout_rounds WHERE anchor_message_seq = ?",
@@ -3980,18 +3986,21 @@ class LiveChatStore:
         by_email: str | None,
         *,
         all_done: bool,
-        now: float,
+        now: float | None = None,
     ) -> bool:
         """Attach the dish pictures an attempt produced (`slot -> (upload id, size)`, already staged
         at `uploads/<id>/assembled`) to the round's ANCHOR message in ONE transaction: upload rows
         + `processing` photo attachments + the merged slot map. Only slots not already filled are
         taken (a ready slot is never overwritten). `images` becomes `done` once all three slots are
         present, else `failed` (partial success is KEPT; `/pictures/retry` makes the missing ones).
+        `all_done` is accepted for interface compatibility and IGNORED: completeness (all three
+        slots present after the merge) alone decides `done` vs `failed`.
         A compare-and-set on `(finished, concepts = 'ready', images = 'pending', images_generation
         = expected_generation)`: a losing write returns False after journaling every staged id for
         cleanup — the caller removes the files — and touches nothing."""
         ids = [upload_id for upload_id, _ in slot_uploads.values()]
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             if any(
                 self._is_deleted_storage(conn, kind=kind, storage_id=att_id)
                 for att_id in ids
@@ -4045,12 +4054,13 @@ class LiveChatStore:
             return True
 
     def fail_cookout_pictures(
-        self, anchor_seq: int, *, expected_generation: int, now: float
+        self, anchor_seq: int, *, expected_generation: int, now: float | None = None
     ) -> bool:
         """The attempt produced nothing (or a failure): the wait ends as `failed`. A compare-and-set
         on the same fence as `store_cookout_pictures`; `False` = a newer attempt (or a delete)
         owns the round, which is left untouched."""
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             cursor = conn.execute(
                 "UPDATE cookout_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
                 "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'ready' "
@@ -4062,12 +4072,13 @@ class LiveChatStore:
             self._cx_event(conn, anchor_seq, now)
             return True
 
-    def retry_cookout_pictures(self, anchor_seq: int, *, now: float) -> bool:
+    def retry_cookout_pictures(self, anchor_seq: int, *, now: float | None = None) -> bool:
         """Draw the missing pictures again (spec §3.5): valid for a `finished` round with `ready`
         concepts, `images` not already `pending` and at least one empty slot. Keeps the attached
         slots, sets `pending` with a fresh try count and 600 s window, and increments
         `images_generation` (never resets it). `False` = not applicable."""
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
             if (
                 round_.state != "finished"
@@ -4215,11 +4226,14 @@ class LiveChatStore:
             self._cx_update(conn, anchor_seq, now_s, {})
             return True
 
-    def retry_cookout_recipe(self, anchor_seq: int, concept_id: str, *, now: float) -> bool:
+    def retry_cookout_recipe(
+        self, anchor_seq: int, concept_id: str, *, now: float | None = None
+    ) -> bool:
         """Try a recipe again (spec §3.5): valid for a `finished` round with `ready` concepts whose
         recipe row is `failed` or `unavailable`. Back to `pending`, run/error/body cleared,
         `banked_at` left NULL, a fresh 900 s window. `False` = not applicable."""
         with self._write_txn() as conn:
+            now = time.time() if now is None else now
             round_ = self._cx_load(conn, anchor_seq)
             if round_.state != "finished" or round_.concepts != "ready":
                 return False
