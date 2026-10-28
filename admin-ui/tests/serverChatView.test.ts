@@ -77,7 +77,7 @@ function createHarness(attach: (session: ServerSession) => Promise<number | null
     suspend: vi.fn(() => () => {}),
     lockNow,
     adoptBoundSession: vi.fn(),
-    getBoundGrantId: vi.fn(() => null),
+    getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
   };
   const view = createServerChatView({ api: {}, hooks, win: window, session: () => null });
   lockNow.mockImplementation(() => view.detach());

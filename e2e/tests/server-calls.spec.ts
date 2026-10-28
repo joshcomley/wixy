@@ -326,3 +326,33 @@ test("Escape during a ring still locks at once and ends the call", async ({ brow
     await expect(pa.locator(".wx-srv-thread")).toHaveCount(0);
   } finally { await Promise.all([a.close(), b.close()]); }
 });
+
+test("a page frozen mid-ring locks the moment it returns, and gets no fresh idle window", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await pa.clock.install();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    // The exposed setting: neither "lock when I leave" box ticked, so only the idle lock guards the chat.
+    await pa.evaluate(() => {
+      localStorage.setItem("wx-srv-lock-on-tab", "0");
+      localStorage.setItem("wx-srv-lock-on-screen", "0");
+      window.dispatchEvent(new Event("wx-srv-lock-prefs-changed"));
+    });
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pa.locator(".wx-srv-call")).toContainText("Calling");
+    // A frozen page's defining feature: wall time jumps while no timer runs in between. Playwright's
+    // fast-forward does exactly that (each due timer fires once, afterwards), unlike a headless page
+    // that Chromium will not really freeze. The fake clock was installed before the page loaded.
+    await pa.clock.fastForward(12_000);
+    // Back after more than the idle period: locked at once, not visible for a fresh window.
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0, { timeout: 2000 });
+    await expect(pb.locator(".wx-srv-call")).toContainText("Call ended"); // locking the caller ended the call
+  } finally { await Promise.all([a.close(), b.close()]); }
+});

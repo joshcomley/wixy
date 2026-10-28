@@ -20,14 +20,17 @@ const TARGET = "b".repeat(32);
 
 function setup(prepare: () => Promise<void> = async () => {}) {
   const socket = new Socket();
-  const releases: { reason: string; release: ReturnType<typeof vi.fn> }[] = [];
+  const releases: { reason: string; release: ReturnType<typeof vi.fn>; touch: ReturnType<typeof vi.fn> }[] = [];
+  const activity = { count: 0 };
   const audio: CallAudioHandle = {
     prepare: vi.fn(prepare), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(),
     pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn(),
   };
   const lock = vi.fn();
   const controller = createCallController({ win: window, isMicBusy: () => false, onBusy: vi.fn(),
-    hooks: { suspend: (reason) => { const release = vi.fn(); releases.push({ reason, release }); return release; }, lockNow: lock },
+    hooks: {
+      suspendLive: (reason) => { const release = vi.fn(); const touch = vi.fn(); releases.push({ reason, release, touch }); return { release, touch }; },
+      activityCount: () => activity.count, lockNow: lock },
     socketFactory: () => socket as unknown as WebSocket, audioFactory: () => audio,
   });
   controller.attach({ token: "secret", expiresAt: Date.now() / 1000 + 3600 }, "A");
@@ -44,7 +47,7 @@ function setup(prepare: () => Promise<void> = async () => {}) {
     }
   };
   const controls = () => socket.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
-  return { controller, socket, audio, releases, lock, click, controls };
+  return { controller, socket, audio, releases, lock, click, controls, activity };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -396,6 +399,90 @@ describe("a ringing or connecting call holds the idle-lock pause (Inv 55)", () =
     expect(held(f)).toBe(1);
     f.click("Decline");
     expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+});
+
+describe("liveness heartbeat and the unanswered-ring cap (Inv 55)", () => {
+  const live = (f: ReturnType<typeof setup>) => f.releases.filter((r) => r.reason === "voiceCall");
+  const ringOut = (f: ReturnType<typeof setup>, seconds: number) => {
+    for (let i = 0; i < seconds; i++) { vi.advanceTimersByTime(1000); f.socket.receive({ type: "ping" }); }
+  };
+  it("touches every hold from its own 100 ms tick while a call is live, and stops after release", () => {
+    const f = setup();
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    const hold = live(f)[0]!;
+    vi.advanceTimersByTime(1000);
+    f.socket.receive({ type: "ping" });
+    expect(hold.touch.mock.calls.length).toBeGreaterThanOrEqual(9);
+    f.click("Decline");
+    const after = hold.touch.mock.calls.length;
+    vi.advanceTimersByTime(1000);
+    expect(hold.touch.mock.calls.length).toBe(after);
+    f.controller.dispose();
+  });
+  it("touches the setup microphone-permission hold too", async () => {
+    const f = setup(() => new Promise<void>(() => {}));
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
+    f.socket.receive({ type: "prepare", callId: ID });
+    const perm = f.releases.find((r) => r.reason === "micPermission")!;
+    vi.advanceTimersByTime(500);
+    expect(perm.touch).toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("stops holding after two unanswered rings with no activity, and resets on any activity", () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    expect(live(f)).toHaveLength(2);
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2); // the third consecutive unattended ring takes no hold
+    f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    f.activity.count++; // somebody touched the device
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(3);
+    expect(live(f)[2]?.release).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("counts a ring that times out locally as unanswered", () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      ringOut(f, 31);
+    }
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2);
+    f.controller.dispose();
+  });
+  it("an unattended device that is then answered still holds the connecting and connected call", async () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2);
+    f.click("Answer");
+    expect(live(f)).toHaveLength(3);
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    f.socket.receive({ type: "connected", callId: ID });
+    expect(live(f)).toHaveLength(3);
+    expect(live(f)[2]?.release).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("a caller's own outgoing ring is always held", () => {
+    const f = setup();
+    for (let n = 0; n < 3; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    f.activity.count++;
+    f.click("Call");
+    expect(live(f).at(-1)?.release).not.toHaveBeenCalled();
     f.controller.dispose();
   });
 });

@@ -35,7 +35,7 @@ function setup(isMicBusy: () => boolean = () => false, failAudio = false) {
   });
   const busy = vi.fn();
   const controller = createCallController({ win: window, isMicBusy, onBusy: busy,
-    hooks: { suspend: () => vi.fn(), lockNow: vi.fn() },
+    hooks: { suspendLive: () => ({ touch() {}, release() {} }), activityCount: () => 0, lockNow: vi.fn() },
     socketFactory: () => socket as unknown as WebSocket,
     audioFactory: factory as unknown as Factory,
   });

@@ -14,7 +14,12 @@ WebSockets. No recording, transcription, database entries, history or notificati
 A call attempt pauses the automatic idle countdown on a device from the moment it sends an
 invite or shows an incoming call, through ringing and connecting, into connected or muted
 (operator decision #2136). The server bounds it: 30 s ringing, 20 s setup. Any end releases
-that pause and restarts a fresh countdown. Every actual lock/detach ends audio.
+that pause and restarts a fresh countdown. Every actual lock/detach ends audio. The pause is
+liveness-stamped: the call controller's 100 ms tick refreshes it, and a pause not refreshed for 3 s
+(the page was frozen, e.g. a phone auto-locking mid-ring) stops excusing the page. On return the
+silence counts as idle time, so a page frozen past the idle period locks at once with no fade and a
+late release never grants a fresh window. After two unanswered incoming rings in a row with no
+activity on the device, further incoming rings take no pause until it is touched again.
 
 ## Protocol
 
