@@ -17,6 +17,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 import anyio
 import httpx
@@ -55,6 +56,12 @@ from wixy_server.livechat.adventure_pictures import (
     WebPictureFinder,
 )
 from wixy_server.livechat.call_broker import CallBroker
+from wixy_server.livechat.cookout_ai import (
+    AiBank,
+    CmdCookoutRunner,
+    CookoutTiming,
+    build_cookout_runner,
+)
 from wixy_server.livechat.cookout_game import (
     BankLike as CookoutBankLike,
 )
@@ -178,6 +185,7 @@ def create_app(
     adventure_pack_timing: PackTiming | None = None,
     adventure_picture_finder: AdventurePictureFinder | None = None,
     adventure_picture_timing: PictureTiming | None = None,
+    cookout_timing: CookoutTiming | None = None,
     cookout_bank: CookoutBankLike | None = None,
     cookout_runner: CookoutRunner | None = None,
 ) -> FastAPI:
@@ -412,15 +420,35 @@ def create_app(
     livechat_adventure_live_limiter = SlidingWindowRateLimiter(
         max_events=ADVENTURE_LIVE_BATCHES_PER_SECOND, window_s=1.0
     )
-    # Cookout (workspace 00058): the ingredient bank loads once; with no runner injected the game is
-    # fully playable but its dish ideas and recipes are `unavailable` (the AI builder wires the
-    # real runner, which also owns the picture job).
+    # Cookout (workspace 00058): the ingredient bank loads once. The fleet edition on the cmd AI
+    # backend gets the real runner (concept + recipe runs through cmd, dish pictures on the shared
+    # ComfyUI); any other edition has none, so the game is fully playable but its dish ideas and
+    # recipes are `unavailable`.
     resolved_cookout_bank: CookoutBankLike | None = (
         cookout_bank if cookout_bank is not None else default_bank()
     )
-    resolved_cookout_runner: CookoutRunner = (
-        cookout_runner if cookout_runner is not None else NullCookoutRunner()
-    )
+    resolved_cookout_runner: CookoutRunner
+    if cookout_runner is not None:
+        resolved_cookout_runner = cookout_runner
+    elif (
+        settings.edition != "standalone"
+        and isinstance(resolved_ai_backend, CmdAIBackend)
+        and resolved_cookout_bank is not None
+    ):
+        resolved_cookout_runner = build_cookout_runner(
+            store=livechat_store,
+            bank=cast(AiBank, resolved_cookout_bank),
+            client=chat_client,
+            notifier=livechat_notifier,
+            paths=paths,
+            generator=resolved_image_generator if livechat_media_available else None,
+            limiter=lambda: wyr_image_limiter(app.state),  # `app` is bound below, used lazily
+            demand=wyr_demand,
+            space_ok=_picture_space_ok,
+            timing=cookout_timing,
+        )
+    else:
+        resolved_cookout_runner = NullCookoutRunner()
     livechat_transcription = TranscriptionRuntime(
         store=livechat_store,
         paths=paths,
@@ -561,6 +589,8 @@ def create_app(
                 livechat_adventure_runner.supervise_pictures(background)
                 # Cookout: resume any concept/recipe run the previous process left `pending`, and
                 # keep the supervised sweep (stale pictures, scratch cleanup) going.
+                if isinstance(resolved_cookout_runner, CmdCookoutRunner):
+                    await anyio.to_thread.run_sync(resolved_cookout_runner.prepare_directory)
                 await resolved_cookout_runner.resume(background)
                 resolved_cookout_runner.supervise(background)
                 yield

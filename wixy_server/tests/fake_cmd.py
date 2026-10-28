@@ -390,6 +390,9 @@ class FakeCmdState:
     """A non-201 makes `POST /api/chat-spawn/runs` refuse with that status (cmd refusing a run)."""
     chat_spawn_final_status: str = "completed"
     chat_spawn_response_text: str | None = None
+    cookout_response_text: str | None = None
+    """A forced final answer for the Cookout runs (`wixy-cookout-*` callers) ONLY. They never read
+    `chat_spawn_response_text`, which the e2e fixture sets to an Adventure pack."""
     """The final assistant message a run settles with; `None` = `CANNED_ADVENTURE_PACK` as JSON."""
     chat_spawn_running_polls: int = 0
     chat_spawn_delay_s: float = 0.0
@@ -686,10 +689,13 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
         }
         if status == "completed":
             text = run.plan.response_text
-            if text is None:
+            caller = str(run.body.get("caller") or "")
+            if text is None and caller.startswith("wixy-cookout-"):
+                text = state.cookout_response_text
+                if text is None:
+                    text = canned_cookout_response(caller, run.body.get("prompt"))
+            elif text is None:
                 text = state.chat_spawn_response_text
-            if text is None:
-                text = canned_cookout_response(run.body.get("caller"), run.body.get("prompt"))
             row["response_text"] = text if text is not None else json.dumps(CANNED_ADVENTURE_PACK)
         elif status in ("error", "timeout"):
             row["error_text"] = run.plan.error_text or "process exited before end_turn"

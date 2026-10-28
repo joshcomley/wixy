@@ -21,6 +21,7 @@ from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
 from wixy_server.background import ContainedTaskGroup
+from wixy_server.livechat.cookout_game import NullCookoutRunner
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.tests.adventure_testkit import run_concurrently
@@ -90,7 +91,8 @@ def cookout_client(
         pin_verifier=pin_verifier,
         transcriber=AsyncMock(),
         cookout_bank=bank if bank is not None else FakeBank(),
-        cookout_runner=resolved,
+        # The edition without a runner: `create_app` would otherwise build the real, cmd-backed one.
+        cookout_runner=resolved if resolved is not None else NullCookoutRunner(),
     )
     client = TestClient(app, cookies={"CF_Authorization": "dummy"})
     client.__enter__()

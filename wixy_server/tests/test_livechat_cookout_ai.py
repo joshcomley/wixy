@@ -830,7 +830,7 @@ class TestConceptsJob:
 
     def test_a_second_failure_ends_the_job_failed(self, tmp_path: Path) -> None:
         bad = json.dumps({"concepts": []})
-        state = FakeCmdState(chat_spawn_response_text=bad)
+        state = FakeCmdState(cookout_response_text=bad)
         store = FakeStore()
         store.add_round()
         _drive_concepts(_runner(store, _client(state), tmp_path))
@@ -1071,7 +1071,7 @@ class TestRecipeJob:
         assert "'Milk'" in str(second.body["prompt"])
 
     def test_two_invalid_recipes_fail_the_save_and_it_stays_unbanked(self, tmp_path: Path) -> None:
-        state = FakeCmdState(chat_spawn_response_text=json.dumps({"steps": []}))
+        state = FakeCmdState(cookout_response_text=json.dumps({"steps": []}))
         store = self._store()
         _drive_recipe(_runner(store, _client(state), tmp_path))
         slot = store.rounds[1]["recipes"]["a"]
