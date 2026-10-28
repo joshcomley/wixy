@@ -29,6 +29,8 @@ from normalise_names import PHRASES, PROPER_NOUNS  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
+from wixy_server.livechat.cookout_bank import FORBIDDEN_STOP_WORDS as _FORBIDDEN  # noqa: E402
+
 BANK = REPO / "wixy_server" / "livechat" / "cookout_ingredients.json"
 
 CATEGORY_IDS = [
@@ -50,8 +52,9 @@ MIN_CATEGORIES_PER_ROLE = 2
 MAX_CATEGORY_SHARE = 0.25
 SIMULATED_ROUNDS = 500
 MANDATORY_WORDS = ("toast", "sugar", "parsley", "beef", "cream")
-FORBIDDEN_STOP_WORDS = ("butter", "flour", "milk", "oil", "sugar", "salt", "pepper")
 RARITY_BANDS = {"everyday": (0.35, 0.62), "uncommon": (0.25, 0.48), "exotic": (0.07, 0.25)}
+
+FORBIDDEN_STOP_WORDS = sorted(_FORBIDDEN)
 
 ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -122,7 +125,7 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append("stopWords has duplicates")
         for word in FORBIDDEN_STOP_WORDS:
             if word in stop_words:
-                problems.append(f"stopWords contains the staple food name {word!r}")
+                problems.append(f"stopWords contains the food word {word!r}")
 
     staples = doc["staples"]
     got = {s.get("id"): s.get("pickable") for s in staples if isinstance(s, dict)}
@@ -224,6 +227,15 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append(f"category {cat}: empty")
         if cats[cat] / total > MAX_CATEGORY_SHARE:
             problems.append(f"category {cat}: more than {MAX_CATEGORY_SHARE:.0%} of the bank")
+    if isinstance(stop_words, list):
+        food = {
+            t[0]
+            for i in by_id.values()
+            for n in (i.get("name"), *(i.get("aliases") or []))
+            if isinstance(n, str) and len(t := re.findall(r"[a-z0-9]+", fold(n))) == 1
+        } | {str(i.get("family")) for i in by_id.values()}
+        for word in sorted(set(stop_words) & food):
+            problems.append(f"stopWords contains {word!r}, which is an ingredient name or family")
     words = {w for i in by_id.values() for w in re.findall(r"[a-z]+", fold(str(i["name"])))}
     for word in MANDATORY_WORDS:
         if word not in words:

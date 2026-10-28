@@ -93,7 +93,13 @@ STAPLE_SHORT_FORMS: Mapping[str, str] = {
     "milk": "milk",
 }
 """Bare words a cook says for a non-seasoning staple; the manifest pass (§3.2 pass 2) reads them."""
-FORBIDDEN_STOP_WORDS = frozenset({"butter", "flour", "milk", "oil", "sugar", "salt", "pepper"})
+FORBIDDEN_STOP_WORDS = frozenset(
+    {
+        "butter", "flour", "milk", "oil", "sugar", "salt", "pepper",
+        "stock", "broth", "juice", "spirit", "grain", "grains", "sweet", "spread", "seasoning",
+        "paste", "root", "bread",
+    }
+)  # fmt: skip
 
 MIN_INGREDIENTS = 2500
 MAX_INGREDIENTS = 4000
@@ -246,11 +252,19 @@ class CookoutBank:
             dictionary.setdefault(key, entity)
         for short, staple_id in STAPLE_SHORT_FORMS.items():
             dictionary.setdefault((short,), ("staple", staple_id))
+        # A family word ("bacon" for "Streaky bacon") is a food word only when it is the tail of
+        # a member's own name; slug artefacts ("baked", "beef-aged") are never read from prose.
         for family in sorted({i.family for i in self.ingredients}):
             tokens = tokenise(family)
-            dictionary.setdefault(tokens, ("family", family))
-            for variant in _plural_variants(tokens):
-                dictionary.setdefault(variant, ("family", family))
+            if not tokens:
+                continue
+            if any(
+                len(name) >= len(tokens) and name[-len(tokens) :] == tokens
+                for name in (tokenise(i.name) for i in self.ingredients if i.family == family)
+            ):
+                dictionary.setdefault(tokens, ("family", family))
+                for variant in _plural_variants(tokens):
+                    dictionary.setdefault(variant, ("family", family))
         object.__setattr__(self, "_dictionary", dictionary)
 
     @staticmethod
@@ -400,7 +414,8 @@ class CookoutBank:
 
         for entity, tokens in _spans(tokenise(text), self._dictionary):
             kind, key = entity
-            if len(tokens) == 1 and tokens[0] in self.stop_words:
+            is_omitted_hit = kind == "ingredient" and key in omitted and not allow_omitted_mentions
+            if len(tokens) == 1 and tokens[0] in self.stop_words and not is_omitted_hit:
                 continue
             if kind == "ingredient":
                 is_staple = key in NON_SEASONING_STAPLES
@@ -651,6 +666,12 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
                 raise CookoutBankError(
                     f"pickable staple {staple.id} must be an ingredient with the same name"
                 )
+    food_words = {
+        t[0] for i in ingredients for n in (i.name, *i.aliases) if len(t := tokenise(n)) == 1
+    }
+    food_words |= {i.family for i in ingredients}
+    for word in sorted(stop_words & food_words):
+        raise CookoutBankError(f"stopWord {word!r} is a food word (an ingredient name or family)")
     for role in ROLES:
         if sum(1 for i in ingredients if i.role == role) < MIN_PER_ROLE:
             raise CookoutBankError(f"role {role} has fewer than {MIN_PER_ROLE} ingredients")

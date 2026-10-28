@@ -268,7 +268,7 @@ def test_or_empty_returns_an_empty_bank_for_missing_and_broken(tmp_path: Path) -
 
 def test_module_default_path_is_the_committed_bank() -> None:
     assert cookout_bank.BANK_PATH == REAL_BANK
-    assert load_cookout_bank().stop_words >= {"bread", "sauce", "pan", "water"}
+    assert load_cookout_bank().stop_words >= {"sauce", "pan", "water"}
 
 
 # -- draw: fixtures ----------------------------------------------------------------------------
@@ -618,3 +618,98 @@ def test_scan_on_the_committed_bank_catches_the_spec_examples() -> None:
         allowed_staple_ids=set(),
     )
     assert clean == []
+
+
+# -- review fixes: stop words are never food, family words are real name tails ------------------
+
+
+def _single_word_family(d: dict[str, Any]) -> str:
+    return str(next(i["family"] for i in d["ingredients"] if "-" not in i["family"]))
+
+
+@pytest.mark.parametrize("word", ["stock", "spirit", "broth", "juice", "grain", "bread", "sweet"])
+def test_loader_and_validator_refuse_food_words_as_stop_words(
+    raw_bank: dict[str, Any], tmp_path: Path, word: str
+) -> None:
+    doc = _mutated(raw_bank, lambda d: d["stopWords"].append(word))
+    with pytest.raises(CookoutBankError):
+        parse_cookout_bank(doc)
+    path = tmp_path / "stop.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert any(word in p for p in validator.validate(path))
+
+
+def test_loader_refuses_a_stop_word_that_is_an_ingredient_family(
+    raw_bank: dict[str, Any], tmp_path: Path
+) -> None:
+    doc = _mutated(raw_bank, lambda d: d["stopWords"].append(_single_word_family(d)))
+    with pytest.raises(CookoutBankError, match="food word"):
+        parse_cookout_bank(doc)
+    path = tmp_path / "family.json"
+    path.write_text(json.dumps(doc), encoding="utf-8")
+    assert any("ingredient name or family" in p for p in validator.validate(path))
+
+
+def test_committed_stop_words_hold_no_food() -> None:
+    bank = load_cookout_bank()
+    for word in ("stock", "spirit", "broth", "juice", "grain", "grains", "bread", "paste"):
+        assert word not in bank.stop_words
+    assert bank.stop_words >= {"pan", "oven", "sauce", "water", "dish"}
+
+
+def test_unpicked_stock_and_spirit_are_flagged_on_the_committed_bank() -> None:
+    bank = load_cookout_bank()
+    for text in ("Simmer in stock", "Deglaze with a little stock"):
+        found = bank.find_contraband_ingredients(
+            text, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        )
+        assert found, text
+
+
+def test_ordinary_cooking_prose_is_clean_on_the_committed_bank() -> None:
+    bank = load_cookout_bank()
+    for text in (
+        "Baked until golden, then rested in a hot pan",
+        "Season with salt and pepper, grilled and served warm",
+        "Crispy, tender and sweetly spiced",
+    ):
+        assert (
+            bank.find_contraband_ingredients(
+                text, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+            )
+            == []
+        ), text
+
+
+def test_bare_family_word_is_flagged_only_when_it_ends_a_member_name() -> None:
+    bank = _mini(
+        _item("Streaky bacon", "meat", "bacon", role="protein"),
+        _item("Tinned baked beans", "tins", "baked", role="protein"),
+    )
+    assert bank.find_contraband_ingredients(
+        "Crisp the bacon", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    ) == ["bacon"]
+    assert (
+        bank.find_contraband_ingredients(
+            "Baked until golden", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        )
+        == []
+    )
+
+
+def test_a_stop_word_never_hides_an_omitted_item() -> None:
+    bank = _mini(
+        _item("Sauce", "sauces", "sauce", role="accent"),
+        _item("Rice", "grains", "rice"),
+        stop_words=frozenset({"sauce"}),
+    )
+    scan: dict[str, Any] = {"allowed_staple_ids": set(), "omitted_ingredient_ids": {"sauce"}}
+    assert bank.find_contraband_ingredients(
+        "Serve with sauce", allowed_ingredient_ids={"rice"}, **scan
+    ) == ["Sauce"]
+    assert (
+        bank.find_contraband_ingredients(
+            "Serve with sauce", allowed_ingredient_ids={"rice"}, allowed_staple_ids=set()
+        )
+        == []
+    )

@@ -51,11 +51,10 @@ STAPLES = [
 ]
 GENERATED = "2026-10-28"
 STOP_WORDS = [
-    "bread", "sauce", "salad", "soup", "stew", "roast", "bake", "pie", "pan", "pot", "bowl",
-    "plate", "crust", "glaze", "broth", "water", "dish", "meal", "topping", "filling", "batter",
-    "dough", "stock", "dressing", "seasoning", "spread", "paste", "juice", "garnish", "marinade",
-    "coating", "sandwich", "oven", "grill", "tray", "board", "skillet", "wok", "jar", "layer",
-    "root", "grain", "grains", "spirit", "sweet", "wrap",
+    "bake", "board", "bowl", "crust", "dish", "dough", "filling", "garnish",
+    "glaze", "grill", "jar", "layer", "marinade", "meal", "oven", "pan", "pie", "plate", "pot",
+    "roast", "salad", "sandwich", "sauce", "skillet", "soup", "stew", "topping", "tray", "wok",
+    "wrap", "water", "coating",
 ]  # fmt: skip
 ROLES = {"base", "protein", "produce", "accent"}
 RARITIES = {"everyday", "uncommon", "exotic"}
