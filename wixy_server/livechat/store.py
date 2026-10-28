@@ -31,18 +31,38 @@ from __future__ import annotations
 import hmac
 import json
 import logging
+import random
 import secrets
 import sqlite3
 import threading
 import time
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from wixy_server.livechat.adventure_bank import TOP_DESTINATIONS, AdventureBank
+from wixy_server.livechat.cookout_game import (
+    CONCEPT_IDS,
+    CONCEPTS_DEADLINE_S,
+    CONCEPTS_UNAVAILABLE_TEXT,
+    MAX_SKIPS,
+    PICTURES_DEADLINE_S,
+    RECIPE_DEADLINE_S,
+    RECIPE_UNAVAILABLE_TEXT,
+    TOTAL_TURNS,
+    CookoutDrawExhausted,
+    concept_by_id,
+    current_turn,
+    draw_inputs,
+    player_of_turn,
+    role_for_turn,
+    slot_of,
+    snapshot,
+)
+from wixy_server.livechat.cookout_game import BankLike as CookoutBankLike
 from wixy_server.livechat.drawings import (
     MAX_DRAWINGS_PER_ANCHOR,
     MAX_POINT_X_PAD,
@@ -59,6 +79,11 @@ from wixy_server.livechat.models import (
     AttachmentKind,
     AttachmentResult,
     AttachmentRow,
+    CookoutRecipeRow,
+    CookoutRoundRow,
+    CookoutSummary,
+    CookoutTurnRow,
+    CookoutViewData,
     DrawingRow,
     DrawingStrokeRow,
     DrawingSummary,
@@ -384,10 +409,62 @@ _ADVENTURE_PICTURE_COLUMNS = {
     "images_started_at": "ALTER TABLE adv_rounds ADD COLUMN images_started_at REAL",
     "images_tries": "ALTER TABLE adv_rounds ADD COLUMN images_tries INTEGER NOT NULL DEFAULT 0",
 }
+# Cookout (workspace 00058, spec/server-chat/09-cookout.md §4.1): the two-player cooking game.
+# `cookout_rounds` follows `wyr_rounds`/`adv_rounds` (Inv 54/56): keyed by its anchor message,
+# `ON DELETE CASCADE` so even an older blue/green-overlap process that has never heard of the
+# table erases a round with its message, and an explicit `DELETE` in wipe. `cookout_turns` holds
+# each turn's offered pairs as immutable ingredient snapshots (a later bank edit never alters a
+# round) and `cookout_recipes` one row per concept the couple asked to "Bank this". All of it is
+# chat content (Inv 57).
+_SCHEMA_V21_COOKOUT = """
+CREATE TABLE IF NOT EXISTS cookout_rounds(
+  anchor_message_seq INTEGER PRIMARY KEY REFERENCES messages(seq) ON DELETE CASCADE,
+  state TEXT NOT NULL CHECK(state IN ('picking','finished','abandoned')),
+  blind INTEGER NOT NULL DEFAULT 0 CHECK(blind IN (0, 1)),
+  started_by TEXT NOT NULL,
+  player1_key TEXT NOT NULL, player1_name TEXT NOT NULL, player1_email TEXT,
+  player2_key TEXT, player2_name TEXT, player2_email TEXT,
+  role_schedule TEXT NOT NULL,
+  concepts TEXT NOT NULL DEFAULT 'none'
+    CHECK(concepts IN ('none','pending','ready','failed','unavailable')),
+  concepts_run_id TEXT, concepts_json TEXT, concepts_error TEXT,
+  concepts_started_at REAL, concepts_tries INTEGER NOT NULL DEFAULT 0,
+  concepts_deadline_at REAL,
+  images TEXT NOT NULL DEFAULT 'none' CHECK(images IN ('none','pending','done','failed')),
+  pictures TEXT,
+  images_started_at REAL, images_tries INTEGER NOT NULL DEFAULT 0,
+  images_deadline_at REAL,
+  images_generation INTEGER NOT NULL DEFAULT 0,
+  rev INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL, updated_at REAL NOT NULL);
+CREATE INDEX IF NOT EXISTS idx_cookout_rounds_state ON cookout_rounds(state);
+CREATE TABLE IF NOT EXISTS cookout_turns(
+  anchor_message_seq INTEGER NOT NULL
+    REFERENCES cookout_rounds(anchor_message_seq) ON DELETE CASCADE,
+  turn INTEGER NOT NULL CHECK(turn BETWEEN 1 AND 10),
+  player INTEGER NOT NULL CHECK(player IN (1, 2)),
+  offers TEXT NOT NULL,
+  choice_id TEXT,
+  skip_move_ids TEXT NOT NULL DEFAULT '[]',
+  pick_move_id TEXT,
+  PRIMARY KEY(anchor_message_seq, turn));
+CREATE TABLE IF NOT EXISTS cookout_recipes(
+  anchor_message_seq INTEGER NOT NULL
+    REFERENCES cookout_rounds(anchor_message_seq) ON DELETE CASCADE,
+  concept_id TEXT NOT NULL CHECK(concept_id IN ('a','b','c')),
+  state TEXT NOT NULL CHECK(state IN ('pending','banked','failed','unavailable')),
+  run_id TEXT, recipe_json TEXT, error TEXT,
+  requested_by TEXT NOT NULL, bank_move_id TEXT,
+  started_at REAL, tries INTEGER NOT NULL DEFAULT 0, deadline_at REAL,
+  banked_at REAL, created_at REAL NOT NULL, updated_at REAL NOT NULL,
+  PRIMARY KEY(anchor_message_seq, concept_id));
+CREATE INDEX IF NOT EXISTS idx_cookout_recipes_banked
+  ON cookout_recipes(state, banked_at DESC, anchor_message_seq DESC);
+"""
 MAX_PICTURE_TRIES = 3
 """How many times a round's picture hunt may begin (the first, then re-claims after a hunt died)
 before the wait is ended as `failed`."""
-_LATEST_SCHEMA_VERSION = 20
+_LATEST_SCHEMA_VERSION = 21
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
 """Spec §3.4: the country roulette starts this long after the second spin stops (glide + zoom)."""
@@ -512,6 +589,41 @@ class AdventureInvalidError(LiveChatStoreError):
     outside its candidates). Mapped to 422 `invalid`."""
 
 
+class CookoutRoundNotFoundError(LiveChatStoreError):
+    """The Cookout round a request targets does not exist (never did, or cascaded away with its
+    anchor message). `routes_livechat_cookout.py` maps this to 404 `not_found`."""
+
+    def __init__(self, anchor_seq: int) -> None:
+        super().__init__(f"no Cookout round on message {anchor_seq}")
+        self.anchor_seq = anchor_seq
+
+
+class CookoutBadStateError(LiveChatStoreError):
+    """The round is not in the state this move needs, or a DIFFERENT move than the live one was
+    made (replaying the SAME move is an idempotent success instead). Mapped to 409 `bad_state`."""
+
+
+class CookoutNotYourTurnError(LiveChatStoreError):
+    """A player moved on the other seat's turn. Mapped to 409 `not_your_turn`."""
+
+
+class CookoutNotPlayerError(LiveChatStoreError):
+    """The caller holds neither seat (or the name belongs to another sign-in). Mapped to 409
+    `not_player`."""
+
+
+class CookoutSkipExhaustedError(LiveChatStoreError):
+    """A third skip: the player must pick one of the final pair. Mapped to 409 `skip_exhausted`."""
+
+
+class CookoutExhaustedError(LiveChatStoreError):
+    """The bank has no valid pair left to deal. Nothing was written. Mapped to 409 `exhausted`."""
+
+
+class CookoutInvalidError(LiveChatStoreError):
+    """The move names something the round does not offer. Mapped to 422 `invalid`."""
+
+
 class WyrRoundFullError(LiveChatStoreError):
     """A third identity tried to vote on a round whose two player slots are taken.
     `routes_livechat.py` maps this to 409 {"error": "full"}."""
@@ -598,8 +710,9 @@ def _row_to_message(
     *,
     reply_to: MessageRow | None = None,
     wyr: WyrSummary | None = None,
-    wyr_ref: tuple[int, Literal["wyr", "adventure"]] | None = None,
+    wyr_ref: tuple[int, Literal["wyr", "adventure", "cookout"]] | None = None,
     adventure: AdventureSummary | None = None,
+    cookout: CookoutSummary | None = None,
 ) -> MessageRow:
     return MessageRow(
         seq=row["seq"],
@@ -624,6 +737,7 @@ def _row_to_message(
         wyr_ref=wyr_ref[0] if wyr_ref is not None else None,
         wyr_ref_kind=wyr_ref[1] if wyr_ref is not None else None,
         adventure=adventure,
+        cookout=cookout,
     )
 
 
@@ -897,9 +1011,112 @@ def _load_adventure_summaries_for(
     }
 
 
+def _decode_pictures(text: str | None) -> dict[str, str]:
+    """`cookout_rounds.pictures` (slot -> attachment id JSON) as a dict; garbage reads as empty."""
+    if text is None:
+        return {}
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def _row_to_cookout_round(row: sqlite3.Row) -> CookoutRoundRow:
+    return CookoutRoundRow(
+        anchor_message_seq=row["anchor_message_seq"],
+        state=row["state"],
+        blind=bool(row["blind"]),
+        started_by=row["started_by"],
+        player1_key=row["player1_key"],
+        player1_name=row["player1_name"],
+        player1_email=row["player1_email"],
+        player2_key=row["player2_key"],
+        player2_name=row["player2_name"],
+        player2_email=row["player2_email"],
+        role_schedule=tuple(str(r) for r in json.loads(row["role_schedule"])),
+        concepts=row["concepts"],
+        concepts_run_id=row["concepts_run_id"],
+        concepts_json=row["concepts_json"],
+        concepts_error=row["concepts_error"],
+        concepts_started_at=row["concepts_started_at"],
+        concepts_tries=row["concepts_tries"],
+        concepts_deadline_at=row["concepts_deadline_at"],
+        images=row["images"],
+        pictures=_decode_pictures(row["pictures"]),
+        images_started_at=row["images_started_at"],
+        images_tries=row["images_tries"],
+        images_deadline_at=row["images_deadline_at"],
+        images_generation=row["images_generation"],
+        rev=row["rev"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_cookout_turn(row: sqlite3.Row) -> CookoutTurnRow:
+    offers = tuple((dict(pair[0]), dict(pair[1])) for pair in json.loads(row["offers"]))
+    return CookoutTurnRow(
+        turn=row["turn"],
+        player=row["player"],
+        offers=offers,
+        choice_id=row["choice_id"],
+        skip_move_ids=tuple(str(m) for m in json.loads(row["skip_move_ids"])),
+        pick_move_id=row["pick_move_id"],
+    )
+
+
+def _row_to_cookout_recipe(row: sqlite3.Row) -> CookoutRecipeRow:
+    return CookoutRecipeRow(
+        concept_id=row["concept_id"],
+        state=row["state"],
+        run_id=row["run_id"],
+        recipe_json=row["recipe_json"],
+        error=row["error"],
+        requested_by=row["requested_by"],
+        bank_move_id=row["bank_move_id"],
+        started_at=row["started_at"],
+        tries=row["tries"],
+        deadline_at=row["deadline_at"],
+        banked_at=row["banked_at"],
+    )
+
+
+def _load_cookout_summaries_for(
+    conn: sqlite3.Connection, message_seqs: Sequence[int]
+) -> dict[int, CookoutSummary]:
+    """Round summary per anchor message — the `Message` wire shape's `cookout` member. Counts only:
+    it is broadcast to everyone, so it carries no ingredient or recipe text (spec §1.3)."""
+    if not message_seqs:
+        return {}
+    placeholders = ",".join("?" for _ in message_seqs)
+    rows = conn.execute(
+        "SELECT r.anchor_message_seq, r.state, r.blind, r.concepts, r.rev, "
+        "(SELECT COUNT(*) FROM cookout_turns t WHERE t.anchor_message_seq = r.anchor_message_seq "
+        " AND t.choice_id IS NOT NULL) AS picked, "
+        "(SELECT COUNT(*) FROM cookout_recipes c WHERE c.anchor_message_seq = "
+        " r.anchor_message_seq AND c.state = 'banked') AS banked "
+        f"FROM cookout_rounds r WHERE r.anchor_message_seq IN ({placeholders})",
+        tuple(message_seqs),
+    ).fetchall()
+    return {
+        row["anchor_message_seq"]: CookoutSummary(
+            state=row["state"],
+            blind=bool(row["blind"]),
+            picked_count=row["picked"],
+            concepts=row["concepts"],
+            banked_count=row["banked"],
+            rev=row["rev"],
+        )
+        for row in rows
+    }
+
+
 def _load_wyr_refs_for(
     conn: sqlite3.Connection, message_seqs: Sequence[int]
-) -> dict[int, tuple[int, Literal["wyr", "adventure"]]]:
+) -> dict[int, tuple[int, Literal["wyr", "adventure", "cookout"]]]:
     """The game round (anchor seq) each message was sent in the game chat of, and which game it is
     — the `Message` wire shape's `wyrRef` and `wyrRefKind`. Absent for an ordinary message. The kind
     is resolved here, in the same query, because a client paging history may not have the anchor
@@ -909,14 +1126,16 @@ def _load_wyr_refs_for(
     placeholders = ",".join("?" for _ in message_seqs)
     rows = conn.execute(
         "SELECT c.message_seq, c.anchor_seq, "
-        "EXISTS (SELECT 1 FROM adv_rounds a WHERE a.anchor_message_seq = c.anchor_seq) AS is_adv "
+        "EXISTS (SELECT 1 FROM adv_rounds a WHERE a.anchor_message_seq = c.anchor_seq) AS is_adv, "
+        "EXISTS (SELECT 1 FROM cookout_rounds k WHERE k.anchor_message_seq = c.anchor_seq) "
+        "AS is_cookout "
         f"FROM wyr_chat c WHERE c.message_seq IN ({placeholders})",
         tuple(message_seqs),
     ).fetchall()
     return {
         int(row["message_seq"]): (
             int(row["anchor_seq"]),
-            "adventure" if row["is_adv"] else "wyr",
+            "adventure" if row["is_adv"] else "cookout" if row["is_cookout"] else "wyr",
         )
         for row in rows
     }
@@ -953,6 +1172,7 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
     wyr = _load_wyr_summaries_for(conn, [seq]).get(seq)
     wyr_ref = _load_wyr_refs_for(conn, [seq]).get(seq)
     adventure = _load_adventure_summaries_for(conn, [seq]).get(seq)
+    cookout = _load_cookout_summaries_for(conn, [seq]).get(seq)
     reply_to_seq = row["reply_to_seq"]
     reply_targets = _load_reply_targets(conn, [reply_to_seq])
     reply_to = reply_targets.get(reply_to_seq) if reply_to_seq is not None else None
@@ -965,6 +1185,7 @@ def _load_message(conn: sqlite3.Connection, seq: int) -> MessageRow:
         wyr=wyr,
         wyr_ref=wyr_ref,
         adventure=adventure,
+        cookout=cookout,
     )
 
 
@@ -980,6 +1201,7 @@ def _hydrate_messages(
     wyr_by_seq = _load_wyr_summaries_for(conn, seqs)
     wyr_ref_by_seq = _load_wyr_refs_for(conn, seqs)
     adventure_by_seq = _load_adventure_summaries_for(conn, seqs)
+    cookout_by_seq = _load_cookout_summaries_for(conn, seqs)
     # §(2): targets are resolved by seq, including ones OUTSIDE this page — a reply near the top
     # of a page may quote a message that paged off already.
     reply_targets = _load_reply_targets(conn, [row["reply_to_seq"] for row in ascending_rows])
@@ -993,6 +1215,7 @@ def _hydrate_messages(
             wyr=wyr_by_seq.get(row["seq"]),
             wyr_ref=wyr_ref_by_seq.get(row["seq"]),
             adventure=adventure_by_seq.get(row["seq"]),
+            cookout=cookout_by_seq.get(row["seq"]),
         )
         for row in ascending_rows
     ]
@@ -1244,6 +1467,13 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 20")
                 current = 20
+
+            if current < 21:
+                for statement in _SCHEMA_V21_COOKOUT.split(";"):
+                    if statement.strip():
+                        conn.execute(statement)
+                conn.execute("PRAGMA user_version = 21")
+                current = 21
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -1382,7 +1612,7 @@ class LiveChatStore:
         now: float,
     ) -> tuple[MessageRow, bool]:
         """Create an ordinary message. `wyr_anchor_seq` marks it as sent in a game's chat — the
-        anchor of a would-you-rather round OR an Adventure Time round: the round must exist
+        anchor of a would-you-rather, Adventure Time OR Cookout round: the round must exist
         (`WyrRoundNotFoundError` otherwise, checked in this same transaction so a concurrent delete
         cannot slip between check and insert) and the association row is written in the same
         transaction as the message."""
@@ -1396,8 +1626,9 @@ class LiveChatStore:
             if wyr_anchor_seq is not None and (
                 conn.execute(
                     "SELECT 1 FROM wyr_rounds WHERE anchor_message_seq = ? "
-                    "UNION ALL SELECT 1 FROM adv_rounds WHERE anchor_message_seq = ?",
-                    (wyr_anchor_seq, wyr_anchor_seq),
+                    "UNION ALL SELECT 1 FROM adv_rounds WHERE anchor_message_seq = ? "
+                    "UNION ALL SELECT 1 FROM cookout_rounds WHERE anchor_message_seq = ?",
+                    (wyr_anchor_seq, wyr_anchor_seq, wyr_anchor_seq),
                 ).fetchone()
                 is None
             ):
@@ -1779,6 +2010,7 @@ class LiveChatStore:
             wyr_by_seq = _load_wyr_summaries_for(conn, list(by_seq.keys()))
             wyr_ref_by_seq = _load_wyr_refs_for(conn, list(by_seq.keys()))
             adventure_by_seq = _load_adventure_summaries_for(conn, list(by_seq.keys()))
+            cookout_by_seq = _load_cookout_summaries_for(conn, list(by_seq.keys()))
             reply_targets = _load_reply_targets(
                 conn, [row["reply_to_seq"] for row in by_seq.values()]
             )
@@ -1797,6 +2029,7 @@ class LiveChatStore:
                         wyr=wyr_by_seq.get(seq),
                         wyr_ref=wyr_ref_by_seq.get(seq),
                         adventure=adventure_by_seq.get(seq),
+                        cookout=cookout_by_seq.get(seq),
                     )
                 )
             return result
@@ -3171,6 +3404,879 @@ class LiveChatStore:
             ).fetchall()
             return [_row_to_adv_round(row) for row in rows]
 
+    # -- Cookout (schema v21, workspace 00058) ---------------------------------------------------
+    #
+    # Every decision and draw runs in ONE `_write_txn()` (`BEGIN IMMEDIATE`), the clock is sampled
+    # only AFTER the write lock is held (a caller may pass `now` to pin it in a test), and the
+    # route publishes to the notifier only after the commit (spec §1.4). Competing moves from two
+    # phones serialise on the database lock: the first applicable move wins, the loser gets
+    # `CookoutBadStateError` (or an idempotent success for a replay of the SAME move). A real
+    # change bumps `rev` + `updated_at` and appends one `message_updated` event for the anchor;
+    # a replay changes nothing (`False`). Methods that mutate the picture/concept/recipe jobs'
+    # state are compare-and-set so a late or duplicate worker lands nothing.
+
+    @staticmethod
+    def _cx_load(conn: sqlite3.Connection, anchor_seq: int) -> CookoutRoundRow:
+        row = conn.execute(
+            "SELECT * FROM cookout_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+        ).fetchone()
+        if row is None:
+            raise CookoutRoundNotFoundError(anchor_seq)
+        return _row_to_cookout_round(row)
+
+    @staticmethod
+    def _cx_turns(conn: sqlite3.Connection, anchor_seq: int) -> list[CookoutTurnRow]:
+        rows = conn.execute(
+            "SELECT * FROM cookout_turns WHERE anchor_message_seq = ? ORDER BY turn",
+            (anchor_seq,),
+        ).fetchall()
+        return [_row_to_cookout_turn(row) for row in rows]
+
+    @staticmethod
+    def _cx_recipes(conn: sqlite3.Connection, anchor_seq: int) -> list[CookoutRecipeRow]:
+        rows = conn.execute(
+            "SELECT * FROM cookout_recipes WHERE anchor_message_seq = ? ORDER BY concept_id",
+            (anchor_seq,),
+        ).fetchall()
+        return [_row_to_cookout_recipe(row) for row in rows]
+
+    def _cx_update(
+        self,
+        conn: sqlite3.Connection,
+        anchor_seq: int,
+        now: float,
+        assignments: dict[str, object],
+    ) -> CookoutRoundRow:
+        """Apply `assignments` (column -> value; column names are internal literals, never user
+        input), bump `rev`/`updated_at`, append the `message_updated` event, return the new row."""
+        columns = ", ".join(f"{column} = ?" for column in assignments)
+        sets = f"{columns}, " if columns else ""
+        conn.execute(
+            f"UPDATE cookout_rounds SET {sets}rev = rev + 1, updated_at = ? "
+            "WHERE anchor_message_seq = ?",
+            (*assignments.values(), now, anchor_seq),
+        )
+        self._cx_event(conn, anchor_seq, now)
+        return self._cx_load(conn, anchor_seq)
+
+    @staticmethod
+    def _cx_event(conn: sqlite3.Connection, anchor_seq: int, now: float) -> None:
+        conn.execute(
+            "INSERT INTO events (type, message_seq, created_at) VALUES ('message_updated', ?, ?)",
+            (anchor_seq, now),
+        )
+
+    @staticmethod
+    def _cx_draw(
+        conn: sqlite3.Connection,
+        round_: CookoutRoundRow,
+        turns: Sequence[CookoutTurnRow],
+        turn: int,
+        bank: CookoutBankLike,
+        rng: random.Random | None,
+    ) -> CookoutTurnRow:
+        """Draw `turn`'s first pair and store it (the caller holds the write lock). Raises
+        `CookoutExhaustedError` — before anything is written — when no valid pair exists."""
+        player = player_of_turn(turn)
+        inputs = draw_inputs(turns, player)
+        try:
+            first, second = bank.draw_pair(
+                role=role_for_turn(round_.role_schedule, turn),
+                seen_ids=inputs.seen_ids,
+                picked_families=inputs.picked_families,
+                offered_families=inputs.offered_families,
+                player_offered_categories=inputs.player_offered_categories,
+                rng=rng,
+            )
+        except CookoutDrawExhausted as exc:
+            raise CookoutExhaustedError(f"no valid pair left for turn {turn}") from exc
+        offers = [[snapshot(first), snapshot(second)]]
+        conn.execute(
+            "INSERT INTO cookout_turns (anchor_message_seq, turn, player, offers) "
+            "VALUES (?, ?, ?, ?)",
+            (round_.anchor_message_seq, turn, player, json.dumps(offers)),
+        )
+        return CookoutTurnRow(
+            turn=turn,
+            player=player,
+            offers=((offers[0][0], offers[0][1]),),
+            choice_id=None,
+            skip_move_ids=(),
+            pick_move_id=None,
+        )
+
+    def create_cookout_round(
+        self,
+        *,
+        client_id: str,
+        sender: str,
+        device_id: str,
+        by_email: str | None,
+        blind: bool,
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> tuple[MessageRow, bool]:
+        """Create a round: a text-less anchor message, a `cookout_rounds` row in `picking` with the
+        sender bound to Slot 1, a freshly shuffled role schedule and Turn 1's first pair. Every
+        round still `picking` is abandoned in the same transaction (a `finished` one never is).
+        Idempotent on `client_id`, checked BEFORE the abandonment, like every other send."""
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            existing = conn.execute(
+                "SELECT seq FROM messages WHERE client_id = ?", (client_id,)
+            ).fetchone()
+            if existing is not None:
+                return _load_message(conn, existing["seq"]), False
+
+            for old in conn.execute(
+                "SELECT anchor_message_seq FROM cookout_rounds WHERE state = 'picking'"
+            ).fetchall():
+                self._cx_update(conn, old["anchor_message_seq"], now_s, {"state": "abandoned"})
+
+            cursor = conn.execute(
+                "INSERT INTO messages "
+                "(client_id, sender, device_id, by_email, text, created_at) "
+                "VALUES (?, ?, ?, ?, NULL, ?)",
+                (client_id, sender, device_id, by_email, now_s),
+            )
+            seq = cursor.lastrowid
+            assert seq is not None
+            schedule = list(bank.shuffle_role_schedule(rng))
+            conn.execute(
+                "INSERT INTO cookout_rounds "
+                "(anchor_message_seq, state, blind, started_by, player1_key, player1_name, "
+                "player1_email, role_schedule, rev, created_at, updated_at) "
+                "VALUES (?, 'picking', ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    seq,
+                    int(blind),
+                    sender,
+                    reactor_key(sender),
+                    sender,
+                    by_email,
+                    json.dumps(schedule),
+                    now_s,
+                    now_s,
+                ),
+            )
+            self._cx_draw(conn, self._cx_load(conn, seq), [], 1, bank, rng)
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) VALUES ('message', ?, ?)",
+                (seq, now_s),
+            )
+            return _load_message(conn, seq), True
+
+    def cookout_view_data(self, *, anchor_seq: int) -> CookoutViewData | None:
+        """The round, its turns, its recipe rows and its picture attachments in ONE read
+        transaction — a view never pairs one `rev` with the contents of a later one."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM cookout_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                return None
+            round_ = _row_to_cookout_round(row)
+            return CookoutViewData(
+                round=round_,
+                turns=tuple(self._cx_turns(conn, anchor_seq)),
+                recipes=tuple(self._cx_recipes(conn, anchor_seq)),
+                attachments=(
+                    tuple(_load_attachments_for(conn, [anchor_seq]).get(anchor_seq, []))
+                    if round_.pictures
+                    else ()
+                ),
+            )
+
+    def get_cookout_round(self, anchor_seq: int) -> dict[str, Any] | None:
+        """The AI runner's read (spec Appendix A.2): the raw `cookout_rounds` columns (JSON text
+        columns stay text, except `pictures`, decoded to slot -> attachment id) plus `picked_ids`
+        (the ten choices in turn order, `[]` until finished) and `recipes` (`{a|b|c: {state,
+        run_id, recipe_json, error, tries, deadline_at, started_at}}`, only rows that exist)."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT * FROM cookout_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
+            ).fetchone()
+            if row is None:
+                return None
+            data: dict[str, Any] = {key: row[key] for key in row.keys()}  # noqa: SIM118
+            data["pictures"] = _decode_pictures(row["pictures"])
+            turns = self._cx_turns(conn, anchor_seq)
+            data["picked_ids"] = (
+                [t.choice_id for t in turns if t.choice_id is not None]
+                if row["state"] == "finished"
+                else []
+            )
+            data["recipes"] = {
+                r.concept_id: {
+                    "state": r.state,
+                    "run_id": r.run_id,
+                    "recipe_json": r.recipe_json,
+                    "error": r.error,
+                    "tries": r.tries,
+                    "deadline_at": r.deadline_at,
+                    "started_at": r.started_at,
+                }
+                for r in self._cx_recipes(conn, anchor_seq)
+            }
+            return data
+
+    def join_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> tuple[CookoutRoundRow, bool]:
+        """Bind Slot 2 (an explicit act, never implied by a first move). If Player 1 has already
+        picked Turn 1 the round is waiting at Turn 2: that pair is drawn in this same transaction.
+        The already-bound Slot-2 player joining again is an idempotent success; a name that is
+        Player 1's, or any join once Slot 2 is taken or the round is no longer `picking`, is
+        `CookoutBadStateError`."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if round_.player2_key is not None:
+                if round_.player2_key != key:
+                    raise CookoutBadStateError("both seats are taken")
+                if slot_of(round_, key, email) != 2:
+                    raise CookoutNotPlayerError("that name belongs to another sign-in")
+                return round_, False
+            if round_.state != "picking":
+                raise CookoutBadStateError(f"round on message {anchor_seq} is {round_.state}")
+            if round_.player1_key == key:
+                raise CookoutBadStateError("you already hold the first seat")
+            conn.execute(
+                "UPDATE cookout_rounds SET player2_key = ?, player2_name = ?, player2_email = ? "
+                "WHERE anchor_message_seq = ?",
+                (key, sender, email, anchor_seq),
+            )
+            round_ = self._cx_load(conn, anchor_seq)
+            turns = self._cx_turns(conn, anchor_seq)
+            if len(turns) == 1 and turns[0].choice_id is not None:
+                self._cx_draw(conn, round_, turns, 2, bank, rng)
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def skip_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        turn: int,
+        offer: int,
+        bank: CookoutBankLike,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> tuple[CookoutRoundRow, bool]:
+        """Skip the current pair: deal a fresh one for the same turn (two skips a turn). Replaying
+        a recorded `move_id` is an idempotent success; a different move whose `turn`/`offer` is not
+        the live one is `CookoutBadStateError`; a third skip is `CookoutSkipExhaustedError`."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            turns = self._cx_turns(conn, anchor_seq)
+            if any(move_id in t.skip_move_ids and t.player == slot for t in turns):
+                return round_, False
+            live = self._cx_live_turn(round_, turns, slot, turn)
+            if offer != len(live.offers) - 1:
+                raise CookoutBadStateError("that pair is no longer on the table")
+            if offer >= MAX_SKIPS:
+                raise CookoutSkipExhaustedError("no skips left: pick one of these two")
+            inputs = draw_inputs(turns, live.player)
+            try:
+                first, second = bank.draw_pair(
+                    role=role_for_turn(round_.role_schedule, turn),
+                    seen_ids=inputs.seen_ids,
+                    picked_families=inputs.picked_families,
+                    offered_families=inputs.offered_families,
+                    player_offered_categories=inputs.player_offered_categories,
+                    rng=rng,
+                )
+            except CookoutDrawExhausted as exc:
+                raise CookoutExhaustedError(f"no valid pair left for turn {turn}") from exc
+            offers = [[dict(a), dict(b)] for a, b in live.offers]
+            offers.append([snapshot(first), snapshot(second)])
+            conn.execute(
+                "UPDATE cookout_turns SET offers = ?, skip_move_ids = ? "
+                "WHERE anchor_message_seq = ? AND turn = ?",
+                (
+                    json.dumps(offers),
+                    json.dumps([*live.skip_move_ids, move_id]),
+                    anchor_seq,
+                    turn,
+                ),
+            )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    @staticmethod
+    def _cx_live_turn(
+        round_: CookoutRoundRow, turns: Sequence[CookoutTurnRow], slot: int, turn: int
+    ) -> CookoutTurnRow:
+        """The drawn, unpicked turn this move targets — or the right refusal: `bad_state` when the
+        round is not `picking`, waiting for Player 2, or `turn` is not the live one (a stale move);
+        `not_your_turn` when the live turn is the other seat's."""
+        cur = current_turn(round_, turns)
+        if cur is None:
+            raise CookoutBadStateError(
+                f"round on message {round_.anchor_message_seq} is {round_.state}, not picking"
+            )
+        if cur.row is None:
+            raise CookoutBadStateError("waiting for the second player to join")
+        if cur.turn != turn:
+            raise CookoutBadStateError(f"the live turn is {cur.turn}, not {turn}")
+        if cur.player != slot:
+            raise CookoutNotYourTurnError(f"it is player {cur.player}'s turn")
+        return cur.row
+
+    def pick_cookout(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        move_id: str,
+        turn: int,
+        offer: int,
+        ingredient_id: str,
+        bank: CookoutBankLike,
+        runner_available: bool,
+        rng: random.Random | None = None,
+        now: float | None = None,
+    ) -> tuple[CookoutRoundRow, bool]:
+        """Pick one of the live pair. Turn 10's pick finishes the round and starts Stage 1: the
+        concepts go `pending` (a job will start the run) when a runner exists, else `unavailable`
+        at once — the caller starts the job when the returned round is `finished` + `pending`
+        and the flag says it changed. Turn < 10 draws the next turn's pair (unless it is turn 2 and
+        Slot 2 has not joined: then it waits). Replaying a recorded `move_id` is a no-op."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            slot = slot_of(round_, key, email)
+            if slot is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            turns = self._cx_turns(conn, anchor_seq)
+            if any(t.pick_move_id == move_id and t.player == slot for t in turns):
+                return round_, False
+            live = self._cx_live_turn(round_, turns, slot, turn)
+            if offer != len(live.offers) - 1:
+                raise CookoutBadStateError("that pair is no longer on the table")
+            if ingredient_id not in {snap["id"] for snap in live.offers[offer]}:
+                raise CookoutInvalidError("that ingredient is not one of the two offered")
+            conn.execute(
+                "UPDATE cookout_turns SET choice_id = ?, pick_move_id = ? "
+                "WHERE anchor_message_seq = ? AND turn = ?",
+                (ingredient_id, move_id, anchor_seq, turn),
+            )
+            picked = [
+                *turns[:-1],
+                CookoutTurnRow(
+                    turn=live.turn,
+                    player=live.player,
+                    offers=live.offers,
+                    choice_id=ingredient_id,
+                    skip_move_ids=live.skip_move_ids,
+                    pick_move_id=move_id,
+                ),
+            ]
+            if turn == TOTAL_TURNS:
+                assignments: dict[str, object] = {"state": "finished"}
+                if runner_available:
+                    assignments.update(
+                        {
+                            "concepts": "pending",
+                            "concepts_run_id": None,
+                            "concepts_started_at": now_s,
+                            "concepts_tries": 1,
+                            "concepts_deadline_at": now_s + CONCEPTS_DEADLINE_S,
+                        }
+                    )
+                else:
+                    assignments.update(
+                        {"concepts": "unavailable", "concepts_error": CONCEPTS_UNAVAILABLE_TEXT}
+                    )
+                return self._cx_update(conn, anchor_seq, now_s, assignments), True
+            if not (turn == 1 and round_.player2_key is None):
+                self._cx_draw(conn, round_, picked, turn + 1, bank, rng)
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def abandon_cookout(
+        self, *, anchor_seq: int, sender: str, email: str | None, now: float | None = None
+    ) -> tuple[CookoutRoundRow, bool]:
+        """End an open round (a bound player's "End game"). A `finished` round is never abandoned
+        (`CookoutBadStateError`); ending an already-abandoned round is an idempotent success."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if slot_of(round_, key, email) is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.state == "abandoned":
+                return round_, False
+            if round_.state != "picking":
+                raise CookoutBadStateError("a finished round cannot be ended")
+            return self._cx_update(conn, anchor_seq, now_s, {"state": "abandoned"}), True
+
+    def cookout_player_slot(self, *, anchor_seq: int, sender: str, email: str | None) -> int | None:
+        """Which seat `sender` holds on a round (`None` = nobody); `CookoutRoundNotFoundError` when
+        there is no such round. The routes gate bank/retry on this."""
+        with self._read_txn() as conn:
+            return slot_of(self._cx_load(conn, anchor_seq), reactor_key(sender), email)
+
+    # -- Cookout: Stage 1 (concepts) -------------------------------------------------------------
+
+    def set_cookout_concepts_run(
+        self, anchor_seq: int, run_id: str, *, expected_run_id: str | None = None
+    ) -> bool:
+        """Record the run a `pending` concepts job waits on — a compare-and-set on
+        `(finished AND concepts = 'pending' AND concepts_run_id = expected_run_id)`. Replacing a
+        dead run (`expected_run_id` not None) counts a try. `False` = the round moved on."""
+        with self._write_txn() as conn:
+            now_s = time.time()
+            cursor = conn.execute(
+                "UPDATE cookout_rounds SET concepts_run_id = ?, "
+                "concepts_tries = concepts_tries + ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'pending' "
+                "AND concepts_run_id IS ?",
+                (run_id, 0 if expected_run_id is None else 1, now_s, anchor_seq, expected_run_id),
+            )
+            return cursor.rowcount == 1
+
+    def finish_cookout_concepts(
+        self,
+        anchor_seq: int,
+        run_id: str | None,
+        state: Literal["ready", "failed", "unavailable"],
+        *,
+        concepts_json: str | None = None,
+        error: str | None = None,
+        pictures_pending: bool = False,
+    ) -> bool:
+        """Land the concepts outcome — a compare-and-set on
+        `(concepts = 'pending' AND concepts_run_id = run_id)`, so two processes polling the same
+        run store it once and a deleted round is untouched. `pictures_pending` (a `ready` result on
+        a server that can draw) starts the picture wait in the same write: `images = 'pending'`,
+        `images_started_at = now`, `images_tries = 1`, a 600 s deadline, and `images_generation`
+        incremented (the fence for the picture job)."""
+        hunt = state == "ready" and pictures_pending
+        with self._write_txn() as conn:
+            now_s = time.time()
+            cursor = conn.execute(
+                "UPDATE cookout_rounds SET concepts = ?, concepts_json = ?, concepts_error = ?, "
+                "images = ?, images_started_at = ?, images_tries = ?, images_deadline_at = ?, "
+                "images_generation = images_generation + ?, rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'pending' "
+                "AND concepts_run_id IS ?",
+                (
+                    state,
+                    concepts_json if state == "ready" else None,
+                    error if state != "ready" else None,
+                    "pending" if hunt else "none",
+                    now_s if hunt else None,
+                    1 if hunt else 0,
+                    now_s + PICTURES_DEADLINE_S if hunt else None,
+                    1 if hunt else 0,
+                    now_s,
+                    anchor_seq,
+                    run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._cx_event(conn, anchor_seq, now_s)
+            return True
+
+    def retry_cookout_concepts(self, anchor_seq: int, *, now: float) -> bool:
+        """Try Stage 1 again (spec §3.5): valid for a `finished` round whose concepts are `failed`
+        or `unavailable`. Back to `pending` with no run, data or error, a fresh 900 s window, and
+        the picture job reset (its generation incremented so any late picture write is fenced).
+        `False` = not applicable (the caller decides between an idempotent `pending` and a
+        `bad_state`); `CookoutRoundNotFoundError` when there is no round."""
+        with self._write_txn() as conn:
+            round_ = self._cx_load(conn, anchor_seq)
+            if round_.state != "finished" or round_.concepts not in ("failed", "unavailable"):
+                return False
+            conn.execute(
+                "UPDATE cookout_rounds SET concepts = 'pending', concepts_run_id = NULL, "
+                "concepts_error = NULL, concepts_json = NULL, concepts_started_at = ?, "
+                "concepts_tries = 1, concepts_deadline_at = ?, images = 'none', "
+                "pictures = NULL, images_started_at = NULL, images_tries = 0, "
+                "images_deadline_at = NULL, images_generation = images_generation + 1, "
+                "rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+                (now, now + CONCEPTS_DEADLINE_S, now, anchor_seq),
+            )
+            self._cx_event(conn, anchor_seq, now)
+            return True
+
+    def cookout_pending_concepts(self) -> list[tuple[int, str | None]]:
+        """Startup/sweep recovery: every round whose concepts are `pending`, as `(anchor seq, run
+        id or None)` — a run id resumes polling that run; none means the process died before the
+        spawn, so a new run starts."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq, concepts_run_id FROM cookout_rounds "
+                "WHERE state = 'finished' AND concepts = 'pending' "
+                "ORDER BY anchor_message_seq"
+            ).fetchall()
+            return [(int(r["anchor_message_seq"]), r["concepts_run_id"]) for r in rows]
+
+    # -- Cookout: pictures (partial-success aware, fenced by `images_generation`) ----------------
+
+    def claim_cookout_pictures(
+        self, anchor_seq: int, *, stale_before: float | None, now: float
+    ) -> tuple[Literal["claimed", "not_due", "gave_up", "gone"], int]:
+        """Begin a picture attempt for a `pending` round — a compare-and-set, so two processes
+        sweeping at once start one. It increments `images_generation` and returns the new value:
+        the fence every store/fail write of THIS attempt must present. `not_due` = another process
+        claimed it or the attempt is young (`stale_before`); `gave_up` = `MAX_PICTURE_TRIES`
+        attempts already began, the wait ended as `failed`; `gone` = nothing waits any more."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT state, concepts, images, images_started_at, images_tries, "
+                "images_generation FROM cookout_rounds WHERE anchor_message_seq = ?",
+                (anchor_seq,),
+            ).fetchone()
+            if (
+                row is None
+                or row["state"] != "finished"
+                or row["concepts"] != "ready"
+                or row["images"] != "pending"
+            ):
+                return "gone", 0
+            started = row["images_started_at"]
+            if stale_before is not None and started is not None and started >= stale_before:
+                return "not_due", int(row["images_generation"])
+            if int(row["images_tries"]) >= MAX_PICTURE_TRIES:
+                conn.execute(
+                    "UPDATE cookout_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ? AND images = 'pending'",
+                    (now, anchor_seq),
+                )
+                self._cx_event(conn, anchor_seq, now)
+                return "gave_up", int(row["images_generation"])
+            generation = int(row["images_generation"]) + 1
+            conn.execute(
+                "UPDATE cookout_rounds SET images_started_at = ?, images_tries = images_tries + 1, "
+                "images_deadline_at = ?, images_generation = ? WHERE anchor_message_seq = ?",
+                (now, now + PICTURES_DEADLINE_S, generation, anchor_seq),
+            )
+            return "claimed", generation
+
+    def store_cookout_pictures(
+        self,
+        anchor_seq: int,
+        expected_generation: int,
+        slot_uploads: Mapping[str, tuple[str, int]],
+        by_email: str | None,
+        *,
+        all_done: bool,
+        now: float,
+    ) -> bool:
+        """Attach the dish pictures an attempt produced (`slot -> (upload id, size)`, already staged
+        at `uploads/<id>/assembled`) to the round's ANCHOR message in ONE transaction: upload rows
+        + `processing` photo attachments + the merged slot map. Only slots not already filled are
+        taken (a ready slot is never overwritten). `images` becomes `done` once all three slots are
+        present, else `failed` (partial success is KEPT; `/pictures/retry` makes the missing ones).
+        A compare-and-set on `(finished, concepts = 'ready', images = 'pending', images_generation
+        = expected_generation)`: a losing write returns False after journaling every staged id for
+        cleanup — the caller removes the files — and touches nothing."""
+        ids = [upload_id for upload_id, _ in slot_uploads.values()]
+        with self._write_txn() as conn:
+            if any(
+                self._is_deleted_storage(conn, kind=kind, storage_id=att_id)
+                for att_id in ids
+                for kind in ("attachment", "upload")
+            ):
+                return False
+            row = conn.execute(
+                "SELECT state, concepts, images, images_generation, pictures "
+                "FROM cookout_rounds WHERE anchor_message_seq = ?",
+                (anchor_seq,),
+            ).fetchone()
+            if (
+                row is None
+                or row["state"] != "finished"
+                or row["concepts"] != "ready"
+                or row["images"] != "pending"
+                or int(row["images_generation"]) != expected_generation
+            ):
+                self._queue_deleted_storage(conn, kind="attachment", ids=ids, now=now)
+                self._queue_deleted_storage(conn, kind="upload", ids=ids, now=now)
+                return False
+            merged = _decode_pictures(row["pictures"])
+            unused: list[str] = []
+            for slot, (att_id, size_bytes) in slot_uploads.items():
+                if slot not in CONCEPT_IDS or slot in merged:
+                    unused.append(att_id)
+                    continue
+                conn.execute(
+                    "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, "
+                    "created_at) VALUES (?, 'photo', 'image/jpeg', ?, NULL, ?, ?)",
+                    (att_id, size_bytes, by_email, now),
+                )
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, message_seq, ordinal, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'photo', 'processing', ?, ?, '[]', 0, ?, ?)",
+                    (att_id, anchor_seq, CONCEPT_IDS.index(slot), now, now),
+                )
+                merged[slot] = att_id
+            if unused:
+                self._queue_deleted_storage(conn, kind="attachment", ids=unused, now=now)
+                self._queue_deleted_storage(conn, kind="upload", ids=unused, now=now)
+            complete = all(slot in merged for slot in CONCEPT_IDS)
+            conn.execute(
+                "UPDATE cookout_rounds SET images = ?, pictures = ?, rev = rev + 1, "
+                "updated_at = ? WHERE anchor_message_seq = ?",
+                ("done" if complete else "failed", json.dumps(merged), now, anchor_seq),
+            )
+            self._cx_event(conn, anchor_seq, now)
+            return True
+
+    def fail_cookout_pictures(
+        self, anchor_seq: int, *, expected_generation: int, now: float
+    ) -> bool:
+        """The attempt produced nothing (or a failure): the wait ends as `failed`. A compare-and-set
+        on the same fence as `store_cookout_pictures`; `False` = a newer attempt (or a delete)
+        owns the round, which is left untouched."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE cookout_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND state = 'finished' AND concepts = 'ready' "
+                "AND images = 'pending' AND images_generation = ?",
+                (now, anchor_seq, expected_generation),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._cx_event(conn, anchor_seq, now)
+            return True
+
+    def retry_cookout_pictures(self, anchor_seq: int, *, now: float) -> bool:
+        """Draw the missing pictures again (spec §3.5): valid for a `finished` round with `ready`
+        concepts, `images` not already `pending` and at least one empty slot. Keeps the attached
+        slots, sets `pending` with a fresh try count and 600 s window, and increments
+        `images_generation` (never resets it). `False` = not applicable."""
+        with self._write_txn() as conn:
+            round_ = self._cx_load(conn, anchor_seq)
+            if (
+                round_.state != "finished"
+                or round_.concepts != "ready"
+                or round_.images == "pending"
+                or all(slot in round_.pictures for slot in CONCEPT_IDS)
+            ):
+                return False
+            conn.execute(
+                "UPDATE cookout_rounds SET images = 'pending', images_started_at = ?, "
+                "images_tries = 1, images_deadline_at = ?, "
+                "images_generation = images_generation + 1, rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ?",
+                (now, now + PICTURES_DEADLINE_S, now, anchor_seq),
+            )
+            self._cx_event(conn, anchor_seq, now)
+            return True
+
+    def cookout_stale_pictures(self, *, stale_before: float) -> list[int]:
+        """Rounds whose picture wait looks abandoned: `images = 'pending'` on `ready` concepts whose
+        current attempt began before `stale_before` (or never recorded a start). The supervised
+        sweep re-claims these; an attempt still running in some process is far younger."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq FROM cookout_rounds "
+                "WHERE state = 'finished' AND concepts = 'ready' AND images = 'pending' "
+                "AND (images_started_at IS NULL OR images_started_at < ?) "
+                "ORDER BY anchor_message_seq",
+                (stale_before,),
+            ).fetchall()
+            return [int(r["anchor_message_seq"]) for r in rows]
+
+    # -- Cookout: Stage 2 (Bank this -> full recipe) ---------------------------------------------
+
+    def bank_cookout_concept(
+        self,
+        *,
+        anchor_seq: int,
+        sender: str,
+        email: str | None,
+        concept_id: str,
+        move_id: str,
+        runner_available: bool,
+        now: float | None = None,
+    ) -> tuple[CookoutRoundRow, bool]:
+        """Bank this: create the concept's `cookout_recipes` row — `pending` (a job will write
+        the full recipe) or `unavailable` without a runner. Valid for a `finished` round with
+        `ready` concepts. State-idempotent: a row already `pending` or `banked` is an idempotent
+        success (`False`, no second job). A `failed`/`unavailable` row is retried through
+        `retry_cookout_recipe`, so banking it again is `CookoutBadStateError`."""
+        key = reactor_key(sender)
+        with self._write_txn() as conn:
+            now_s = time.time() if now is None else now
+            round_ = self._cx_load(conn, anchor_seq)
+            if slot_of(round_, key, email) is None:
+                raise CookoutNotPlayerError("you are not a player in this round")
+            if round_.state != "finished" or round_.concepts != "ready":
+                raise CookoutBadStateError("the dish ideas are not ready to bank")
+            if concept_by_id(round_, concept_id) is None:
+                raise CookoutInvalidError("there is no such dish idea")
+            existing = conn.execute(
+                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? AND concept_id = ?",
+                (anchor_seq, concept_id),
+            ).fetchone()
+            if existing is not None:
+                if existing["state"] in ("pending", "banked"):
+                    return round_, False
+                raise CookoutBadStateError("that recipe failed; try it again instead")
+            state = "pending" if runner_available else "unavailable"
+            conn.execute(
+                "INSERT INTO cookout_recipes (anchor_message_seq, concept_id, state, error, "
+                "requested_by, bank_move_id, started_at, tries, deadline_at, created_at, "
+                "updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    anchor_seq,
+                    concept_id,
+                    state,
+                    None if runner_available else RECIPE_UNAVAILABLE_TEXT,
+                    sender,
+                    move_id,
+                    now_s if runner_available else None,
+                    1 if runner_available else 0,
+                    now_s + RECIPE_DEADLINE_S if runner_available else None,
+                    now_s,
+                    now_s,
+                ),
+            )
+            return self._cx_update(conn, anchor_seq, now_s, {}), True
+
+    def set_cookout_recipe_run(
+        self, anchor_seq: int, concept_id: str, run_id: str, *, expected_run_id: str | None = None
+    ) -> bool:
+        """Record the run a `pending` recipe waits on (compare-and-set on `state = 'pending' AND
+        run_id = expected_run_id`); replacing a dead run counts a try. `False` = it moved on."""
+        with self._write_txn() as conn:
+            now_s = time.time()
+            cursor = conn.execute(
+                "UPDATE cookout_recipes SET run_id = ?, tries = tries + ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND concept_id = ? AND state = 'pending' "
+                "AND run_id IS ?",
+                (
+                    run_id,
+                    0 if expected_run_id is None else 1,
+                    now_s,
+                    anchor_seq,
+                    concept_id,
+                    expected_run_id,
+                ),
+            )
+            return cursor.rowcount == 1
+
+    def finish_cookout_recipe(
+        self,
+        anchor_seq: int,
+        concept_id: str,
+        run_id: str | None,
+        state: Literal["banked", "failed", "unavailable"],
+        *,
+        recipe_json: str | None = None,
+        error: str | None = None,
+    ) -> bool:
+        """Land a recipe outcome — a compare-and-set on `(state = 'pending' AND run_id = run_id)`.
+        `banked` stores the validated body and stamps `banked_at` (only banked rows reach the
+        Recipe book); the round's `rev` moves so both screens and the card summary re-read."""
+        with self._write_txn() as conn:
+            now_s = time.time()
+            cursor = conn.execute(
+                "UPDATE cookout_recipes SET state = ?, recipe_json = ?, error = ?, "
+                "banked_at = ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND concept_id = ? AND state = 'pending' "
+                "AND run_id IS ?",
+                (
+                    state,
+                    recipe_json if state == "banked" else None,
+                    error if state != "banked" else None,
+                    now_s if state == "banked" else None,
+                    now_s,
+                    anchor_seq,
+                    concept_id,
+                    run_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._cx_update(conn, anchor_seq, now_s, {})
+            return True
+
+    def retry_cookout_recipe(self, anchor_seq: int, concept_id: str, *, now: float) -> bool:
+        """Try a recipe again (spec §3.5): valid for a `finished` round with `ready` concepts whose
+        recipe row is `failed` or `unavailable`. Back to `pending`, run/error/body cleared,
+        `banked_at` left NULL, a fresh 900 s window. `False` = not applicable."""
+        with self._write_txn() as conn:
+            round_ = self._cx_load(conn, anchor_seq)
+            if round_.state != "finished" or round_.concepts != "ready":
+                return False
+            cursor = conn.execute(
+                "UPDATE cookout_recipes SET state = 'pending', run_id = NULL, error = NULL, "
+                "recipe_json = NULL, banked_at = NULL, started_at = ?, tries = 1, "
+                "deadline_at = ?, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND concept_id = ? "
+                "AND state IN ('failed', 'unavailable')",
+                (now, now + RECIPE_DEADLINE_S, now, anchor_seq, concept_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._cx_update(conn, anchor_seq, now, {})
+            return True
+
+    def cookout_recipe_state(self, anchor_seq: int, concept_id: str) -> str | None:
+        """A concept's recipe state, `None` when it was never requested."""
+        with self._read_txn() as conn:
+            row = conn.execute(
+                "SELECT state FROM cookout_recipes WHERE anchor_message_seq = ? AND concept_id = ?",
+                (anchor_seq, concept_id),
+            ).fetchone()
+            return str(row["state"]) if row is not None else None
+
+    def cookout_pending_recipes(self) -> list[tuple[int, str, str | None]]:
+        """Startup/sweep recovery: every `pending` recipe as `(anchor seq, concept id, run id or
+        None)`."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq, concept_id, run_id FROM cookout_recipes "
+                "WHERE state = 'pending' ORDER BY anchor_message_seq, concept_id"
+            ).fetchall()
+            return [(int(r["anchor_message_seq"]), str(r["concept_id"]), r["run_id"]) for r in rows]
+
+    def list_cookout_bank(
+        self,
+    ) -> list[tuple[CookoutRoundRow, CookoutRecipeRow, tuple[AttachmentRow, ...]]]:
+        """The Recipe book: every `banked` recipe, newest first (`banked_at DESC,
+        anchor_message_seq DESC, concept_id ASC`), with its round and the round's attachments."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM cookout_recipes WHERE state = 'banked' "
+                "ORDER BY banked_at DESC, anchor_message_seq DESC, concept_id ASC"
+            ).fetchall()
+            seqs = sorted({int(r["anchor_message_seq"]) for r in rows})
+            rounds = {seq: self._cx_load(conn, seq) for seq in seqs}
+            attachments = _load_attachments_for(conn, seqs)
+            return [
+                (
+                    rounds[int(r["anchor_message_seq"])],
+                    _row_to_cookout_recipe(r),
+                    tuple(attachments.get(int(r["anchor_message_seq"]), [])),
+                )
+                for r in rows
+            ]
+
     def events_after(self, cursor: int, limit: int = 200) -> list[EventRow]:
         with self._read_txn() as conn:
             rows = conn.execute(
@@ -3281,6 +4387,12 @@ class LiveChatStore:
             # forgets everything about the two of you (Inv 56), the turned-down places included.
             conn.execute("DELETE FROM adv_rounds")
             conn.execute("DELETE FROM adv_rejected")
+            # And Cookout (schema v21, Inv 57): recipes and turns before their round, the round
+            # before its anchor message. The cascades already do this; explicit here so wipe's
+            # intent is never left implicit.
+            conn.execute("DELETE FROM cookout_recipes")
+            conn.execute("DELETE FROM cookout_turns")
+            conn.execute("DELETE FROM cookout_rounds")
             # `adv_settings` (the shared include-advised preference) names no place and no person,
             # so — like `wyr_topics` — a wipe deliberately leaves it alone.
             conn.execute("DELETE FROM messages")
@@ -3631,6 +4743,12 @@ class LiveChatStore:
                     "WHERE anchor_message_seq = ?",
                     (now, message_seq),
                 )
+                # Likewise a Cookout dish picture: the round's `rev` moves when one is ready.
+                conn.execute(
+                    "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ?",
+                    (now, message_seq),
+                )
                 conn.execute(
                     "INSERT INTO events (type, message_seq, created_at) "
                     "VALUES ('message_updated', ?, ?)",
@@ -3661,8 +4779,8 @@ class LiveChatStore:
         """The gallery's page of the media history, NEWEST first: every `ready` photo and video
         that belongs to a sent message and is not view-once (a view-once picture is never kept
         anywhere a second look could reach it — Inv 52). The would-you-rather round's own
-        generated pictures and the Adventure Time holiday pack's pictures are game furniture, not
-        sent media, so they are left out. Ordered by
+        generated pictures, the Adventure Time holiday pack's pictures and the Cookout dish
+        pictures are game furniture, not sent media, so they are left out. Ordered by
         `(message_seq, ordinal)`; `before` is the last `(seq, ordinal)` of the previous page.
         Returns `(rows, has_more)`."""
         sql = (
@@ -3671,7 +4789,8 @@ class LiveChatStore:
             "AND a.view_once_renditions IS NULL AND m.view_once_s IS NULL "
             "AND a.renditions != '[]' "
             "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM wyr_rounds) "
-            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM adv_rounds)"
+            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM adv_rounds) "
+            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM cookout_rounds)"
         )
         args: list[int] = []
         if before is not None:
