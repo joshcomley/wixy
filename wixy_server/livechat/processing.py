@@ -465,6 +465,31 @@ def process_photo(src: Path, *, output_dir: Path) -> PhotoResult:
     )
 
 
+PHOTO_PIXEL_CAP = _PHOTO_PIXEL_CAP
+"""The decompression-bomb limit for a photo (declared width x height), exported for the holiday-pack
+picture check, which applies it BEFORE decoding a fetched image (Inv 44)."""
+
+
+def reencode_still_as_jpeg(image: Image.Image, *, long_edge: int, quality: int) -> bytes:
+    """A still image already opened (and size-checked) by the caller, as clean JPEG bytes: upright
+    (EXIF orientation applied), colour-managed to sRGB, flattened onto white if it has
+    transparency, rebuilt from raw 8-bit RGB pixels so no EXIF, ICC or text chunk survives (Inv
+    16/44), scaled down to `long_edge` and encoded. The same normalisation `process_photo` applies
+    to every upload."""
+    upright = ImageOps.exif_transpose(image) or image
+    has_alpha = _image_has_alpha(upright)
+    colour_managed = _convert_to_srgb(upright, has_alpha=has_alpha)
+    normalized = _normalize_photo_mode(colour_managed, has_alpha=has_alpha)
+    if has_alpha:
+        flat = Image.new("RGB", normalized.size, (255, 255, 255))
+        flat.paste(normalized, mask=normalized.getchannel("A"))
+        normalized = flat
+    stripped = _clamp_long_edge(_strip_image_metadata(normalized), long_edge)
+    out = io.BytesIO()
+    stripped.save(out, format="JPEG", quality=quality, optimize=True)
+    return out.getvalue()
+
+
 # ---------------------------------------------------------------------------
 # Voice (§7)
 # ---------------------------------------------------------------------------

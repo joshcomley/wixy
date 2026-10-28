@@ -21,7 +21,13 @@ from dataclasses import dataclass
 
 from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.livechat.adventure_bank import AdventureBank
-from wixy_server.livechat.models import AdventureLanding, AdventureRoundRow, AdventureSpin
+from wixy_server.livechat.models import (
+    AdventureLanding,
+    AdventureRoundRow,
+    AdventureSpin,
+    AttachmentRow,
+    MediaUrlSigner,
+)
 
 # §3.1: a spin's committed consequence.
 SPIN_MIN_DELTA_DEG = 720.0
@@ -273,6 +279,67 @@ def _spin_json(spin: AdventureSpin | None) -> JsonObject | None:
     return spin.to_json() if spin is not None else None
 
 
+def pack_pictures(
+    round_: AdventureRoundRow,
+    attachments: Sequence[AttachmentRow],
+    signer: MediaUrlSigner | None,
+) -> tuple[bool, JsonObject]:
+    """The holiday pack's pictures for the view (spec §4.3a): `(arriving, {hero, items})`.
+
+    The round's stored slot map (`pictures_json`) names each picture by the ordinal of its ordinary
+    photo attachment on the anchor message, with its credit, source page and caption. A `Picture`
+    is `{thumbUrl, fullUrl, credit, page, caption | null}` built from that attachment's SIGNED media
+    URLs — and only once the attachment is `ready` (a still-processing one is left out until its
+    renditions exist; the round's `rev` moves when it finishes, so a client re-fetches). `hero` is
+    the hero photos in order; `items` maps `"<section key>:<item index>"` to its picture.
+    `arriving` is true while the pictures are not all there yet: the search is still running
+    (`images = pending`) or a stored picture is still processing."""
+    hero: list[tuple[int, JsonObject]] = []
+    items: JsonObject = {}
+    processing = False
+    slots: list[object] = []
+    if round_.pictures_json is not None and signer is not None:
+        try:
+            stored = json.loads(round_.pictures_json)
+        except json.JSONDecodeError:
+            stored = None
+        raw_slots = stored.get("slots") if isinstance(stored, dict) else None
+        slots = raw_slots if isinstance(raw_slots, list) else []
+    by_ordinal = {a.ordinal: a for a in attachments if a.ordinal is not None}
+    for slot in slots:
+        if not isinstance(slot, dict):
+            continue
+        key = slot.get("slot")
+        ordinal = slot.get("ordinal")
+        attachment = by_ordinal.get(ordinal) if isinstance(ordinal, int) else None
+        if not isinstance(key, str) or attachment is None or signer is None:
+            continue
+        if attachment.status == "processing":
+            processing = True
+        if (
+            attachment.status != "ready"
+            or "thumb" not in attachment.renditions
+            or "full" not in attachment.renditions
+        ):
+            continue
+        caption = slot.get("caption")
+        picture: JsonObject = {
+            "thumbUrl": signer.url_for(attachment.id, "thumb"),
+            "fullUrl": signer.url_for(attachment.id, "full"),
+            "credit": slot.get("credit") if isinstance(slot.get("credit"), str) else "",
+            "page": slot.get("page") if isinstance(slot.get("page"), str) else "",
+            "caption": caption if isinstance(caption, str) and caption else None,
+        }
+        if key.startswith("hero:"):
+            index = key.removeprefix("hero:")
+            hero.append((int(index) if index.isdigit() else len(hero), picture))
+        else:
+            items[key] = picture
+    hero.sort(key=lambda entry: entry[0])
+    arriving = round_.images == "pending" or processing
+    return arriving, {"hero": [picture for _, picture in hero], "items": items}
+
+
 def adventure_view_json(
     round_: AdventureRoundRow,
     bank: AdventureBank,
@@ -281,6 +348,8 @@ def adventure_view_json(
     now: float,
     researcher_available: bool,
     include_advised: bool = False,
+    attachments: Sequence[AttachmentRow] = (),
+    signer: MediaUrlSigner | None = None,
 ) -> JsonObject:
     """The `GET /adventure/{seq}` body (spec §4.2). `eligible` (the units with at least one
     destination still in play, honouring the couple's shared `include_advised` preference at
@@ -319,6 +388,7 @@ def adventure_view_json(
 
     spinning = round_.state in ("spin_lng", "spin_lat")
     pack_error = round_.pack_error if round_.pack in ("failed", "unavailable") else None
+    arriving, pictures = pack_pictures(round_, attachments, signer)
     return {
         "seq": round_.anchor_message_seq,
         "state": round_.state,
@@ -339,6 +409,8 @@ def adventure_view_json(
             "data": pack_data(round_),
             "error": pack_error,
             "canRetry": pack_can_retry(round_, researcher_available=researcher_available),
+            "images": "pending" if arriving else "done",
+            "pictures": pictures,
         },
         "decidedBy": round_.decided_by,
     }

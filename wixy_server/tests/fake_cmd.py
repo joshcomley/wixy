@@ -124,6 +124,7 @@ CANNED_ADVENTURE_PACK: JsonObject = {
     "headline": "Sun, tiles and custard tarts on the Atlantic edge of Europe",
     "summary": "A hilly, walkable capital with trams, viewpoints and a famous food scene, "
     "close to beaches and fairytale palaces.",
+    "wikipedia": "Lisbon",
     "sections": [
         {
             "key": "food",
@@ -133,11 +134,13 @@ CANNED_ADVENTURE_PACK: JsonObject = {
                     "name": "Pasteis de nata",
                     "detail": "The custard tart every bakery sells; eat one warm with cinnamon.",
                     "url": "https://example.com/food/pasteis",
+                    "wikipedia": "Pastel de nata",
                 },
                 {
                     "name": "Grilled sardines",
                     "detail": "A summer street-party classic.",
                     "url": None,
+                    "wikipedia": None,
                 },
             ],
         },
@@ -149,13 +152,21 @@ CANNED_ADVENTURE_PACK: JsonObject = {
                     "name": "A tiled townhouse in Alfama",
                     "detail": "Quiet rooms under the castle walls.",
                     "url": "https://example.com/stay/alfama",
+                    "wikipedia": None,
                 }
             ],
         },
         {
             "key": "sights",
             "title": "Sights",
-            "items": [{"name": "Belem Tower", "detail": "A riverside fortress.", "url": None}],
+            "items": [
+                {
+                    "name": "Belem Tower",
+                    "detail": "A riverside fortress.",
+                    "url": None,
+                    "wikipedia": "Belém Tower",
+                }
+            ],
         },
     ],
     "bestTime": "April to June and September to October.",
