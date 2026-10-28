@@ -7749,6 +7749,1555 @@ button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
 
 /* -- Motion ------------------------------------------------------------------------------------------------ */
 
+/* == Cookout twists (workspace 00058; spec/server-chat/09a-cookout-twists.md §9) ==========================
+   The start sheet's "Add twists (optional)" and Encore banner, the pane's rules strip, the table's lucky
+   dip / chaos shelf / sweep, secret stars, the chef gate and cloche, the dinner vote, the rescue swap,
+   earlier dishes, "We cooked it!" with its photo chooser, and the Recipe book's additions. Same kitchen
+   tokens as above, so light and dark come for free; 360 px first, nothing scrolls sideways. */
+
+/* -- The start sheet: scrolls inside itself once the twists open ------------------------------------------ */
+
+.wx-srv-ck-start-sheet {
+  max-height: 100%;
+}
+
+.wx-srv-ck-start-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  margin: 0 -4px;
+  padding: 0 4px 2px;
+}
+
+.wx-srv-ck-encore {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 2px solid var(--ck-saffron);
+  border-radius: 16px;
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-encore-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.wx-srv-ck-encore-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-encore-icon {
+  margin-right: 6px;
+}
+
+.wx-srv-ck-encore-drop {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ck-muted);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-encore-hint {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-encore-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-encore-seed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 4px 12px 4px 8px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-encore-seed-on {
+  border-color: var(--ck-herb);
+  background: var(--ck-herb-tint);
+}
+
+.wx-srv-ck-encore-seed:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wx-srv-ck-encore-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-twists {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+}
+
+.wx-srv-ck-twists-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-twists-label {
+  flex: 1 1 auto;
+}
+
+.wx-srv-ck-twists-count {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--ck-tomato);
+  color: #fff;
+  font-size: 0.75rem;
+}
+
+.wx-srv-ck-twists-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 2px 12px 14px;
+}
+
+.wx-srv-ck-twists-chef {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wx-srv-ck-twists-note {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-twist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-srv-ck-twist-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wx-srv-ck-twist-icon {
+  flex: none;
+  width: 28px;
+  font-size: 1.375rem;
+  text-align: center;
+}
+
+.wx-srv-ck-twist-words {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wx-srv-ck-twist-name {
+  font-weight: 800;
+}
+
+.wx-srv-ck-twist-hint {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-twist-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-twist-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-twist-chip-on {
+  border-color: var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+/* An on/off twist: the whole row is the switch. */
+button.wx-srv-ck-twist-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 8px 10px;
+  border: 2px solid var(--ck-line);
+  border-radius: 14px;
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-twist-on {
+  border-color: var(--ck-herb);
+  background: var(--ck-herb-tint);
+}
+
+.wx-srv-ck-switch {
+  position: relative;
+  flex: none;
+  width: 40px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--ck-line-strong);
+  transition: background 120ms ease-out;
+}
+
+.wx-srv-ck-switch::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 120ms ease-out;
+}
+
+.wx-srv-ck-twist-on .wx-srv-ck-switch {
+  background: var(--ck-herb);
+}
+
+.wx-srv-ck-twist-on .wx-srv-ck-switch::after {
+  transform: translateX(16px);
+}
+
+/* -- The fridge raid's search ------------------------------------------------------------------------------- */
+
+.wx-srv-ck-fridge {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.wx-srv-ck-fridge-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-cream);
+}
+
+.wx-srv-ck-fridge-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 1rem; /* 16 px: no zoom-on-focus on phones */
+  outline: none;
+}
+
+.wx-srv-ck-fridge-status {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-fridge-results {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.wx-srv-ck-fridge-option,
+.wx-srv-ck-fridge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 4px 12px 4px 8px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+.wx-srv-ck-fridge-option {
+  cursor: pointer;
+}
+
+.wx-srv-ck-fridge-option-name,
+.wx-srv-ck-fridge-chip-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-fridge-chip {
+  border-color: var(--ck-herb);
+  background: var(--ck-herb-tint);
+  padding-right: 4px;
+}
+
+.wx-srv-ck-fridge-clear {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* -- The pane: the rules strip -------------------------------------------------------------------------------- */
+
+.wx-srv-ck-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-rule-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 2px 10px 2px 6px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  border: 1px solid var(--ck-line);
+  font-size: 0.75rem;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+
+.wx-srv-ck-rule-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-rule-style {
+  border-color: var(--ck-saffron);
+}
+
+/* The spun style's wheel: a reel of faces that lands on the server's choice (the last face). */
+.wx-srv-ck-wheel {
+  display: inline-block;
+  width: 1.4em;
+  height: 1.4em;
+  overflow: hidden;
+  line-height: 1.4em;
+  text-align: center;
+}
+
+.wx-srv-ck-wheel-reel {
+  display: flex;
+  flex-direction: column;
+  transform: translateY(calc(-100% + 1.4em));
+  animation: wx-srv-ck-wheel 1.6s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.wx-srv-ck-wheel-face {
+  display: block;
+  height: 1.4em;
+}
+
+/* -- The table: sweeps, chaos and the twist buttons ----------------------------------------------------------- */
+
+.wx-srv-ck-optwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+@container ckbody (min-width: 560px) {
+  .wx-srv-ck-pair > .wx-srv-ck-optwrap {
+    align-self: stretch;
+  }
+}
+
+.wx-srv-ck-sweep {
+  align-self: flex-start;
+  min-height: 36px;
+  padding: 4px 12px;
+  border: 2px dashed var(--ck-tomato);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ck-tomato-deep);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-sweep:disabled {
+  border-color: var(--ck-line-strong);
+  color: var(--ck-muted);
+  cursor: not-allowed;
+}
+
+.wx-srv-ck-swept,
+.wx-srv-ck-chaos-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--ck-chip);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.wx-srv-ck-chaos-note {
+  background: var(--ck-plum);
+  color: #fff;
+}
+
+.wx-srv-ck-pair-chaos .wx-srv-ck-opt,
+.wx-srv-ck-opt-exotic {
+  border-color: #8a5bd6;
+  box-shadow: 0 3px 0 #6b43ad;
+}
+
+.wx-srv-ck-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-srv-ck-twistbar {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: 8px;
+}
+
+.wx-srv-ck-lucky,
+.wx-srv-ck-chaos {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-lucky:hover:not(:disabled),
+.wx-srv-ck-lucky:focus-visible {
+  border-color: var(--ck-saffron);
+}
+
+.wx-srv-ck-chaos:hover:not(:disabled),
+.wx-srv-ck-chaos:focus-visible {
+  border-color: #8a5bd6;
+}
+
+.wx-srv-ck-lucky:disabled,
+.wx-srv-ck-chaos:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* -- Starters, stars and the twist badges on basket chips ---------------------------------------------------- */
+
+.wx-srv-ck-pill-starter {
+  box-shadow: inset 0 0 0 2px var(--ck-herb);
+}
+
+.wx-srv-ck-pill {
+  position: relative;
+}
+
+.wx-srv-ck-pill-star-mark {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  font-size: 0.75rem;
+  color: var(--ck-saffron);
+}
+
+.wx-srv-ck-chip-badge {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-chip-wildcard .wx-srv-ck-chip-badge {
+  background: var(--ck-chip);
+  color: var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-chip-starred {
+  border-color: var(--ck-saffron);
+}
+
+.wx-srv-ck-star {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  margin: -4px -6px -4px 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ck-saffron);
+  font: inherit;
+  font-size: 1.125rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wx-srv-ck-star:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.wx-srv-ck-star-mark {
+  flex: none;
+  color: var(--ck-saffron);
+}
+
+.wx-srv-ck-star-hint,
+.wx-srv-ck-stars-revealed {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+/* -- The finished stage: sections, the gate and the cloche --------------------------------------------------- */
+
+.wx-srv-ck-sec {
+  display: contents;
+}
+
+.wx-srv-ck-gate {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 12px 14px;
+  border: 2px solid var(--ck-saffron);
+  border-radius: 16px;
+  background: var(--ck-paper);
+}
+
+.wx-srv-ck-gate-icon {
+  flex: none;
+  font-size: 1.75rem;
+}
+
+.wx-srv-ck-gate-words {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.wx-srv-ck-gate-text {
+  flex: 1 1 180px;
+  margin: 0;
+  font-weight: 800;
+}
+
+.wx-srv-ck-gate-sub {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-gate-words .wx-srv-ck-gate-sub {
+  margin-top: 2px;
+}
+
+.wx-srv-ck-cloche-bell {
+  animation: wx-srv-ck-bob 2.4s ease-in-out infinite;
+}
+
+.wx-srv-ck-gate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex-basis: 100%;
+}
+
+.wx-srv-ck-lift,
+.wx-srv-ck-decline {
+  flex: 1 1 140px;
+  min-height: 48px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-lift {
+  border: 0;
+  background: var(--ck-tomato);
+  color: #fff;
+  box-shadow: 0 3px 0 var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-decline {
+  border: 2px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-lift:disabled,
+.wx-srv-ck-decline:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* The coin flip and the lid lift: a moment over the pane that never takes a tap. */
+.wx-srv-ck-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.wx-srv-ck-fx-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  padding: 18px 22px;
+  border-radius: 22px;
+  background: var(--ck-paper);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  animation: wx-srv-ck-pop 220ms ease-out;
+}
+
+.wx-srv-ck-fx-art {
+  position: relative;
+  width: 72px;
+  height: 72px;
+}
+
+.wx-srv-ck-fx-coin,
+.wx-srv-ck-fx-lid,
+.wx-srv-ck-fx-food {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+}
+
+.wx-srv-ck-fx-coin {
+  animation: wx-srv-ck-coin 700ms ease-in both;
+}
+
+.wx-srv-ck-fx-coin ~ .wx-srv-ck-fx-food {
+  animation: wx-srv-ck-fade-in 300ms 650ms ease-out both;
+}
+
+.wx-srv-ck-fx-lid {
+  z-index: 1;
+  animation: wx-srv-ck-lid 800ms ease-in both;
+}
+
+.wx-srv-ck-fx-lid ~ .wx-srv-ck-fx-food {
+  animation: wx-srv-ck-fade-in 300ms 400ms ease-out both;
+}
+
+.wx-srv-ck-fx-words {
+  margin: 0;
+  font-weight: 800;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+/* -- The rescue swap -------------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-rescue {
+  align-self: center;
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 2px dashed var(--ck-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-swap {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+}
+
+.wx-srv-ck-swap-text {
+  margin: 0;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-swap-basket {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-swap-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: 40px;
+  padding: 4px 12px 4px 8px;
+  border: 2px solid var(--ck-line);
+  border-radius: 999px;
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-swap-item-on {
+  border-color: var(--ck-tomato);
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-swap-item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wx-srv-ck-swap-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wx-srv-ck-swap-send,
+.wx-srv-ck-swap-cancel,
+.wx-srv-ck-swap-keep {
+  flex: 1 1 140px;
+  min-height: 44px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-swap-send {
+  border: 0;
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+.wx-srv-ck-swap-cancel,
+.wx-srv-ck-swap-keep {
+  border: 2px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-swap-send:disabled,
+.wx-srv-ck-swap-cancel:disabled,
+.wx-srv-ck-swap-keep:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wx-srv-ck-swapped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--ck-herb-tint);
+  font-weight: 700;
+}
+
+/* -- The dinner vote, rule badges and the dish ⋯ ----------------------------------------------------------- */
+
+.wx-srv-ck-vote-banner {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--ck-chip);
+  font-weight: 700;
+}
+
+.wx-srv-ck-vote-match {
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-dish-vote {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wx-srv-ck-vote {
+  min-height: 40px;
+  padding: 4px 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-vote-mine {
+  border-color: var(--ck-herb);
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-voter,
+.wx-srv-ck-dinner {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-dinner {
+  background: var(--ck-herb);
+  color: #fff;
+}
+
+.wx-srv-ck-dish-dinner {
+  border-color: var(--ck-herb);
+  box-shadow: 0 0 0 3px var(--ck-herb-tint);
+}
+
+.wx-srv-ck-dish-titlerow {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.wx-srv-ck-dish-titlerow .wx-srv-ck-dish-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.wx-srv-ck-dish-more {
+  position: relative;
+  flex: none;
+}
+
+.wx-srv-ck-dish-more-btn,
+.wx-srv-ck-cooked-more {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ck-chip);
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.wx-srv-ck-dish-menu {
+  position: absolute;
+  top: 40px;
+  right: 0;
+  z-index: 3;
+  min-width: 220px;
+  max-width: 70vw;
+  padding: 6px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-paper);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+
+.wx-srv-ck-dish-menu-item,
+.wx-srv-ck-cooked-menu-item {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 700;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-dish-menu-item:hover,
+.wx-srv-ck-cooked-menu-item:hover {
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-rule {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  font-size: 0.8125rem;
+}
+
+.wx-srv-ck-rule-name,
+.wx-srv-ck-rule-time {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  font-weight: 800;
+}
+
+.wx-srv-ck-rule-note {
+  flex-basis: 100%;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-bank-frozen {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-recipe-cookware {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+/* -- Earlier dishes ---------------------------------------------------------------------------------------- */
+
+.wx-srv-ck-earlier {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-srv-ck-earlier-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-earlier-title {
+  font-weight: 800;
+}
+
+.wx-srv-ck-earlier-sub {
+  flex: 1 1 auto;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-dish-earlier {
+  opacity: 0.92;
+}
+
+.wx-srv-ck-earlier-state {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+/* -- We cooked it! ------------------------------------------------------------------------------------------ */
+
+.wx-srv-ck-cooked {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wx-srv-ck-cooked-on {
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--ck-herb-tint);
+}
+
+.wx-srv-ck-cooked-mark {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ck-herb);
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-cooked-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wx-srv-ck-cooked-badge {
+  font-weight: 900;
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-cooked-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-paper);
+}
+
+.wx-srv-ck-cooked-confirm {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px;
+}
+
+.wx-srv-ck-cooked-confirm-text {
+  flex-basis: 100%;
+  margin: 0;
+  font-weight: 700;
+}
+
+.wx-srv-ck-cooked-keep,
+.wx-srv-ck-cooked-unmark-yes {
+  flex: 1 1 120px;
+  min-height: 44px;
+  border-radius: 12px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-cooked-keep {
+  border: 2px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-cooked-unmark-yes {
+  border: 0;
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+.wx-srv-ck-ratings {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wx-srv-ck-hearts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.wx-srv-ck-hearts-who {
+  min-width: 64px;
+  font-weight: 800;
+}
+
+.wx-srv-ck-hearts-list {
+  display: inline-flex;
+  gap: 2px;
+}
+
+.wx-srv-ck-heart {
+  color: var(--ck-tomato);
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+button.wx-srv-ck-heart {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  font: inherit;
+  font-size: 1.375rem;
+  color: var(--ck-tomato);
+  cursor: pointer;
+}
+
+.wx-srv-ck-hearts-none {
+  font-size: 0.75rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-plates {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.wx-srv-ck-plates-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+}
+
+.wx-srv-ck-plates-open,
+.wx-srv-ck-plates-add,
+.wx-srv-ck-plates-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 2rem;
+}
+
+.wx-srv-ck-plates-open,
+.wx-srv-ck-plates-add {
+  cursor: pointer;
+}
+
+.wx-srv-ck-plates-add {
+  border: 2px dashed var(--ck-herb);
+}
+
+.wx-srv-ck-plates-add-text {
+  font-size: 0.8125rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-plates-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-ck-plates-caption {
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-align: center;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-plates-change {
+  min-height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--ck-herb);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* The photo chooser: a sheet over the pane. */
+.wx-srv-ck-photos {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.wx-srv-ck-photos-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(20, 12, 6, 0.45);
+}
+
+.wx-srv-ck-photos-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 85%;
+  padding: 16px;
+  border-radius: 20px 20px 0 0;
+  background: var(--ck-cream);
+  box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.2);
+  animation: wx-srv-ck-sheet-in 200ms ease-out;
+}
+
+.wx-srv-ck-photos-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 800;
+}
+
+.wx-srv-ck-photos-note {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-photos-note-warn {
+  color: var(--ck-tomato-deep);
+  font-weight: 700;
+}
+
+.wx-srv-ck-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.wx-srv-ck-photos-tile {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 12px;
+  background: var(--ck-paper);
+  cursor: pointer;
+}
+
+.wx-srv-ck-photos-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-ck-photos-who {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  max-width: calc(100% - 8px);
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-size: 0.6875rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-photos-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wx-srv-ck-photos-send,
+.wx-srv-ck-photos-cancel {
+  flex: 1 1 160px;
+  min-height: 44px;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.wx-srv-ck-photos-send {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  background: var(--ck-herb);
+  color: #fff;
+}
+
+.wx-srv-ck-photos-cancel {
+  border: 2px solid var(--ck-line-strong);
+  background: transparent;
+  color: var(--wx-ink);
+}
+
+/* -- The Recipe book's additions ------------------------------------------------------------------------- */
+
+.wx-srv-ck-book-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.wx-srv-ck-book-filter {
+  min-height: 36px;
+  padding: 2px 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.wx-srv-ck-book-filter-on {
+  border-color: var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+.wx-srv-ck-book-none {
+  margin: 8px 0;
+  color: var(--ck-muted);
+  text-align: center;
+}
+
+.wx-srv-ck-book-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.wx-srv-ck-book-thumbs {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+
+.wx-srv-ck-book-thumb-real {
+  outline: 2px solid var(--ck-herb);
+  outline-offset: -2px;
+}
+
+.wx-srv-ck-book-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.wx-srv-ck-book-badge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--ck-chip);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-book-cooked {
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+}
+
+.wx-srv-ck-book-ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font-size: 0.75rem;
+}
+
+.wx-srv-ck-book-rating {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.wx-srv-ck-book-rating-who {
+  font-weight: 800;
+}
+
+.wx-srv-ck-book-rating-hearts {
+  color: var(--ck-tomato);
+  letter-spacing: 1px;
+}
+
+.wx-srv-ck-book-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-left: 4px;
+}
+
+.wx-srv-ck-book-encore {
+  min-height: 36px;
+  padding: 2px 12px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+@keyframes wx-srv-ck-wheel {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(calc(-100% + 1.4em));
+  }
+}
+
+@keyframes wx-srv-ck-coin {
+  0% {
+    transform: translateY(0) rotateX(0);
+    opacity: 1;
+  }
+  60% {
+    transform: translateY(-28px) rotateX(900deg);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(0) rotateX(1440deg);
+    opacity: 0;
+  }
+}
+
+@keyframes wx-srv-ck-lid {
+  0% {
+    transform: translateY(0) rotate(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-44px) rotate(-18deg);
+    opacity: 0;
+  }
+}
+
+@keyframes wx-srv-ck-fade-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @keyframes wx-srv-ck-pop {
   from {
     transform: scale(0.8);

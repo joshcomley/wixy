@@ -28,6 +28,18 @@
 // The pane redraws a section only when what that section shows changed (its key), so a scrolled list,
 // an expanded recipe, ticked-off ingredients and loaded photos survive the frequent refreshes of a round
 // whose pictures and recipes are still arriving.
+//
+// THE TWISTS (spec/server-chat/09a-cookout-twists.md §9) add to every stage, and all of them are things
+// the players may simply ignore: a rules strip under the header (style, challenge, cloche, stars); on the
+// table 🪙 Lucky dip, 🌋 Chaos shelf and — for the waiting partner in Open mode — 🧹 Sweep it; ☆/★ secret
+// stars on your own picks; the chef gate (stars, then "Lift the cloche?"); on the dishes 🍽️ "I'd eat this
+// tonight", 🔄 Rescue swap and "Earlier dishes"; and 👩‍🍳 "We cooked it!" on a banked recipe
+// (`cookedSheet.ts`). The secrets (the partner's star, their vote, their chaos pair in Blind) never reach
+// this file before their reveal: the server leaves them out, and `api.ts` drops them again if sent.
+//
+// GENERATION. A vote, a Bank or a retry is sent with the `generation` of the view its button was drawn
+// from (captured when drawn, never re-read when tapped), so a tap that lands after a rescue swap is
+// refused by the server instead of acting on a different dish with the same letter.
 
 import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
@@ -38,6 +50,8 @@ import {
   allPicks,
   CONCEPT_IDS,
   formatMinutes,
+  isChallengeId,
+  isStyleId,
   PICKS_PER_PLAYER,
   type Concept,
   type ConceptId,
@@ -46,24 +60,52 @@ import {
   type CookoutRole,
   type CookoutView,
   type FullRecipe,
+  type GenerationView,
   type IngredientSnap,
+  type PhotosResult,
+  type PickSnap,
   type Picture,
   type RecipeSlot,
 } from "./api";
+import { createCookedControls } from "./cookedSheet";
 import type { CookoutModel } from "./model";
+import type { StartPreset } from "./startSheet";
+
+export interface TableMove {
+  readonly moveId: string;
+  readonly turn: number;
+  readonly offer: number;
+}
 
 export interface CookoutGameApi {
   join(seq: number): Promise<CookoutOutcome>;
-  skip(seq: number, input: { readonly moveId: string; readonly turn: number; readonly offer: number }): Promise<CookoutOutcome>;
-  pick(
-    seq: number,
-    input: { readonly moveId: string; readonly turn: number; readonly offer: number; readonly ingredientId: string },
-  ): Promise<CookoutOutcome>;
+  skip(seq: number, input: TableMove): Promise<CookoutOutcome>;
+  pick(seq: number, input: TableMove & { readonly ingredientId: string }): Promise<CookoutOutcome>;
   abandon(seq: number): Promise<CookoutOutcome>;
-  retryConcepts(seq: number): Promise<CookoutOutcome>;
-  retryPictures(seq: number): Promise<CookoutOutcome>;
-  bank(seq: number, conceptId: ConceptId, moveId: string): Promise<CookoutOutcome>;
-  retryRecipe(seq: number, conceptId: ConceptId): Promise<CookoutOutcome>;
+  retryConcepts(seq: number, generation: number): Promise<CookoutOutcome>;
+  retryPictures(seq: number, generation: number): Promise<CookoutOutcome>;
+  bank(seq: number, conceptId: ConceptId, moveId: string, generation: number): Promise<CookoutOutcome>;
+  retryRecipe(seq: number, conceptId: ConceptId, generation: number): Promise<CookoutOutcome>;
+  // -- Twists --
+  lucky(seq: number, input: TableMove & { readonly optionIds: readonly [string, string] }): Promise<CookoutOutcome>;
+  chaos(seq: number, input: TableMove & { readonly optionIds: readonly [string, string] }): Promise<CookoutOutcome>;
+  veto(seq: number, input: TableMove & { readonly ingredientId: string }): Promise<CookoutOutcome>;
+  star(seq: number, ingredientId: string): Promise<CookoutOutcome>;
+  wildcard(seq: number, moveId: string, lift: boolean): Promise<CookoutOutcome>;
+  vote(seq: number, generation: number, conceptId: ConceptId): Promise<CookoutOutcome>;
+  proposeSwap(seq: number, moveId: string, ingredientId: string): Promise<CookoutOutcome>;
+  chooseSwap(seq: number, moveId: string, ingredientId: string): Promise<CookoutOutcome>;
+  cancelSwap(seq: number): Promise<CookoutOutcome>;
+  markCooked(seq: number, generation: number, conceptId: ConceptId, cooked: boolean): Promise<CookoutOutcome>;
+  rate(seq: number, generation: number, conceptId: ConceptId, rating: number | null): Promise<CookoutOutcome>;
+  linkPhoto(
+    seq: number,
+    generation: number,
+    conceptId: ConceptId,
+    messageSeq: number | null,
+    attachmentId: string | null,
+  ): Promise<CookoutOutcome>;
+  photos(seq: number): Promise<PhotosResult>;
 }
 
 export interface CookoutGameDeps {
@@ -79,8 +121,8 @@ export interface CookoutGameDeps {
   roundMessage(seq: number): Message | undefined;
   /** The other person's display name when it is known (for "Waiting for …" before they join). */
   partner(): string | null;
-  /** Opens the start sheet with `blind` preselected (the header's New). */
-  openStartSheet(blind: boolean): void;
+  /** Opens the start sheet preselected (the header's New: this round's setup; a dish's encore). */
+  openStartSheet(preset: StartPreset): void;
   /** Opens the Recipe book screen. */
   openBook(): void;
   openLightbox(src: string, alt: string): void;
@@ -95,6 +137,8 @@ export interface CookoutGameDeps {
     clearInterval(id: number): void;
   };
   newId?(): string;
+  /** Whether the viewer asked for less motion (the coin flip, the wheel and the lid then do not play). */
+  reducedMotion?(): boolean;
 }
 
 export interface CookoutGame {
@@ -102,7 +146,7 @@ export interface CookoutGame {
   readonly pane: HTMLElement;
   open(seq: number): void;
   /** Opens the round straight at one dish's full recipe (the Recipe book's tap). */
-  openRecipe(seq: number, conceptId: ConceptId): void;
+  openRecipe(seq: number, conceptId: ConceptId, generation?: number): void;
   offer(seq: number): void;
   close(): void;
   /** The open round, or null. */
@@ -222,12 +266,71 @@ export function formatElapsed(seconds: number): string {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+// -- Twist words ----------------------------------------------------------------------------------------------
+
+/** The style wheel's faces: decoration only (the server already chose the style). */
+const WHEEL_FACES: readonly string[] = ["🍺", "🌯", "🥂", "🥞", "🕯️", "🥡", "🧺", "🔥"];
+
+/** A starter's icon: 🧊 for the fridge raid's (always Turn 1), 🔁 for an encore's. */
+export function starterIcon(view: CookoutView, snap: PickSnap): string {
+  return view.setup.fridgeRaid && snap.turn === 1 ? "🧊" : "🔁";
+}
+
+/** The small badge a basket item carries for how it got in ("" for an ordinary pick). */
+export function viaBadge(view: CookoutView, snap: PickSnap): string {
+  switch (snap.via) {
+    case "seed":
+      return `${starterIcon(view, snap)} Starter`;
+    case "wildcard":
+      return "🛎️ Wildcard";
+    case "swap":
+      return "🔄 Swapped in";
+    case "lucky":
+      return "🪙";
+    case "chaos":
+      return "🌋";
+    default:
+      return "";
+  }
+}
+
+/** The chef gate's words for this viewer (09a §1.4: the pane shows who it is waiting for). */
+export function starsGateText(view: CookoutView, partner: string): string {
+  if (!view.gate.waitingFor.includes("stars")) return "";
+  if (view.you !== null && view.stars.mine === null) return "⭐ Star one of your five picks — the chef will make it a hero";
+  if (view.you !== null) return `Waiting for ${partner} to star one`;
+  return "Waiting for the secret stars";
+}
+
+/** The dinner vote's banner for this viewer (09a §1.7). */
+export function voteBannerText(view: CookoutView, partner: string): string {
+  const vote = view.vote;
+  if (vote === null) return "";
+  if (vote.revealed) {
+    if (vote.match !== null) {
+      const title = view.concepts.data?.find((c) => c.id === vote.match)?.title;
+      return title !== undefined ? `🎯 Tonight's dinner: ${title}!` : "🎯 Tonight's dinner is decided!";
+    }
+    return "🍽️ You'd each eat something different tonight — see the badges.";
+  }
+  if (view.you === null) return vote.partnerVoted ? "🍽️ The dinner vote is under way…" : "";
+  if (vote.you === null) {
+    return vote.partnerVoted
+      ? `🍽️ ${partner} has secretly chosen — which would you eat tonight?`
+      : "🍽️ Which would you actually eat tonight? Tap one — it stays secret until you've both chosen.";
+  }
+  return `🍽️ Your vote is in (secret). Waiting for ${partner}…`;
+}
+
 const MOVE_ATTEMPTS = 2;
 const MOVE_RETRY_MS = 800;
 const TOAST_MS = 4_000;
 const REVEAL_STAGGER_MS = 90;
+/** The coin flip and the lid lift (09a §9: ≈1.2 s). */
+const FX_MS = 1_200;
 
-type Busy = "move" | "join" | "abandon" | "concepts" | "pictures";
+type Busy = "move" | "join" | "abandon" | "concepts" | "pictures" | "star" | "wildcard" | "vote" | "swap";
+type TableKind = "skip" | "pick" | "lucky" | "chaos" | "veto";
 
 export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   const doc = deps.document;
@@ -299,18 +402,51 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   confirmEnd.append(confirmText, keepPlaying, endNow);
 
   const scroll = el("div", "wx-srv-ck-scroll");
+  /** The round's start-sheet twists, as chips (hidden for a twist-free round). */
+  const rules = el("div", "wx-srv-ck-rules");
+  rules.setAttribute("aria-label", "This round's twists");
+  rules.hidden = true;
   const progress = el("section", "wx-srv-ck-progress");
   progress.setAttribute("aria-label", "Basket progress");
   const stage = el("section", "wx-srv-ck-stage");
   const tray = el("section", "wx-srv-ck-tray");
-  scroll.append(progress, stage, tray);
+  scroll.append(rules, progress, stage, tray);
 
   const toast = el("div", "wx-srv-ck-toast");
   toast.setAttribute("role", "status");
   toast.hidden = true;
 
+  /** The coin flip and the cloche's lid: a moment over the pane, never in the way of a tap. */
+  const fx = el("div", "wx-srv-ck-fx");
+  fx.setAttribute("aria-hidden", "true");
+  fx.hidden = true;
+
   const strip = deps.itemChat.createStrip({ popupTitle: "Cookout chat" });
-  pane.append(bar, confirmEnd, scroll, toast, strip.element);
+  const cooked = createCookedControls({
+    document: doc,
+    api: {
+      markCooked: (seq, g, id, value) => deps.api.markCooked(seq, g, id, value),
+      rate: (seq, g, id, rating) => deps.api.rate(seq, g, id, rating),
+      linkPhoto: (seq, g, id, messageSeq, attachmentId) => deps.api.linkPhoto(seq, g, id, messageSeq, attachmentId),
+      photos: (seq) => deps.api.photos(seq),
+    },
+    run: (callFn) => guarded(callFn),
+    async readPhotos(callFn) {
+      try {
+        return await callFn();
+      } catch (error) {
+        if (error instanceof ServerLockedError) deps.hooks.lockNow("unauthorized");
+        return { ok: false, kind: "unavailable" };
+      }
+    },
+    refetch: (seq) => deps.model.refetch(seq),
+    toast: (text) => showToast(text),
+    redraw: () => redraw(),
+    openChat: (seq) => deps.itemChat.openPopup(seq, "Cookout chat"),
+    openLightbox: (src, alt) => deps.openLightbox(src, alt),
+    afterChange: () => deps.afterChange(),
+  });
+  pane.append(bar, confirmEnd, scroll, toast, fx, cooked.chooser, strip.element);
 
   // -- Per-round view state ------------------------------------------------------------------------------
 
@@ -330,7 +466,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   let trayOpen = true;
   let ending = false;
   /** A dish to open at once (the Recipe book's tap), consumed when its recipe is on screen. */
-  let focusConcept: { readonly seq: number; readonly id: ConceptId } | null = null;
+  let focusConcept: { readonly seq: number; readonly id: ConceptId; readonly generation: number | null } | null = null;
   /** The round was seen being picked here: its Blind reveal plays when it finishes. */
   let sawPicking = false;
   let revealPlayed = false;
@@ -340,9 +476,26 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   let toastTimer: number | null = null;
   let moveRetryTimer: number | null = null;
   /** The keys the sections were last drawn for. */
-  const drawn = { progress: "", stage: "", tray: "" };
+  const drawn = { progress: "", stage: "", tray: "", rules: "" };
   /** Each dish card's element and the key it was drawn for. */
   const conceptCards = new Map<ConceptId, { readonly element: HTMLElement; key: string }>();
+  /** The finished stage's sections (in order) and the keys they were drawn for. */
+  const sections = new Map<string, { readonly element: HTMLElement; key: string }>();
+  /** The twist move on its way (which button shows "…"). */
+  let tableBusy: { readonly kind: TableKind; readonly target: string | null } | null = null;
+  /** The rescue-swap chooser: open, and the basket item chosen to send back (awaiting confirm). */
+  let swapChoosing = false;
+  let swapTarget: string | null = null;
+  /** The swap replacement being chosen (the partner's tap). */
+  let swapChoice: string | null = null;
+  let earlierOpen = false;
+  /** Expanded recipes of earlier dish sets, `"<generation>:<concept>"`. */
+  const expandedEarlier = new Set<string>();
+  /** A dish card's ⋯ menu that is open, `"<generation>:<concept>"`. */
+  let dishMenu: string | null = null;
+  /** Rounds whose spun-style wheel already landed on this screen (kept until a lock). */
+  const wheelPlayed = new Set<number>();
+  let fxTimer: number | null = null;
 
   // -- Small helpers -------------------------------------------------------------------------------------
 
@@ -377,6 +530,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         return "No skips left — pick one of these two.";
       case "exhausted":
         return "The pantry has no fresh pair for this turn — pick one of these two.";
+      case "token_used":
+        return "You've already used that once this game.";
+      case "recipe_pending":
+        return "A recipe is still being written — wait for it to finish first.";
       case "bad_state":
         return "Somebody else got there first.";
       case "not_found":
@@ -402,23 +559,84 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   // -- Calls ---------------------------------------------------------------------------------------------
 
-  /** A skip or a pick: one move id for every attempt, so a resend after a lost answer is not a second move. */
-  async function move(kind: "skip" | "pick", ingredientId: string | null): Promise<void> {
+  function reduced(): boolean {
+    if (deps.reducedMotion !== undefined) return deps.reducedMotion();
+    try {
+      return typeof window !== "undefined" && typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Plays a short moment over the pane (the coin, the lid); replaced by the next one. */
+  function playFx(kind: "coin" | "lid", emoji: string, words: string): void {
+    if (fxTimer !== null) clock.clearTimeout(fxTimer);
+    const card = el("div", `wx-srv-ck-fx-card wx-srv-ck-fx-${kind}`);
+    const art = el("div", "wx-srv-ck-fx-art");
+    if (kind === "coin") {
+      art.append(el("span", "wx-srv-ck-fx-coin", "🪙"));
+    } else {
+      art.append(el("span", "wx-srv-ck-fx-lid", "🛎️"));
+    }
+    art.append(el("span", "wx-srv-ck-fx-food", emoji !== "" ? emoji : "🍽️"));
+    card.append(art, el("p", "wx-srv-ck-fx-words", words));
+    fx.replaceChildren(card);
+    fx.hidden = false;
+    fxTimer = clock.setTimeout(() => {
+      fxTimer = null;
+      fx.hidden = true;
+      fx.replaceChildren();
+    }, FX_MS);
+  }
+
+  function stopFx(): void {
+    if (fxTimer !== null) clock.clearTimeout(fxTimer);
+    fxTimer = null;
+    fx.hidden = true;
+    fx.replaceChildren();
+  }
+
+  /** What landed in the basket on `turn` (the coin's answer), from a fresh view. */
+  function choiceOf(view: CookoutView, turn: number): IngredientSnap | null {
+    const fromHistory = view.history.find((t) => t.turn === turn)?.choice;
+    if (fromHistory !== undefined && fromHistory !== null) return fromHistory;
+    const mine = view.you === null ? null : playerOf(view, view.you.slot).picks;
+    return mine?.find((p) => p.turn === turn) ?? null;
+  }
+
+  /** A move on the table (skip, pick, lucky dip, chaos shelf, sweep): one move id for every attempt, so a
+   * resend after a lost answer is not a second move. Each names the table it saw (turn, offer, and the pair
+   * or the target), so a table that changed first makes it stale rather than acting on unseen options. */
+  async function move(kind: TableKind, ingredientId: string | null): Promise<void> {
     const seq = drawnSeq;
     const view = seq === null ? undefined : deps.model.view(seq);
     const current = view?.current ?? null;
-    if (seq === null || current === null || current.offerIndex === null || busy.has("move")) return;
+    if (seq === null || current === null || current.offerIndex === null || current.options === null || busy.has("move")) return;
     const started = generation;
     const moveId = newId();
     const base = { moveId, turn: current.turn, offer: current.offerIndex };
+    const optionIds: readonly [string, string] = [current.options[0].id, current.options[1].id];
     busy.add("move");
-    pickingId = ingredientId;
+    tableBusy = { kind, target: ingredientId };
+    pickingId = kind === "pick" ? ingredientId : null;
     redraw();
+    const send = (): Promise<CookoutOutcome> => {
+      switch (kind) {
+        case "pick":
+          return deps.api.pick(seq, { ...base, ingredientId: ingredientId ?? "" });
+        case "lucky":
+          return deps.api.lucky(seq, { ...base, optionIds });
+        case "chaos":
+          return deps.api.chaos(seq, { ...base, optionIds });
+        case "veto":
+          return deps.api.veto(seq, { ...base, ingredientId: ingredientId ?? "" });
+        default:
+          return deps.api.skip(seq, base);
+      }
+    };
     let outcome: CookoutOutcome = { ok: false, kind: "unavailable" };
     for (let attempt = 0; attempt < MOVE_ATTEMPTS; attempt += 1) {
-      outcome = await guarded(() =>
-        kind === "pick" && ingredientId !== null ? deps.api.pick(seq, { ...base, ingredientId }) : deps.api.skip(seq, base),
-      );
+      outcome = await guarded(send);
       if (started !== generation) return;
       if (outcome.ok || outcome.kind !== "unavailable" || attempt === MOVE_ATTEMPTS - 1) break;
       await new Promise<void>((resolve) => {
@@ -430,17 +648,92 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       if (started !== generation) return;
     }
     busy.delete("move");
+    tableBusy = null;
     pickingId = null;
     if (outcome.ok) {
       if (kind === "pick") {
-        const chosen = current.options?.find((o) => o.id === ingredientId);
+        const chosen = current.options.find((o) => o.id === ingredientId);
         if (chosen !== undefined) showToast(`${chosen.name} is in the basket ✓`);
+      } else if (kind === "lucky") {
+        // The server already chose; the coin only shows its answer.
+        const chosen = choiceOf(outcome.view, current.turn);
+        const words = chosen === null ? "The coin has chosen!" : `The coin chose ${chosen.name}`;
+        if (reduced()) showToast(`🪙 ${words} ✓`);
+        else playFx("coin", chosen?.emoji ?? "", words);
+      } else if (kind === "veto") {
+        const swept = current.options.find((o) => o.id === ingredientId);
+        if (swept !== undefined) showToast(`🧹 ${swept.name} swept off the table`);
+      } else if (kind === "chaos") {
+        showToast("🌋 Two from the chaos shelf — dare you?");
       }
     } else {
       deps.model.refetch(seq);
       showToast(failureText(outcome.kind));
     }
     redraw();
+  }
+
+  /** One twist call that answers with a view (star, cloche, vote, swap): `kind` shows as busy meanwhile. */
+  async function twist(kind: Busy, callFn: (seq: number) => Promise<CookoutOutcome>, failed: string): Promise<CookoutOutcome | null> {
+    const seq = drawnSeq;
+    if (seq === null || busy.has(kind)) return null;
+    const started = generation;
+    busy.add(kind);
+    redraw();
+    const outcome = await guarded(() => callFn(seq));
+    if (started !== generation) return null;
+    busy.delete(kind);
+    if (!outcome.ok) {
+      deps.model.refetch(seq);
+      showToast(outcome.kind === "unavailable" ? failed : failureText(outcome.kind));
+    }
+    redraw();
+    return outcome;
+  }
+
+  function doStar(ingredientId: string): void {
+    void twist("star", (seq) => deps.api.star(seq, ingredientId), "Couldn't save your star — try again.");
+  }
+
+  async function doWildcard(lift: boolean): Promise<void> {
+    const moveId = newId();
+    const outcome = await twist("wildcard", (seq) => deps.api.wildcard(seq, moveId, lift), "Couldn't reach the kitchen — try again.");
+    if (outcome === null) return;
+    if (!outcome.ok && outcome.kind === "exhausted") {
+      showToast("The pantry has no surprise left under the lid — “No thanks” starts the cooking.");
+      return;
+    }
+    if (outcome.ok && lift && outcome.view.wildcard.ingredient !== null) {
+      const snap = outcome.view.wildcard.ingredient;
+      if (reduced()) showToast(`🛎️ Under the lid: ${snap.name}!`);
+      else playFx("lid", snap.emoji, `Under the lid: ${snap.name}!`);
+    }
+  }
+
+  function doVote(viewGeneration: number, conceptId: ConceptId): void {
+    void twist("vote", (seq) => deps.api.vote(seq, viewGeneration, conceptId), "Couldn't save your vote — try again.");
+  }
+
+  async function doProposeSwap(ingredientId: string): Promise<void> {
+    const moveId = newId();
+    const outcome = await twist("swap", (seq) => deps.api.proposeSwap(seq, moveId, ingredientId), "Couldn't send that back — try again.");
+    if (outcome?.ok === true) {
+      swapChoosing = false;
+      swapTarget = null;
+      redraw();
+    }
+  }
+
+  async function doChooseSwap(ingredientId: string): Promise<void> {
+    const moveId = newId();
+    swapChoice = ingredientId;
+    await twist("swap", (seq) => deps.api.chooseSwap(seq, moveId, ingredientId), "Couldn't swap that in — try again.");
+    swapChoice = null;
+    redraw();
+  }
+
+  function doCancelSwap(): void {
+    void twist("swap", (seq) => deps.api.cancelSwap(seq), "Couldn't cancel the swap — try again.");
   }
 
   async function simple(kind: Busy, callFn: (seq: number) => Promise<CookoutOutcome>, failed: string): Promise<void> {
@@ -459,7 +752,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     redraw();
   }
 
-  async function doBank(conceptId: ConceptId): Promise<void> {
+  async function doBank(conceptId: ConceptId, viewGeneration: number): Promise<void> {
     const seq = drawnSeq;
     if (seq === null || banking.has(conceptId)) return;
     const started = generation;
@@ -468,7 +761,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const moveId = newId();
     let outcome: CookoutOutcome = { ok: false, kind: "unavailable" };
     for (let attempt = 0; attempt < MOVE_ATTEMPTS; attempt += 1) {
-      outcome = await guarded(() => deps.api.bank(seq, conceptId, moveId));
+      outcome = await guarded(() => deps.api.bank(seq, conceptId, moveId, viewGeneration));
       if (started !== generation) return;
       if (outcome.ok || outcome.kind !== "unavailable") break;
     }
@@ -480,13 +773,13 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     redraw();
   }
 
-  async function doRetryRecipe(conceptId: ConceptId): Promise<void> {
+  async function doRetryRecipe(conceptId: ConceptId, viewGeneration: number): Promise<void> {
     const seq = drawnSeq;
     if (seq === null || recipeRetrying.has(conceptId)) return;
     const started = generation;
     recipeRetrying.add(conceptId);
     redraw();
-    const outcome = await guarded(() => deps.api.retryRecipe(seq, conceptId));
+    const outcome = await guarded(() => deps.api.retryRecipe(seq, conceptId, viewGeneration));
     if (started !== generation) return;
     recipeRetrying.delete(conceptId);
     if (!outcome.ok) {
@@ -514,10 +807,42 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     await simple("abandon", (seq) => deps.api.abandon(seq), "Couldn't end the game — try again.");
   }
 
+  /** "New": the start sheet comes back preselected with this round's setup (09a §1.1). */
   function startNew(): void {
     const seq = drawnSeq;
     const view = seq === null ? undefined : deps.model.view(seq);
-    deps.openStartSheet(view?.blind ?? false);
+    if (view === undefined) {
+      deps.openStartSheet({});
+      return;
+    }
+    const setup = view.setup;
+    const fridge = setup.fridgeRaid ? (view.starters.find((s) => s.turn === 1) ?? null) : null;
+    const styleId = setup.style?.id;
+    const challengeId = setup.challenge?.id;
+    deps.openStartSheet({
+      blind: view.blind,
+      style: setup.styleSpun ? "spin" : isStyleId(styleId) ? styleId : null,
+      challenge: isChallengeId(challengeId) ? challengeId : null,
+      wildcard: setup.wildcard,
+      stars: setup.stars,
+      fridge: fridge === null ? null : { id: fridge.id, name: fridge.name, category: fridge.category, emoji: fridge.emoji, blurb: fridge.blurb },
+    });
+  }
+
+  /** A dish's "Encore with the leftovers": a new round seeded with what this dish left out (09a §1.3). */
+  function startEncore(view: CookoutView, dishGeneration: number, concept: Concept): void {
+    dishMenu = null;
+    deps.openStartSheet({
+      blind: view.blind,
+      encore: {
+        fromSeq: view.seq,
+        generation: dishGeneration,
+        conceptId: concept.id,
+        kind: "leftovers",
+        title: concept.title,
+        candidates: concept.omitted.map((o) => o.ingredient),
+      },
+    });
   }
 
   // -- Drawing: the progress pills and the turn banner -----------------------------------------------------
@@ -529,6 +854,16 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return slot === 2 ? "Waiting to join" : "Player 1";
   }
 
+  /** The public starters on `slot`'s turns (odd turns are Slot 1's). */
+  function startersOf(view: CookoutView, slot: 1 | 2): PickSnap[] {
+    return view.starters.filter((s) => s.turn !== null && (s.turn % 2 === 1 ? 1 : 2) === slot);
+  }
+
+  /** A star this viewer may see: their own always, the partner's only once revealed. */
+  function isStarred(view: CookoutView, id: string): boolean {
+    return view.stars.enabled && (view.stars.mine === id || (view.stars.revealed && view.stars.partner === id));
+  }
+
   function pillsRow(view: CookoutView, slot: 1 | 2): HTMLElement {
     const player = playerOf(view, slot);
     const row = el("div", "wx-srv-ck-pills");
@@ -537,13 +872,20 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     row.classList.toggle("wx-srv-ck-pills-active", active);
     row.append(el("span", "wx-srv-ck-pills-name", slotLabel(view, slot)));
     const dots = el("span", "wx-srv-ck-pills-dots");
+    // A hidden partner's public starters still show (they are first in pick order).
+    const visible: readonly PickSnap[] = player.picks ?? startersOf(view, slot);
     for (let i = 0; i < PICKS_PER_PLAYER; i += 1) {
       const pill = el("span", "wx-srv-ck-pill");
-      const pick = player.picks?.[i];
+      const pick = visible[i];
       if (pick !== undefined) {
         pill.classList.add("wx-srv-ck-pill-full");
         pill.textContent = pick.emoji !== "" ? pick.emoji : "•";
-        pill.title = pick.name;
+        pill.title = pick.via === "seed" ? `Starter: ${pick.name}` : pick.name;
+        pill.classList.toggle("wx-srv-ck-pill-starter", pick.via === "seed");
+        if (isStarred(view, pick.id)) {
+          pill.classList.add("wx-srv-ck-pill-star");
+          pill.append(emojiSpan("wx-srv-ck-pill-star-mark", "★"));
+        }
       } else if (i < player.pickCount) {
         pill.classList.add("wx-srv-ck-pill-secret");
         pill.textContent = "🔒";
@@ -561,7 +903,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const showJoin = view.state === "picking" && view.players[1].name === null && view.you?.slot !== 1;
     const key = JSON.stringify([
       view.state,
-      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => x.id) ?? null]),
+      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via]) ?? null]),
+      view.stars,
       view.you?.slot ?? null,
       view.current === null ? null : [view.current.turn, view.current.player, view.current.offerIndex, view.current.waitingForJoin, view.current.role],
       showJoin,
@@ -594,23 +937,84 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   // -- Drawing: the stage (drafting) ----------------------------------------------------------------------
 
-  function ingredientCard(snap: IngredientSnap, pickable: boolean): HTMLElement {
-    const card = el(pickable ? "button" : "div", "wx-srv-ck-opt");
+  interface CardAction {
+    readonly onPick: () => void;
+    readonly cta: string;
+    readonly chosen: boolean;
+    readonly disabled: boolean;
+  }
+
+  /** One tactile ingredient card: a button when it can be chosen (`action`), else a plain card. */
+  function ingredientCard(snap: IngredientSnap, action: CardAction | null, exotic = false): HTMLElement {
+    const card = el(action !== null ? "button" : "div", "wx-srv-ck-opt");
     card.dataset["ingredient"] = snap.id;
+    card.classList.toggle("wx-srv-ck-opt-exotic", exotic);
     card.append(emojiSpan("wx-srv-ck-opt-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"));
     card.append(el("span", "wx-srv-ck-opt-cat", categoryName(snap.category)));
     card.append(el("span", "wx-srv-ck-opt-name", snap.name));
     if (snap.blurb !== "") card.append(el("span", "wx-srv-ck-opt-blurb", snap.blurb));
-    if (card instanceof HTMLButtonElement) {
+    if (card instanceof HTMLButtonElement && action !== null) {
       card.type = "button";
       card.setAttribute("data-srv-gesture-boundary", "");
-      const cta = el("span", "wx-srv-ck-opt-cta", pickingId === snap.id ? "Adding…" : "Pick this");
-      card.append(cta);
-      card.disabled = busy.has("move");
-      card.classList.toggle("wx-srv-ck-opt-chosen", pickingId === snap.id);
-      card.addEventListener("click", () => void move("pick", snap.id));
+      card.append(el("span", "wx-srv-ck-opt-cta", action.cta));
+      card.disabled = action.disabled;
+      card.classList.toggle("wx-srv-ck-opt-chosen", action.chosen);
+      card.addEventListener("click", action.onPick);
     }
     return card;
+  }
+
+  function pickAction(snap: IngredientSnap): CardAction {
+    return {
+      onPick: () => void move("pick", snap.id),
+      cta: pickingId === snap.id ? "Adding…" : "Pick this",
+      chosen: pickingId === snap.id,
+      disabled: busy.has("move"),
+    };
+  }
+
+  /** The waiting partner's view of one option in Open mode, with 🧹 Sweep it when their sweep is unused. */
+  function watchedCard(view: CookoutView, snap: IngredientSnap, exotic: boolean): HTMLElement {
+    const current = view.current;
+    const wrap = el("div", "wx-srv-ck-optwrap");
+    wrap.append(ingredientCard(snap, null, exotic));
+    // `canVeto` is null when the server has no sweep for this viewer (Blind, a non-player, an older server).
+    if (current === null || current.canVeto === null || view.you === null || view.you.slot === current.player) return wrap;
+    const sweeping = tableBusy?.kind === "veto" && tableBusy.target === snap.id;
+    const used = view.you.vetoUsed;
+    const sweep = button(
+      "wx-srv-ck-sweep",
+      sweeping ? "Sweeping…" : used ? "🧹 Sweep used" : "🧹 Sweep it (once)",
+      () => void move("veto", snap.id),
+      `Sweep ${snap.name} off the table`,
+    );
+    sweep.disabled = !current.canVeto || busy.has("move");
+    wrap.append(sweep);
+    return wrap;
+  }
+
+  /** The active player's twist buttons beside the skip (09a §9): only those the server offers. */
+  function tableTwists(current: NonNullable<CookoutView["current"]>, view: CookoutView): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    if (current.canLucky !== null) {
+      const dipping = tableBusy?.kind === "lucky";
+      const lucky = button("wx-srv-ck-lucky", dipping ? "Flipping…" : "🪙 Lucky dip", () => void move("lucky", null), "Lucky dip: let a coin pick one of the two");
+      lucky.disabled = !current.canLucky || busy.has("move");
+      out.push(lucky);
+    }
+    if (current.canChaos !== null) {
+      const raiding = tableBusy?.kind === "chaos";
+      const used = view.you?.chaosUsed === true;
+      const chaos = button(
+        "wx-srv-ck-chaos",
+        raiding ? "Raiding the shelf…" : used ? "🌋 Chaos shelf used" : "🌋 Chaos shelf (once)",
+        () => void move("chaos", null),
+        "Chaos shelf: swap these two for two weird and exotic ones (once a game)",
+      );
+      chaos.disabled = !current.canChaos || busy.has("move");
+      out.push(chaos);
+    }
+    return out;
   }
 
   function drawDraft(view: CookoutView): HTMLElement[] {
@@ -638,26 +1042,47 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const out: HTMLElement[] = [];
     const role = roleLine(current.role);
     if (role !== "") out.push(el("p", "wx-srv-ck-role", role));
+    const partnerName = mine ? nameOf(view, current.player === 1 ? 2 : 1, partnerFallback() ?? "your partner") : "";
+    if (mine && current.vetoed !== null) {
+      const swept = el("p", "wx-srv-ck-swept");
+      swept.append(emojiSpan("wx-srv-ck-swept-icon", "🧹"), doc.createTextNode(`${partnerName} swept `));
+      swept.append(el("em", "wx-srv-ck-swept-name", current.vetoed.name), doc.createTextNode(" off your table"));
+      out.push(swept);
+    }
+    const exotic = current.chaosPair === true;
+    if (exotic) {
+      out.push(el("p", "wx-srv-ck-chaos-note", mine ? "🌋 Straight from the chaos shelf — dare you?" : "🌋 A pair from the chaos shelf!"));
+    }
     if (!mine) {
       const who = nameOf(view, current.player, "your partner");
       out.push(el("p", "wx-srv-ck-watch", `${who} is choosing between:`));
     }
     const pair = el("div", "wx-srv-ck-pair");
     pair.classList.toggle("wx-srv-ck-pair-watch", !mine);
+    pair.classList.toggle("wx-srv-ck-pair-chaos", exotic);
     pair.dataset["offer"] = String(current.offerIndex ?? 0);
     const [a, b] = current.options;
-    pair.append(ingredientCard(a, mine), el("span", "wx-srv-ck-or", "or"), ingredientCard(b, mine));
+    const side = (snap: IngredientSnap): HTMLElement => (mine ? ingredientCard(snap, pickAction(snap), exotic) : watchedCard(view, snap, exotic));
+    pair.append(side(a), el("span", "wx-srv-ck-or", "or"), side(b));
     out.push(pair);
     if (mine) {
+      const row = el("div", "wx-srv-ck-actions");
       const offer = current.offerIndex ?? 0;
       if (offer >= 2 || current.skipsRemaining === 0) {
-        out.push(el("p", "wx-srv-ck-final", skipLabel(2)));
+        row.append(el("p", "wx-srv-ck-final", skipLabel(2)));
       } else {
         const skip = button("wx-srv-ck-skip", skipLabel(offer), () => void move("skip", null));
         skip.disabled = busy.has("move");
-        if (busy.has("move") && pickingId === null) skip.textContent = "Dealing…";
-        out.push(skip);
+        if (tableBusy?.kind === "skip") skip.textContent = "Dealing…";
+        row.append(skip);
       }
+      const twists = tableTwists(current, view);
+      if (twists.length > 0) {
+        const extra = el("div", "wx-srv-ck-twistbar");
+        extra.append(...twists);
+        row.append(extra);
+      }
+      out.push(row);
     }
     return out;
   }
@@ -671,6 +1096,55 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return chip;
   }
 
+  /** A basket chip with how it got in (starter, wildcard, swap) and its star: a ☆/★ toggle on the viewer's
+   * own picks while stars can still change, a plain ★ otherwise. */
+  function pickChip(view: CookoutView, snap: PickSnap, className: string, mine: boolean): HTMLElement {
+    const chip = basketChip(snap, className);
+    chip.dataset["ingredient"] = snap.id;
+    const badge = snap.via === "seed" || snap.via === "wildcard" || snap.via === "swap" ? viaBadge(view, snap) : "";
+    if (badge !== "") {
+      chip.classList.add(`wx-srv-ck-chip-${snap.via}`);
+      chip.append(el("span", "wx-srv-ck-chip-badge", badge));
+    }
+    const stars = view.stars;
+    const starred = isStarred(view, snap.id);
+    chip.classList.toggle("wx-srv-ck-chip-starred", starred);
+    // The wildcard is nobody's pick and cannot be starred; a swapped-in item is not one of the five.
+    const starrable = mine && stars.enabled && view.you !== null && snap.via !== "wildcard" && snap.via !== "swap";
+    if (starrable) {
+      const on = stars.mine === snap.id;
+      const toggle = button(
+        "wx-srv-ck-star",
+        on ? "★" : "☆",
+        () => {
+          if (!on) doStar(snap.id);
+        },
+        on ? `${snap.name} is your secret star` : `Star ${snap.name}`,
+      );
+      toggle.setAttribute("aria-pressed", on ? "true" : "false");
+      toggle.classList.toggle("wx-srv-ck-star-on", on);
+      // Revealed is locked (09a §1.5): a secret commitment cannot change once shown.
+      toggle.disabled = stars.revealed || busy.has("star") || view.state === "abandoned";
+      chip.append(toggle);
+    } else if (starred) {
+      chip.append(el("span", "wx-srv-ck-star-mark", "★"));
+    }
+    return chip;
+  }
+
+  function starHint(view: CookoutView): HTMLElement | null {
+    if (!view.stars.enabled || view.you === null || view.stars.revealed || view.state === "abandoned") return null;
+    const own = playerOf(view, view.you.slot).picks ?? [];
+    if (own.length === 0) return null;
+    return el(
+      "p",
+      "wx-srv-ck-star-hint",
+      view.stars.mine === null
+        ? "⭐ Tap ☆ to secretly star one of your picks — the chef will make it a hero."
+        : "⭐ Your star is secret until you've both chosen. Tap another ☆ to change it.",
+    );
+  }
+
   function drawTray(view: CookoutView): void {
     if (view.state === "finished") {
       tray.hidden = true;
@@ -679,9 +1153,13 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     tray.hidden = false;
     const key = JSON.stringify([
-      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => x.id) ?? null]),
+      view.state,
+      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via]) ?? null]),
       view.you?.slot ?? null,
       view.staples.map((s) => s.id),
+      view.stars,
+      view.setup.fridgeRaid,
+      busy.has("star"),
       trayOpen,
     ]);
     if (drawn.tray === key) return;
@@ -704,20 +1182,25 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       row.append(el("span", "wx-srv-ck-tray-who", slotLabel(view, slot)));
       const chips = el("div", "wx-srv-ck-tray-chips");
       if (player.picks !== null) {
-        for (const pick of player.picks) chips.append(basketChip(pick));
+        for (const pick of player.picks) chips.append(pickChip(view, pick, "wx-srv-ck-chip-ing", view.you?.slot === slot));
       } else {
-        for (let i = 0; i < player.pickCount; i += 1) {
+        // Starters are public in both modes: a Blind partner's starter shows, their drafted picks do not.
+        const starters = startersOf(view, slot);
+        for (const pick of starters) chips.append(pickChip(view, pick, "wx-srv-ck-chip-ing", false));
+        for (let i = starters.length; i < player.pickCount; i += 1) {
           const secret = el("span", "wx-srv-ck-chip-secret");
           secret.append(emojiSpan("wx-srv-ck-chip-emoji", "🔒"), el("span", "wx-srv-ck-chip-name", "Secret pick"));
           chips.append(secret);
         }
       }
-      const known = player.picks?.length ?? player.pickCount;
+      const known = player.picks?.length ?? Math.max(player.pickCount, startersOf(view, slot).length);
       const left = PICKS_PER_PLAYER - known;
       if (left > 0) chips.append(el("span", "wx-srv-ck-chip-empty", `${left} to go`));
       row.append(chips);
       body.append(row);
     }
+    const hint = starHint(view);
+    if (hint !== null) body.append(hint);
     if (view.staples.length > 0) {
       body.append(el("p", "wx-srv-ck-staples", `Always in the cupboard: ${view.staples.map((s) => s.name).join(", ")}`));
     }
@@ -731,8 +1214,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const head = el("p", "wx-srv-ck-reveal-title");
     head.append(emojiSpan("wx-srv-ck-reveal-icon", "🧺"), doc.createTextNode(view.blind ? "The big reveal — your 10 ingredients" : "Your 10 ingredients"));
     const chips = el("div", "wx-srv-ck-reveal-chips");
+    const mine = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
     allPicks(view).forEach((snap, index) => {
-      const chip = basketChip(snap, "wx-srv-ck-chip-ing wx-srv-ck-reveal-chip");
+      const chip = pickChip(view, snap, "wx-srv-ck-chip-ing wx-srv-ck-reveal-chip", mine.has(snap.id));
       if (animate) {
         chip.classList.add("wx-srv-ck-flip");
         chip.style.animationDelay = `${index * REVEAL_STAGGER_MS}ms`;
@@ -740,20 +1224,180 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       chips.append(chip);
     });
     banner.append(head, chips);
+    if (view.stars.enabled && view.stars.revealed && (view.stars.mine !== null || view.stars.partner !== null)) {
+      banner.append(el("p", "wx-srv-ck-stars-revealed", "★ The stars are out — the chef makes them the heroes of every dish."));
+    }
     if (view.staples.length > 0) {
       banner.append(el("p", "wx-srv-ck-staples", `Plus cupboard staples: ${view.staples.map((s) => s.name).join(", ")}`));
     }
     return banner;
   }
 
+  function partnerName(view: CookoutView): string {
+    const other: 1 | 2 = view.you?.slot === 2 ? 1 : 2;
+    return playerOf(view, other).name ?? partnerFallback() ?? "your partner";
+  }
+
+  /** The chef gate (09a §1.4): the stars still to choose and the cloche to answer, before cooking. */
+  function gateSection(view: CookoutView): HTMLElement[] {
+    const out: HTMLElement[] = [];
+    const waiting = view.gate.waitingFor;
+    if (view.state !== "finished" || waiting.length === 0) return out;
+    if (waiting.includes("stars")) {
+      const box = el("div", "wx-srv-ck-gate wx-srv-ck-gate-stars");
+      box.setAttribute("role", "status");
+      box.append(emojiSpan("wx-srv-ck-gate-icon", "⭐"), el("p", "wx-srv-ck-gate-text", starsGateText(view, partnerName(view)).replace(/^⭐ /, "")));
+      if (view.you !== null && view.stars.mine === null) {
+        box.append(el("p", "wx-srv-ck-gate-sub", "Tap ☆ on one of your picks above."));
+      }
+      out.push(box);
+    }
+    if (waiting.includes("wildcard") && view.wildcard.state === "offered") {
+      const card = el("div", "wx-srv-ck-gate wx-srv-ck-cloche-gate");
+      card.append(emojiSpan("wx-srv-ck-gate-icon wx-srv-ck-cloche-bell", "🛎️"));
+      const words = el("div", "wx-srv-ck-gate-words");
+      words.append(el("p", "wx-srv-ck-gate-text", "Lift the cloche? One surprise 11th ingredient"));
+      words.append(el("p", "wx-srv-ck-gate-sub", "Neither of you chose it — the chef has to use it."));
+      card.append(words);
+      if (view.you !== null) {
+        const row = el("div", "wx-srv-ck-gate-actions");
+        const lifting = busy.has("wildcard");
+        const lift = button("wx-srv-ck-lift", lifting ? "Lifting…" : "Lift it!", () => void doWildcard(true));
+        const decline = button("wx-srv-ck-decline", "No thanks — start cooking", () => void doWildcard(false));
+        lift.disabled = lifting;
+        decline.disabled = lifting;
+        row.append(lift, decline);
+        card.append(row);
+      }
+      out.push(card);
+    }
+    return out;
+  }
+
+  /** The rescue swap (09a §1.6): the button, the basket chooser, the proposal and its answer, the result. */
+  function swapSection(view: CookoutView): HTMLElement[] {
+    const swap = view.swap;
+    const out: HTMLElement[] = [];
+    const working = busy.has("swap");
+    if (swap.state === "done") {
+      if (swap.out !== null && swap.in !== null) {
+        const done = el("p", "wx-srv-ck-swapped");
+        done.append(emojiSpan("wx-srv-ck-swapped-icon", "🔄"), doc.createTextNode("Swapped "));
+        done.append(el("strong", "", swap.out.name), doc.createTextNode(" → "), el("strong", "", swap.in.name));
+        out.push(done);
+      }
+      return out;
+    }
+    if (swap.state === "proposed") {
+      const box = el("div", "wx-srv-ck-swap");
+      box.dataset["swap"] = "proposed";
+      const proposer = swap.by === null ? "Somebody" : swap.by === view.you?.slot ? "You" : (playerOf(view, swap.by).name ?? "Your partner");
+      const outName = swap.out?.name ?? "an ingredient";
+      if (view.you !== null && swap.by === view.you.slot) {
+        box.append(el("p", "wx-srv-ck-swap-text", `You're sending back ${outName}. Waiting for ${partnerName(view)} to choose a replacement…`));
+        const cancel = button("wx-srv-ck-swap-cancel", working ? "Cancelling…" : "Cancel", () => doCancelSwap(), "Cancel the swap");
+        cancel.disabled = working;
+        box.append(cancel);
+      } else if (view.you !== null) {
+        const words = el("p", "wx-srv-ck-swap-text");
+        words.append(doc.createTextNode(`${proposer} wants to send back `), el("em", "", outName), doc.createTextNode(". Choose a replacement:"));
+        box.append(words);
+        if (swap.pair !== null) {
+          const pair = el("div", "wx-srv-ck-pair wx-srv-ck-swap-pair");
+          const [a, b] = swap.pair;
+          const option = (snap: IngredientSnap): HTMLElement =>
+            ingredientCard(snap, {
+              onPick: () => void doChooseSwap(snap.id),
+              cta: swapChoice === snap.id ? "Swapping…" : "Swap this in",
+              chosen: swapChoice === snap.id,
+              disabled: working,
+            });
+          pair.append(option(a), el("span", "wx-srv-ck-or", "or"), option(b));
+          box.append(pair);
+        }
+        const keep = button("wx-srv-ck-swap-keep", "Keep these dishes", () => doCancelSwap());
+        keep.disabled = working;
+        box.append(keep);
+      } else {
+        box.append(el("p", "wx-srv-ck-swap-text", `${proposer} is swapping out ${outName}…`));
+      }
+      out.push(box);
+      return out;
+    }
+    if (!swap.available || view.you === null) return out;
+    if (!swapChoosing) {
+      out.push(
+        button("wx-srv-ck-rescue", "🔄 Rescue swap (once)", () => {
+          swapChoosing = true;
+          swapTarget = null;
+          redraw();
+          deps.afterChange();
+        }, "Rescue swap: send one ingredient back and get three new dishes"),
+      );
+      return out;
+    }
+    const box = el("div", "wx-srv-ck-swap");
+    box.dataset["swap"] = "choosing";
+    box.append(el("p", "wx-srv-ck-swap-text", "Which ingredient do you regret? Send one back — your partner picks its replacement and the chef makes three new dishes."));
+    const list = el("div", "wx-srv-ck-swap-basket");
+    for (const snap of allPicks(view)) {
+      const starred = view.stars.mine === snap.id || view.stars.partner === snap.id;
+      const item = button("wx-srv-ck-swap-item", "", () => {
+        swapTarget = snap.id;
+        redraw();
+      }, starred ? `${snap.name} is a star and can't be swapped` : `Send back ${snap.name}`);
+      item.append(emojiSpan("wx-srv-ck-chip-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"), el("span", "wx-srv-ck-chip-name", snap.name));
+      if (starred) item.append(el("span", "wx-srv-ck-star-mark", "★"));
+      item.disabled = starred || working;
+      item.dataset["ingredient"] = snap.id;
+      item.setAttribute("aria-pressed", swapTarget === snap.id ? "true" : "false");
+      item.classList.toggle("wx-srv-ck-swap-item-on", swapTarget === snap.id);
+      list.append(item);
+    }
+    box.append(list);
+    const target = allPicks(view).find((s) => s.id === swapTarget);
+    const row = el("div", "wx-srv-ck-swap-actions");
+    const never = button("wx-srv-ck-swap-cancel", "Never mind", () => {
+      swapChoosing = false;
+      swapTarget = null;
+      redraw();
+    });
+    const send = button(
+      "wx-srv-ck-swap-send",
+      working ? "Sending…" : target === undefined ? "Choose one to send back" : `Send back ${target.name}`,
+      () => {
+        if (target !== undefined) void doProposeSwap(target.id);
+      },
+    );
+    send.disabled = target === undefined || working;
+    never.disabled = working;
+    row.append(never, send);
+    box.append(row);
+    out.push(box);
+    return out;
+  }
+
+  function voteSection(view: CookoutView): HTMLElement[] {
+    const words = voteBannerText(view, partnerName(view));
+    if (words === "") return [];
+    const banner = el("p", "wx-srv-ck-vote-banner", words);
+    banner.setAttribute("role", "status");
+    banner.classList.toggle("wx-srv-ck-vote-match", view.vote?.match !== null && view.vote?.match !== undefined);
+    return [banner];
+  }
+
   function chefStatus(view: CookoutView): HTMLElement | null {
     const state = view.concepts.state;
     if (state === "ready") return null;
+    // Behind the gate the chef has not started: the gate says what it waits for.
+    if (state === "none" && view.gate.waitingFor.length > 0) return null;
     const box = el("div", "wx-srv-ck-chef");
     if (state === "pending" || state === "none") {
       box.classList.add("wx-srv-ck-chef-working");
       box.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
-      box.append(el("p", "wx-srv-ck-chef-text", "Chef is inventing 3 dishes from your 10 ingredients…"));
+      const count = allPicks(view).length;
+      const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
+      box.append(el("p", "wx-srv-ck-chef-text", `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`));
       const elapsed = el("span", "wx-srv-ck-elapsed", formatElapsed(chefSince === null ? 0 : (clock.now() - chefSince) / 1000));
       elapsed.setAttribute("aria-hidden", "true");
       box.append(elapsed);
@@ -768,8 +1412,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         state === "unavailable" ? "The chef isn't available right now." : "The chef couldn't finish those dishes.",
       ),
     );
+    const viewGeneration = view.generation;
     const retry = button("wx-srv-ck-retry", busy.has("concepts") ? "Trying…" : "Try again", () =>
-      void simple("concepts", (seq) => deps.api.retryConcepts(seq), "Couldn't restart the chef — try again."),
+      void simple("concepts", (seq) => deps.api.retryConcepts(seq, viewGeneration), "Couldn't restart the chef — try again."),
     );
     retry.disabled = busy.has("concepts");
     box.append(retry);
@@ -785,7 +1430,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return names;
   }
 
-  function pictureHeader(view: CookoutView, concept: Concept, picture: Picture | null): HTMLElement {
+  /** `archived`: a dish of an earlier set — its missing picture cannot be retried (09a §1.6). */
+  function pictureHeader(view: CookoutView, concept: Concept, picture: Picture | null, archived = false): HTMLElement {
     const header = el("div", "wx-srv-ck-dish-pic");
     if (picture !== null) {
       const open = button("wx-srv-ck-dish-photo", "", () => deps.openLightbox(picture.fullUrl, concept.title), `See a bigger picture of ${concept.title}`);
@@ -807,12 +1453,14 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     header.classList.add("wx-srv-ck-dish-pic-empty");
     header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+    if (archived) return header;
     if (view.images.state === "pending") {
       header.classList.add("wx-srv-ck-dish-pic-pending");
       header.append(el("span", "wx-srv-ck-dish-pic-note", "Plating up…"));
     } else if (view.images.state === "failed") {
+      const viewGeneration = view.generation;
       const retry = button("wx-srv-ck-dish-retry", busy.has("pictures") ? "Trying…" : "Retry picture", () =>
-        void simple("pictures", (seq) => deps.api.retryPictures(seq), "Couldn't restart the pictures — try again."),
+        void simple("pictures", (seq) => deps.api.retryPictures(seq, viewGeneration), "Couldn't restart the pictures — try again."),
       );
       retry.disabled = busy.has("pictures");
       header.append(retry);
@@ -820,9 +1468,18 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return header;
   }
 
-  function recipeView(concept: Concept, recipe: FullRecipe, names: Map<string, string>, slot: RecipeSlot): HTMLElement {
+  function recipeView(
+    view: CookoutView,
+    concept: Concept,
+    recipe: FullRecipe,
+    names: Map<string, string>,
+    slot: RecipeSlot,
+    picture: Picture | null,
+  ): HTMLElement {
     const box = el("div", "wx-srv-ck-recipe");
     box.dataset["concept"] = concept.id;
+    box.dataset["generation"] = String(slot.generation);
+    box.append(cooked.section(view, concept, slot, picture));
     const facts = el("div", "wx-srv-ck-recipe-facts");
     for (const [label, value] of [
       ["Serves", String(recipe.serves)],
@@ -835,6 +1492,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       facts.append(fact);
     }
     box.append(facts);
+    if (recipe.cookware.length > 0) {
+      box.append(el("p", "wx-srv-ck-recipe-cookware", `You'll need: ${recipe.cookware.join(", ")}`));
+    }
 
     box.append(el("h4", "wx-srv-ck-recipe-head", "Ingredients"));
     const list = el("ul", "wx-srv-ck-recipe-ings");
@@ -845,7 +1505,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       const box2 = doc.createElement("input");
       box2.type = "checkbox";
       box2.className = "wx-srv-ck-recipe-check";
-      const tickKey = `${concept.id}:${item.id}`;
+      const tickKey = `${slot.generation}:${concept.id}:${item.id}`;
       box2.checked = checked.has(tickKey);
       box2.addEventListener("change", () => {
         if (box2.checked) checked.add(tickKey);
@@ -887,11 +1547,24 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const slot = view.recipes[concept.id];
     const box = el("div", "wx-srv-ck-bankrow");
     box.dataset["recipe"] = slot.state;
+    // Captured now: a tap after a rescue swap names the dish set it was drawn for (09a §1.10).
+    const viewGeneration = view.generation;
+    // No recipe job may start against dishes about to be archived (09a §1.6).
+    const frozen = view.swap.state === "proposed";
+    const frozenNote = (): void => {
+      box.append(el("span", "wx-srv-ck-bank-frozen", "Finish or cancel the swap first"));
+    };
     switch (slot.state) {
       case "none": {
-        const bank = button("wx-srv-ck-bank", banking.has(concept.id) ? "Saving…" : "Bank this ✓", () => void doBank(concept.id), `Bank ${concept.title}`);
-        bank.disabled = banking.has(concept.id);
+        const bank = button(
+          "wx-srv-ck-bank",
+          banking.has(concept.id) ? "Saving…" : "Bank this ✓",
+          () => void doBank(concept.id, viewGeneration),
+          `Bank ${concept.title}`,
+        );
+        bank.disabled = banking.has(concept.id) || frozen;
         box.append(bank);
+        if (frozen) frozenNote();
         break;
       }
       case "pending": {
@@ -906,10 +1579,11 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         const retry = button(
           "wx-srv-ck-recipe-retry",
           recipeRetrying.has(concept.id) ? "Trying…" : "Recipe didn't finish — Try again",
-          () => void doRetryRecipe(concept.id),
+          () => void doRetryRecipe(concept.id, viewGeneration),
         );
-        retry.disabled = recipeRetrying.has(concept.id);
+        retry.disabled = recipeRetrying.has(concept.id) || frozen;
         box.append(retry);
+        if (frozen) frozenNote();
         break;
       }
       case "banked": {
@@ -928,38 +1602,202 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return box;
   }
 
-  function conceptKey(view: CookoutView, concept: Concept): string {
-    const slot = view.recipes[concept.id];
-    const picture = view.images.pictures[concept.id];
+  /** One dish card's context: the dishes on the table now, or an earlier (read-only) set. */
+  interface DishContext {
+    readonly generation: number;
+    readonly archived: boolean;
+    readonly picture: Picture | null;
+    readonly slot: RecipeSlot;
+    /** Both votes once revealed (null before, and for a one-sided archived vote). */
+    readonly votes: { readonly 1: ConceptId; readonly 2: ConceptId } | null;
+    readonly match: ConceptId | null;
+    /** The basket the dish was made from (for "Uses n/total"). */
+    readonly basketSize: number;
+  }
+
+  function currentDish(view: CookoutView, concept: Concept): DishContext {
+    return {
+      generation: view.generation,
+      archived: false,
+      picture: view.images.pictures[concept.id],
+      slot: view.recipes[concept.id],
+      votes: view.vote?.votes ?? null,
+      match: view.vote?.match ?? null,
+      basketSize: allPicks(view).length,
+    };
+  }
+
+  function earlierDish(set: GenerationView, concept: Concept): DishContext {
+    return {
+      generation: set.generation,
+      archived: true,
+      picture: set.pictures[concept.id],
+      slot: set.recipes[concept.id],
+      votes: set.vote.votes,
+      match: set.vote.match,
+      basketSize: set.basket.length,
+    };
+  }
+
+  function dishId(ctx: DishContext, conceptId: ConceptId): string {
+    return `${ctx.generation}:${conceptId}`;
+  }
+
+  function isExpanded(ctx: DishContext, conceptId: ConceptId): boolean {
+    return ctx.archived ? expandedEarlier.has(dishId(ctx, conceptId)) : expanded.has(conceptId);
+  }
+
+  function conceptKey(view: CookoutView, concept: Concept, ctx: DishContext = currentDish(view, concept)): string {
     return JSON.stringify([
       concept,
+      ctx,
       // A card with its photo does not care how the OTHER photos are getting on (redrawing it would
       // reload the photo); one without shows the shimmer or Retry, which do.
-      picture ?? [view.images.state, busy.has("pictures")],
-      slot,
-      banking.has(concept.id),
-      recipeRetrying.has(concept.id),
-      expanded.has(concept.id),
+      ctx.picture ?? (ctx.archived ? null : [view.images.state, busy.has("pictures")]),
+      ctx.archived ? null : [banking.has(concept.id), recipeRetrying.has(concept.id), view.swap.state, view.vote, busy.has("vote")],
+      isExpanded(ctx, concept.id),
+      dishMenu === dishId(ctx, concept.id),
+      cooked.stateKey(ctx.slot.generation, concept.id),
+      view.you,
+      view.players.map((p) => p.name),
+      view.stars,
+      view.setup.challenge,
     ]);
   }
 
-  function conceptCard(view: CookoutView, concept: Concept): HTMLElement {
+  function voterName(view: CookoutView, slot: 1 | 2): string {
+    return view.you?.slot === slot ? "You" : (playerOf(view, slot).name ?? (slot === 1 ? "Player 1" : "Player 2"));
+  }
+
+  /** The vote on one dish: the viewer's own button before the reveal, everybody's badges after. */
+  function voteRow(view: CookoutView, concept: Concept, ctx: DishContext): HTMLElement | null {
+    const box = el("div", "wx-srv-ck-dish-vote");
+    if (ctx.votes !== null) {
+      if (ctx.match === concept.id) {
+        box.append(el("span", "wx-srv-ck-dinner", "🎯 Tonight's dinner!"));
+      } else {
+        for (const s of [1, 2] as const) {
+          if (ctx.votes[s] === concept.id) box.append(el("span", "wx-srv-ck-voter", `🍽️ ${voterName(view, s)}`));
+        }
+      }
+      return box.childElementCount > 0 ? box : null;
+    }
+    if (ctx.archived) return null;
+    const vote = view.vote;
+    if (vote === null || view.you === null) return null;
+    const mine = vote.you === concept.id;
+    // Captured now: the vote names the dish set this card was drawn for.
+    const viewGeneration = view.generation;
+    const tap = button(
+      "wx-srv-ck-vote",
+      mine ? "✓ You'd eat this tonight" : "🍽️ I'd eat this tonight",
+      () => {
+        if (!mine) doVote(viewGeneration, concept.id);
+      },
+      mine ? `Your secret vote: ${concept.title}` : `Vote for ${concept.title} as tonight's dinner`,
+    );
+    tap.setAttribute("aria-pressed", mine ? "true" : "false");
+    tap.classList.toggle("wx-srv-ck-vote-mine", mine);
+    tap.disabled = busy.has("vote");
+    box.append(tap);
+    return box;
+  }
+
+  /** The dish's ⋯: "Encore with the leftovers" when the dish left something out (09a §9). */
+  function dishMore(view: CookoutView, concept: Concept, ctx: DishContext): HTMLElement | null {
+    if (concept.omitted.length === 0) return null;
+    const id = dishId(ctx, concept.id);
+    const wrap = el("div", "wx-srv-ck-dish-more");
+    const more = button(
+      "wx-srv-ck-dish-more-btn",
+      "⋯",
+      () => {
+        dishMenu = dishMenu === id ? null : id;
+        redraw();
+        deps.afterChange();
+      },
+      `More for ${concept.title}`,
+    );
+    more.setAttribute("aria-expanded", dishMenu === id ? "true" : "false");
+    more.setAttribute("aria-haspopup", "menu");
+    wrap.append(more);
+    if (dishMenu === id) {
+      const menu = el("div", "wx-srv-ck-dish-menu");
+      menu.setAttribute("role", "menu");
+      const encore = button("wx-srv-ck-dish-menu-item", "🔁 Encore with the leftovers", () => startEncore(view, ctx.generation, concept));
+      encore.setAttribute("role", "menuitem");
+      menu.append(encore);
+      wrap.append(menu);
+    }
+    return wrap;
+  }
+
+  /** The kitchen challenge and the dish's time, as a small rule badge. */
+  function ruleBadge(view: CookoutView, concept: Concept): HTMLElement | null {
+    const challenge = view.setup.challenge;
+    const note = concept.challengeNote !== null && concept.challengeNote.trim() !== "" ? concept.challengeNote : null;
+    if (challenge === null && note === null && concept.totalMinutes === null) return null;
+    const badge = el("p", "wx-srv-ck-rule");
+    if (challenge !== null) badge.append(el("span", "wx-srv-ck-rule-name", `${challenge.emoji} ${challenge.label}`.trim()));
+    if (concept.totalMinutes !== null) badge.append(el("span", "wx-srv-ck-rule-time", `⏱️ ${formatMinutes(concept.totalMinutes)}`));
+    if (note !== null) badge.append(el("span", "wx-srv-ck-rule-note", note));
+    return badge;
+  }
+
+  /** An earlier dish's recipe state: banked ones open their recipe; the rest are view-only. */
+  function earlierControls(concept: Concept, ctx: DishContext): HTMLElement {
+    const box = el("div", "wx-srv-ck-bankrow");
+    box.dataset["recipe"] = ctx.slot.state;
+    if (ctx.slot.state !== "banked") {
+      box.append(el("span", "wx-srv-ck-earlier-state", "Not banked"));
+      return box;
+    }
+    const id = dishId(ctx, concept.id);
+    const open = expandedEarlier.has(id);
+    const toggle = button("wx-srv-ck-banked", open ? "Banked ✓ — Hide recipe" : "Banked ✓ — View full recipe", () => {
+      if (expandedEarlier.has(id)) expandedEarlier.delete(id);
+      else expandedEarlier.add(id);
+      redraw();
+      deps.afterChange();
+    });
+    toggle.setAttribute("aria-expanded", open ? "true" : "false");
+    box.append(toggle);
+    return box;
+  }
+
+  function conceptCard(view: CookoutView, concept: Concept, ctx: DishContext = currentDish(view, concept)): HTMLElement {
     const card = el("article", "wx-srv-ck-dish");
     card.dataset["concept"] = concept.id;
-    card.append(pictureHeader(view, concept, view.images.pictures[concept.id]));
+    card.dataset["generation"] = String(ctx.generation);
+    card.classList.toggle("wx-srv-ck-dish-earlier", ctx.archived);
+    card.classList.toggle("wx-srv-ck-dish-dinner", ctx.match === concept.id);
+    card.append(pictureHeader(view, concept, ctx.picture, ctx.archived));
     const body = el("div", "wx-srv-ck-dish-body");
-    body.append(el("h3", "wx-srv-ck-dish-title", concept.title));
+    const titleRow = el("div", "wx-srv-ck-dish-titlerow");
+    titleRow.append(el("h3", "wx-srv-ck-dish-title", concept.title));
+    const more = view.state === "finished" ? dishMore(view, concept, ctx) : null;
+    if (more !== null) titleRow.append(more);
+    body.append(titleRow);
     const tags = el("div", "wx-srv-ck-dish-tags");
     if (concept.vibe !== "") tags.append(el("span", "wx-srv-ck-tag wx-srv-ck-tag-vibe", concept.vibe));
     if (concept.dishType !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.dishType)));
     if (concept.technique !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.technique)));
     if (tags.childElementCount > 0) body.append(tags);
+    const rule = ruleBadge(view, concept);
+    if (rule !== null) body.append(rule);
     body.append(el("p", "wx-srv-ck-dish-desc", concept.description));
-    const total = Math.max(allPicks(view).length, concept.pickedIngredients.length + concept.omitted.length);
+    const total = Math.max(ctx.basketSize, concept.pickedIngredients.length + concept.omitted.length);
     const uses = el("div", "wx-srv-ck-dish-uses");
     uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${concept.pickedIngredients.length}/${total}`));
     const chips = el("div", "wx-srv-ck-uses-chips");
-    for (const snap of concept.pickedIngredients) chips.append(basketChip(snap, "wx-srv-ck-chip-ing wx-srv-ck-chip-small"));
+    for (const snap of concept.pickedIngredients) {
+      const chip = basketChip(snap, "wx-srv-ck-chip-ing wx-srv-ck-chip-small");
+      if (isStarred(view, snap.id)) {
+        chip.classList.add("wx-srv-ck-chip-starred");
+        chip.append(el("span", "wx-srv-ck-star-mark", "★"));
+      }
+      chips.append(chip);
+    }
     uses.append(chips);
     if (concept.staplesUsed.length > 0) {
       uses.append(el("span", "wx-srv-ck-uses-staples", `Staples: ${concept.staplesUsed.map((s) => s.name.toLowerCase()).join(", ")}`));
@@ -974,12 +1812,14 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       }
       body.append(note);
     }
-    body.append(bankControls(view, concept));
-    const slot = view.recipes[concept.id];
-    if (slot.state === "banked" && expanded.has(concept.id)) {
+    const vote = voteRow(view, concept, ctx);
+    if (vote !== null) body.append(vote);
+    body.append(ctx.archived ? earlierControls(concept, ctx) : bankControls(view, concept));
+    const slot = ctx.slot;
+    if (slot.state === "banked" && isExpanded(ctx, concept.id)) {
       body.append(
         slot.data !== null
-          ? recipeView(concept, slot.data, nameLookup(view, concept), slot)
+          ? recipeView(view, concept, slot.data, nameLookup(view, concept), slot, ctx.picture)
           : el("p", "wx-srv-ck-recipe-missing", "This recipe is saved but can't be shown right now."),
       );
     }
@@ -987,10 +1827,33 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return card;
   }
 
-  function drawChef(view: CookoutView, host: HTMLElement): void {
+  /** The dish sets a rescue swap replaced: collapsed under "Earlier dishes", read-only. */
+  function earlierSection(view: CookoutView): HTMLElement[] {
+    if (view.generations.length === 0) return [];
+    const box = el("section", "wx-srv-ck-earlier");
+    const toggle = button("wx-srv-ck-earlier-toggle", "", () => {
+      earlierOpen = !earlierOpen;
+      redraw();
+      deps.afterChange();
+    });
+    toggle.setAttribute("aria-expanded", earlierOpen ? "true" : "false");
+    toggle.append(emojiSpan("wx-srv-ck-earlier-icon", "🕰️"), el("span", "wx-srv-ck-earlier-title", "Earlier dishes"));
+    toggle.append(el("span", "wx-srv-ck-earlier-sub", "before the swap"), el("span", "wx-srv-ck-tray-caret", earlierOpen ? "▾" : "▸"));
+    box.append(toggle);
+    if (!earlierOpen) return [box];
+    for (const set of view.generations) {
+      const grid = el("div", "wx-srv-ck-dishes wx-srv-ck-earlier-dishes");
+      grid.dataset["generation"] = String(set.generation);
+      for (const concept of set.concepts) grid.append(conceptCard(view, concept, earlierDish(set, concept)));
+      box.append(grid);
+    }
+    return [box];
+  }
+
+  function drawChef(view: CookoutView): void {
     const concepts = view.concepts.state === "ready" ? (view.concepts.data ?? []) : [];
-    const grid = host.querySelector<HTMLElement>(".wx-srv-ck-dishes");
-    if (grid === null) return;
+    const grid = sections.get("dishes")?.element;
+    if (grid === undefined) return;
     const wanted = new Set<ConceptId>();
     const ordered: HTMLElement[] = [];
     for (const concept of concepts) {
@@ -1019,12 +1882,26 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   // -- Drawing: the stage as a whole ----------------------------------------------------------------------
 
+  /** The finished stage's sections, top to bottom. The swap shows above the dishes once proposed or done
+   * (both players need it first), and below them as the "Rescue swap" button before that. */
+  const FINISHED_SECTIONS = ["basket", "gate", "chef", "swapTop", "vote", "dishes", "swapBottom", "earlier"] as const;
+  type FinishedSection = (typeof FINISHED_SECTIONS)[number];
+
+  /** Redraws one section of the finished stage when its key changed. */
+  function section(name: FinishedSection, key: string, build: () => HTMLElement[]): void {
+    const entry = sections.get(name);
+    if (entry === undefined || entry.key === key) return;
+    entry.key = key;
+    entry.element.replaceChildren(...build());
+  }
+
   function drawStage(view: CookoutView): void {
     if (view.state === "abandoned") {
       const key = JSON.stringify(["abandoned"]);
       if (drawn.stage === key) return;
       drawn.stage = key;
       conceptCards.clear();
+      sections.clear();
       const box = el("div", "wx-srv-ck-ended");
       box.append(emojiSpan("wx-srv-ck-ended-icon", "🧹"));
       box.append(el("p", "wx-srv-ck-ended-text", "This Cookout was ended before the basket was full."));
@@ -1034,14 +1911,16 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     if (view.state === "picking") {
       conceptCards.clear();
+      sections.clear();
       const current = view.current;
       const key = JSON.stringify([
         "picking",
         current,
-        view.you?.slot ?? null,
+        view.you,
         view.players.map((p) => p.name),
         busy.has("move"),
         pickingId,
+        tableBusy,
         deps.partner(),
       ]);
       if (drawn.stage === key) return;
@@ -1049,26 +1928,81 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       stage.replaceChildren(...drawDraft(view));
       return;
     }
-    // Finished: the reveal banner, the chef's status and the three dishes.
-    // A Blind round this screen watched being picked flips its basket open once. (Not part of the key:
-    // the very next refresh must not redraw the banner and cut the flip short.)
-    const animate = view.blind && sawPicking && !revealPlayed;
-    const frameKey = JSON.stringify(["finished", allPicks(view).map((p) => p.id), view.concepts.state, busy.has("concepts")]);
+    // Finished: the basket, the chef gate, the chef's status, the dinner vote, the three dishes, the rescue
+    // swap and any earlier dishes — each redrawn only when what it shows changed.
+    const frameKey = JSON.stringify(["finished", view.seq]);
     if (drawn.stage !== frameKey) {
       drawn.stage = frameKey;
       conceptCards.clear();
-      const status = chefStatus(view);
-      const grid = el("div", "wx-srv-ck-dishes");
-      stage.replaceChildren(revealBanner(view, animate), ...(status === null ? [] : [status]), grid);
-      if (animate) revealPlayed = true;
+      sections.clear();
+      const hosts: HTMLElement[] = [];
+      for (const name of FINISHED_SECTIONS) {
+        const host = el("div", name === "dishes" ? "wx-srv-ck-dishes" : `wx-srv-ck-sec wx-srv-ck-sec-${name}`);
+        sections.set(name, { element: host, key: "" });
+        hosts.push(host);
+      }
+      stage.replaceChildren(...hosts);
     }
-    drawChef(view, stage);
+    const you = view.you;
+    const names = view.players.map((p) => p.name);
+    // A Blind round this screen watched being picked flips its basket open once. (The flag is not part of
+    // the key: the very next refresh must not redraw the basket and cut the flip short.)
+    section(
+      "basket",
+      JSON.stringify([allPicks(view).map((p) => [p.id, p.via]), view.stars, busy.has("star"), you, view.setup.fridgeRaid, view.staples]),
+      () => {
+        const animate = view.blind && sawPicking && !revealPlayed;
+        if (animate) revealPlayed = true;
+        return [revealBanner(view, animate)];
+      },
+    );
+    section(
+      "gate",
+      JSON.stringify([view.gate.waitingFor, view.wildcard.state, view.stars.mine, view.stars.partnerChosen, busy.has("wildcard"), you, names, deps.partner()]),
+      () => gateSection(view),
+    );
+    section(
+      "chef",
+      JSON.stringify([view.concepts.state, busy.has("concepts"), view.gate.waitingFor.length, view.generation, allPicks(view).length]),
+      () => {
+        const status = chefStatus(view);
+        return status === null ? [] : [status];
+      },
+    );
+    const swapKey = JSON.stringify([view.swap, swapChoosing, swapTarget, swapChoice, busy.has("swap"), view.stars, allPicks(view).map((p) => p.id), you, names]);
+    const swapUp = view.swap.state !== "none";
+    section("swapTop", JSON.stringify([swapUp, swapUp ? swapKey : null]), () => (swapUp ? swapSection(view) : []));
+    section(
+      "swapBottom",
+      JSON.stringify([!swapUp, !swapUp && view.concepts.state === "ready" ? swapKey : null]),
+      () => (!swapUp && view.concepts.state === "ready" ? swapSection(view) : []),
+    );
+    section("vote", JSON.stringify([view.vote, view.concepts.data?.map((c) => c.title) ?? null, you, names]), () => voteSection(view));
+    drawChef(view);
+    section(
+      "earlier",
+      JSON.stringify([
+        view.generations,
+        earlierOpen,
+        [...expandedEarlier],
+        dishMenu,
+        you,
+        names,
+        view.stars,
+        view.generations.map((g) => CONCEPT_IDS.map((id) => cooked.stateKey(g.generation, id))),
+      ]),
+      () => earlierSection(view),
+    );
   }
 
   // -- The elapsed clock -----------------------------------------------------------------------------------
 
   function syncElapsed(view: CookoutView | undefined): void {
-    const working = view !== undefined && view.state === "finished" && (view.concepts.state === "pending" || view.concepts.state === "none");
+    // Behind the chef gate nothing is cooking yet: the clock starts when the chef does.
+    const working =
+      view !== undefined &&
+      view.state === "finished" &&
+      (view.concepts.state === "pending" || (view.concepts.state === "none" && view.gate.waitingFor.length === 0));
     if (working && chefSince === null) chefSince = clock.now();
     if (!working) chefSince = null;
     const run = working && visible;
@@ -1127,13 +2061,84 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (moveRetryTimer !== null) clock.clearTimeout(moveRetryTimer);
     moveRetryTimer = null;
     stopTimers();
+    stopFx();
+    tableBusy = null;
+    swapChoosing = false;
+    swapTarget = null;
+    swapChoice = null;
+    earlierOpen = false;
+    expandedEarlier.clear();
+    dishMenu = null;
+    cooked.reset();
     drawn.progress = "";
     drawn.stage = "";
     drawn.tray = "";
+    drawn.rules = "";
     conceptCards.clear();
+    sections.clear();
+    rules.replaceChildren();
+    rules.hidden = true;
     progress.replaceChildren();
     stage.replaceChildren();
     tray.replaceChildren();
+  }
+
+  /** The round's start-sheet twists as chips under the header. A spun style lands its wheel once. */
+  function drawRules(view: CookoutView): void {
+    const setup = view.setup;
+    const spin = setup.styleSpun && setup.style !== null && !wheelPlayed.has(view.seq);
+    const key = JSON.stringify([setup, spin]);
+    if (drawn.rules === key) return;
+    drawn.rules = key;
+    const chips: HTMLElement[] = [];
+    if (setup.style !== null) {
+      const chip = el("span", "wx-srv-ck-rule-chip wx-srv-ck-rule-style");
+      if (spin && !reduced()) {
+        // The wheel spins through the faces and lands on the server's answer (it chose at creation).
+        const wheel = el("span", "wx-srv-ck-wheel");
+        wheel.setAttribute("aria-hidden", "true");
+        const reel = el("span", "wx-srv-ck-wheel-reel");
+        for (const face of [...WHEEL_FACES, ...WHEEL_FACES, setup.style.emoji]) reel.append(el("span", "wx-srv-ck-wheel-face", face));
+        wheel.append(reel);
+        chip.append(wheel);
+      } else {
+        chip.append(emojiSpan("wx-srv-ck-rule-icon", setup.style.emoji));
+      }
+      chip.append(el("span", "wx-srv-ck-rule-text", setup.styleSpun ? `${setup.style.label} (spun)` : setup.style.label));
+      chips.push(chip);
+    }
+    if (spin) wheelPlayed.add(view.seq);
+    if (setup.challenge !== null) {
+      const chip = el("span", "wx-srv-ck-rule-chip wx-srv-ck-rule-challenge");
+      chip.append(emojiSpan("wx-srv-ck-rule-icon", setup.challenge.emoji), el("span", "wx-srv-ck-rule-text", setup.challenge.label));
+      chips.push(chip);
+    }
+    if (setup.wildcard) {
+      const chip = el("span", "wx-srv-ck-rule-chip");
+      chip.append(emojiSpan("wx-srv-ck-rule-icon", "🛎️"), el("span", "wx-srv-ck-rule-text", "Cloche"));
+      chips.push(chip);
+    }
+    if (setup.stars) {
+      const chip = el("span", "wx-srv-ck-rule-chip");
+      chip.append(emojiSpan("wx-srv-ck-rule-icon", "⭐"), el("span", "wx-srv-ck-rule-text", "Secret stars"));
+      chips.push(chip);
+    }
+    if (setup.fridgeRaid) {
+      const chip = el("span", "wx-srv-ck-rule-chip");
+      chip.append(emojiSpan("wx-srv-ck-rule-icon", "🧊"), el("span", "wx-srv-ck-rule-text", "Fridge raid"));
+      chips.push(chip);
+    }
+    if (setup.encore !== null) {
+      const chip = el("span", "wx-srv-ck-rule-chip");
+      const what = setup.encore.kind === "remix" ? "Remix" : "Leftovers encore";
+      chip.append(
+        emojiSpan("wx-srv-ck-rule-icon", "🔁"),
+        el("span", "wx-srv-ck-rule-text", setup.encore.fromTitle !== null ? `${what} of ${setup.encore.fromTitle}` : what),
+      );
+      chips.push(chip);
+    }
+    rules.replaceChildren(...chips);
+    rules.hidden = chips.length === 0;
   }
 
   function applyFocus(view: CookoutView): void {
@@ -1141,12 +2146,24 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       return;
     }
     const id = focusConcept.id;
+    const wanted = focusConcept.generation;
+    focusConcept = null;
+    if (wanted !== null && wanted !== view.generation) {
+      // A dish from before a rescue swap: open "Earlier dishes" at its recipe.
+      const set = view.generations.find((g) => g.generation === wanted);
+      if (set === undefined) return;
+      earlierOpen = true;
+      if (set.recipes[id].state === "banked") expandedEarlier.add(`${wanted}:${id}`);
+      drawStage(view);
+      const card = stage.querySelector<HTMLElement>(`.wx-srv-ck-dish-earlier[data-generation="${wanted}"][data-concept="${id}"]`);
+      if (card !== null && typeof card.scrollIntoView === "function") card.scrollIntoView({ block: "start" });
+      return;
+    }
     const slot = view.recipes[id];
     if (slot.state === "banked" && !expanded.has(id)) {
       expanded.add(id);
-      drawChef(view, stage);
+      drawChef(view);
     }
-    focusConcept = null;
     const card = conceptCards.get(id)?.element;
     if (card !== undefined && typeof card.scrollIntoView === "function") card.scrollIntoView({ block: "start" });
   }
@@ -1172,6 +2189,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     if (view.state === "picking") sawPicking = true;
     syncElapsed(view);
+    drawRules(view);
     drawProgress(view);
     drawStage(view);
     drawTray(view);
@@ -1205,6 +2223,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       // Another tab came to the front: no timer keeps running for a pane nobody can see.
       visible = false;
       stopTimers();
+      stopFx();
       if (ending) cancelEnd();
     },
     reset: forget,
@@ -1213,8 +2232,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   return {
     pane,
     open: (seq) => deps.tabs.open("cookout", seq),
-    openRecipe(seq, conceptId) {
-      focusConcept = CONCEPT_IDS.includes(conceptId) ? { seq, id: conceptId } : null;
+    openRecipe(seq, conceptId, dishGeneration) {
+      focusConcept = CONCEPT_IDS.includes(conceptId) ? { seq, id: conceptId, generation: dishGeneration ?? null } : null;
       deps.tabs.open("cookout", seq);
       // Already on screen with the same round: the open redraws only when something changed.
       const view = deps.model.view(seq);
