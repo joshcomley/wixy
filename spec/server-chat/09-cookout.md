@@ -794,6 +794,7 @@ To prevent merge conflicts across parallel builders, every shared file has a **s
 RoleKey = Literal["base", "protein", "produce", "accent"]
 RarityKey = Literal["everyday", "uncommon", "exotic"]
 
+
 @dataclass(frozen=True, slots=True)
 class Ingredient:
     id: str
@@ -817,11 +818,13 @@ class Ingredient:
             "blurb": self.blurb,
         }
 
+
 @dataclass(frozen=True, slots=True)
 class Staple:
     id: str
     name: str
     pickable: bool
+
 
 class CookoutBank:
     def ingredient(self, ingredient_id: str) -> Ingredient | None: ...
@@ -853,6 +856,7 @@ class CookoutBank:
         allowed_staple_ids: AbstractSet[str],
     ) -> list[str]: ...
 
+
 def load_cookout_bank(path: Path | None = None) -> CookoutBank: ...
 def load_cookout_bank_or_empty(path: Path | None = None) -> CookoutBank: ...
 ```
@@ -879,6 +883,7 @@ def finish_cookout_concepts(
 ) -> bool: ...
 def cookout_pending_concepts(self) -> list[tuple[int, str | None]]: ...
 
+
 # ComfyUI pictures (partial-success aware)
 def claim_cookout_pictures(
     self, anchor_seq: int, *, stale_before: float | None, now: float
@@ -894,6 +899,7 @@ def store_cookout_pictures(
 ) -> bool: ...
 def fail_cookout_pictures(self, anchor_seq: int, *, now: float) -> bool: ...
 def cookout_stale_pictures(self, *, stale_before: float) -> list[int]: ...
+
 
 # Stage 2 full recipes
 def set_cookout_recipe_run(
