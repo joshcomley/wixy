@@ -10,11 +10,13 @@
 // real view's first-unlock name prompt is handled once, inside `enterPin`.
 //
 // `page.clock.install()` before every `goto` (per the brief's own e2e
-// note): once installed, virtual time never advances between two
-// Playwright actions unless `runFor`/`fastForward` is called, so two
-// `.click()`s issued back-to-back always read as "0ms apart" on
-// `performance.now()` — exactly what a real double-tap needs, with zero
-// flake from IPC/network latency between commands.
+// note), then `freezeClock` once the page has loaded: from there virtual
+// time never advances between two Playwright actions unless
+// `runFor`/`fastForward` is called, so two `.click()`s issued back-to-back
+// always read as "0ms apart" on `performance.now()` — exactly what a real
+// double-tap needs, with zero flake from IPC/network latency between
+// commands. (`install()` alone lets page time flow at real speed; see
+// `freezeClock`.)
 //
 // The fixture's PIN app (e2e/fixture_server.py) has its OWN real wall-clock
 // lockout timer, independent of the browser's virtual clock — tripping it
@@ -23,7 +25,7 @@
 
 import { expect, test } from "../fixtures";
 import type { Browser, Locator, Page } from "@playwright/test";
-import { trackConsoleErrors } from "./helpers";
+import { freezeClock, tapThreadGap, trackConsoleErrors } from "./helpers";
 
 // Matches e2e/fixture_server.py's TEST_SERVER_PIN / TEST_SERVER_PIN_APP_KEY.
 const TEST_PIN = "246813";
@@ -57,6 +59,7 @@ async function withServerPage(
   await page.clock.install();
   await page.goto("/admin/server");
   await page.waitForSelector(".wx-srv-decoy");
+  await freezeClock(page);
   await fn(page);
   expect(errors).toEqual([]);
   await context.close();
@@ -429,9 +432,7 @@ for (const profile of DEVICE_PROFILES) {
         // R3: a double-tap anywhere in the chat view locks.
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        const thread = page.locator(".wx-srv-thread");
-        await thread.click();
-        await thread.click();
+        await tapThreadGap(page, 2);
         await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
 
         // R3's exclusion: a double-tap inside the draft textarea must not.
@@ -471,7 +472,7 @@ for (const profile of DEVICE_PROFILES) {
         await enterPin(page, TEST_PIN);
         await expect(page.locator(".wx-srv-thread")).toBeVisible();
 
-        await page.locator(".wx-srv-thread").click();
+        await tapThreadGap(page);
 
         await expect(page.locator(".wx-srv-thread")).toBeVisible();
       });
@@ -481,10 +482,19 @@ for (const profile of DEVICE_PROFILES) {
       browser,
     }) => {
       await withServerPage(browser, profile, async (page) => {
-        // SPA routing away and back — a fresh mount always starts at decoy.
+        // SPA routing away and back — a fresh mount always starts at decoy. The unlocked chat is
+        // full screen (workspace 00045: the shell's navigation steps aside), so its way out is the
+        // browser's own Back. Pages -> Server first (locked, the nav is there) so Back stays in the
+        // app. Before the clock was frozen this step clicked "Pages" while the nav was hidden and
+        // only passed because Playwright kept retrying until the chat idle-locked by itself.
+        await page.locator('[data-route-kind="pages"]').click();
+        await page.waitForSelector(".wx-pages-table");
+        await page.locator('[data-route-kind="server"]').click();
+        await page.waitForSelector(".wx-srv-decoy");
         await revealAndOpenPinPad(page);
         await enterPin(page, TEST_PIN);
-        await page.locator('[data-route-kind="pages"]').click();
+        await expect(page.locator(".wx-srv-thread")).toBeVisible();
+        await page.goBack();
         await page.waitForSelector(".wx-pages-table");
         await page.locator('[data-route-kind="server"]').click();
         await page.waitForSelector(".wx-srv-decoy");
@@ -633,6 +643,7 @@ async function withAndroidServerPage(
   await page.clock.install();
   await page.goto("/admin/server");
   await page.waitForSelector(".wx-srv-decoy");
+  await freezeClock(page);
   await fn(page);
   expect(errors).toEqual([]);
   await context.close();
