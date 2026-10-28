@@ -152,6 +152,27 @@ describe("rev only moves forward", () => {
     expect(h.onChange).not.toHaveBeenCalled();
   });
 
+  it("a round the server says is gone is not asked about again until its summary moves", async () => {
+    const h = harness(async () => ({ ok: false, kind: "not_found" }));
+    h.model.observe([message(41, 3)]);
+    await flush();
+    h.model.observe([message(41, 3)]);
+    h.model.observe([message(41, 3)]);
+    await flush();
+    expect(h.fetches).toHaveLength(1);
+    h.model.observe([message(41, 4)]);
+    await flush();
+    expect(h.fetches).toHaveLength(2);
+  });
+
+  it("reset() stops a pending round's poll", () => {
+    const h = harness(async () => ({ ok: false, kind: "unavailable" }));
+    h.model.apply(v(finishedView({ concepts: "pending", images: "none" })));
+    expect(h.live()).toHaveLength(1);
+    h.model.reset();
+    expect(h.live()).toHaveLength(0);
+  });
+
   it("a failed read is retried later, and reset() cancels everything", async () => {
     const h = harness(async () => ({ ok: false, kind: "unavailable" }));
     h.model.observe([message(41, 3)]);

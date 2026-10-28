@@ -579,7 +579,8 @@ export function parseCookoutView(value: unknown): CookoutView | null {
     players,
     you: youSlot === null ? null : { slot: youSlot },
     current: shownCurrent,
-    history: parseHistory(record["history"]),
+    // Blind: only the viewer's own turns, ever — even after the reveal (spec §1.3); the second lock again.
+    history: blind ? parseHistory(record["history"]).filter((t) => youSlot !== null && t.player === youSlot) : parseHistory(record["history"]),
     staples: parseStaples(record["staples"]),
     concepts: parseConcepts(record["concepts"]),
     images: parseImages(record["images"]),

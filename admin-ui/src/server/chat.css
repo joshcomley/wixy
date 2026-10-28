@@ -6172,10 +6172,12 @@ video.wx-srv-gallery-media {
 }
 
 .wx-srv-ck-title {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
   font-weight: 800;
   font-size: 1.0625rem;
   letter-spacing: 0.01em;
@@ -6185,8 +6187,19 @@ video.wx-srv-gallery-media {
   font-size: 1.25rem;
 }
 
+.wx-srv-ck-title-icon {
+  flex: none;
+}
+
 .wx-srv-ck-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.wx-srv-ck-end-short {
+  display: none;
 }
 
 .wx-srv-ck-badge {
@@ -6244,11 +6257,26 @@ video.wx-srv-gallery-media {
 }
 
 /* A narrow pane keeps the Recipe book's icon and drops its words. */
+/* A narrow pane (a phone): the Recipe book keeps its icon, End game says "End", and below ~310 px (a 320 px phone) the
+   title keeps its pan and the mode badge — never one control under another (the badge must stay
+   readable: it is how a player knows the round is Blind). */
 @container ck (max-width: 419px) {
   .wx-srv-ck-book {
     padding: 0;
   }
   .wx-srv-ck-book .wx-srv-ck-chip-text {
+    display: none;
+  }
+  .wx-srv-ck-end-long {
+    display: none;
+  }
+  .wx-srv-ck-end-short {
+    display: inline;
+  }
+}
+
+@container ck (max-width: 309px) {
+  .wx-srv-ck-title-text {
     display: none;
   }
 }
@@ -6767,12 +6795,17 @@ button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
 }
 
 .wx-srv-ck-chip-empty {
-  display: inline-block;
-  width: 56px;
-  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
   border-radius: 999px;
   border: 2px dashed var(--ck-line);
   box-sizing: border-box;
+  color: var(--ck-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .wx-srv-ck-chip-small {

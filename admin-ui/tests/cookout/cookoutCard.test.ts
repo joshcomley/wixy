@@ -79,6 +79,18 @@ describe("the card", () => {
       "/api/admin/server/media/thumb-3.jpg",
     ]);
     expect(card.textContent).not.toContain("Ribeye");
+    // A redraw with the same photos keeps the very same image elements (no flicker, no re-request).
+    const before = [...card.querySelectorAll("img")];
+    cards.render(card, msg);
+    const after = [...card.querySelectorAll("img")];
+    expect(after.every((img, i) => img === before[i])).toBe(true);
+    expect(after).toHaveLength(3);
+    // A different photo set is redrawn.
+    const fewer = parseCookoutView(finishedView({ rev: 13, images: "done", pictures: { a: picture(1) } }));
+    if (fewer === null) throw new Error("fixture");
+    model.apply(fewer);
+    cards.render(card, msg);
+    expect(card.querySelectorAll("img")).toHaveLength(1);
   });
 
   it("a malformed summary still draws a plain card rather than nothing", () => {

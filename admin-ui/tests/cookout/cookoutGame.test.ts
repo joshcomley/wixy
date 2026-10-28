@@ -224,6 +224,29 @@ describe("the start sheet", () => {
     expect(sheet.element.hidden).toBe(true);
   });
 
+  it("is one radio group: arrows move the choice, only the chosen mode is a tab stop, and Tab stays inside", () => {
+    const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}), newId: ids() });
+    document.body.append(sheet.element);
+    sheet.open();
+    const open = q<HTMLButtonElement>(sheet.element, '[data-mode="open"]');
+    const blind = q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]');
+    expect([open.tabIndex, blind.tabIndex]).toEqual([0, -1]);
+    open.focus();
+    open.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+    expect(blind.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(blind);
+    expect([open.tabIndex, blind.tabIndex]).toEqual([-1, 0]);
+    const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
+    go.focus();
+    const tab = new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
+    go.dispatchEvent(tab);
+    expect(tab.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(blind);
+    const back = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true, bubbles: true, cancelable: true });
+    blind.dispatchEvent(back);
+    expect(document.activeElement).toBe(go);
+  });
+
   it("opens with the given mode preselected (New in the pane), and Cancel closes it", () => {
     const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}), newId: ids() });
     sheet.open(true);
@@ -429,6 +452,77 @@ describe("Blind mode", () => {
   });
 });
 
+describe("Blind mode, every viewer", () => {
+  /** Every ingredient string of Player 2's (and the pair being offered to them) is absent from the pane. */
+  function noPartnerStrings(pane: HTMLElement): void {
+    const text = pane.textContent ?? "";
+    const html = pane.innerHTML;
+    for (const partner of [...P2_PICKS, RIBEYE, SALMON]) {
+      expect(text).not.toContain(partner["name"] as string);
+      expect(html).not.toContain(partner["id"] as string);
+    }
+  }
+
+  it("a non-player sees a cloche and counted secrets, no ingredient of either player", () => {
+    const h = make();
+    h.show(pickingView({ blind: true, you: null, turn: 3, showOptions: false, p1Picks: null, p1Count: 1, p2Picks: null, p2Count: 1 }));
+    expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("🕵️ Secret turn: Josh is choosing…");
+    noPartnerStrings(h.pane);
+    expect(h.pane.textContent).not.toContain("Thick-cut white toast");
+    expect(h.pane.querySelectorAll(".wx-srv-ck-chip-secret")).toHaveLength(2);
+  });
+
+  it("an abandoned Blind round never reveals the partner's picks", () => {
+    const h = make();
+    h.show({ ...pickingView({ blind: true, you: 1, turn: 5, p2Picks: null, p2Count: 2 }), state: "abandoned", current: null });
+    expect(q(h.pane, ".wx-srv-ck-ended-text").textContent).toContain("ended");
+    noPartnerStrings(h.pane);
+  });
+
+  it("waiting for Player 2 to join shows the waiting cloche and nothing of theirs", () => {
+    const h = make();
+    h.show(pickingView({ blind: true, you: 1, turn: 2, player2: null, showOptions: false, waitingForJoin: true, p2Picks: null }));
+    expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("Waiting for Cupcake to join…");
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Waiting for Cupcake to join — Pick 1 of 5");
+    noPartnerStrings(h.pane);
+  });
+
+  it("the slots still to fill are one '… to go' pill, never a row of lone empty slots", () => {
+    const h = make();
+    h.show(pickingView({ blind: true, you: 1, turn: 4, showOptions: false, p2Picks: null, p2Count: 1 }));
+    const rows = [...h.pane.querySelectorAll(".wx-srv-ck-tray-row")];
+    expect(rows.map((r) => [...r.querySelectorAll(".wx-srv-ck-chip-empty")].map((e) => e.textContent))).toEqual([["3 to go"], ["4 to go"]]);
+  });
+});
+
+describe("timers end with the round", () => {
+  it("a lock or wipe (the frame's reset) clears a pending move retry and the chef's clock", async () => {
+    const h = make();
+    h.show(pickingView({ turn: 1 }));
+    h.api.pick.mockResolvedValue({ ok: false, kind: "unavailable" });
+    q<HTMLButtonElement>(h.pane, '[data-ingredient="ribeye-steak"]').click();
+    await flush(); // the first attempt failed: the retry is waiting on its timer
+    expect(h.clock.timeouts.size).toBe(1);
+    h.tabs.reset();
+    expect(h.clock.timeouts.size).toBe(0);
+    h.show(finishedView({ concepts: "pending", images: "none", rev: 30 }));
+    expect(h.clock.intervals.size).toBe(1);
+    h.tabs.reset();
+    expect(h.clock.intervals.size).toBe(0);
+  });
+
+  it("the toast's timer goes with a reset too", async () => {
+    const h = make();
+    h.show(pickingView({ turn: 1 }));
+    h.api.skip.mockResolvedValue({ ok: false, kind: "bad_state" });
+    q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").click();
+    await flush();
+    expect(h.clock.timeouts.size).toBe(1);
+    h.tabs.reset();
+    expect(h.clock.timeouts.size).toBe(0);
+  });
+});
+
 describe("the chef", () => {
   it("counts the time while the chef invents, and stops the clock when hidden", () => {
     const h = make();
@@ -467,7 +561,12 @@ describe("the chef", () => {
     // A tap on the photo opens the full-size picture.
     q<HTMLButtonElement>(dishes[0] as HTMLElement, ".wx-srv-ck-dish-photo").click();
     expect(h.openLightbox).toHaveBeenCalledWith("/api/admin/server/media/full-1.jpg", "Espresso-Glazed Ribeye over Crispy Toast");
-    // Card a keeps its node (and its loaded photo) when only another slot changes.
+    // A photo that will not load falls back to the plate.
+    const img = q<HTMLImageElement>(dishes[0] as HTMLElement, ".wx-srv-ck-dish-img");
+    img.dispatchEvent(new Event("error"));
+    expect((dishes[0] as HTMLElement).querySelector(".wx-srv-ck-dish-plate")).not.toBeNull();
+    expect((dishes[0] as HTMLElement).querySelector(".wx-srv-ck-dish-photo")).toBeNull();
+    // Card a keeps its node when only another slot changes.
     const cardA = dishes[0];
     h.show(finishedView({ concepts: "ready", images: "failed", pictures: { a: picture(1), b: picture(2) }, rev: 13 }));
     expect(h.pane.querySelector('.wx-srv-ck-dish[data-concept="a"]')).toBe(cardA);

@@ -23,7 +23,7 @@ import {
 } from "../../src/server/cookout/api";
 import { ServerLockedError } from "../../src/server/api/http";
 import { parseWyrRefKind } from "../../src/server/api/messages";
-import { FULL_RECIPE, bankedRecipes, bookBody, finishedView, pickingView, picture, type Json } from "./fixtures";
+import { FULL_RECIPE, LENTILS, RIBEYE, SALMON, bankedRecipes, bookBody, finishedView, pickingView, picture, type Json } from "./fixtures";
 
 // The Cookout wire parsers (spec/server-chat/09-cookout.md §4.2): every response is read defensively, a
 // half-understood round is never drawn, and nothing the server leaves out (Blind mode) is invented.
@@ -174,6 +174,13 @@ describe("the round view", () => {
     // A non-player sees nobody's picks; the active player keeps their own pair.
     expect(parseCookoutView(pickingView({ blind: true, you: null, turn: 3 }))?.players[0].picks).toBeNull();
     expect(parseCookoutView(pickingView({ blind: true, you: 1, turn: 3 }))?.current?.options).not.toBeNull();
+    // Blind history is only ever the viewer's own turns, even after the reveal.
+    const withHistory = finishedView({ blind: true });
+    withHistory["history"] = [
+      { turn: 1, player: 1, offers: [[RIBEYE, SALMON]], choice: RIBEYE },
+      { turn: 2, player: 2, offers: [[LENTILS, SALMON]], choice: LENTILS },
+    ];
+    expect(parseCookoutView(withHistory)?.history.map((t) => t.turn)).toEqual([1]);
     // An abandoned Blind round never reveals; a finished, revealed one shows all ten.
     const abandoned = { ...pickingView({ blind: true, you: 1, turn: 5 }), state: "abandoned", current: null };
     expect(parseCookoutView(abandoned)?.players[1].picks).toBeNull();

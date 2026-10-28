@@ -282,7 +282,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   const actions = el("div", "wx-srv-ck-bar-actions");
   const bookButton = button("wx-srv-ck-chip wx-srv-ck-book", "", () => deps.openBook(), "Recipe book");
   bookButton.append(emojiSpan("wx-srv-ck-chip-icon", "📖"), el("span", "wx-srv-ck-chip-text", "Recipe book"));
-  const endButton = button("wx-srv-ck-chip wx-srv-ck-end", "End game", () => askEnd(), "End this Cookout");
+  const endButton = button("wx-srv-ck-chip wx-srv-ck-end", "", () => askEnd(), "End this Cookout");
+  endButton.append(el("span", "wx-srv-ck-end-long", "End game"), el("span", "wx-srv-ck-end-short", "End"));
   const newButton = button("wx-srv-ck-chip wx-srv-ck-new", "New", () => startNew(), "Start a new Cookout");
   const closeButton = button("wx-srv-ck-chip wx-srv-ck-close", "✕", () => close(), "Close the game");
   actions.append(bookButton, endButton, newButton, closeButton);
@@ -603,7 +604,6 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (card instanceof HTMLButtonElement) {
       card.type = "button";
       card.setAttribute("data-srv-gesture-boundary", "");
-      card.setAttribute("aria-label", `Pick ${snap.name}`);
       const cta = el("span", "wx-srv-ck-opt-cta", pickingId === snap.id ? "Adding…" : "Pick this");
       card.append(cta);
       card.disabled = busy.has("move");
@@ -713,7 +713,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         }
       }
       const known = player.picks?.length ?? player.pickCount;
-      for (let i = known; i < PICKS_PER_PLAYER; i += 1) chips.append(el("span", "wx-srv-ck-chip-empty"));
+      const left = PICKS_PER_PLAYER - known;
+      if (left > 0) chips.append(el("span", "wx-srv-ck-chip-empty", `${left} to go`));
       row.append(chips);
       body.append(row);
     }
@@ -795,6 +796,11 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       img.loading = "lazy";
       img.decoding = "async";
       img.draggable = false;
+      img.addEventListener("error", () => {
+        open.remove();
+        header.classList.add("wx-srv-ck-dish-pic-empty");
+        header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+      });
       open.append(img);
       header.append(open);
       return header;

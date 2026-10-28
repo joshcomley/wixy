@@ -115,8 +115,38 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     ] as const) {
       option.setAttribute("aria-checked", on ? "true" : "false");
       option.classList.toggle("wx-srv-ck-mode-on", on);
+      // A radio group is ONE tab stop (the chosen mode); the arrow keys move within it.
+      option.tabIndex = on ? 0 : -1;
     }
   }
+
+  // The arrows move the choice (and the focus) between the two modes, as a radio group does.
+  modes.addEventListener("keydown", (event) => {
+    const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+    const back = event.key === "ArrowUp" || event.key === "ArrowLeft";
+    if (!forward && !back) return;
+    event.preventDefault();
+    select(!blindChosen);
+    (blindChosen ? blindOption : openOption).focus();
+  });
+
+  // Tab stays inside the sheet while it is open (it is modal over the chat). Escape is deliberately not
+  // handled: it is the chat's panic key.
+  sheet.addEventListener("keydown", (event) => {
+    if (event.key !== "Tab") return;
+    const stops = [blindChosen ? blindOption : openOption, cancel, go].filter((b) => !b.disabled);
+    const first = stops[0];
+    const last = stops[stops.length - 1];
+    if (first === undefined || last === undefined) return;
+    const active = doc.activeElement;
+    if (event.shiftKey && (active === first || !sheet.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !sheet.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
 
   function setBusy(next: boolean): void {
     busy = next;

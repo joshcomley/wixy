@@ -65,6 +65,9 @@ export function createCookoutCards(deps: CookoutCardDeps): CookoutCards {
     const seq = message.seq;
     const summary = parseCookoutSummary(message.cookout);
     const view = deps.model.view(seq);
+    // The dish photos are kept when their URLs have not changed: a redraw (every poll and stream frame)
+    // must not flicker them or ask the server for the same signed thumbnails again.
+    const oldMedia = container.querySelector<HTMLElement>(":scope > .wx-srv-ck-mcard-media");
     container.replaceChildren();
     container.dataset["ckSeq"] = String(seq);
     container.dataset["ckState"] = summary?.state ?? "";
@@ -96,8 +99,12 @@ export function createCookoutCards(deps: CookoutCardDeps): CookoutCards {
         if (picture !== null) pictures.push(picture);
       }
     }
-    if (pictures.length > 0) {
+    const mediaKey = pictures.map((p) => p.thumbUrl).join(" ");
+    if (pictures.length > 0 && oldMedia !== null && oldMedia.dataset["ckMedia"] === mediaKey) {
+      container.append(text, oldMedia);
+    } else if (pictures.length > 0) {
       const media = el("div", "wx-srv-ck-mcard-media");
+      media.dataset["ckMedia"] = mediaKey;
       for (const picture of pictures) {
         const img = doc.createElement("img");
         img.className = "wx-srv-ck-mcard-dish";

@@ -90,6 +90,9 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
   const latest = new Map<number, { readonly rev: number }>();
   /** Rounds to read again regardless of `rev` (a forced refetch, a renewed token, a poll). */
   const forced = new Set<number>();
+  /** Rounds the server answered "not found" for, with the summary rev that was asked about: not asked
+   * again (once per render of the thread otherwise) until the summary moves. */
+  const missing = new Map<number, number>();
   let generation = 0;
   let viewerKey: string | null = null;
   /** The token the held views' signed picture URLs were minted for. */
@@ -108,6 +111,7 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
     if (forced.has(seq)) return true;
     const summary = latest.get(seq);
     if (summary === undefined) return false;
+    if (missing.get(seq) === summary.rev) return false;
     const have = views.get(seq);
     // `rev` only moves forward: a held view at the summary's rev or later is current, even when the
     // thread's summary lags it (a mutation answered before its stream frame arrived).
@@ -195,7 +199,9 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
       apply(outcome.view);
       forced.delete(seq);
     } else if (outcome.kind === "not_found") {
+      const rev = latest.get(seq)?.rev;
       forget(seq);
+      if (rev !== undefined) missing.set(seq, rev);
       return;
     } else {
       scheduleRetry(seq, entry);
@@ -234,6 +240,7 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
     views.clear();
     latest.clear();
     forced.clear();
+    missing.clear();
     viewsToken = null;
   }
 
@@ -274,6 +281,9 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
       // because a mutation answered with it — and so does its poll.
       for (const seq of new Set([...latest.keys(), ...views.keys()])) {
         if (!seen.has(seq)) forget(seq);
+      }
+      for (const seq of [...missing.keys()]) {
+        if (!seen.has(seq)) missing.delete(seq);
       }
     },
     refetch(seq) {
