@@ -91,6 +91,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
   const b = await browser.newContext({ permissions: ["microphone"] });
   const c = await browser.newContext({ permissions: ["microphone"] });
   let observerActivity: ReturnType<typeof setInterval> | null = null;
+  let keepAlive: { start(): void; stop(): void }[] = [];
   let stage = "unlock devices";
   try {
     const pa = await a.newPage();
@@ -113,8 +114,25 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
         }
       });
     });
+    // Every device auto-locks after 10 s without activity, and a RINGING call does not pause that
+    // countdown (only a connected one does, Inv 55). Setup (three unlocks, the dialog, Answer)
+    // takes longer than 10 s on a loaded machine, so a device nobody touches in the meantime locks
+    // and drops out of the call presence list. Keep the two call devices live until both are muted.
+    keepAlive = [pa, pb].map((page) => {
+      let timer: ReturnType<typeof setInterval> | null = null;
+      return {
+        start(): void {
+          timer = setInterval(() => {
+            void page.mouse.move(150 + Math.random() * 3, 300).catch(() => undefined);
+          }, 1000);
+        },
+        stop(): void { if (timer !== null) clearInterval(timer); timer = null; },
+      };
+    });
     await unlock(pa, "Caller");
+    keepAlive[0]!.start();
     await unlock(pb, "Receiver");
+    keepAlive[1]!.start();
     await unlock(pc, "Observer");
     await pa.setViewportSize({ width: 390, height: 844 });
     await expect(pa.locator(".wx-srv-call select")).toHaveCount(0);
@@ -185,6 +203,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     for (const page of [pa, pb]) await expect(page.locator(".wx-srv-call")).toContainText("On a voice call");
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
     await pb.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
+    for (const live of keepAlive) live.stop(); // From here only the call itself holds the devices open.
     stage = "muted idle and third-device isolation";
     await pa.waitForTimeout(11_000); // Beyond default idle, without fake clock/network interference.
     for (const page of [pa, pb]) {
@@ -213,6 +232,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     throw error;
   } finally {
     if (observerActivity !== null) clearInterval(observerActivity);
+    for (const live of keepAlive) live.stop();
     await Promise.all([a.close(), b.close(), c.close()]);
   }
 });
