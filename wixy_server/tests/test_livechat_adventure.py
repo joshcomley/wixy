@@ -130,6 +130,8 @@ class TestSchema:
                 "pack_run_id",
                 "pack_json",
                 "pack_error",
+                "images",
+                "pictures",
                 "decided_by",
                 "rev",
                 "created_at",

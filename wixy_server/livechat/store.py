@@ -55,6 +55,7 @@ from wixy_server.livechat.models import (
     AdventureSpin,
     AdventureState,
     AdventureSummary,
+    AdventureViewData,
     AttachmentKind,
     AttachmentResult,
     AttachmentRow,
@@ -347,6 +348,8 @@ CREATE TABLE IF NOT EXISTS adv_rounds(
   pack TEXT NOT NULL DEFAULT 'none'
     CHECK(pack IN ('none','pending','ready','failed','unavailable')),
   pack_run_id TEXT, pack_json TEXT, pack_error TEXT,
+  images TEXT NOT NULL DEFAULT 'none' CHECK(images IN ('none','pending','done','failed')),
+  pictures TEXT,
   decided_by TEXT,
   rev INTEGER NOT NULL DEFAULT 1,
   created_at REAL NOT NULL, updated_at REAL NOT NULL);
@@ -360,6 +363,18 @@ CREATE TABLE IF NOT EXISTS adv_settings(
 # defaults (`include_advised` off: places under a whole-country UK "advise against all travel" are
 # left out of the draw until the pair switch them back in). Like `wyr_topics` it names no place and
 # no person, so a wipe leaves it alone.
+#
+# The holiday pack's PICTURES (spec §4.3a) live on the same row: `images` is the picture job's state
+# (the `wyr_rounds.images` precedent) and `pictures` maps each picture slot to the ordinal of its
+# ordinary photo attachment on the anchor message, with its credit, source page and caption. The v20
+# DDL above was amended IN PLACE to carry them (v20 was never deployed); `_ensure_adventure_picture_
+# columns` adds the two columns to a database that ran the earlier v20 text (a developer's), so no
+# version bump is needed.
+_ADVENTURE_PICTURE_COLUMNS = (
+    "ALTER TABLE adv_rounds ADD COLUMN images TEXT NOT NULL DEFAULT 'none' "
+    "CHECK(images IN ('none','pending','done','failed'))",
+    "ALTER TABLE adv_rounds ADD COLUMN pictures TEXT",
+)
 _LATEST_SCHEMA_VERSION = 20
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
@@ -838,6 +853,8 @@ def _row_to_adv_round(row: sqlite3.Row) -> AdventureRoundRow:
         pack_run_id=row["pack_run_id"],
         pack_json=row["pack_json"],
         pack_error=row["pack_error"],
+        images=row["images"],
+        pictures_json=row["pictures"],
         decided_by=row["decided_by"],
         rev=row["rev"],
         created_at=row["created_at"],
@@ -1039,6 +1056,7 @@ class LiveChatStore:
         current = conn.execute("PRAGMA user_version").fetchone()[0]
         if current >= _LATEST_SCHEMA_VERSION:
             self._ensure_attachment_transcripts_table(conn)
+            self._ensure_adventure_picture_columns(conn)
             return
 
         conn.execute("BEGIN IMMEDIATE")
@@ -1217,6 +1235,28 @@ class LiveChatStore:
             conn.execute("ROLLBACK")
             raise
         self._ensure_attachment_transcripts_table(conn)
+        self._ensure_adventure_picture_columns(conn)
+
+    @staticmethod
+    def _ensure_adventure_picture_columns(conn: sqlite3.Connection) -> None:
+        """Independent of `PRAGMA user_version`: a database that ran the first text of schema v20
+        (before the holiday-pack pictures existed) has `adv_rounds` without `images`/`pictures`.
+        Settled here, once, for such a database; a plain column read otherwise (the
+        `_ensure_attachment_transcripts_table` precedent)."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(adv_rounds)")}
+        if not columns or {"images", "pictures"} <= columns:
+            return
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(adv_rounds)")}
+            if "images" not in columns:
+                conn.execute(_ADVENTURE_PICTURE_COLUMNS[0])
+            if "pictures" not in columns:
+                conn.execute(_ADVENTURE_PICTURE_COLUMNS[1])
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
 
     @staticmethod
     def _index_pending_links(conn: sqlite3.Connection) -> int:
@@ -2587,6 +2627,13 @@ class LiveChatStore:
         """One consistent read for the round view: the round, and — only while it is still in a
         spin state, the one place the view lists `eligible` — the ids out of play, plus the
         shared `include_advised` preference."""
+        data = self.adventure_view_data(anchor_seq=anchor_seq)
+        return None if data is None else (data.round, data.excluded, data.include_advised)
+
+    def adventure_view_data(self, *, anchor_seq: int) -> AdventureViewData | None:
+        """`adventure_view_state` plus the round's picture attachments, in the SAME read
+        transaction — so a view never pairs one `rev` with the ready-state of a later one (a
+        picture finishing between two reads would otherwise show up a revision early)."""
         with self._read_txn() as conn:
             row = conn.execute(
                 "SELECT * FROM adv_rounds WHERE anchor_message_seq = ?", (anchor_seq,)
@@ -2599,7 +2646,17 @@ class LiveChatStore:
                 if round_.state in ("spin_lng", "spin_lat")
                 else frozenset[str]()
             )
-            return round_, excluded, self._adv_include_advised(conn)
+            attachments: tuple[AttachmentRow, ...] = (
+                tuple(_load_attachments_for(conn, [anchor_seq]).get(anchor_seq, []))
+                if round_.pictures_json is not None
+                else ()
+            )
+            return AdventureViewData(
+                round=round_,
+                excluded=excluded,
+                include_advised=self._adv_include_advised(conn),
+                attachments=attachments,
+            )
 
     def spin_adventure(
         self,
@@ -2798,6 +2855,10 @@ class LiveChatStore:
                 if round_.pack == "pending":
                     assignments["pack"] = "failed"
                     assignments["pack_error"] = ADVENTURE_PACK_STOPPED_TEXT
+                if round_.images == "pending":
+                    # The picture job notices (its attach is a compare-and-set on `pending`) and
+                    # attaches nothing; the round stops waiting for pictures that are not coming.
+                    assignments["images"] = "failed"
             return self._adv_update(conn, anchor_seq, now_s, assignments), True
 
     def retry_adventure_pack(
@@ -2825,7 +2886,14 @@ class LiveChatStore:
                     conn,
                     anchor_seq,
                     now_s,
-                    {"pack": "pending", "pack_run_id": None, "pack_json": None, "pack_error": None},
+                    {
+                        "pack": "pending",
+                        "pack_run_id": None,
+                        "pack_json": None,
+                        "pack_error": None,
+                        "images": "none",
+                        "pictures": None,
+                    },
                 )
                 return updated, True
             raise AdventureBadStateError(
@@ -2861,20 +2929,24 @@ class LiveChatStore:
         state: Literal["ready", "failed", "unavailable"],
         pack_json: str | None = None,
         error: str | None = None,
+        pictures_pending: bool = False,
         now: float | None = None,
     ) -> bool:
         """Land the research outcome on the round — a compare-and-set on
         `(pack = 'pending' AND pack_run_id = run_id)`, so a blue/green overlap where two processes
         poll the same run stores it once, and a round rejected or deleted meanwhile is untouched.
         `False` = nothing was waiting for this run. A pack landing on a round already `banked`
-        still lands (the trip's pack arrives after the couple saved it)."""
+        still lands (the trip's pack arrives after the couple saved it). `pictures_pending` (a
+        `ready` pack on a server that can fetch pictures) starts the picture wait in the same
+        write: `images` becomes `pending` and the caller then runs the picture job."""
+        images = "pending" if state == "ready" and pictures_pending else "none"
         with self._write_txn() as conn:
             now_s = time.time() if now is None else now
             cursor = conn.execute(
-                "UPDATE adv_rounds SET pack = ?, pack_json = ?, pack_error = ?, "
+                "UPDATE adv_rounds SET pack = ?, pack_json = ?, pack_error = ?, images = ?, "
                 "rev = rev + 1, updated_at = ? "
                 "WHERE anchor_message_seq = ? AND pack = 'pending' AND pack_run_id IS ?",
-                (state, pack_json, error, now_s, anchor_seq, run_id),
+                (state, pack_json, error, images, now_s, anchor_seq, run_id),
             )
             if cursor.rowcount != 1:
                 return False
@@ -2895,6 +2967,108 @@ class LiveChatStore:
                 "WHERE pack = 'pending' ORDER BY anchor_message_seq"
             ).fetchall()
             return [(int(row["anchor_message_seq"]), row["pack_run_id"]) for row in rows]
+
+    def adventure_pending_pictures(self) -> list[int]:
+        """Startup recovery: the anchor seq of every round whose pack is `ready` and whose pictures
+        are still `pending` — the previous process died mid-hunt, and since the attach is
+        all-or-nothing nothing was stored, so the hunt is simply redone. A rejected round never
+        appears (rejecting ends the wait)."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT anchor_message_seq FROM adv_rounds "
+                "WHERE pack = 'ready' AND images = 'pending' AND state IN ('chosen', 'banked') "
+                "ORDER BY anchor_message_seq"
+            ).fetchall()
+            return [int(row["anchor_message_seq"]) for row in rows]
+
+    def fail_adventure_pictures(self, *, anchor_seq: int, now: float) -> bool:
+        """The pictures for a round are not coming (nothing found, a failure, or the round no longer
+        wants them): the pane stops waiting. A compare-and-set on `images = 'pending'`; `False` =
+        nothing was waiting (gone, already done or failed)."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE adv_rounds SET images = 'failed', rev = rev + 1, updated_at = ? "
+                "WHERE anchor_message_seq = ? AND images = 'pending'",
+                (now, anchor_seq),
+            )
+            if cursor.rowcount != 1:
+                return False
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            return True
+
+    def create_adventure_picture_attachments(
+        self,
+        *,
+        anchor_seq: int,
+        images: Sequence[tuple[str, int]],
+        pictures_json: str,
+        by_email: str | None,
+        now: float,
+    ) -> bool:
+        """Attach a holiday pack's server-fetched pictures (`(attachment id, size)` in ordinal
+        order, already staged at `uploads/<id>/assembled`) to the round's ANCHOR message in ONE
+        transaction — the `create_wyr_image_attachments` precedent: upload rows + `processing` photo
+        attachments + the slot map + `images = 'done'` + one event. They are ordinary private photo
+        attachments, so renditions, signed URLs, quota and delete/wipe erasure are inherited.
+        A compare-and-set: it attaches only while the round still exists, is `chosen` or `banked`
+        with its pack `ready` and `images = 'pending'`. Otherwise (deleted, rejected, finished by
+        another process) it returns False after journaling the ids for cleanup, and the caller
+        removes the staged files."""
+        ids = [att_id for att_id, _ in images]
+        with self._write_txn() as conn:
+            if any(
+                self._is_deleted_storage(conn, kind=kind, storage_id=att_id)
+                for att_id in ids
+                for kind in ("attachment", "upload")
+            ):
+                return False
+            row = conn.execute(
+                "SELECT state, pack, images FROM adv_rounds WHERE anchor_message_seq = ?",
+                (anchor_seq,),
+            ).fetchone()
+            if (
+                row is None
+                or row["state"] not in ("chosen", "banked")
+                or row["pack"] != "ready"
+                or row["images"] != "pending"
+            ):
+                self._queue_deleted_storage(conn, kind="attachment", ids=ids, now=now)
+                self._queue_deleted_storage(conn, kind="upload", ids=ids, now=now)
+                return False
+            for ordinal, (att_id, size_bytes) in enumerate(images):
+                conn.execute(
+                    "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, "
+                    "created_at) VALUES (?, 'photo', 'image/jpeg', ?, NULL, ?, ?)",
+                    (att_id, size_bytes, by_email, now),
+                )
+                conn.execute(
+                    "INSERT INTO attachments "
+                    "(id, kind, status, message_seq, ordinal, renditions, bytes_on_disk, "
+                    "created_at, updated_at) "
+                    "VALUES (?, 'photo', 'processing', ?, ?, '[]', 0, ?, ?)",
+                    (att_id, anchor_seq, ordinal, now, now),
+                )
+            conn.execute(
+                "UPDATE adv_rounds SET images = 'done', pictures = ?, rev = rev + 1, "
+                "updated_at = ? WHERE anchor_message_seq = ?",
+                (pictures_json, now, anchor_seq),
+            )
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (anchor_seq, now),
+            )
+            return True
+
+    def adventure_picture_attachments(self, *, anchor_seq: int) -> tuple[AttachmentRow, ...]:
+        """The photo attachments on a round's anchor message, in ordinal order (the holiday pack's
+        pictures; the slot map in `pictures_json` names them by ordinal)."""
+        with self._read_txn() as conn:
+            return tuple(_load_attachments_for(conn, [anchor_seq]).get(anchor_seq, []))
 
     def list_adventure_bank(self) -> list[AdventureRoundRow]:
         """The banked trips, newest first (by anchor seq)."""
@@ -3356,6 +3530,14 @@ class LiveChatStore:
             )
             message_seq = row["message_seq"]
             if message_seq is not None:
+                # A holiday-pack picture becoming ready changes the Adventure Time round's view
+                # (its pictures list only READY attachments), so the round's `rev` — the signal the
+                # client re-fetches on — moves too. A no-op for every other message.
+                conn.execute(
+                    "UPDATE adv_rounds SET rev = rev + 1, updated_at = ? "
+                    "WHERE anchor_message_seq = ?",
+                    (now, message_seq),
+                )
                 conn.execute(
                     "INSERT INTO events (type, message_seq, created_at) "
                     "VALUES ('message_updated', ?, ?)",
@@ -3386,7 +3568,8 @@ class LiveChatStore:
         """The gallery's page of the media history, NEWEST first: every `ready` photo and video
         that belongs to a sent message and is not view-once (a view-once picture is never kept
         anywhere a second look could reach it — Inv 52). The would-you-rather round's own
-        generated pictures are game furniture, not sent media, so they are left out. Ordered by
+        generated pictures and the Adventure Time holiday pack's pictures are game furniture, not
+        sent media, so they are left out. Ordered by
         `(message_seq, ordinal)`; `before` is the last `(seq, ordinal)` of the previous page.
         Returns `(rows, has_more)`."""
         sql = (
@@ -3394,7 +3577,8 @@ class LiveChatStore:
             "WHERE a.status = 'ready' AND a.kind IN ('photo', 'video') "
             "AND a.view_once_renditions IS NULL AND m.view_once_s IS NULL "
             "AND a.renditions != '[]' "
-            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM wyr_rounds)"
+            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM wyr_rounds) "
+            "AND a.message_seq NOT IN (SELECT anchor_message_seq FROM adv_rounds)"
         )
         args: list[int] = []
         if before is not None:

@@ -109,6 +109,7 @@ from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
 from wixy_server.livechat.adventure_pack import CmdAdventureResearcher, PackTiming  # noqa: E402
+from wixy_server.livechat.adventure_pictures import WebPictureFinder  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
 from wixy_server.livechat.transcribe import CmdTranscriber  # noqa: E402
@@ -116,7 +117,13 @@ from wixy_server.livechat.transcription import SlidingWindowRateLimiter  # noqa:
 from wixy_server.registry import load_registry  # noqa: E402
 from wixy_server.site_source import build_site_source  # noqa: E402
 from wixy_server.storage import ProjectPaths, ensure_project_dirs, project_paths  # noqa: E402
-from wixy_server.tests.fake_cmd import FakeCmdServer, FakeCmdState  # noqa: E402
+from wixy_server.tests.fake_cmd import (  # noqa: E402
+    CANNED_ADVENTURE_PACK,
+    FakeCmdServer,
+    FakeCmdState,
+)
+from wixy_server.tests.fake_open_web import FakeFile, FakeOpenWeb  # noqa: E402
+from wixy_server.tests.fake_web import FakeWeb, local_fetcher  # noqa: E402
 from wixy_server.watcher import WatcherStatus, fetch_once  # noqa: E402
 
 # spec/server-chat/00-brief.md §11: "the fixture's FakeCmdServer registers a
@@ -450,6 +457,39 @@ def main() -> None:
         )
     )
 
+    # The holiday pack's pictures (spec/server-chat/08 §4.3a) are fetched by the SERVER from open
+    # sources. The fixture has no internet: a local fake Wikipedia + Commons + venue answers for
+    # every host name the finder asks about, reached through the SAME `SafeFetcher` the product
+    # uses, its resolver / address policy / port injected through the constructor (the one
+    # test-only seam; nothing in the product reads an environment variable for it). The canned
+    # pack's venue link is pointed at the fake venue so a picture comes from a site's `og:image`
+    # too; the destination article, a dish and a sight come from the fake Wikipedia.
+    fake_web = FakeWeb()
+    fake_web_port = fake_web.start_threaded()
+    open_web = FakeOpenWeb(fake_web)
+    lead = open_web.add_file(FakeFile("Fixture Skyline.jpg", 4000, 2667, seed=1))
+    open_web.add_article("Lisbon", lead, description="Capital of Portugal")
+    for seed, (title, file_name) in enumerate(
+        (("Pastel de nata", "Fixture Pastel.jpg"), ("Belém Tower", "Fixture Tower.jpg")), start=2
+    ):
+        open_web.add_article(title, open_web.add_file(FakeFile(file_name, 3000, 2000, seed=seed)))
+    open_web.add_search(
+        "",
+        [
+            open_web.add_file(FakeFile(f"Fixture Street {i}.jpg", 4000, 2667, seed=10 + i)).title
+            for i in range(4)
+        ],
+    )
+    open_web.add_venue(
+        "alfama.fake.test", "/stay", og_image="/img/hero.jpg", site_name="Casa Alfama"
+    )
+    fixture_pack = json.loads(json.dumps(CANNED_ADVENTURE_PACK))
+    fixture_pack["sections"][1]["items"][0]["url"] = f"http://alfama.fake.test:{fake_web_port}/stay"
+    fake_cmd_state.chat_spawn_response_text = json.dumps(fixture_pack)
+    adventure_picture_finder = WebPictureFinder(
+        local_fetcher(fake_web_port), endpoints=open_web.endpoints
+    )
+
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
@@ -457,6 +497,7 @@ def main() -> None:
         transcriber=transcriber,
         adventure_researcher=adventure_researcher,
         adventure_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        adventure_picture_finder=adventure_picture_finder,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on

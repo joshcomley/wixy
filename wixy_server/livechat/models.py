@@ -45,6 +45,10 @@ AdventurePackState = Literal["none", "pending", "ready", "failed", "unavailable"
 runs, then `ready` / `failed`; `unavailable` when no researcher is configured (or cmd could not be
 reached to start one)."""
 
+AdventureImagesState = Literal["none", "pending", "done", "failed"]
+"""The holiday pack's PICTURE job (spec §4.3a): `none` until the text pack is in (or when pictures
+are not available), `pending` while the server finds and fetches them, then `done` / `failed`."""
+
 
 MessageHook = Callable[["MessageRow"], Awaitable[None]]
 """`app.state.livechat_message_hooks`'s element type (§4 "App state"): run on the
@@ -276,6 +280,10 @@ class AdventureRoundRow:
     pack_run_id: str | None
     pack_json: str | None
     pack_error: str | None
+    images: AdventureImagesState
+    pictures_json: str | None
+    """Which stored attachment (by ordinal on the anchor message) fills which picture slot, with its
+    credit, source page and caption — JSON, written in the same transaction as the attachments."""
     decided_by: str | None
     rev: int
     created_at: float
@@ -283,6 +291,18 @@ class AdventureRoundRow:
 
     def summary(self) -> AdventureSummary:
         return AdventureSummary(state=self.state, pack=self.pack, rev=self.rev)
+
+
+@dataclass(frozen=True, slots=True)
+class AdventureViewData:
+    """Everything the `GET /adventure/{seq}` view reads from the store, in ONE transaction: the
+    round, the ids out of play (only while it is still spinning), the shared `include_advised`
+    preference and the round's picture attachments."""
+
+    round: AdventureRoundRow
+    excluded: frozenset[str]
+    include_advised: bool
+    attachments: tuple[AttachmentRow, ...]
 
 
 @dataclass(frozen=True, slots=True)

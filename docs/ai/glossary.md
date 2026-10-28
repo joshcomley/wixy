@@ -223,5 +223,13 @@ real provisioning failure (decisions/00031).
 - **Holiday pack** — the food / places to stay / culture / sights / things to do / practical
   write-up of a chosen place, researched live through a hidden cmd chat-spawn run
   (`adventure_pack.py`), sanitised and stored on the round.
+- **Images state** (`adv_rounds.images`, `AdventureImagesState`) — the pack's PICTURE job: `none`
+  (the text pack is not in yet, or this server fetches no pictures) -> `pending` (set in the same
+  write that stores a `ready` pack; the server is finding and fetching pictures) -> `done` | `failed`.
+  The wire's `pack.images` is `"pending"` or `"done"` only. Pictures are ordinary photo attachments on
+  the anchor message plus a slot map (`adv_rounds.pictures`: slot -> attachment ordinal, credit, source
+  page, caption); a slot is `hero:<n>` or `<section key>:<item index>`.
+- **Safe fetch** (`livechat/safe_fetch.py`) — the one SSRF-safe GET behind every picture and page fetch
+  (public addresses only, vetted at connect time, bounded, polite); see Inv 56.
 - **Live trail** — the dragger's finger trail, relayed id-less as `adventure_live` SSE frames and
   never stored.

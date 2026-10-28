@@ -161,19 +161,23 @@ def _runner(request: Request) -> AdventurePackRunner:
     return runner
 
 
-async def _view_response(request: Request, seq: int) -> JSONResponse:
+async def _view_response(request: Request, seq: int, auth: ServerAuth) -> JSONResponse:
     store: LiveChatStore = request.app.state.livechat_store
-    state = await anyio.to_thread.run_sync(lambda: store.adventure_view_state(anchor_seq=seq))
-    if state is None:
+    secret: bytes = request.app.state.livechat_secret
+    data = await anyio.to_thread.run_sync(lambda: store.adventure_view_data(anchor_seq=seq))
+    if data is None:
         return _not_found()
-    round_, excluded, include_advised = state
+    # The holiday pack's pictures are ordinary photo attachments on the anchor message; the view
+    # carries their SIGNED urls (minted per response, for this token), only once they are ready.
     content = adventure_view_json(
-        round_,
+        data.round,
         _bank(request),
-        excluded,
+        data.excluded,
         now=time.time(),
         researcher_available=_runner(request).available,
-        include_advised=include_advised,
+        include_advised=data.include_advised,
+        attachments=data.attachments,
+        signer=MediaSigner.for_auth(secret, auth),
     )
     return JSONResponse(status_code=200, content=content)
 
@@ -277,10 +281,10 @@ async def put_adventure_settings(body: AdventureSettingsIn, request: Request) ->
 async def get_adventure(seq: int, request: Request) -> JSONResponse:
     """The round's view (spec §4.2): state, both spins, the landing, both roulettes, the holiday
     pack, `serverNow` for the client's clock offset."""
-    await require_server_token(request)
+    auth = await require_server_token(request)
     if not (0 < seq <= _SQLITE_MAX_INTEGER):
         return _not_found()
-    return await _view_response(request, seq)
+    return await _view_response(request, seq, auth)
 
 
 async def _adventure_mutation(
@@ -292,7 +296,7 @@ async def _adventure_mutation(
     """Shared body of the four mutations: token, sender, seq, then `action(store, sender)` on a
     worker thread. A real change is announced; a round that has just entered `chosen` with its pack
     `pending` and no run starts the holiday-pack job (once: a replay changes nothing)."""
-    await require_server_token(request)
+    auth = await require_server_token(request)
     sender = sender_raw.strip()
     if not _valid_sender(sender):
         return _invalid("sender must be 1-32 characters with no control characters")
@@ -316,7 +320,7 @@ async def _adventure_mutation(
         if runner.available and round_.pack == "pending" and round_.pack_run_id is None:
             background: ContainedTaskGroup = request.app.state.background_tasks
             background.spawn("livechat-adventure-pack", runner.run_job, seq)
-    return await _view_response(request, seq)
+    return await _view_response(request, seq, auth)
 
 
 @router.post("/adventure/live", response_model=None)

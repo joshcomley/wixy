@@ -8,13 +8,15 @@ import os
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
+import anyio
+import anyio.to_thread
 from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
@@ -25,10 +27,16 @@ from wixy_server.livechat.adventure_pack import (
     ResearchError,
     ResearchRun,
 )
+from wixy_server.livechat.adventure_pictures import (
+    AdventurePictureFinder,
+    FoundPicture,
+    PicturePlan,
+)
 from wixy_server.livechat.models import AdventureLanding, AdventureRoundRow
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.tests.fake_cmd import CANNED_ADVENTURE_PACK
+from wixy_server.tests.fake_open_web import make_image
 from wixy_server.tests.test_livechat_view_once import (
     TEST_PIN,
     UNLOCK_GUARD_HEADERS,
@@ -116,6 +124,59 @@ class FakeResearcher:
     async def cancel(self, run_id: str) -> None:
         self.cancelled.append(run_id)
         self._live.discard(run_id)
+
+
+class FakePictureFinder:
+    """A programmable `AdventurePictureFinder`: returns `pictures` (real JPEGs) after it is
+    released, records every plan it was given, and can be held mid-hunt (`hold=True`, then
+    `release.set()`) so a test can reject, delete or stop the app while pictures are in flight. It
+    never touches the network."""
+
+    def __init__(
+        self,
+        pictures: list[FoundPicture] | None = None,
+        *,
+        hold: bool = False,
+        error: Exception | None = None,
+    ) -> None:
+        self.pictures = pictures if pictures is not None else sample_pictures(3)
+        self.error = error
+        self.release = threading.Event()
+        if not hold:
+            self.release.set()
+        self.plans: list[PicturePlan] = []
+        self.started = threading.Event()
+        self.wanted_after_release: list[bool] = []
+
+    async def find(
+        self, plan: PicturePlan, *, still_wanted: Callable[[], Awaitable[bool]]
+    ) -> list[FoundPicture]:
+        self.plans.append(plan)
+        self.started.set()
+        while not self.release.is_set():  # cancellable, unlike a blocking wait in a thread
+            await anyio.sleep(0.01)
+        self.wanted_after_release.append(await still_wanted())
+        if self.error is not None:
+            raise self.error
+        return list(self.pictures)
+
+
+def sample_pictures(count: int, *, hero: int = 2, label: str = "Photo") -> list[FoundPicture]:
+    """`count` finished pictures: the first `hero` are `hero:N`, the rest `food:N` item slots."""
+    pictures: list[FoundPicture] = []
+    for index in range(count):
+        slot = f"hero:{index}" if index < hero else f"food:{index - hero}"
+        pictures.append(
+            FoundPicture(
+                slot=slot,
+                jpeg=make_image(900 + index * 20, 700, seed=index, exif=False),
+                credit=f"{label} {index}, CC BY 4.0",
+                page=f"https://commons.example.org/wiki/File:{label}_{index}.jpg",
+                caption=f"Caption {index}" if index % 2 == 0 else None,
+                keys=frozenset({f"sha256:{label}-{index}"}),
+            )
+        )
+    return pictures
 
 
 # A spin that satisfies every bound: 1800 degrees in 4 s.
@@ -271,11 +332,14 @@ def unlocked_client(
     no_researcher: bool = False,
     timing: PackTiming | None = None,
     email: str = "a@example.com",
+    picture_finder: AdventurePictureFinder | None = None,
 ) -> Iterator[tuple[TestClient, dict[str, str]]]:
     """An app (with the small fixture bank and a `FakeResearcher` unless told otherwise — a test
     never reaches a real cmd) and an unlocked token, closed on exit so each test's background
     tasks end with it. `no_researcher=True` builds the app with none, as the standalone edition
-    does: the caller must have set `WIXY_EDITION=standalone` so `create_app`'s default is none."""
+    does: the caller must have set `WIXY_EDITION=standalone` so `create_app`'s default is none.
+    `picture_finder` injects the holiday pack's picture sources; without one a pack has no
+    pictures (an injected researcher never gets the production, network-facing finder)."""
     if no_researcher:
         assert os.environ.get("WIXY_EDITION") == "standalone", "no_researcher needs standalone"
         resolved: AdventureResearcher | None = None
@@ -289,6 +353,7 @@ def unlocked_client(
         adventure_bank=bank if bank is not None else fixture_bank(),
         adventure_researcher=resolved,
         adventure_pack_timing=timing if timing is not None else FAST,
+        adventure_picture_finder=picture_finder,
     )
     client = TestClient(app, cookies={"CF_Authorization": "dummy"})
     client.__enter__()

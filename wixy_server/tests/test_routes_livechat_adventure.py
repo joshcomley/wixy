@@ -230,7 +230,14 @@ class TestView:
             assert view["spins"] == {"lng": None, "lat": None}
             assert view["landing"] is None
             assert view["country"] is None and view["destination"] is None
-            assert view["pack"] == {"state": "none", "data": None, "error": None, "canRetry": False}
+            assert view["pack"] == {
+                "state": "none",
+                "data": None,
+                "error": None,
+                "canRetry": False,
+                "images": "done",
+                "pictures": {"hero": [], "items": {}},
+            }
             assert isinstance(view["serverNow"], float)
 
     def test_the_view_through_the_whole_game(
@@ -719,7 +726,14 @@ class TestIdempotencyAndConflicts:
     def test_the_single_destination_unit_skips_the_destination_roulette(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
     ) -> None:
-        with unlocked_client(storage_root, wixy_repo_root, pin_verifier) as (client, h):
+        # A research run that stays `running`: the default fake finishes on its first poll (~20 ms),
+        # so on a loaded machine the stop's response can be built after the pack is already
+        # `ready` — this test is about the skipped roulette, not about that race.
+        researcher = FakeResearcher([FakeRunPlan(statuses=["running"])])
+        with unlocked_client(storage_root, wixy_repo_root, pin_verifier, researcher=researcher) as (
+            client,
+            h,
+        ):
             seq = create_round(client, h).json()["message"]["seq"]
             route_to_country(client, h, seq, "CCC")
             view = post(

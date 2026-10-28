@@ -40,6 +40,39 @@ destination alone) and the final answer — in its hidden chat-spawn ledger and 
 this server cannot erase. It names no one and says nothing the static bank does not, but its
 timestamp records that a pack was researched then. The operator accepted this (decision #2113).
 
+**The holiday pack's pictures are chat content too, fetched by this server only, through one
+SSRF-safe fetcher.** The research names things (a venue's own site, an English Wikipedia article
+title) and supplies no image link; after the text pack is stored the server finds the pictures
+(Wikipedia lead image -> its Commons thumbnail; the venue's `og:image`; for the hero and sights a Commons
+search) and stores them as ordinary private photo attachments on the round's ANCHOR message, attached with
+their slot map in one compare-and-set transaction (`adv_rounds.images`/`pictures`; only while the round is
+`chosen`/`banked`, its pack `ready` and `images = pending`). They are erased with the anchor or a wipe by
+Inv 46's machinery (credits and source pages live on the round row, so they go with it), are excluded from
+the Gallery like the would-you-rather pictures, and are never fetched again after storing. A viewer's
+device never contacts a third-party image host. **Every fetch of a URL the engine did not build goes
+through `livechat/safe_fetch.py` (`SafeFetcher`), and its rules are an invariant**: `http(s)` only, ports
+80/443 only; the URL is parsed once and the request is built from the parsed parts; userinfo, backslashes,
+control characters, single-label hosts and IP-literal hosts in any spelling are refused; the host is
+resolved exactly once, inside the network backend's `connect_tcp`, EVERY resolved address must be a public
+address (IPv4 globally routable and outside every special-purpose block; IPv6 only inside `2000::/3`, which
+refuses loopback, unique-local, link-local, multicast, IPv4-mapped / compatible, NAT64, 6to4 and Teredo
+whatever IPv4 they embed) and the socket is dialled to that vetted address literal — no second lookup, so no
+DNS-rebinding window — while TLS verifies the certificate against, and sends the SNI of, the HOSTNAME;
+redirects are followed by hand, each re-parsed and re-vetted, at most 3, never from https down to http;
+15 s from the request's start; bodies streamed under a hard cap (8 MB image, 1 MB HTML, 2 MB JSON),
+`Accept-Encoding: identity` and any other `Content-Encoding` refused, the content type checked before the
+body is read; no cookies, auth, proxies from the environment or connection reuse (httpcore is driven
+directly: it reads no environment); one request at a time per host, at most four hosts at once, one honoured
+`Retry-After` (<= 10 s), a descriptive User-Agent naming the engine and its repo. The resolver, the address
+policy, the allowed ports and the TLS context are constructor arguments used ONLY by tests to reach a local
+fake server; **there is no environment variable, setting or module-level switch that relaxes any of it**, and
+production builds `SafeFetcher()` with the defaults. A fetched image must have an `image/*` content type AND
+sniff as JPEG/PNG/WebP, open in Pillow as that format with <= 36 MP declared (checked before decoding), be a
+single frame with a short side >= 480 px and aspect <= 3:1, and is rebuilt as a metadata-free JPEG of <=
+1600 px (decoded two at a time). What the picture hunt sends to third parties is only names and URLs from
+the pack (the destination, item names, article titles, the venues' own URLs) plus the engine's User-Agent:
+nothing from the chat, and no sign-in, cookie or identity of either person.
+
 Every mutation is idempotent (the SAME move replayed is a 200 with the unchanged view; a DIFFERENT
 move after the state advanced is 409 `bad_state`) and is announced only through the existing
 `message_updated` event. The holiday-pack writes are compare-and-set on
@@ -54,7 +87,17 @@ concurrency), `test_routes_livechat_adventure.py` (auth, every validation bound,
 HTTP, erasure through the routes with sentinel bytes), `test_livechat_adventure_live.py` (bounds, its
 own rate limit, the `adventure_live` event name, never stored), `test_livechat_adventure_pack.py`
 (parse/sanitise, the prompt names only the destination, the chat-spawn calls against the fake cmd,
-every job outcome, restart resume, the overlap compare-and-set) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
+every job outcome, restart resume, the overlap compare-and-set), `test_livechat_safe_fetch.py` (every
+refused address class incl. IPv6 / mapped / NAT64 / 6to4 / Teredo, URL-parsing refusals, a name resolving
+to a private address, mixed records, rebinding, redirects to private hosts / schemes / ports, the redirect
+cap, byte / time / content-type / encoding bounds, Retry-After once, per-host serialisation and the
+four-host cap, no cookies / proxies, TLS name and SNI), `test_livechat_adventure_pictures.py` (the plan,
+the file-name parsing of the real thumb URL shape, never an original, source order, credits, de-duplication,
+the 16 cap, the image check incl. bombs / banners / animation / metadata stripping, no fetch ever targeting
+a private address even by redirect, politeness and budget), `test_livechat_adventure_pictures_job.py`
+(the compare-and-set attach, the Gallery exclusion, the job's outcomes incl. rejected / deleted mid-hunt, a
+blue/green overlap and restart, the view shape and signed URLs, erasure of pictures and credits by delete and
+wipe, and the whole chain with the production finder over a fake Wikipedia / Commons / venue) and `test_adventure_bank_loader.py` (+ `test_adventure_bank.py` for the bank against the map).
 Decision: [00190](../../decisions/00190-server-chat-adventure-time/decision.md).
 
 ### Inv 55 — Live calls are ephemeral private pairs, and idle suspension never overrides locking
