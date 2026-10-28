@@ -94,14 +94,14 @@ def _raw_db(db_path: Path) -> bytes:
 
 
 class TestSchema:
-    def test_a_fresh_database_is_v20_with_the_adventure_tables(
+    def test_a_fresh_database_is_current_with_the_adventure_tables(
         self, store: LiveChatStore, db_path: Path
     ) -> None:
         store.list_messages(before=None, limit=1)
-        assert _LATEST_SCHEMA_VERSION == 20
+        assert _LATEST_SCHEMA_VERSION >= 20  # v21 (Cookout) is additive on top
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
             assert {"adv_rounds", "idx_adv_rounds_state", "adv_rejected", "adv_settings"} <= names
             assert [r[1] for r in conn.execute("PRAGMA table_info(adv_settings)")] == [
@@ -199,7 +199,7 @@ class TestSchema:
         assert all(m.adventure is None for m in listed)
         conn = sqlite3.connect(str(db_path))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 20
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             names = {r[0] for r in conn.execute("SELECT name FROM sqlite_master")}
             assert {
                 "adv_rounds",
