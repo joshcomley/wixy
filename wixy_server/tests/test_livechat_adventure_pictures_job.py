@@ -30,7 +30,7 @@ from wixy_server.livechat.adventure_pictures import (
 from wixy_server.livechat.models import AttachmentResult
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
-from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.store import _LATEST_SCHEMA_VERSION, LiveChatStore
 from wixy_server.storage import ProjectPaths
 from wixy_server.tests.adventure_testkit import (
     BASE,
@@ -230,7 +230,7 @@ class TestSchema:
             assert {"images", "pictures", "images_started_at", "images_tries"} <= {
                 r[1] for r in conn.execute("PRAGMA table_info(adv_rounds)")
             }
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 20  # no version bump
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             with pytest.raises(sqlite3.IntegrityError):
                 conn.execute("UPDATE adv_rounds SET images = 'nonsense' WHERE 1")
         finally:
