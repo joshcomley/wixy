@@ -14,6 +14,7 @@ import json
 import random
 import shutil
 import sqlite3
+import time
 from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
@@ -2012,12 +2013,10 @@ class TestClockAndMoveIds:
         """With no `now` given, a method reads the clock INSIDE its transaction (queueing behind a
         competing writer must not eat into a window): the stamped time is the one `time.time`
         returned after `BEGIN IMMEDIATE`, not one sampled before the call."""
-        import wixy_server.livechat.store as store_module
-
         seq, picked = finished_round(store, bank)
         store.set_cookout_concepts_run(seq, "run-1")
         store.finish_cookout_concepts(seq, "run-1", "failed", error="x")
-        real = store_module.time.time
+        real = time.time
         log: list[str] = []
         clock = iter(float(n) for n in range(5000, 6000))
         original = LiveChatStore._write_txn
@@ -2031,25 +2030,20 @@ class TestClockAndMoveIds:
             return next(clock)
 
         monkeypatch.setattr(LiveChatStore, "_write_txn", traced)
-        monkeypatch.setattr(store_module.time, "time", tick)
+        monkeypatch.setattr(time, "time", tick)
         assert store.retry_cookout_concepts(seq) is True
         assert log[:2] == ["lock", "clock"]
         row = data_of(store, seq).round
         assert row.concepts_started_at == 5000.0 and row.concepts_deadline_at == 5900.0
-        monkeypatch.setattr(store_module.time, "time", real)
+        monkeypatch.setattr(time, "time", real)
         store.set_cookout_concepts_run(seq, "run-2")
         store.finish_cookout_concepts(
             seq, "run-2", "ready", concepts_json=canned_concepts(picked), pictures_pending=True
         )
-        monkeypatch.setattr(store_module.time, "time", tick)
+        monkeypatch.setattr(time, "time", tick)
         log.clear()
         status, gen = store.claim_cookout_pictures(seq, stale_before=None)
         assert (status, log[:2]) == ("claimed", ["lock", "clock"])
-        assert (
-            data_of(store, seq).round.images_started_at
-            == float(int(log.count("clock")) + 5000 - 1 + 1)
-            or True
-        )
         log.clear()
         assert store.fail_cookout_pictures(seq, expected_generation=gen) is True
         assert log[:2] == ["lock", "clock"]
