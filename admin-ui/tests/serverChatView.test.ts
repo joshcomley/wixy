@@ -46,6 +46,7 @@ function createHarness(attach: (session: ServerSession) => Promise<number | null
     mountCallControls: vi.fn(),
     isMicBusy: vi.fn(() => false),
     setCallBusy: vi.fn(),
+    setCallLive: vi.fn(),
     attach: vi.fn(attach),
     detach: vi.fn(),
     handleStreamEvent: vi.fn(),

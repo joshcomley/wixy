@@ -15,10 +15,11 @@ zooms into the country that was lit. Then it takes that country's **top five hol
 destinations** and does the same again; Stop zooms into the destination and lets you explore. An
 AI then says **"Preparing holiday pack"**, researches the place live on the internet (a couple of
 minutes) and comes back with the food, a couple of nice villas or places to stay, the culture
-(theatre, things to see), the sights and what to do. **"Bank this"** (the operator's wording, 2026-10-28; originally "Let's go there") banks it (saved);
-**"No"** rejects it and it **never appears again** in the destination draws. Every destination has
-its own **mini chat** at the bottom (expandable), exactly like the would-you-rather game, and it
-must SHARE that code: improving the per-item mini chat improves every game.
+(theatre, things to see), the sights and what to do. **"Yay"** (the operator's wording, 2026-10-29; originally "Let's go there", then "Bank this") banks it (saved);
+**"Nay"** rejects it and it **never appears again** in the destination draws. Every destination has
+its own **chat** (a floating chat button, floating messages and a quick reply, and a pop-up with the
+whole history), exactly like the would-you-rather game, and it must SHARE that code: improving the
+per-item chat improves every game. The game runs **full screen** (§5.1).
 
 Operator decision #2113 (answered 2026-10-28): the second spin is up/down; either person may do
 any step (the UI shows whose turn it is but never blocks); cmd's retained copy of each research
@@ -469,10 +470,32 @@ so two screens agree and a late joiner lands mid-flight.
   game first (its pop-up closes, its pane hides, its `reset()` runs, its dismissal is NOT
   recorded), so the second tab simply becomes the new game. The registry still holds both games;
   only one is ever open.
-- `itemChat.ts`: the mini chat strip (fixed 60 px; last two messages + echoes; 20 px thumbnails;
-  "Chat N") and the pop-up item chat (the thread's embedded bubble renderer, incremental, the ONE
-  composer re-parented in). Extracted verbatim from `wyrGame.ts`; both games use it; game-chat
-  messages are tagged in the main chat with their game ("WYR" / "Adventure").
+- **Full-screen game mode** (operator, 2026-10-29: "it's too squeezed in… get rid of the top Wixie menu
+  and let the game take up the screen to the very, very top… we have a whole horizontal strip taken up for
+  chat now… we don't need both", decisions/00194). While a game tab is the active tab the chat HEADER and the
+  chat COMPOSER are hidden (`.wx-srv-in-game` on the thread view, toggled by `thread.ts` on every layout
+  change) and the game pane runs from the very top of the chat view down to the tab bar. The Chat tab restores
+  both exactly. **Exception (Inv 55):** while the call controller is not idle (incoming ringing, outgoing
+  request, connecting, connected, muted, or a failure notice to read) the header stays shown (`.wx-srv-call-live`,
+  fed by `CallDeps.onLive`) — Accept / Mute / End live in it and an incoming call's Answer must never be
+  hidden. R3 multi-tap-to-lock and Escape-panic are unchanged (they are the only lock affordances left once the
+  header's ✕ is hidden). There is no mini strip and no composer in the pane.
+- `itemChat.ts`: the pop-up item chat only (the thread's embedded bubble renderer, incremental, the ONE
+  composer re-parented in) — the "chat per destination" view. Extracted from `wyrGame.ts`; both games use it;
+  game-chat messages are tagged in the main chat with their game ("WYR" / "Adventure"). (The mini chat strip
+  it used to hold is gone.)
+- `gameFloat.ts` (+ pure `gameFloatModel.ts`): the **chat FAB** (a round chat-bubble button bottom-right of the
+  pane, above any pinned dock; a dot while the OTHER person has written something in the item's chat that this
+  device has not seen; opens the pop-up), the **floating message** (the newest unseen message from the other
+  person, left of the FAB: two-line clamp, attachments as a thumbnail or "Photo" / "Voice note", "+N" when
+  several; stays until tapped, dismissed by its ✕ or a swipe down, or its chat opened — never a timer; main-chat
+  messages float too, labelled "Chat"; never my own; nothing on the Chat tab) and the **quick reply** (tap the
+  floating message: a compact box above the tab bar showing the message and the ONE composer re-parented in
+  exactly like the pop-up, mic and Send working, paperclip hidden, above the on-screen keyboard via
+  `visualViewport`; the send goes to the chat the message came from — the item or the main chat — then the box
+  closes, never while recording; ✕ / a tap outside closes it). "Seen" = the pop-up showed it, the floating message
+  was dismissed, or the quick reply opened on it. `chatTarget()` is overridden by `gameFloat.quickTarget()` while
+  the quick reply is open. Everything clears on lock / wipe / game close.
 - `wyrGame.ts` keeps only the WYR-specific pane (header, picture stage, controls, maximize view)
   and plugs into the two shared modules. Every existing WYR unit/e2e test stays green.
 - Contract (names are binding; details may grow):
@@ -486,10 +509,13 @@ so two screens agree and a late joiner lands mid-flight.
     close(key: GameKey): void; showTab(tab: "chat" | GameKey): void;
     activeTab(): "chat" | GameKey; seqOf(key: GameKey): number | null;
     chatTarget(): number | null; noteChatActivity(): void; refresh(): void; reset(): void; }
-  interface ItemChat { popup: HTMLElement; createStrip(): MiniStrip;
+  interface ItemChat { popup: HTMLElement;
     openPopup(seq: number, title: string): void; closePopup(): void; isPopupOpen(): boolean;
     popupSeq(): number | null; refresh(): void; reset(): void; }
-  interface MiniStrip { element: HTMLElement; draw(seq: number | null): void; }
+  interface GameFloat { quick: HTMLElement;
+    createOverlay(o: { fabLabel: string; popupTitle: string; item(): number | null }): HTMLElement;
+    note(m: Message): void; noteSent(source: number | null): void;
+    quickTarget(): number | null | undefined; closeQuick(): void; sync(): void; reset(): void; }
   ```
 
 ### 5.2 Adventure modules (`admin-ui/src/server/adventure/`)
@@ -505,20 +531,38 @@ screen).
 
 ### 5.3 The pane (top to bottom, phone first)
 
-`[ 🌍 Adventure Time   Options   Bank   New   ✕ ]` (Options opens a small sheet with one
+The pane is full screen (§5.1): no chat header, no composer, no mini strip.
+
+```
+[ Yay  Nay                Options  Bank  New  ✕ ]   pinned title row (no title text)
+[ the scrolling column:                              scrolls only once the place is chosen
+    the stage (the globe)
+    the holiday pack ]
+[ Stop · "Never show <name> again?" · Play again ]   pinned dock
+   (chat FAB bottom-right and a floating message bottom-left, over the column's bottom corners)
+```
+
+`Yay` / `Nay` (operator, 2026-10-29: "Bank this is white text on a light green button… they're taking up way
+too much space… yay and nay… on the left, as buttons, and get rid of the Adventure Time title text") sit on
+the LEFT of the title row and replace the big dock buttons: `Yay` banks (aria "Yay: bank this trip"), `Nay`
+asks once ("Never show <name> again?" with *Never show again* / *Keep it* in the dock). They are shown exactly
+while a decision is possible (`data-action="decide"`); otherwise the row is just Options · Bank · New · ✕. Yay is
+white on dark green `#0b6b43` (6.6:1) and Nay the neutral glass chip, both ≥ 4.5:1 and ≥ 44 px tall on a phone;
+on a phone (≤ 440 px) Options is a gear so the six buttons fit one line at 360 px. (Options opens a small sheet with one
 switch, "Include places the UK says not to travel to", off by default, with a one-line
 explanation; the `wyrTopics.ts` sheet precedent) →
-the **stage** (canvas; takes all spare height; the pin; overlay labels: big lit name, "Nearest
-land: …", step hints "Swipe sideways to spin — Bubble's turn") →
-the **action bar** (one row: `Stop` during a roulette, `Try again` on a failed pack,
-`Bank this ✓` / `No thanks ✕` in `chosen`; the reject asks once: "Never show <name>
-again?") →
-in `chosen`: the **pack panel** (scrolls; the stage shrinks to ~38 % height with an `Explore map`
-toggle that gives the map the full height): "Preparing holiday pack…" with an elapsed timer and
+the **stage** (canvas; the whole column while the globe spins or a roulette runs and nothing scrolls; the pin;
+overlay labels: big lit name, "Nearest land: …", step hints "Swipe sideways to spin — Bubble's turn") →
+the **action dock** (`Stop` during a roulette, `Try again` on a failed pack, Play again at the end) →
+in `chosen`: the **pack panel**. The stage and the pack are ONE column that scrolls (the title row and the dock stay
+put): the map is a fixed-height block (`clamp(220px, 42dvh, 460px)`) at the top that scrolls up and away as the pack is read, and
+a finger that starts on the map scrolls the column (`touch-action: pan-y`). `Explore map` is the mode that fills the
+column with the map and hands drags (pan / pinch) to it (`touch-action: none`); "Back to the place" re-centres it. Content:
+"Preparing holiday pack…" with an elapsed timer and
 "this can take a couple of minutes", then headline, summary, sections as cards with links
 (`target=_blank rel="noopener noreferrer"`) and PICTURES (§4.3a: a swipeable hero carousel at the top, a photo on each item card where one exists, tap → full-screen viewer with credit; every picture is served by this server — the browser never loads a third-party image), best time,
 getting there, travel advice, sources →
-the **mini chat strip** (shared) → the composer (shared, as WYR).
+the chat FAB / floating message / quick reply (shared, as WYR).
 
 Idle lock: suspend (`hooks.suspend("adventureAnimating")`) only while a spin animation or a
 roulette is running on screen; never during the pack wait (minutes) — Inv 43/55 unchanged.

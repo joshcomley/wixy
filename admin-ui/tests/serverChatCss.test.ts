@@ -59,6 +59,14 @@ const HIDDEN_TOGGLED_CLASSES = [
   "wx-srv-game-controls",
   "wx-srv-gamepop",
   "wx-srv-gamepop-empty",
+  // The chat FAB, floating message and quick reply (gameFloat.ts).
+  "wx-srv-float-dot",
+  "wx-srv-float-bubble",
+  "wx-srv-float-tag",
+  "wx-srv-float-thumb",
+  "wx-srv-float-more",
+  "wx-srv-quick",
+  "wx-srv-quick-tag",
   // Adventure Time (adventure/*.ts; workspace 00056): the game pane's own toggled parts, the
   // main-chat card's map and the Holiday bank screen.
   "wx-srv-adv-back",

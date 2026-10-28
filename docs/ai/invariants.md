@@ -121,6 +121,10 @@ transcripts, presence or call history is written to persistent state or the SSE 
 Leases, credits, frame/rate limits and bounded queues prevent delayed catch-up audio.
 TLS does not make this end-to-end encrypted: the trusted relay sees live PCM.
 
+Full-screen game mode (decisions/00194) hides the chat header, where the call controls live, while a game tab shows —
+except while the call is not idle (ringing, connecting, connected, a failure notice): then the header stays visible, so an
+incoming call's Accept is never hidden.
+
 Operator-requested troubleshooting may keep a bounded current-attempt technical
 trace in browser memory and print one technical console entry on failure. It
 contains no audio/content, identities, labels, connection/call IDs, credentials,

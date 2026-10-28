@@ -7,6 +7,7 @@ import type { LockHooks, ServerSession } from "../src/server/types";
 import { createWyrCards } from "../src/server/wyrCard";
 import { createWyrControls, wyrStatusLine } from "../src/server/wyrControls";
 import { createGameTabs, type GameTabs } from "../src/server/gameTabs";
+import { createGameFloat, type GameFloat } from "../src/server/gameFloat";
 import { createItemChat, type ItemChat } from "../src/server/itemChat";
 import { createWyrGame, type WyrGameDeps } from "../src/server/wyrGame";
 import { createWyrModel, type WyrModel } from "../src/server/wyrModel";
@@ -404,6 +405,7 @@ describe("wyr game tab", () => {
     /** The shared frame the pane plugs into (gameTabs.ts / itemChat.ts). */
     tabs: GameTabs;
     itemChat: ItemChat;
+    float: GameFloat;
     deps: WyrGameDeps;
     composer: HTMLElement;
     thread: HTMLElement;
@@ -434,7 +436,6 @@ describe("wyr game tab", () => {
     let controls: ReturnType<typeof createWyrControls>;
     const itemChat = createItemChat({
       document,
-      isMine: (sender) => sender === "Josh",
       gameMessages: (seq) => state.messages.filter((m) => m.wyrRef === seq),
       gameEchoes: () => state.echoes,
       renderBubble,
@@ -448,6 +449,19 @@ describe("wyr game tab", () => {
       afterChange: () => {},
     });
     const tabs = createGameTabs({ document, itemChat, onLayoutChange: layout });
+    const float = createGameFloat({
+      document,
+      win: window,
+      itemChat,
+      tabs,
+      mountComposer: (host) => {
+        if (host !== null) host.appendChild(composer);
+        else thread.appendChild(composer);
+      },
+      isRecording: () => false,
+      tabBar: tabs.tabBar,
+      host: thread,
+    });
     const deps: WyrGameDeps = {
       document,
       model,
@@ -455,7 +469,7 @@ describe("wyr game tab", () => {
         render: (container, seq, vw) => controls.render(container, seq, vw),
       },
       tabs,
-      itemChat,
+      float,
       roundMessage: () => state.round,
       startNextRound: next,
       openTopics: vi.fn(),
@@ -472,8 +486,8 @@ describe("wyr game tab", () => {
       redraw: () => tabs.refresh(),
       afterChange: () => {},
     });
-    thread.append(game.pane, tabs.tabBar, itemChat.popup);
-    return { game, tabs, itemChat, deps, composer, thread, state, renderBubble, mounts, layout, next };
+    thread.append(game.pane, tabs.tabBar, itemChat.popup, float.quick);
+    return { game, tabs, itemChat, float, deps, composer, thread, state, renderBubble, mounts, layout, next };
   }
 
   afterEach(() => document.body.replaceChildren());
@@ -584,47 +598,12 @@ describe("wyr game tab", () => {
     expect(painting.game.pane.querySelector(".wx-srv-game-placeholder")!.textContent).toBe("Painting…");
   });
 
-  it("the mini chat shows only this card's last two messages (and echoes), never other chat", () => {
-    const h = make();
-    h.state.messages = [
-      chatMessage(10, null, "main chat, not this card"),
-      chatMessage(11, 7, "first about the card"),
-      chatMessage(12, 7, "second about the card", "Josh"),
-      chatMessage(13, 7, "third about the card"),
-      chatMessage(14, 9, "a different round"),
-    ];
-    h.game.open(7);
-    const rows = [...h.game.pane.querySelectorAll(".wx-srv-game-mini-msg")].map((r) => r.textContent);
-    expect(rows).toHaveLength(2);
-    expect(rows[0]).toContain("second about the card");
-    expect(rows[0]).not.toContain("Josh:"); // my own messages carry no name
-    expect(rows[1]).toContain("Rose: third about the card");
-    expect(h.game.pane.textContent).not.toContain("main chat, not this card");
-    h.state.echoes = [{ clientId: "e1", text: "sending this" }];
-    h.tabs.refresh();
-    const after = [...h.game.pane.querySelectorAll(".wx-srv-game-mini-msg")].map((r) => r.textContent);
-    expect(after).toHaveLength(2);
-    expect(after[1]).toContain("sending this");
-  });
-
-  it("an empty card chat invites a message; attachments show as tiny tappable thumbnails", () => {
-    const h = make();
-    h.game.open(7);
-    expect(h.game.pane.querySelector(".wx-srv-game-mini-empty")!.textContent).toContain("Chat about this one");
-    h.state.messages = [{ ...chatMessage(11, 7, "look"), attachments: [photos()[0]!] }];
-    h.tabs.refresh();
-    const thumb = h.game.pane.querySelector<HTMLImageElement>(".wx-srv-game-mini-thumb")!;
-    expect(thumb.getAttribute("src")).toBe("https://example.invalid/thumb0.jpg");
-    thumb.parentElement!.click(); // tapping the message (or its thumbnail) opens the pop-up
-    expect(h.itemChat.isPopupOpen()).toBe(true);
-  });
-
   it("the pop-up borrows the one composer and returns it; it shows the card's whole history", () => {
     const h = make();
     h.state.messages = [chatMessage(11, 7, "one"), chatMessage(12, 7, "two"), chatMessage(13, 7, "three")];
     h.game.open(7);
     expect(h.itemChat.popup.hidden).toBe(true);
-    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-msg")!.click();
+    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
     expect(h.itemChat.popup.hidden).toBe(false);
     expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-composer")!.contains(h.composer)).toBe(true);
     expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(3);
@@ -640,7 +619,7 @@ describe("wyr game tab", () => {
     const h = make();
     h.state.messages = [chatMessage(11, 7, "one")];
     h.game.open(7);
-    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-msg")!.click();
+    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
     expect(h.renderBubble).toHaveBeenCalledTimes(1);
     h.state.messages = [chatMessage(11, 7, "one"), chatMessage(12, 7, "two")];
     h.tabs.refresh();
@@ -651,13 +630,13 @@ describe("wyr game tab", () => {
   it("the close button and the backdrop close the pop-up; Escape is left to the panic lock", () => {
     const h = make();
     h.game.open(7);
-    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
+    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
     expect(h.itemChat.isPopupOpen()).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(h.itemChat.isPopupOpen()).toBe(true); // not ours: the panel's panic key handles Escape
     h.itemChat.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-close")!.click();
     expect(h.itemChat.isPopupOpen()).toBe(false);
-    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
+    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
     h.itemChat.popup.querySelector<HTMLButtonElement>(".wx-srv-gamepop-backdrop")!.click();
     expect(h.itemChat.isPopupOpen()).toBe(false);
   });
@@ -676,7 +655,7 @@ describe("wyr game tab", () => {
   it("closing the game while the pop-up is open returns the composer", () => {
     const h = make();
     h.game.open(7);
-    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
+    h.game.pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
     h.game.close();
     expect(h.thread.contains(h.composer)).toBe(true);
     expect(h.itemChat.popup.hidden).toBe(true);
@@ -830,8 +809,9 @@ describe("thread wiring", () => {
     await flush();
     expect(sendMessage).toHaveBeenCalledTimes(1);
     expect(sendMessage.mock.calls[0]![1]).toMatchObject({ text: "about the card", wyrSeq: 9 });
-    // The card chat's own message shows in the mini chat, tagged in the main chat.
-    expect(thread.element.querySelector(".wx-srv-game-mini")!.textContent).toContain("hi");
+    // The card chat's own message shows in the card's pop-up chat (opened by the FAB), tagged in the main chat.
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
+    expect(thread.element.querySelector(".wx-srv-gamepop")!.textContent).toContain("hi");
     thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
     sendMessage.mockClear();
     sendMessage.mockResolvedValue({ ok: true, message: chatMessage(21, null, "hello", "Josh") } satisfies SendMessageResult);

@@ -64,7 +64,7 @@ export function createHolidayBank(deps: HolidayBankDeps): HolidayBank {
   bar.append(title, closeButton);
 
   const list = el("div", "wx-srv-bank-list");
-  const empty = el("p", "wx-srv-bank-empty", "Nothing saved yet. Bank a place with “Bank this” in the Adventure Time game.");
+  const empty = el("p", "wx-srv-bank-empty", "Nothing saved yet. Bank a place with “Yay” in the Adventure Time game.");
   empty.hidden = true;
   const loading = el("p", "wx-srv-bank-loading", "Loading…");
   loading.hidden = true;

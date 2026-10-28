@@ -2,7 +2,7 @@
 // two people play a whole adventure with REAL mouse drags on the globe. One spins it sideways and then
 // up/down (the other sees the finger's trail while it moves, and the same spin and landing after), both
 // press a Stop (each screen lights the same country, then the same place), the fake cmd researcher
-// returns the canned holiday pack, the destination has its own mini chat (shared with every game), the
+// returns the canned holiday pack, the destination has its own chat (the chat FAB's pop-up, a floating message and a quick reply, shared with every game; the game runs full screen), the
 // trip is banked and appears in the Holiday bank screen; a rejected place is confirmed and never
 // returns; Adventure and Would-you-rather replace each other in the tab bar (only ever two tabs); and
 // the pane fits a 360 px phone.
@@ -114,8 +114,17 @@ async function waitFactSet(pages: readonly Page[], name: string, timeoutMs = 20_
   }
 }
 
+/** The ... menu lives in the chat header, which a game tab hides (full-screen game mode): go to the Chat tab first. */
+async function toChatHeader(page: Page): Promise<void> {
+  if (await page.locator(".wx-srv-more-button").isVisible()) return;
+  await page.locator(".wx-srv-tab-chat").click();
+  await expect(page.locator(".wx-srv-more-button")).toBeVisible();
+  await humanPause(page);
+}
+
 /** Starts an adventure from the ... menu; the starter lands in the Adventure tab. Returns the anchor seq. */
 async function startAdventure(page: Page): Promise<string> {
+  await toChatHeader(page);
   const before = await page.locator(".wx-srv-bubble-adv").count();
   await page.locator(".wx-srv-more-button").click();
   await expect(page.locator(".wx-srv-more-adventure")).toBeVisible();
@@ -412,18 +421,18 @@ test.describe("Adventure Time", () => {
     for (const b of boxes) expect(Math.abs(b.w - b.h)).toBeLessThan(1.5);
     // Two screenshots of the grid (the pack panel is a short scroller on a phone: a row is about one panel tall).
     await a.evaluate(() => {
-      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-scroll")!;
       const grid = document.querySelector<HTMLElement>(".wx-srv-adv-dishes")!;
       host.scrollTop += grid.getBoundingClientRect().top - host.getBoundingClientRect().top + 26; // past the title: row one, photos and names
     });
     await shot(a, "05c-food-grid");
     await a.evaluate(() => {
-      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-scroll")!;
       host.scrollTop += 210; // row two
     });
     await shot(a, "05c2-food-grid-more");
     await a.evaluate(() => {
-      const host = document.querySelector<HTMLElement>(".wx-srv-adv-pk-host")!;
+      const host = document.querySelector<HTMLElement>(".wx-srv-adv-scroll")!;
       host.scrollTop += 205; // row three: the dish with no photo is a text tile
     });
     await shot(a, "05c3-food-grid-text-tile");
@@ -453,24 +462,80 @@ test.describe("Adventure Time", () => {
     expect(requestedExternally).toEqual([]);
     await humanPause(a);
 
-    // The destination has its own mini chat (the shared one): a message lands in the other mini chat,
-    // the pop-up shows the history with the one composer, and the main chat tags it "Adventure".
+    // The map and the pack are ONE scrolling column: scrolled down, the map is gone (the title row stays),
+    // and a finger that starts on the map is handed to the page scroll (touch-action: pan-y); Explore map
+    // is the mode that hands drags to the map instead.
+    {
+      const column = a.locator(".wx-srv-adv-scroll");
+      const globe = a.locator(".wx-srv-adv-globe");
+      await column.evaluate((el) => { el.scrollTop = 0; });
+      await shot(a, "05g-pack-scrolled-top");
+      const barBefore = (await a.locator(".wx-srv-adv-bar").boundingBox())!;
+      const colBox = (await column.boundingBox())!;
+      const stageTop = (await a.locator(".wx-srv-adv-stage").boundingBox())!;
+      expect(stageTop.y + stageTop.height).toBeGreaterThan(colBox.y + 50); // the map is in view at the top
+      expect(stageTop.height).toBeLessThan(colBox.height); // and no longer fills the column (it is not pinned)
+      expect(await column.evaluate((el) => el.scrollHeight > el.clientHeight + 100)).toBe(true);
+      await column.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+      await a.waitForTimeout(150);
+      await shot(a, "05h-pack-scrolled-down");
+      const stageAfter = (await a.locator(".wx-srv-adv-stage").boundingBox())!;
+      expect(stageAfter.y + stageAfter.height).toBeLessThanOrEqual(colBox.y + 1); // the map scrolled up and away
+      const barAfter = (await a.locator(".wx-srv-adv-bar").boundingBox())!;
+      expect(barAfter.y).toBeCloseTo(barBefore.y, 0); // the title row stays put
+      expect(await globe.evaluate((el) => getComputedStyle(el).touchAction)).toBe("pan-y");
+      await column.evaluate((el) => { el.scrollTop = 0; });
+      await humanPause(a);
+      await a.locator(".wx-srv-adv-explore-toggle").click();
+      expect(await globe.evaluate((el) => getComputedStyle(el).touchAction)).toBe("none");
+      await humanPause(a);
+      await a.locator(".wx-srv-adv-explore-toggle").click();
+      await humanPause(a);
+    }
+
+    // The game runs FULL SCREEN: the chat header and the composer are hidden in a game tab.
+    await expect(a.locator(".wx-srv-thread-header")).toBeHidden();
+    await expect(a.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
+    // The destination has its own chat (the shared one). Alice opens the chat FAB's pop-up and writes;
+    // Bob sees the message FLOAT (the FAB gets a dot), taps it, and answers in the quick reply, which
+    // sends into the destination and closes; Alice sees the answer float.
     async function say(page: Page, text: string): Promise<void> {
       await page.locator(".wx-chat-composer-input").fill(text);
       await page.locator(".wx-chat-send-button").click();
       await humanPause(page);
     }
+    await a.locator(".wx-srv-adv .wx-srv-float-fab").click();
+    await expect(a.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
     await say(a, "Imagine the custard tarts");
-    await eventually(pages, async () => (await b.locator(".wx-srv-adv .wx-srv-game-mini").innerText()).includes("Imagine the custard tarts"), "Bob's mini chat");
-    await expect(b.locator(".wx-srv-adv .wx-srv-game-mini")).toContainText("Alice:");
-    await b.locator(".wx-srv-adv .wx-srv-game-mini-msg").first().click();
+    await a.locator(".wx-srv-gamepop-close").click();
+    await expect(a.locator(".wx-srv-gamepop")).toBeHidden();
+    await expect(b.locator(".wx-srv-adv .wx-srv-float-bubble")).toContainText("Imagine the custard tarts", { timeout: 20_000 });
+    await expect(b.locator(".wx-srv-adv .wx-srv-float-bubble")).toContainText("Alice:");
+    await expect(b.locator(".wx-srv-adv .wx-srv-float-fab")).toHaveAttribute("aria-label", /new message/);
+    await expect(b.locator(".wx-srv-adv .wx-srv-float-dot")).toBeVisible();
+    await shot(b, "05e-floating-message");
+    await humanPause(b);
+    await b.locator(".wx-srv-adv .wx-srv-float-open").click();
+    await expect(b.locator(".wx-srv-quick")).toBeVisible();
+    await expect(b.locator(".wx-srv-quick .wx-chat-composer-input")).toBeVisible();
+    await expect(b.locator(".wx-srv-adv .wx-srv-float-dot")).toBeHidden(); // answered through the floating message: seen
+    await shot(b, "05f-quick-reply");
+    await say(b, "Book it");
+    await expect(b.locator(".wx-srv-quick")).toBeHidden(); // a successful send closes it
+    await expect(a.locator(".wx-srv-adv .wx-srv-float-bubble")).toContainText("Book it", { timeout: 20_000 });
+    await humanPause(a);
+    // The FAB's pop-up is the destination's whole chat, with the one composer.
+    await b.locator(".wx-srv-adv .wx-srv-float-fab").click();
     await expect(b.locator(".wx-srv-gamepop")).toBeVisible();
     await expect(b.locator(".wx-srv-gamepop")).toContainText("Imagine the custard tarts");
-    await expect(b.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
-    await say(b, "Book it");
-    await eventually(pages, async () => (await a.locator(".wx-srv-adv .wx-srv-game-mini").innerText()).includes("Book it"), "Alice sees the reply");
+    await expect(b.locator(".wx-srv-gamepop")).toContainText("Book it");
     await b.locator(".wx-srv-gamepop-close").click();
     await expect(b.locator(".wx-srv-gamepop")).toBeHidden();
+    await humanPause(a);
+    await a.locator(".wx-srv-adv .wx-srv-float-fab").click();
+    await expect(a.locator(".wx-srv-adv .wx-srv-float-dot")).toBeHidden();
+    await a.locator(".wx-srv-gamepop-close").click();
+    await humanPause(a);
 
     // Back in the main chat: the card tells the story, the chat messages wear an "Adventure" tag.
     await a.locator(".wx-srv-tab-chat").click();
@@ -513,14 +578,17 @@ test.describe("Adventure Time", () => {
     await expect(a.locator(".wx-srv-tab-adventure")).toHaveClass(/wx-srv-tab-on/);
     await waitFact([a], "state", "banked");
     await expect(a.locator(".wx-srv-adv-pk-headline")).toHaveText(CANNED_HEADLINE);
-    await expect(a.locator(".wx-srv-adv .wx-srv-game-mini")).toContainText("Book it");
+    await humanPause(a);
+    await a.locator(".wx-srv-adv .wx-srv-float-fab").click();
+    await expect(a.locator(".wx-srv-gamepop")).toContainText("Book it");
+    await a.locator(".wx-srv-gamepop-close").click();
 
     for (const e of errors) expect(e.filter((m) => !/favicon/i.test(m))).toEqual([]);
     stopAwake();
     await closeAll(contextA, contextB);
   });
 
-  test("No thanks asks once, 'Never show again' rejects the place for good", async ({ browser }) => {
+  test("Nay asks once, 'Never show again' rejects the place for good", async ({ browser }) => {
     const contextA = await newGameContext(browser);
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
@@ -534,6 +602,55 @@ test.describe("Adventure Time", () => {
 
     // Bob passes: the question is asked once, "Keep it" backs out, "Never show again" confirms.
     await eventually(pages, async () => (await b.locator(".wx-srv-adv-pass").isVisible()), "the decision buttons");
+
+    // The decision is Yay / Nay on the LEFT of the title row (no title text, no big dock buttons), and the
+    // whole row fits one line on a 360 px phone with real tap targets and readable text.
+    await b.setViewportSize({ width: 360, height: 780 });
+    await b.waitForTimeout(300);
+    await expect(b.locator(".wx-srv-adv-bank-this")).toHaveText("Yay");
+    await expect(b.locator(".wx-srv-adv-pass")).toHaveText("Nay");
+    await expect(b.locator(".wx-srv-adv-bank-this")).toHaveAttribute("aria-label", "Yay: bank this trip");
+    await expect(b.locator(".wx-srv-adv-pass")).toHaveAttribute("aria-label", "Nay: not this one");
+    await expect(b.locator(".wx-srv-adv-bar")).not.toContainText("Adventure Time");
+    await expect(b.locator(".wx-srv-adv-dock .wx-srv-adv-bank-this")).toHaveCount(0);
+    const row = await b.locator(".wx-srv-adv-bar-decide > button, .wx-srv-adv-bar-actions > button").evaluateAll((els) =>
+      els.map((el) => {
+        const r = el.getBoundingClientRect();
+        return { name: el.getAttribute("aria-label") ?? "", left: r.left, right: r.right, top: r.top, height: r.height, clipped: el.scrollWidth > el.clientWidth + 1 };
+      }),
+    );
+    expect(row.map((r) => r.name)).toEqual(["Yay: bank this trip", "Nay: not this one", "Options", "Open the Holiday bank", "Start a new adventure", "Close the game"]);
+    expect(Math.max(...row.map((r) => r.top)) - Math.min(...row.map((r) => r.top))).toBeLessThanOrEqual(2); // one line
+    for (let i = 1; i < row.length; i += 1) expect(row[i]!.left).toBeGreaterThanOrEqual(row[i - 1]!.right - 0.5); // no overlap
+    for (const r of row) {
+      expect(r.height, r.name).toBeGreaterThanOrEqual(43.5);
+      expect(r.clipped, r.name).toBe(false);
+    }
+    expect(row[row.length - 1]!.right).toBeLessThanOrEqual(360.5);
+    // WCAG AA (4.5:1) for the text of both buttons against their own background.
+    const contrasts = await b.locator(".wx-srv-adv-yay, .wx-srv-adv-nay").evaluateAll((els) =>
+      els.map((el) => {
+        const cs = getComputedStyle(el);
+        const channels = (c: string): number[] => (c.match(/[\d.]+/g) ?? ["0", "0", "0"]).slice(0, 3).map(Number);
+        const lum = ([r, g, bl]: number[]): number => {
+          const lin = (v: number): number => { const x = v / 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; };
+          return 0.2126 * lin(r!) + 0.7152 * lin(g!) + 0.0722 * lin(bl!);
+        };
+        // The glass chip is translucent: composite its background over the card's dark navy.
+        const bgParts = (cs.backgroundColor.match(/[\d.]+/g) ?? ["0", "0", "0", "1"]).map(Number);
+        const alpha = bgParts[3] ?? 1;
+        const card = [10, 26, 58];
+        const bg = [0, 1, 2].map((i) => bgParts[i]! * alpha + card[i]! * (1 - alpha));
+        const l1 = lum(channels(cs.color));
+        const l2 = lum(bg);
+        return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+      }),
+    );
+    for (const ratio of contrasts) expect(ratio).toBeGreaterThanOrEqual(4.5);
+    await shot(b, "05i-title-row-yay-nay-360");
+    await b.screenshot({ path: test.info().outputPath("phone-360-yay-nay.png") });
+    await b.setViewportSize({ width: 390, height: 844 });
+    await humanPause(b);
     await b.locator(".wx-srv-adv-pass").click();
     await expect(b.locator(".wx-srv-adv-ask")).toContainText("again?");
     await expect(b.locator(".wx-srv-adv-never")).toBeVisible();
@@ -568,6 +685,7 @@ test.describe("Adventure Time", () => {
     await unlockServer(page, "Alice");
 
     async function startWyr(): Promise<void> {
+      await toChatHeader(page);
       await page.locator(".wx-srv-more-button").click();
       await expect(page.locator(".wx-srv-more-wyr")).toBeVisible();
       await humanPause(page);
@@ -713,13 +831,15 @@ test.describe("Adventure Time", () => {
     const paneFit = await adv(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(paneFit.scroll).toBeLessThanOrEqual(paneFit.client + 1);
 
-    // The globe keeps real room; the header, the mini chat, the composer and the tab bar are all on
-    // screen, inside the width, and proper tap targets.
+    // The game runs full screen: no chat header and no composer. The globe keeps real room; the title
+    // row, the chat FAB and the tab bar are all on screen, inside the width, and proper tap targets.
+    await expect(page.locator(".wx-srv-thread-header")).toBeHidden();
+    await expect(page.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
     const stage = (await page.locator(".wx-srv-adv-stage").boundingBox())!;
     expect(stage.height).toBeGreaterThanOrEqual(200);
     expect(stage.x).toBeGreaterThanOrEqual(0);
     expect(stage.x + stage.width).toBeLessThanOrEqual(360.5);
-    for (const selector of [".wx-srv-adv-bar", ".wx-srv-adv .wx-srv-game-mini", ".wx-chat-composer-input", ".wx-srv-tab-chat", ".wx-srv-tab-adventure"]) {
+    for (const selector of [".wx-srv-adv-bar", ".wx-srv-adv .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-adventure"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box, selector).not.toBeNull();
       expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(780.5);

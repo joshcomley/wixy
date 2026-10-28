@@ -17,6 +17,9 @@ export interface CallDeps {
   hooks: Pick<LockHooks, "suspend" | "lockNow">;
   isMicBusy: () => boolean;
   onBusy: (busy: boolean) => void;
+  /** The call controls need the screen: a call is ringing, being set up, connected, or has a failure notice
+   * to read. The thread keeps its header (where these controls live) visible in a game tab while true. */
+  onLive?: (live: boolean) => void;
   socketFactory?: (url: string, protocol: string) => WebSocket;
   audioFactory?: (capture: (pcm: ArrayBuffer, lease: number) => void, admitted: (sequence: number) => void,
     failed: () => void, leaseReady: (until: number, remainingMs: number) => void,
@@ -257,6 +260,7 @@ export function createCallController(deps: CallDeps) {
     muteButton.hidden = state !== "connected";
     endButton.hidden = !inCall;
     labelButton(endButton, state === "incoming" ? "Decline" : state === "outgoing" ? "Cancel call" : "End call", "end");
+    deps.onLive?.(state !== "idle" || outgoingRequest !== null || !dialog.hidden || !notice.hidden);
   }
   function send(message: Record<string, unknown>): boolean {
     if (!socket || socket.readyState !== 1 || socket.bufferedAmount > 8192) return false;
