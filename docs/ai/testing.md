@@ -95,6 +95,38 @@ never "auto"; `1` reproduces the old fully serial run for debugging) and `WIXY_E
 `python3`; on Windows use the real interpreter, bare `python` is the Store stub). Do not add a
 shared `webServer` or a fixed port back: that is what forced `workers: 1`.
 
+**Every test starts from a pristine Server chat** (decisions/00195). A worker's one fixture server
+holds one Server chat that its tests share in sequence, and which tests share a worker varies run to
+run, so a test used to inherit earlier tests' messages, game rounds (Adventure Time's unfinished
+rounds are OFFERED as a tab and their cards carry a Play button), device grants, call state and
+fake-cmd settings. `e2e/fixtures.ts` therefore has a test-scoped **auto** fixture, `serverChatReset`,
+that POSTs the fixture server's own `/test/server/reset` (in `e2e/fixture_server.py` only, never in the
+product app) before each test: the product's `wipe_for_scrub` plus the storage sweep the real wipe
+route runs (every message and what hangs off it, Adventure rounds and the never-again list,
+transcripts, attachment files), then what a wipe deliberately keeps (device grants, push
+subscriptions, `adv_settings`), then the in-memory state (call broker sessions and per-identity
+admission budgets, the rate limiters, the fake cmd's transcription settings and PIN lockout, the
+delete-response delay). The database file is never replaced under its live connections. Specs
+therefore never need to clean up after themselves and must not rely on what an earlier test left.
+`WIXY_E2E_WORKERS=1` is the worst case for leftovers: run it when touching shared state.
+
+**Clocks:** `page.clock.install()` does NOT pause time (measured on Playwright 1.61.1: page time keeps
+flowing at real speed); a spec that counts idle time with `runFor` must call `freezeClock(page)` from
+`e2e/tests/helpers.ts` after the page has loaded, or a busy machine adds its own delay to the count.
+`waitForNextDraftPatchAccepted(page, { path })` waits for the PATCH that edits a given content path;
+without `path` it is satisfied by any accepted PATCH, including one the test's own click did not cause.
+
+**Image bakes and uploads:** never leave one inside Playwright's default 5 s `expect` timeout (the
+Alignment test's "Save aligned photo" did, and a loaded CI runner broke it: the dialog was still open at
+5.0 s; click to dialog-closed measured 0.07 s unthrottled, 1.2-2.6 s with the page's CPU throttled 6-20x
+via CDP `Emulation.setCPUThrottlingRate`, 4-8 s at 25x and 9-14 s at 30x, where the old 5 s wait failed). Arm `waitForMediaUpload(page)` from `e2e/tests/helpers.ts` before the click or
+`setInputFiles` that causes the upload (it resolves on the `POST /api/admin/media` answering 200, skips a
+5xx the admin client retries, and rejects with the status on any other), then wait for the on-screen
+effect with `{ timeout: MEDIA_PIPELINE_TIMEOUT_MS }` (60 s: the admin client's own 3 x 10 s upload attempts
+plus backoff is 31.5 s, doubled for the bake). A test doing that raises its own budget with
+`test.setTimeout(MEDIA_PIPELINE_TIMEOUT_MS * 3)`. `section-panel.spec.ts`'s `uploadThroughMediaDialog`
+is the media-dialog flavour.
+
 The one `@pytest.mark.live_cmd` test (a real cmd round-trip) is excluded by default; run it
 during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/`.
 

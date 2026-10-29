@@ -130,6 +130,53 @@ export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
   });
 }
 
+/** The longest ONE image write through the admin may legitimately take, for every wait on a bake or
+ * an upload (Playwright's own 5 s `expect` default is an accident here, not a limit of the product).
+ *
+ * Where 60 s comes from: `admin-ui/src/api.ts`'s `fetchWithRetry` gives `uploadMedia` up to
+ * `MAX_ATTEMPTS` (3) attempts of `TIMEOUT_MS` (10 s) each with `RETRY_BASE_MS * attempt` (0.5 s,
+ * 1 s) between them, so the upload alone can run 31.5 s before the admin itself gives up and shows
+ * "Couldn't save the aligned photo" (the dialog then stays open). A save still pending after that is
+ * a real failure; one inside it is just a slow machine. On top of that sits the in-browser bake
+ * (a 1920x1080 canvas plus a JPEG encode: ~70 ms here, 1.2-2.6 s with the page's CPU throttled 6-20x)
+ * and the server's own re-encode; 60 s is the 31.5 s ceiling with roughly double headroom for them.
+ * A test that waits on this must raise its own timeout past a few of these (`test.setTimeout`). */
+export const MEDIA_PIPELINE_TIMEOUT_MS = 60_000;
+
+/** Waits for the NEXT `POST /api/admin/media` this page makes (an upload through the real media
+ * pipeline: the media dialog's file input, or the aligner's "Save aligned photo", which bakes the
+ * canvas and uploads the result) to come back 200, returning that response. Create the promise
+ * BEFORE the click or `setInputFiles` that causes the upload; the listener is attached
+ * synchronously, so it cannot miss the response.
+ *
+ * A 5xx is skipped, not failed on: the admin's `fetchWithRetry` re-sends the upload on a 5xx (safe,
+ * the upload is content-hashed), so only a non-5xx answer is the upload's real outcome. Any non-200
+ * of those (a 422 for an unreadable image, say) rejects with the status and the server's detail,
+ * rather than leaving the caller to time out waiting for a dialog that will never close. */
+export function waitForMediaUpload(page: Page): Promise<Response> {
+  const uploaded = page
+    .waitForResponse(
+      (res) =>
+        res.url().endsWith("/api/admin/media") && res.request().method() === "POST" && res.status() < 500,
+      { timeout: MEDIA_PIPELINE_TIMEOUT_MS },
+    )
+    .then(async (res) => {
+      if (res.status() !== 200) {
+        throw new Error(`expected POST /api/admin/media to 200, got ${res.status()}: ${await res.text()}`);
+      }
+      return res;
+    });
+  // The caller awaits this right after its click; if that click throws first, the rejection that
+  // would come later (60 s on) must not surface as an unhandled one in whatever test runs next.
+  uploaded.catch(() => undefined);
+  return uploaded;
+}
+
+function patchTouchesPath(res: Response, path: string): boolean {
+  const body = res.request().postDataJSON() as { ops?: { path?: unknown }[] } | null;
+  return (body?.ops ?? []).some((op) => op.path === path);
+}
+
 const PUBLISH_CONFLICT_RETRY_LIMIT = 5;
 
 /** Opens the publish drawer (the status bar's Publish button — spec/05 §5),
