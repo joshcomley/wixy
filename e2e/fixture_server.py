@@ -704,8 +704,8 @@ def main() -> None:
 
     @app.post("/test/cookout/chef-delay", include_in_schema=False)
     async def _post_cookout_chef_delay(payload: dict[str, object]) -> dict[str, float]:
-        """How long the fake cmd holds the next chef runs (concept runs included) before settling, so
-        a test can watch the "chef is thinking" carousel for as long as it needs. Applies to runs
+        """How long the fake cmd holds the next chef runs (concept runs included) before
+        settling, so a test can watch the "chef is thinking" carousel for as long as it needs. Applies to runs
         created afterwards; the file's default is restored by posting `seconds: 2`."""
         seconds = payload["seconds"]
         assert isinstance(seconds, (int, float))
