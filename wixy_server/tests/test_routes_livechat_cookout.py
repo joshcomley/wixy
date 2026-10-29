@@ -1023,7 +1023,7 @@ class TestRecipes:
                 "seq", "conceptId", "title", "vibe", "description", "serves", "prepMinutes",
                 "cookMinutes", "totalMinutes", "bankedAt", "requestedBy", "picture",
                 "generation", "cooked", "dinnerPick", "style", "challenge", "ingredients",
-                "leftovers",
+                "leftovers", "mode", "build",
             }  # fmt: skip
             assert first["totalMinutes"] == 30 and first["title"] == "Dish B"
             assert first["requestedBy"] == "Josh" and first["picture"] is None

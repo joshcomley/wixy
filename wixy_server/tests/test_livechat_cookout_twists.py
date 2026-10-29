@@ -2163,7 +2163,7 @@ class TestErasure:
         assert "Zed" not in blob and "base-" not in blob and '"a"' not in blob
         assert set(wire) == {
             "state", "blind", "pickedCount", "concepts", "bankedCount", "rev", "generation",
-            "waiting", "swap", "dinnerDecided", "cookedCount",
+            "waiting", "swap", "dinnerDecided", "cookedCount", "mode",
         }  # fmt: skip
 
     def test_attachment_results_import_is_used(self) -> None:

@@ -1253,7 +1253,7 @@ class TestBlindRedaction:
         assert set(v) == {
             "seq", "state", "rev", "blind", "revealed", "players", "you", "current",
             "history", "staples", "concepts", "images", "recipes", "setup", "generation",
-            "starters", "basket", "gate", "wildcard", "stars", "vote", "swap", "generations",
+            "starters", "basket", "gate", "wildcard", "stars", "vote", "swap", "generations", "mode",
         }  # fmt: skip
         assert v["players"][1] == {
             "slot": 2, "name": None, "pickCount": 0, "picks": [], "chaosUsed": False,
