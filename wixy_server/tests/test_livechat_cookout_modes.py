@@ -638,7 +638,7 @@ class TestToastieStarters:
         monkeypatch.setattr(
             store_module,
             "default_modes",
-            lambda: CookoutModes([default_modes().default, narrowed]),
+            lambda: CookoutModes((default_modes().default, narrowed)),
         )
         with pytest.raises(CookoutInvalidError, match="twist"):
             start(store, bank, setup=CookoutSetup(stars=True))
