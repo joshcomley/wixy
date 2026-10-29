@@ -46,6 +46,20 @@ export type LockCause =
    * it is intentionally absent from `pausesGrant`'s list. */
   | "grantOff";
 
+/** A suspension held by something with a running JS tick (the voice-call controller). The holder
+ * calls `touch()` from its own tick so the panel can tell a LIVE hold from one stranded by a
+ * frozen page (a phone that locked mid-ring suspends JS, so nothing ever released it): a hold not
+ * touched for `LIVE_HOLD_STALE_MS` no longer counts as legitimately pausing the idle lock, and a
+ * stale one is never turned into a fresh idle window. See Inv 55. */
+export interface LiveSuspension {
+  /** Wall-clock heartbeat. Cheap and idempotent; may itself lock (a stale hold whose absence
+   * outlasted the idle period), after which the lock detaches the holder. */
+  touch(): void;
+  /** Releases the hold (idempotent). A LIVE release restarts a fresh idle period; a STALE one
+   * restarts it from the hold's last heartbeat, or locks at once if that is already too old. */
+  release(): void;
+}
+
 /** The callback surface `panel.ts` hands to the mounted `ServerChatView` (and
  * anything it in turn mounts — uploader, recorder, media renderer) so those
  * modules can pause the idle timer around their own async gaps and force an
@@ -59,6 +73,11 @@ export interface LockHooks {
    * idle period (the device's configured duration) once the last active
    * suspension ends (R7). */
   suspend(reason: SuspendReason): () => void;
+  /** Like `suspend`, but liveness-stamped: the holder must `touch()` it from a running tick. */
+  suspendLive(reason: SuspendReason): LiveSuspension;
+  /** Counts real user activity on this device (taps, keys, pointer moves) since the panel mounted,
+   * so a module can tell "nobody has touched this device since" without reading any content. */
+  activityCount(): number;
   /** Forces an instant lock for `cause`, from any state. A no-op if already
    * locked. */
   lockNow(cause: LockCause): void;

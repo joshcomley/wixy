@@ -105,8 +105,14 @@ export async function tapThreadGap(page: Page, times = 1): Promise<void> {
  * the overlay), so a test chaining an edit immediately after one of those can
  * observe the first PATCH attempt landing a 409 before the queue's own retry
  * lands the real 200. Skip those transparently rather than failing on them —
- * this is expected queue behavior, not a bug the test should catch. */
-export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
+ * this is expected queue behavior, not a bug the test should catch.
+ *
+ * `options.path` narrows the wait to the PATCH that edits that content path (e.g.
+ * "showcase.items"); without it ANY accepted PATCH satisfies the wait. */
+export function waitForNextDraftPatchAccepted(
+  page: Page,
+  options: { path?: string } = {},
+): Promise<number> {
   // ONE listener for the whole wait. Looping on `page.waitForResponse` re-registered a fresh
   // listener only AFTER each 409 arrived, and the queue's immediate replay can land its 200 in
   // that gap: the 200 was then never seen and the wait hung until the test timeout (measured on
@@ -116,6 +122,10 @@ export function waitForNextDraftPatchAccepted(page: Page): Promise<number> {
     const onResponse = (res: Response): void => {
       if (!res.url().endsWith("/api/admin/draft") || res.request().method() !== "PATCH") return;
       if (res.status() === 409) return;
+      // `path`: only the PATCH that carries an op for that content path counts. A test that
+      // waits on "the next PATCH" is satisfied by whichever edit lands first, including one its
+      // own click did not cause (a loaded run satisfied a reorder's wait with a footer-link edit).
+      if (options.path !== undefined && !patchTouchesPath(res, options.path)) return;
       page.off("response", onResponse);
       if (res.status() !== 200) {
         reject(new Error(`expected PATCH /api/admin/draft to 200, got ${res.status()}`));

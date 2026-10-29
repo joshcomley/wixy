@@ -58,10 +58,18 @@ domain (HTTPS); explicit development loopback origins are permitted only with de
 
 `server/call/controller.ts` owns presence, consent and teardown. `audio.ts` owns tracks,
 context and the self-hosted fingerprinted `call-worklet.js`. Both accept before capture;
-both ready before media. A connected **or muted** call holds exactly one `voiceCall`
-idle suspension. End releases it, restarting a fresh countdown; actual lock, shield
+both ready before media. A call attempt holds exactly one `voiceCall`
+idle suspension from invite sent / incoming call shown (`holdCall()`), through ringing,
+connecting and connected or muted, with no gap. Any end (decline, cancel, ring/setup
+timeout, failure, socket loss) releases it in `teardownCall`, restarting a fresh countdown. The hold
+is taken with `hooks.suspendLive` and the controller's 100 ms `pulse()` calls `touch()` on it (and on
+the setup `micPermission` hold); `panel.ts` treats a hold untouched for `LIVE_HOLD_STALE_MS` (3 s) as
+stranded by a frozen page: `idleRanOutWhileAway` ignores it and counts the silence from its last heartbeat,
+a late `touch`/`release` locks (`idleAway`) when that already passed the idle period, otherwise the
+countdown continues from the last heartbeat (never a fresh window). A callee stops taking the ring hold after
+2 consecutive unanswered incoming rings with no `hooks.activityCount()` change in between; actual lock, shield
 detach, pagehide, disposal, grant failure or connection failure stops audio immediately.
-Ringing does not suspend idle. A renewed unlock token ends the call and reconnects only
+Ringing is bounded server-side (30 s ring, 20 s setup), so the pause cannot outlive an attempt. A renewed unlock token ends the call and reconnects only
 presence; it never resumes audio. Recording a voice note and a call cannot own the mic
 together. Existing tab/screen-lock policies are unchanged. See **Inv 55**.
 
@@ -1979,30 +1987,44 @@ the answers filter keeps the game fun but the chat has no per-person secrecy (In
     offers a game tab once per NEW anchor (`seenAnchor`, reset by a lock/wipe), choosing the newer anchor when a first load has an
     unfinished round of both games, so an older unfinished round of one game never keeps pushing the other game's tab out on every
     redraw.
-  - `itemChat.ts` (`createItemChat`) is the **per-item chat**: `createStrip()` returns a `MiniStrip {element, draw(seq|null)}`
-    (the fixed 60 px mini chat strip — each game embeds its own in its own pane) and `openPopup(seq, title)` /
-    `closePopup()` / `isPopupOpen()` / `popupSeq()` drive the ONE pop-up (`.wx-srv-gamepop`) all games share; `refresh()`
-    redraws every strip and the pop-up, `reset()` closes the pop-up and unbinds the strips. It takes the thread's data and
-    the composer through its deps (`gameMessages`, `gameEchoes`, `isMine`, `renderBubble`, `disposeBubble`,
+  - **Full-screen game mode** (decisions/00194). While a game tab is active the thread view carries `.wx-srv-in-game` and the
+    chat header, reply bar and a composer that is at home (a direct child of the view) are `display: none`: the game runs from
+    the top of the chat view to the tab bar. The Chat tab restores them. **Exception (Inv 55):** the call controller's
+    `onLive` (state ≠ idle, an invite pending, the call dialog open, or a failure notice) puts `.wx-srv-call-live` on the view,
+    which keeps the header (where Answer / Mute / End live). R3 multi-tap and Escape are unchanged.
+  - `itemChat.ts` (`createItemChat`) is the **per-item chat**: `openPopup(seq, title)` / `closePopup()` / `isPopupOpen()` /
+    `popupSeq()` drive the ONE pop-up (`.wx-srv-gamepop`) all games share — the "chat per destination" view; `refresh()`
+    redraws the pop-up, `reset()` closes it. (The fixed 60 px mini chat strip is gone.) It takes the thread's data and
+    the composer through its deps (`gameMessages`, `gameEchoes`, `renderBubble`, `disposeBubble`,
     `mountComposer`, `onLayoutChange`, `afterChange`).
-  - `thread.ts` creates `itemChat` and `gameTabs` once after the composer and implements their callbacks
-    (`applyGameLayout` hides/restores the thread wrapper whenever ANY game tab is active, saves its scroll, abandons the
-    pen); `resetGames()` (`itemChat.reset()` then `gameTabs.reset()`) runs on lock, wipe and teardown. `gameLabelFor(anchorSeq)`
+  - `gameFloat.ts` (`createGameFloat`; unseen-message rules in the pure `gameFloatModel.ts`) is the **chat FAB, floating message
+    and quick reply**. Each pane embeds an overlay (`createOverlay({fabLabel, popupTitle, item})`) in a positioned slot above its
+    own pinned dock (Adventure: the body over the scrolling column; WYR: a reserved 64 px chat row): the FAB (`.wx-srv-float-fab`,
+    a dot + "— new message" in its name while the other person has unseen messages in the item's chat) opens the pop-up; the
+    newest unseen message floats left of it (`.wx-srv-float-bubble`: two-line clamp, "+N", "Chat" label for main-chat messages);
+    tapping it opens the ONE quick-reply box (`.wx-srv-quick`, above the tab bar / the on-screen keyboard via `visualViewport`)
+    with the ONE composer re-parented in; `quickTarget()` (an item's seq, or `null` for the main chat) overrides
+    `gameTabs.chatTarget()` in `chatTargetNow()` while it is open, and `noteSent(source)` (called after a confirmed send) closes it —
+    never while recording. `thread.ts` feeds it every arrival from the OTHER person (`gameFloat.note`) and prunes deleted messages
+    (`reconcile`). Cleared by `resetGames()` (lock, wipe, teardown) and when the Chat tab shows.
+  - `thread.ts` creates `itemChat`, `gameTabs` and `gameFloat` once after the composer and implements their callbacks
+    (`applyGameLayout` hides/restores the thread wrapper whenever ANY game tab is active, toggles `.wx-srv-in-game`, saves its
+    scroll, abandons the pen); `resetGames()` (`gameFloat.reset()`, `itemChat.reset()`, then `gameTabs.reset()`) runs on lock,
+    wipe and teardown. `gameLabelFor(anchorSeq)`
     names the game an anchor message belongs to for the main-chat tag (a new game adds its branch there).
   - `wyrGame.ts` (`createWyrGame`) is now ONLY the would-you-rather pane (header, picture stage, controls host, the
-    maximize-pictures dialog and its own `MiniStrip`); it registers itself as `"wyr"` (tab "WYR", aria "Would you rather
+    maximize-pictures dialog and its own chat overlay); it registers itself as `"wyr"` (tab "WYR", aria "Would you rather
     game") and exposes `pane`, `open/offer/close/gameSeq` for its own round. A new game copies that shape: build a pane,
-    `createStrip()`, `tabs.register(...)`.
+    `float.createOverlay(...)`, `tabs.register(...)`.
 - **The game pane**, top to bottom: header (title, Topics, Next ▸ once a round is revealed/skipped, ✕), the picture stage (tap
   flips A/B; both images are preloaded; a text-only round shows the option as large text, a `pending` job shows
-  "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results), the mini chat
-  (the shared `itemChat.ts` strip, a FIXED 60 px: this card's last two messages + echoes, one line each cut with an ellipsis, attachments as
-  20 px thumbnails, and a "Chat N" button on the right; it never changes height, so the stage and controls never shift
-  and nothing spills onto the composer — pinned by the "stays tidy on a phone" e2e; tap → pop-up) and — below, as always — the
-  one composer, which now sends into the card.
+  "Painting…"), the controls (`wyrControls.ts`: Play/Skip, a pick row and a guess row, Reveal, results) and a reserved 64 px **chat row**
+  (`.wx-srv-game-chatrow`) holding the shared chat FAB (right) and the floating message (left), so they never cover the controls —
+  pinned by the "stays tidy on a phone" e2e. The pane is full screen: no chat header and no composer while it shows (the FAB's pop-up
+  and the quick reply borrow the one composer, which sends into the card).
 - **Game chat routing.** Messages are ordinary; `gameTabs.chatTarget()` (the open item's seq while a game tab or the
-  pop-up is in use) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
-  echoes carry it so the mini chat shows them at once. A voice note captures its target when recording stops. View-once
+  pop-up is in use; overridden by the quick reply's source chat while it is open — `chatTargetNow()`) is spread into every text `sendMessage` as `wyrSeq` (`wyrSendFields()` in `thread.ts`), and optimistic
+  echoes carry it so the pop-up shows them at once. A voice note captures its target when recording stops. View-once
   is main-chat only: its button is disabled in the game chat and a view-once draft is refused there. A message carrying
   `wyrRef` gets a small tag naming its game in the main chat (`.wx-srv-bubble-gametag`; the WYR one also keeps the
   original `.wx-srv-bubble-wyrtag`; the label comes from `gameLabelFor(anchorSeq)`: "WYR" when the anchor message has
@@ -2325,12 +2347,11 @@ basemap/globe.ts`, spec §3) and the shared game frame (§20).
   `CATCHUP_MS` (400 ms), never jumped; the first sight of a round is not blended. Reduced motion: a spin shows at its end at once,
   camera moves cut, no ripple/glide, no trail. Whose turn: the starter spins sideways, then the other person than whoever moved
   last ("Your turn" / "<Name>'s turn"); nothing is ever refused for being the "wrong" person.
-- **The pane** (`createAdventureGame`; tab "Adventure", `data-game="adventure"`, registered as `"adventure"`). Header 🌍 Adventure
-  Time · Options · Bank · New · ✕; the stage (canvas, hint pill, toast, "Nearest land", the big lit name, "Back to the place"); the
-  pack area (the stage shrinks to 38 % when the pack is ready or has failed; "Preparing holiday pack…" with an elapsed timer and the
-  stage at full size while it is pending; the Explore map toggle); the action dock (the big coral **Stop**, **Bank this ✓** /
-  **No thanks ✕** — the reject asks once, "Never show <name> again?" with *Never show again* / *Keep it* —, Play again); the shared
-  mini chat strip. **Stop fires on the press** (what you saw lit is what you get; a click that follows a press within 700 ms is
+- **The pane** (`createAdventureGame`; tab "Adventure", `data-game="adventure"`, registered as `"adventure"`). Full screen. Title row (NO title text): **Yay** · **Nay** on the left while a place can be decided (Yay banks, aria "Yay: bank this trip"; Nay asks once, "Never show <name> again?" with *Never show again* / *Keep it* in the dock; contrast ≥ 4.5:1, ≥ 44 px, one line at 360 px with Options as a gear on a phone), then Options · Bank · New · ✕ on the right;
+  one scrolling column (`.wx-srv-adv-scroll`) holding the stage (canvas, hint pill, toast, "Nearest land", the big lit name, "Back to the place") and the
+  pack area — the column scrolls only once the pack is pending-with-panel (the map is a `clamp(220px, 42dvh, 460px)` block that scrolls away; `touch-action: pan-y` on the globe; "Preparing holiday pack…" with an elapsed timer and the
+  stage at full size while it is pending; the Explore map toggle fills the column with the map and hands drags to it); the pinned action dock (the big coral **Stop**, the "Never show again?" question, Play again); the shared
+  chat overlay (FAB + floating message) over the column's bottom corners. **Stop fires on the press** (what you saw lit is what you get; a click that follows a press within 700 ms is
   ignored). A spin POST is retried up to 3 times on a network failure (the same move is idempotent on the server), then taken back
   with a message and a re-read; a 409 says "Somebody else got there first." and re-reads; `exhausted` names the country; a 401 locks
   the chat. The Options sheet holds the shared "Include places the UK says not to travel to" switch (`GET/PUT /adventure/settings`,
@@ -2397,7 +2418,7 @@ basemap/globe.ts`, spec §3) and the shared game frame (§20).
   `test_livechat_adventure_pictures.py`, `test_livechat_adventure_pictures_job.py` (+ `fake_web.py`,
   `fake_open_web.py`) — see [testing.md](testing.md).
 
-## 24. Cookout: the two-player cooking game (workspace 00058; spec `spec/server-chat/09-cookout.md`, decisions/00193, Inv 57)
+## 24. Cookout: the two-player cooking game (workspace 00058; spec `spec/server-chat/09-cookout.md`, decisions/00199, Inv 57)
 
 The header's ... menu has **Cookout**: the two of them take turns picking ingredients into one shared basket — five
 picks each, ten in all. Every turn the server shows **two contrasting ingredients** from a static bank of about 3,500;
@@ -2407,7 +2428,7 @@ staples, a picture of each is drawn on the hub's ComfyUI, and either player can 
 full recipe written and kept in the shared **Recipe book**. A game starts **Open** (both see everything) or **Blind**
 (neither sees the other's offers or picks until the end). Like Adventure Time, the round is anchored to a message, so
 it streams as ordinary `message_updated` events and dies with its message. The panel's reasoning and the minority
-positions taken are in [decisions/00193](../../decisions/00193-server-chat-cookout/decision.md); the panel's ruling is
+positions taken are in [decisions/00199](../../decisions/00199-server-chat-cookout/decision.md); the panel's ruling is
 `triad/cookout/ruling.md`.
 
 - **Modules.** `livechat/cookout_bank.py` (strict loader, the draw, the contraband scanner),

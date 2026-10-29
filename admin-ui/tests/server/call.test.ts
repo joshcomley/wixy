@@ -20,14 +20,17 @@ const TARGET = "b".repeat(32);
 
 function setup(prepare: () => Promise<void> = async () => {}) {
   const socket = new Socket();
-  const releases: { reason: string; release: ReturnType<typeof vi.fn> }[] = [];
+  const releases: { reason: string; release: ReturnType<typeof vi.fn>; touch: ReturnType<typeof vi.fn> }[] = [];
+  const activity = { count: 0 };
   const audio: CallAudioHandle = {
     prepare: vi.fn(prepare), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(),
     pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn(),
   };
   const lock = vi.fn();
   const controller = createCallController({ win: window, isMicBusy: () => false, onBusy: vi.fn(),
-    hooks: { suspend: (reason) => { const release = vi.fn(); releases.push({ reason, release }); return release; }, lockNow: lock },
+    hooks: {
+      suspendLive: (reason) => { const release = vi.fn(); const touch = vi.fn(); releases.push({ reason, release, touch }); return { release, touch }; },
+      activityCount: () => activity.count, lockNow: lock },
     socketFactory: () => socket as unknown as WebSocket, audioFactory: () => audio,
   });
   controller.attach({ token: "secret", expiresAt: Date.now() / 1000 + 3600 }, "A");
@@ -44,7 +47,7 @@ function setup(prepare: () => Promise<void> = async () => {}) {
     }
   };
   const controls = () => socket.sent.map((s) => JSON.parse(s) as Record<string, unknown>);
-  return { controller, socket, audio, releases, lock, click, controls };
+  return { controller, socket, audio, releases, lock, click, controls, activity };
 }
 
 beforeEach(() => vi.useFakeTimers());
@@ -175,7 +178,9 @@ describe("live-call consent and lifetime", () => {
     f.click("Decline");
     expect(f.controls().at(-1)).toEqual({ type: "decline", callId: ID });
     expect(f.audio.prepare).not.toHaveBeenCalled();
-    expect(f.releases).toHaveLength(0);
+    // The ring held the idle pause (Inv 55); declining releases it.
+    expect(f.releases.map((r) => r.reason)).toEqual(["voiceCall"]);
+    expect(f.releases[0]?.release).toHaveBeenCalledTimes(1);
     f.controller.dispose();
   });
   it("waits for acceptance before preparing mic; connected/muted owns one idle pause", async () => {
@@ -183,7 +188,7 @@ describe("live-call consent and lifetime", () => {
     f.click("Call");
     expect(f.audio.prepare).not.toHaveBeenCalled();
     f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
-    expect(f.releases).toHaveLength(0);
+    expect(f.releases.map((r) => r.reason)).toEqual(["voiceCall"]); // held while ringing, not first at connect
     f.socket.receive({ type: "prepare", callId: ID });
     await Promise.resolve();
     expect(f.controls().some((m) => m["type"] === "ready")).toBe(true);
@@ -210,11 +215,12 @@ describe("live-call consent and lifetime", () => {
     f.socket.receive({ type: "prepare", callId: ID });
     f.controller.detach();
     expect(f.audio.stop).toHaveBeenCalledTimes(1);
-    expect(f.releases[0]?.release).toHaveBeenCalledTimes(1);
+    expect(f.releases.map((r) => r.reason)).toEqual(["voiceCall", "micPermission"]);
+    for (const r of f.releases) expect(r.release).toHaveBeenCalledTimes(1);
     resolve();
     await Promise.resolve();
     expect(f.controls().some((m) => m["type"] === "ready")).toBe(false);
-    expect(f.releases.some((r) => r.reason === "voiceCall")).toBe(false);
+    expect(f.releases).toHaveLength(2); // late readiness takes no new pause
     f.controller.dispose();
   });
 
@@ -254,4 +260,229 @@ it("media envelope preserves call identity, sample clock and PCM without URL cre
   expect(frame).toMatchObject({ callId: ID, sequence: 5, lease: 9 });
   expect(frame.pcm.byteLength).toBe(960);
   expect(new DataView(packet).getBigUint64(24)).toBe(2400n);
+});
+
+describe("a ringing or connecting call holds the idle-lock pause (Inv 55)", () => {
+  /** How many `voiceCall` pauses are held right now (taken and not yet released). */
+  const held = (f: ReturnType<typeof setup>) =>
+    f.releases.filter((r) => r.reason === "voiceCall" && r.release.mock.calls.length === 0).length;
+  const total = (f: ReturnType<typeof setup>) => f.releases.filter((r) => r.reason === "voiceCall").length;
+  const requestId = (f: ReturnType<typeof setup>) => f.controls().filter((m) => m["type"] === "invite").at(-1)?.["requestId"];
+  const ringOut = (f: ReturnType<typeof setup>, seconds: number) => {
+    for (let i = 0; i < seconds; i++) { vi.advanceTimersByTime(1000); f.socket.receive({ type: "ping" }); }
+  };
+
+  it("holds one pause from the moment an outgoing invite is sent, through ringing, connecting and connected", async () => {
+    const f = setup();
+    f.click("Call");
+    expect(held(f)).toBe(1);
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(f) });
+    expect(held(f)).toBe(1);
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    expect(held(f)).toBe(1);
+    f.socket.receive({ type: "connected", callId: ID });
+    expect(held(f)).toBe(1);
+    expect(total(f)).toBe(1); // one continuous pause: no gap in which the countdown could restart
+    f.click("End call");
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("holds one pause from the moment an incoming call is shown until it is declined", () => {
+    const f = setup();
+    expect(held(f)).toBe(0);
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(held(f)).toBe(1);
+    f.click("Decline");
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("holds one pause across an incoming call's answer and connect", async () => {
+    const f = setup();
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    f.click("Answer");
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    f.socket.receive({ type: "connected", callId: ID });
+    expect(total(f)).toBe(1);
+    expect(held(f)).toBe(1);
+    f.controller.dispose();
+  });
+  it("releases when the caller cancels while calling", () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(f) });
+    f.click("Cancel call");
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when the other device declines or the server ends the ring", () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(f) });
+    f.socket.receive({ type: "ended", callId: ID, reason: "declined" });
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when the server ends an invite before any call id exists, and when the target is unavailable", () => {
+    const f = setup();
+    f.click("Call");
+    expect(held(f)).toBe(1);
+    f.socket.receive({ type: "unavailable", requestId: requestId(f) });
+    expect(held(f)).toBe(0);
+    f.click("Call");
+    expect(held(f)).toBe(1);
+    f.socket.receive({ type: "ended", callId: TARGET, requestId: requestId(f), reason: "timeout" });
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when the invite cannot be sent", () => {
+    const f = setup();
+    f.socket.bufferedAmount = 9000;
+    f.click("Call");
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when an incoming call is never answered and the ring times out", () => {
+    const f = setup();
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    ringOut(f, 31);
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when an outgoing call's ring times out on this device", () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(f) });
+    ringOut(f, 31);
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+  it("releases when connecting audio fails or times out", async () => {
+    const f = setup(async () => { throw new DOMException("x", "NotAllowedError"); });
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(f) });
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+    const g = setup(() => new Promise<void>(() => {}));
+    g.click("Call");
+    g.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(g) });
+    g.socket.receive({ type: "prepare", callId: ID });
+    ringOut(g, 21);
+    expect(held(g)).toBe(0);
+    g.controller.dispose();
+  });
+  it("releases on socket close, detach and dispose while ringing", () => {
+    const a = setup();
+    a.click("Call");
+    a.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: requestId(a) });
+    a.socket.onclose?.({ code: 1006 });
+    expect(held(a)).toBe(0);
+    a.controller.dispose();
+    const b = setup();
+    b.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    b.controller.detach();
+    expect(held(b)).toBe(0);
+    b.controller.dispose();
+    const c = setup();
+    c.click("Call");
+    c.controller.dispose();
+    expect(held(c)).toBe(0);
+  });
+  it("takes only one pause when a crossing incoming call replaces a pending invite", () => {
+    const f = setup();
+    f.click("Call");
+    f.socket.receive({ type: "incoming", callId: TARGET, peer: "B" });
+    expect(held(f)).toBe(1);
+    f.click("Decline");
+    expect(held(f)).toBe(0);
+    f.controller.dispose();
+  });
+});
+
+describe("liveness heartbeat and the unanswered-ring cap (Inv 55)", () => {
+  const live = (f: ReturnType<typeof setup>) => f.releases.filter((r) => r.reason === "voiceCall");
+  const ringOut = (f: ReturnType<typeof setup>, seconds: number) => {
+    for (let i = 0; i < seconds; i++) { vi.advanceTimersByTime(1000); f.socket.receive({ type: "ping" }); }
+  };
+  it("touches every hold from its own 100 ms tick while a call is live, and stops after release", () => {
+    const f = setup();
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    const hold = live(f)[0]!;
+    vi.advanceTimersByTime(1000);
+    f.socket.receive({ type: "ping" });
+    expect(hold.touch.mock.calls.length).toBeGreaterThanOrEqual(9);
+    f.click("Decline");
+    const after = hold.touch.mock.calls.length;
+    vi.advanceTimersByTime(1000);
+    expect(hold.touch.mock.calls.length).toBe(after);
+    f.controller.dispose();
+  });
+  it("touches the setup microphone-permission hold too", async () => {
+    const f = setup(() => new Promise<void>(() => {}));
+    f.click("Call");
+    f.socket.receive({ type: "outgoing", callId: ID, peer: "B", requestId: f.controls().find((m) => m["type"] === "invite")?.["requestId"] });
+    f.socket.receive({ type: "prepare", callId: ID });
+    const perm = f.releases.find((r) => r.reason === "micPermission")!;
+    vi.advanceTimersByTime(500);
+    expect(perm.touch).toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("stops holding after two unanswered rings with no activity, and resets on any activity", () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    expect(live(f)).toHaveLength(2);
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2); // the third consecutive unattended ring takes no hold
+    f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    f.activity.count++; // somebody touched the device
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(3);
+    expect(live(f)[2]?.release).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("counts a ring that times out locally as unanswered", () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      ringOut(f, 31);
+    }
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2);
+    f.controller.dispose();
+  });
+  it("an unattended device that is then answered still holds the connecting and connected call", async () => {
+    const f = setup();
+    for (let n = 0; n < 2; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+    expect(live(f)).toHaveLength(2);
+    f.click("Answer");
+    expect(live(f)).toHaveLength(3);
+    f.socket.receive({ type: "prepare", callId: ID });
+    await Promise.resolve();
+    f.socket.receive({ type: "connected", callId: ID });
+    expect(live(f)).toHaveLength(3);
+    expect(live(f)[2]?.release).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
+  it("a caller's own outgoing ring is always held", () => {
+    const f = setup();
+    for (let n = 0; n < 3; n++) {
+      f.socket.receive({ type: "incoming", callId: ID, peer: "B" });
+      f.socket.receive({ type: "ended", callId: ID, reason: "timeout" });
+    }
+    f.activity.count++;
+    f.click("Call");
+    expect(live(f).at(-1)?.release).not.toHaveBeenCalled();
+    f.controller.dispose();
+  });
 });

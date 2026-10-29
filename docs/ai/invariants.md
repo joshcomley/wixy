@@ -89,7 +89,7 @@ rules, `moveId`/`clientId` idempotency, two-connection `BEGIN IMMEDIATE` races, 
 `test_livechat_cookout_ai.py` (parse/validate, the contraband scan, repair, resume and compare-and-set),
 `test_livechat_cookout_images.py` (generation fencing, partial success, scratch cleanup, `generate_many`),
 `test_cookout_bank.py` (the bank validator and the simulated draw). Decision:
-[00193](../../decisions/00193-server-chat-cookout/decision.md).
+[00199](../../decisions/00199-server-chat-cookout/decision.md).
 
 ### Inv 56 — An Adventure Time round is chat content: erased with its message or a wipe; the never-again list is destination ids only; live frames are never stored; cmd keeps its own research copy
 
@@ -212,15 +212,24 @@ transcripts, presence or call history is written to persistent state or the SSE 
 Leases, credits, frame/rate limits and bounded queues prevent delayed catch-up audio.
 TLS does not make this end-to-end encrypted: the trusted relay sees live PCM.
 
+Full-screen game mode (decisions/00194) hides the chat header, where the call controls live, while a game tab shows —
+except while the call is not idle (ringing, connecting, connected, a failure notice): then the header stays visible, so an
+incoming call's Accept is never hidden.
+
 Operator-requested troubleshooting may keep a bounded current-attempt technical
 trace in browser memory and print one technical console entry on failure. It
 contains no audio/content, identities, labels, connection/call IDs, credentials,
 URLs or exception messages/stacks, is never automatically uploaded/persisted by
 the app, and resets on new consent or detach. This is not a call-history store.
 
-Connected calls, including silence/mute, hold one `voiceCall` idle suspension. Ending
-releases it exactly once and restarts the full idle countdown. Ringing does not hold
-it. Manual/actual lock, shield detach and disposal synchronously stop local capture
+A call attempt, from invite sent / incoming call shown through ringing, connecting and
+connected (including silence/mute), holds one `voiceCall` idle suspension with no gap
+(decisions/00197). Any end releases it exactly once and restarts the full idle countdown.
+The hold is liveness-stamped (`suspendLive`; the call tick touches it): a hold stale for 3 s (frozen
+page) is ignored by the away check, its silence counts as idle time, and a stale release or touch locks
+at once or continues from the last heartbeat — never a fresh window. After 2 consecutive unanswered
+incoming rings with no activity in between, further incoming rings take no hold. Only the idle countdown is paused: Escape, panic, multi-tap, tab/screen policies, token
+expiry and 401 still lock at once. Manual/actual lock, shield detach and disposal synchronously stop local capture
 and playback, even if permission resolves later. Existing tab/screen policies remain
 authoritative. Reconnection and token replacement never resume a call without consent.
 Remote stop across a network partition is bounded by leases/liveness, not instantaneous.

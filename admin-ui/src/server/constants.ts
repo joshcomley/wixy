@@ -56,6 +56,12 @@ export const TAP_MAX_MS = 300;
  * abandoned, app backgrounded) can't suspend the idle timer forever. */
 export const PICKER_SUSPEND_MAX_MS = 300_000;
 
+/** A liveness-stamped suspension (`LockHooks.suspendLive`) whose holder has not touched it for this long
+ * is treated as stranded by a frozen page. The call controller touches every 100 ms; a hidden but not
+ * frozen tab is throttled to at best 1 s, so 3 s tolerates three missed beats while still being far
+ * under the 10 s default idle period. */
+export const LIVE_HOLD_STALE_MS = 3000;
+
 /** 03-permanent-unlock.md §8: after a background switch whose cause isn't known yet, the
  * decoy stays up this long once the page is visible again so IdleDetector events queued
  * while it was away can arrive. */

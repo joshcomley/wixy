@@ -73,7 +73,7 @@ function fakeHooks(): LockHooks {
     suspend: vi.fn(() => () => {}),
     lockNow: vi.fn(),
     adoptBoundSession: vi.fn(),
-    getBoundGrantId: vi.fn(() => null),
+    getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
   };
 }
 
@@ -265,7 +265,7 @@ describe("mountServerThread", () => {
       suspend: vi.fn(() => release),
       lockNow: vi.fn(),
       adoptBoundSession: vi.fn(),
-      getBoundGrantId: vi.fn(() => null),
+      getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
     };
     const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks, win: fakeWindow(), onSettings: vi.fn() });
     await view.attach(SESSION);
@@ -2186,7 +2186,7 @@ describe("mountServerThread", () => {
       suspend: vi.fn(() => release),
       lockNow: vi.fn(),
       adoptBoundSession: vi.fn(),
-      getBoundGrantId: vi.fn(() => null),
+      getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
     };
       const view = mount(hooks);
       await view.attach(SESSION);
@@ -2578,7 +2578,7 @@ describe("mountServerThread reactions", () => {
       suspend: vi.fn(() => release),
       lockNow: vi.fn(),
       adoptBoundSession: vi.fn(),
-      getBoundGrantId: vi.fn(() => null),
+      getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
     };
       const view = await mountWith([voice], { hooks });
 
@@ -2634,7 +2634,7 @@ describe("mountServerThread reactions", () => {
       suspend: vi.fn(() => release),
       lockNow: vi.fn(),
       adoptBoundSession: vi.fn(),
-      getBoundGrantId: vi.fn(() => null),
+      getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
     };
       const view = await mountWith([voice], { hooks });
       const audio = view.element.querySelector<HTMLAudioElement>("audio")!;

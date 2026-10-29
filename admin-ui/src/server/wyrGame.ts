@@ -1,27 +1,28 @@
 // The would-you-rather GAME PANE (workspace 00045): when a round is opened its tab shows the round
-// full-height:
+// FULL SCREEN (decisions/00194) — the chat header and composer are hidden while a game tab shows:
 //
 //   [ title                  Maximize  Topics  Next ▸  × ]
 //   [ the picture — tap it to flip between option A and option B ]
 //   [ the controls: Play/Skip, pick + guess, Reveal, results ]
-//   [ mini chat: this card's last two messages ]      <- tap a message (or a thumbnail) to open
-//   [ the chat composer — the ordinary one, now sending into this card ]
+//   [ the chat row: floating message (left) · chat FAB (right) ]   <- a reserved row, never over the controls
 //
 // The card's chat is kept WITH the card (messages carry `wyrRef`, `wyrSeq` on send) and also lives
-// in the main chat. Closing the game closes the tab; with one tab left the bar disappears.
+// in the main chat. The FAB opens the card's pop-up chat; a message from the other person floats in
+// the chat row and a tap on it opens the quick reply (`gameFloat.ts`). Closing the game closes the
+// tab; with one tab left the bar disappears.
 //
 // This module is only the WYR-specific part — the header, the picture stage, the controls host and
 // the maximize-pictures dialog. The FRAME is shared with every game (spec/server-chat/
 // 08-adventure-time.md §5.1): the tab bar, which pane shows, dots, dismissal and where a message
-// goes live in `gameTabs.ts`; the mini chat strip and the pop-up item chat (with the ONE composer
-// re-parented into it) live in `itemChat.ts`. The thread supplies the data and the composer through
-// those two modules (so nothing here knows how messages are stored or sent), and this pane
-// registers itself with `gameTabs` under the key "wyr".
+// goes live in `gameTabs.ts`; the pop-up item chat (with the ONE composer re-parented into it) lives
+// in `itemChat.ts`; the chat FAB, floating message and quick reply live in `gameFloat.ts`. The thread
+// supplies the data and the composer through those modules (so nothing here knows how messages are
+// stored or sent), and this pane registers itself with `gameTabs` under the key "wyr".
 
 import type { Message } from "./api/messages";
 import type { WyrView } from "./api/wyr";
 import type { GameTabs } from "./gameTabs";
-import type { ItemChat } from "./itemChat";
+import type { GameFloat } from "./gameFloat";
 import type { WyrControls } from "./wyrControls";
 import { wyrPictureUrls } from "./wyrCard";
 import type { WyrModel } from "./wyrModel";
@@ -32,8 +33,8 @@ export interface WyrGameDeps {
   readonly controls: WyrControls;
   /** The shared tab bar: this pane registers itself as the game "wyr". */
   readonly tabs: GameTabs;
-  /** The shared item chat: this pane embeds one mini chat strip. */
-  readonly itemChat: ItemChat;
+  /** The shared chat FAB / floating message / quick reply: this pane embeds one overlay of it. */
+  readonly float: GameFloat;
   /** The round's anchor message, or undefined once it is gone (deleted, wiped). */
   roundMessage(seq: number): Message | undefined;
   /** Starts the next round (the ⋯ menu's action). */
@@ -129,7 +130,16 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   });
 
   const controlsHost = el("div", "wx-srv-game-controls");
-  const strip = deps.itemChat.createStrip();
+  // The chat row is reserved space under the controls: the FAB (right) and a floating message (left) sit
+  // in it, so they never cover the pick / guess / reveal buttons.
+  const chatRow = el("div", "wx-srv-game-chatrow");
+  chatRow.appendChild(
+    deps.float.createOverlay({
+      fabLabel: "Open this card's chat",
+      popupTitle: "Game chat",
+      item: () => deps.tabs.seqOf("wyr"),
+    }),
+  );
   const picturesOverlay = doc.createElement("dialog");
   picturesOverlay.className = "wx-srv-game-pictures";
   picturesOverlay.setAttribute("role", "dialog");
@@ -160,7 +170,7 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     return { which, image, fallback, label };
   });
   picturesOverlay.append(picturesHead, picturesPair);
-  pane.append(head, stage, controlsHost, strip.element, picturesOverlay);
+  pane.append(head, stage, controlsHost, chatRow, picturesOverlay);
   let picturesOpen = false;
 
   // -- Drawing ------------------------------------------------------------------------------
@@ -253,14 +263,13 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
   }
 
   /** Redraws the pane for round `seq` (the frame calls this only while the WYR tab shows; the
-   * mini chat strip and the pop-up are redrawn by the shared item chat right after). */
+   * pop-up and the chat FAB are redrawn by the shared item chat and float right after). */
   function refreshPane(seq: number): void {
     if (drawnSeq !== seq) {
       // A different round starts again at option A, and its pictures are not the ones on screen.
       closePictures(false);
       shown = "a";
       drawnSeq = seq;
-      strip.draw(seq);
     }
     const view = deps.model.view(seq);
     if (view !== undefined) {
@@ -279,7 +288,6 @@ export function createWyrGame(deps: WyrGameDeps): WyrGame {
     closePictures(false);
     shown = "a";
     drawnSeq = null;
-    strip.draw(null);
   }
 
   function close(): void {

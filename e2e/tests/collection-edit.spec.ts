@@ -65,9 +65,21 @@ test.describe("E2E 4: collection", () => {
 
     // "reorder" — move the new item up one slot: [Item One, New, Item Two] -> was
     // [Item One, Item Two, New].
-    const reorderPatch = waitForNextDraftPatchAccepted(page);
-    await newItem.hover();
-    await frame.locator('.wx-item-toolbar button[data-wx-toolbar-action="moveUp"]').click();
+    // The one floating toolbar is rebuilt for whichever item the pointer is over, so press the
+    // button of THE NEW ITEM's toolbar (it names its list and index) and wait for the PATCH that
+    // edits the showcase list, not whichever edit lands next.
+    const reorderPatch = waitForNextDraftPatchAccepted(page, { path: "showcase.items" });
+    const newItemToolbar = frame.locator(
+      '.wx-item-toolbar[data-wx-toolbar-list="showcase.items"][data-wx-toolbar-index="2"]',
+    );
+    // The toolbar only exists while the pointer is over its item and is rebuilt whenever the
+    // preview re-renders under the pointer, which also detaches a button Playwright is about to
+    // press. Hovering is one-shot, so retry hover + press together until the press lands on the
+    // new item's own toolbar; the PATCH wait below proves what the press actually did.
+    await expect(async () => {
+      await newItem.hover();
+      await newItemToolbar.locator('button[data-wx-toolbar-action="moveUp"]').click({ timeout: 2_000 });
+    }).toPass({ timeout: 20_000 });
     await reorderPatch;
     await expect(items.nth(1).locator('[data-wx=".title"]')).toHaveText("New Treatment Card");
 

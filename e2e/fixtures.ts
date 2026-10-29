@@ -7,6 +7,10 @@
 // (fixture_server.py), so a server per worker is fully isolated. Cold start is ~5-9s, paid once
 // per worker, and Playwright hands whole spec files to whichever worker is free.
 //
+// The server's one Server chat is shared by the worker's tests IN SEQUENCE, so each test starts
+// by resetting it (`serverChatReset` below): no test inherits another's messages, game rounds,
+// grants or call state, whatever order the tests land on a worker.
+//
 // Specs import `test`/`expect` from here (never straight from "@playwright/test") so the
 // worker's own `baseURL` reaches `page`, `request` and `browser.newContext()` alike.
 
@@ -95,13 +99,34 @@ async function bootServer(workerIndex: number): Promise<{ server: FixtureServer;
   throw new Error(`fixture server failed to start after ${BOOT_ATTEMPTS} attempts:\n${lastFailure}`);
 }
 
-export const test = base.extend<{ cleanGames: void }, { fixtureServer: FixtureServer }>({
-  // Every test starts with no game round left in the shared chat by an earlier test on this worker:
-  // an open round makes the page offer a game tab on load (server-adventure left one, and
-  // server-wyr's "no game, no tabs" then failed depending on which worker ran what).
-  cleanGames: [
+/** Returns the worker's Server chat (and the state around it) to pristine, see fixture_server.py
+ * `/test/server/reset`. One retry: the server can be mid-request from the previous test's last
+ * page when a test ends, and the reset itself is idempotent. */
+async function resetServerChat(baseURL: string): Promise<void> {
+  let lastFailure = "";
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      const response = await fetch(`${baseURL}/test/server/reset`, {
+        method: "POST",
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (response.ok) return;
+      lastFailure = `HTTP ${response.status}: ${await response.text()}`;
+    } catch (error) {
+      lastFailure = String(error);
+    }
+  }
+  throw new Error(`could not reset the fixture server's Server chat: ${lastFailure}`);
+}
+
+export const test = base.extend<{ serverChatReset: void }, { fixtureServer: FixtureServer }>({
+  // `auto`, test-scoped: EVERY test starts from a Server chat no earlier test touched (messages,
+  // game rounds, grants, call state, PIN lockout, fake-cmd transcription settings). The one
+  // place this is done, so no spec has to remember to clean up after itself or to tolerate what
+  // the test before it left behind.
+  serverChatReset: [
     async ({ fixtureServer }, use) => {
-      await fetch(`${fixtureServer.baseURL}/test/server/clear-games`, { method: "POST" });
+      await resetServerChat(fixtureServer.baseURL);
       await use();
     },
     { auto: true },
