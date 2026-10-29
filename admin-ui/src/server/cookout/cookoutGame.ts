@@ -56,6 +56,12 @@
 // GENERATION. A vote, a Bank or a retry is sent with the `generation` of the view its button was drawn
 // from (captured when drawn, never re-read when tapped), so a tap that lands after a rescue swap is
 // refused by the server instead of acting on a different dish with the same letter.
+//
+// GAME MODES (spec/server-chat/09c-cookout-modes.md §6): the round's mode (`view.mode`) sets every count
+// (turns, picks each) and, outside Classic, the words: the title row's emoji, a banner per pick kind
+// ("Your turn — pick the bread"), 4 + 4 progress slots with the bread slot first, the basket sheet by kind,
+// no chaos shelf on the bread turn, the bread first on the reveal and in the chef's carousel, and dish cards
+// with the build pill, an "On <bread>" line and "Uses 6/7 fillings". A Classic round draws exactly as before.
 
 import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
@@ -68,10 +74,11 @@ import {
   CONCEPT_IDS,
   formatMinutes,
   isChallengeId,
+  isClassic,
   isStyleId,
-  PICKS_PER_PLAYER,
   type Concept,
   type ConceptId,
+  type CookoutOptions,
   type CookoutOutcome,
   type CookoutPlayer,
   type CookoutRole,
@@ -79,6 +86,7 @@ import {
   type FullRecipe,
   type GenerationView,
   type IngredientSnap,
+  type ModeOption,
   type PhotosResult,
   type PickSnap,
   type Picture,
@@ -89,6 +97,21 @@ import { createCarousel, type Carousel } from "./carousel";
 import { createCookedControls } from "./cookedSheet";
 import { createIntro, twistPhrases } from "./intro";
 import type { CookoutModel } from "./model";
+import {
+  anchorFirst,
+  anchorKind,
+  anchorMark,
+  anchorPick,
+  capitalise,
+  dishNoun,
+  fillingTurns,
+  isAnchorPick,
+  kindNoun,
+  kindOf,
+  numberWord,
+  ordinal,
+  plural,
+} from "./modes";
 import { DECODE_WAIT_MS, decodeAll, ingredientPicture, type Picturable } from "./pictures";
 import type { StartPreset } from "./startSheet";
 
@@ -164,6 +187,9 @@ export interface CookoutGameDeps {
   reducedMotion?(): boolean;
   /** The device's storage for the intro's "seen" flags (default: `localStorage`; a throw counts as none). */
   storage?(): Pick<Storage, "getItem" | "setItem"> | null;
+  /** `GET /cookout/options` (cached by the caller): a mode round's intro lines (09c §6.2). Never awaited
+   * before drawing; absent or failing, the intro builds its lines from the view. */
+  loadOptions?(): Promise<CookoutOptions | null>;
 }
 
 export interface CookoutGame {
@@ -216,9 +242,9 @@ const ROLE_WORDS: Readonly<Record<CookoutRole, string>> = {
   accent: "🌿 accent",
 };
 
-/** "🍗 protein" for the banner's second line, or "" when the role is not known to this viewer. */
-export function roleShort(role: CookoutRole | null): string {
-  return role === null ? "" : ROLE_WORDS[role];
+/** "🍗 protein" for the banner's second line, or "" when the role is not a Classic role known to this viewer. */
+export function roleShort(role: string | null): string {
+  return role === null ? "" : (ROLE_WORDS[role as CookoutRole] ?? "");
 }
 
 /** The skip button's words for the offer on screen (09b §D.3): two new pairs at most, then the final one. */
@@ -254,7 +280,7 @@ export interface TurnBanner {
 export function turnBanner(view: CookoutView, partnerFallback: string | null, sweeping = false): TurnBanner {
   const current = view.current;
   if (view.state !== "picking" || current === null) return { line1: "", line2: "", join: false, mine: false };
-  const pick = `Pick ${pickNumber(current.turn)} of ${PICKS_PER_PLAYER}`;
+  const pick = `Pick ${pickNumber(current.turn)} of ${view.mode.picksPerPlayer}`;
   const mine = view.you !== null && view.you.slot === current.player;
   const activeName = bannerName(
     playerOf(view, current.player).name ?? (current.player === 2 ? partnerFallback : null) ?? (current.player === 1 ? "Player 1" : null),
@@ -277,6 +303,12 @@ export function turnBanner(view: CookoutView, partnerFallback: string | null, sw
       note = `${sentence(bannerName(playerOf(view, current.player === 1 ? 2 : 1).name ?? partnerFallback))} swept one off your table`;
     }
     const skips = offer >= 2 || current.skipsRemaining === 0 ? "final pair" : `${current.skipsRemaining ?? 2 - offer} new ${(current.skipsRemaining ?? 2 - offer) === 1 ? "pair" : "pairs"} left`;
+    if (!isClassic(view.mode)) {
+      // 09c §6.3: the kind's own prompt, and where this pick sits in the sandwich.
+      const kind = kindOf(view.mode, current.role);
+      const line2 = note !== "" ? note : [modePosition(view, current.turn, current.role), skips].filter((part) => part !== "").join(" · ");
+      return { line1: kind !== null ? `Your turn — ${kind.prompt}` : "Your turn — tap the one you want", line2, join: false, mine: true };
+    }
     const line2 = note !== "" ? note : [pick, roleShort(current.role), skips].filter((part) => part !== "").join(" · ");
     return { line1: "Your turn — tap the one you want", line2, join: false, mine: true };
   }
@@ -284,9 +316,35 @@ export function turnBanner(view: CookoutView, partnerFallback: string | null, sw
     return { line1: "Tap the one to sweep away", line2: `It goes off ${activeName}'s table`, join: false, mine: false };
   }
   const line1 = `${sentence(activeName)} is choosing…`;
+  // Blind: "is choosing…", never the kind (the server leaves it out; neither is it guessed from the turn).
   if (current.options === null) return { line1, line2: `Secret pick · ${pick}`, join: false, mine: false };
+  if (!isClassic(view.mode)) {
+    const anchor = anchorKind(view.mode);
+    const watching =
+      anchor !== null && current.role === anchor.id
+        ? `${sentence(activeName)} is picking ${anchor.label}…`
+        : current.role !== null
+          ? `${sentence(activeName)} is adding a filling…`
+          : line1;
+    if (current.chaosPair === true) return { line1: watching, line2: "A pair from the chaos shelf!", join: false, mine: false };
+    return { line1: watching, line2: modePosition(view, current.turn, current.role), join: false, mine: false };
+  }
   if (current.chaosPair === true) return { line1, line2: "A pair from the chaos shelf!", join: false, mine: false };
   return { line1, line2: [pick, roleShort(current.role)].filter((part) => part !== "").join(" · "), join: false, mine: false };
+}
+
+/** Where a mode round's turn sits (09c §6.3 line 2): "Bread · then 7 fillings" on the anchor's turn,
+ * "Filling 3 of 7" after it; a mode without an anchor counts picks as Classic does. */
+export function modePosition(view: CookoutView, turn: number, role: string | null): string {
+  const mode = view.mode;
+  const anchor = anchorKind(mode);
+  if (anchor === null) {
+    const kind = kindOf(mode, role);
+    return [`Pick ${pickNumber(turn)} of ${mode.picksPerPlayer}`, kind === null ? "" : capitalise(kindNoun(kind))].filter((p) => p !== "").join(" · ");
+  }
+  const fillings = fillingTurns(mode);
+  if (role === anchor.id || (role === null && turn === 1)) return `${capitalise(kindNoun(anchor))} · then ${fillings} fillings`;
+  return `Filling ${Math.max(1, turn - 1)} of ${fillings}`;
 }
 
 const DISH_EMOJI: Readonly<Record<string, string>> = {
@@ -366,7 +424,9 @@ export function viaBadge(view: CookoutView, snap: PickSnap): string {
 /** The chef gate's words for this viewer (09a §1.4: the pane shows who it is waiting for). */
 export function starsGateText(view: CookoutView, partner: string): string {
   if (!view.gate.waitingFor.includes("stars")) return "";
-  if (view.you !== null && view.stars.mine === null) return "⭐ Star one of your five picks — the chef will make it a hero";
+  if (view.you !== null && view.stars.mine === null) {
+    return `⭐ Star one of your ${numberWord(view.mode.picksPerPlayer)} picks — the chef will make it a hero`;
+  }
   if (view.you !== null) return `Waiting for ${partner} to star one`;
   return "Waiting for the secret stars";
 }
@@ -452,7 +512,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   const bar = el("header", "wx-srv-ck-bar");
   const title = el("div", "wx-srv-ck-title");
-  title.append(emojiSpan("wx-srv-ck-title-icon", "🍳"), el("span", "wx-srv-ck-title-text", "Cookout"));
+  /** The mode's emoji in a mode round (09c §6.3); 🍳 for Classic. */
+  const titleIcon = emojiSpan("wx-srv-ck-title-icon", "🍳");
+  title.append(titleIcon, el("span", "wx-srv-ck-title-text", "Cookout"));
   const modeBadge = el("span", "wx-srv-ck-badge");
   modeBadge.hidden = true;
   title.append(modeBadge);
@@ -548,11 +610,39 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       item: () => deps.tabs.seqOf("cookout"),
     }),
   );
+  /** The options' modes once read (for a mode round's intro); null until then or when the read failed. */
+  let modeOptions: readonly ModeOption[] | null = null;
+  let optionsAsked = false;
   const intro = createIntro({
     document: doc,
     storage: () => (deps.storage !== undefined ? deps.storage() : typeof window === "undefined" ? null : window.localStorage),
     onChange: () => deps.afterChange(),
+    modeOption: (id) => modeOptions?.find((m) => m.id === id) ?? null,
   });
+
+  /** Reads the options once (in the background) for a mode round's intro lines; the card already shows. */
+  function askOptions(view: CookoutView): void {
+    if (isClassic(view.mode) || optionsAsked || deps.loadOptions === undefined) return;
+    optionsAsked = true;
+    const asked = deps.loadOptions;
+    void (async () => {
+      let options: CookoutOptions | null = null;
+      try {
+        options = await asked();
+      } catch {
+        options = null;
+      }
+      if (options === null) {
+        // A failed read may be asked again by the next mode round opened here.
+        optionsAsked = false;
+        return;
+      }
+      modeOptions = options.modes;
+      const seq = drawnSeq;
+      const now = seq === null ? undefined : deps.model.view(seq);
+      if (now !== undefined) intro.update(now);
+    })();
+  }
   pane.append(bar, confirmEnd, scroll, chatRow, toast, fx, cooked.chooser, sheetHost, intro.element);
 
   // -- Per-round view state ------------------------------------------------------------------------------
@@ -959,6 +1049,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const styleId = setup.style?.id;
     const challengeId = setup.challenge?.id;
     deps.openStartSheet({
+      mode: view.mode.id,
       blind: view.blind,
       style: setup.styleSpun ? "spin" : isStyleId(styleId) ? styleId : null,
       challenge: isChallengeId(challengeId) ? challengeId : null,
@@ -982,7 +1073,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         conceptId: concept.id,
         kind: "leftovers",
         title: concept.title,
-        candidates: concept.omitted.map((o) => o.ingredient),
+        // Each starter with its pick kind from the basket (a mode round seats them by kind, 09c §2.5).
+        candidates: concept.omitted.map((o) => ({ ...o.ingredient, kind: allPicks(view).find((p) => p.id === o.ingredient.id)?.kind ?? null })),
+        mode: view.mode.id,
       },
     });
   }
@@ -1023,7 +1116,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return snap.what ?? snap.blurb;
   }
 
-  /** One player's five progress slots: passive tiles (the whole row is the one button). */
+  /** One player's progress slots (five in Classic, four in a toasted sandwich): passive tiles (the whole row
+   * is the one button). In a mode with an anchor, the starter's first slot is the anchor's (09c §6.3). */
   function progressGroup(view: CookoutView, slot: 1 | 2): HTMLElement {
     const player = playerOf(view, slot);
     const group = el("span", "wx-srv-ck-prog-group");
@@ -1035,7 +1129,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     group.append(who);
     // A hidden partner's public starters still show (they are first in pick order).
     const known: readonly PickSnap[] = player.picks ?? startersOf(view, slot);
-    for (let i = 0; i < PICKS_PER_PLAYER; i += 1) {
+    const anchorSlot = slot === 1 && anchorKind(view.mode) !== null;
+    for (let i = 0; i < view.mode.picksPerPlayer; i += 1) {
       const pick = known[i];
       let tile: HTMLElement;
       if (pick !== undefined) {
@@ -1052,18 +1147,34 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         tile.classList.toggle("wx-srv-ck-prog-now", active && i === player.pickCount);
       }
       tile.setAttribute("aria-hidden", "true");
+      if (anchorSlot && i === 0) {
+        tile.classList.add("wx-srv-ck-prog-anchor");
+        tile.append(el("span", "wx-srv-ck-prog-mark", anchorMark(view.mode)));
+      }
       group.append(tile);
     }
     return group;
+  }
+
+  /** "Bread: Sourdough loaf" / "Secret bread" / "Bread not picked yet" for the progress row's label. */
+  function anchorWords(view: CookoutView): string | null {
+    const anchor = anchorKind(view.mode);
+    if (anchor === null) return null;
+    const noun = capitalise(kindNoun(anchor));
+    const pick = anchorPick(view.mode, allPicks(view)) ?? anchorPick(view.mode, view.starters);
+    if (pick !== null) return `${noun}: ${pick.name}`;
+    if (view.players[0].pickCount > 0) return `Secret ${kindNoun(anchor)}`;
+    return `${noun} not picked yet`;
   }
 
   function progressLabel(view: CookoutView): string {
     const parts = slotOrder(view).map((slot) => {
       const player = playerOf(view, slot);
       const who = view.you?.slot === slot ? "you have" : `${playerOf(view, slot).name ?? "your partner"} has`;
-      return `${who} ${player.pickCount} of ${PICKS_PER_PLAYER}`;
+      return `${who} ${player.pickCount} of ${view.mode.picksPerPlayer}`;
     });
-    return `Basket so far: ${parts.join(", ")}. Show the basket.`;
+    const anchor = anchorWords(view);
+    return `Basket so far: ${parts.join(", ")}.${anchor === null ? "" : ` ${anchor}.`} Show the basket.`;
   }
 
   function drawProgress(view: CookoutView): void {
@@ -1074,6 +1185,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       view.you?.slot ?? null,
       view.current === null ? null : [view.current.player, view.current.turn],
       deps.partner(),
+      view.mode,
     ]);
     if (drawn.progress === key) return;
     drawn.progress = key;
@@ -1249,13 +1361,83 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return line;
   }
 
+  /** A mode round's basket sheet (09c §6.3): the anchor first, then the fillings grouped by kind, then the
+   * partner's secret picks as 🔒 lines (Blind), then how many are still to come. */
+  function modeBasketSheet(view: CookoutView): HTMLElement[] {
+    const mode = view.mode;
+    const body: HTMLElement[] = [];
+    const mineIds = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
+    const owner = (snap: PickSnap): string =>
+      snap.turn === null ? "" : slotLabel(view, snap.turn % 2 === 1 ? 1 : 2);
+    // Everything this viewer may know: both players' visible picks plus the public starters.
+    const known: PickSnap[] = [];
+    for (const slot of [1, 2] as const) {
+      for (const snap of playerOf(view, slot).picks ?? startersOf(view, slot)) {
+        if (!known.some((k) => k.id === snap.id)) known.push(snap);
+      }
+    }
+    const anchor = anchorKind(mode);
+    const groups: Array<{ readonly id: string; readonly title: string; readonly items: PickSnap[] }> = [];
+    if (anchor !== null) groups.push({ id: anchor.id, title: capitalise(kindNoun(anchor)), items: known.filter((s) => isAnchorPick(mode, s)) });
+    for (const kind of mode.kinds) {
+      if (kind.id === mode.anchorKind) continue;
+      groups.push({ id: kind.id, title: capitalise(kindNoun(kind)), items: known.filter((s) => s.kind === kind.id && !isAnchorPick(mode, s)) });
+    }
+    const grouped = new Set(groups.flatMap((g) => g.items.map((i) => i.id)));
+    const other = known.filter((s) => !grouped.has(s.id));
+    if (other.length > 0) groups.push({ id: "other", title: "Fillings", items: other });
+    for (const group of groups) {
+      if (group.items.length === 0) continue;
+      const box = el("section", "wx-srv-ck-bgroup");
+      box.dataset["kind"] = group.id;
+      box.append(el("h4", "wx-srv-ck-bgroup-who", group.title));
+      const list = el("ul", "wx-srv-ck-blist");
+      for (const snap of group.items) {
+        const line = basketLine(view, snap, mineIds.has(snap.id));
+        const who = owner(snap);
+        if (who !== "") line.querySelector(".wx-srv-ck-bline-words")?.append(el("span", "wx-srv-ck-bline-who", who));
+        list.append(line);
+      }
+      box.append(list);
+      body.push(box);
+    }
+    // The partner's picks this viewer may not see yet (Blind): one 🔒 line each, the anchor named as such.
+    const secrets = el("ul", "wx-srv-ck-blist");
+    for (const slot of [1, 2] as const) {
+      const player = playerOf(view, slot);
+      if (player.picks !== null) continue;
+      const shown = startersOf(view, slot);
+      for (let i = shown.length; i < player.pickCount; i += 1) {
+        const secret = el("li", "wx-srv-ck-bline wx-srv-ck-bline-secret");
+        const tile = el("span", "wx-srv-ck-pic wx-srv-ck-pic-thumb wx-srv-ck-bline-pic wx-srv-ck-pic-secret", "🔒");
+        tile.setAttribute("aria-hidden", "true");
+        const isAnchor = slot === 1 && i === 0 && anchor !== null;
+        secret.append(tile, el("span", "wx-srv-ck-bline-name", isAnchor ? `Secret ${kindNoun(anchor)}` : `Secret pick · ${slotLabel(view, slot)}`));
+        secrets.append(secret);
+      }
+    }
+    if (secrets.childElementCount > 0) {
+      const box = el("section", "wx-srv-ck-bgroup");
+      box.dataset["kind"] = "secret";
+      box.append(el("h4", "wx-srv-ck-bgroup-who", "Secret picks"), secrets);
+      body.push(box);
+    }
+    const picked = view.players[0].pickCount + view.players[1].pickCount;
+    const left = mode.turns - picked;
+    if (left > 0) body.push(el("p", "wx-srv-ck-bline-left", `${left} to go`));
+    const hint = starHint(view);
+    if (hint !== null) body.push(hint);
+    return sheetFrame("Basket so far", body);
+  }
+
   function basketSheet(view: CookoutView): HTMLElement[] {
+    if (!isClassic(view.mode)) return modeBasketSheet(view);
     const body: HTMLElement[] = [];
     for (const slot of slotOrder(view)) {
       const player = playerOf(view, slot);
       const group = el("section", "wx-srv-ck-bgroup");
       group.dataset["slot"] = String(slot);
-      group.append(el("h4", "wx-srv-ck-bgroup-who", `${slotLabel(view, slot)} · ${player.pickCount} of ${PICKS_PER_PLAYER}`));
+      group.append(el("h4", "wx-srv-ck-bgroup-who", `${slotLabel(view, slot)} · ${player.pickCount} of ${view.mode.picksPerPlayer}`));
       const list = el("ul", "wx-srv-ck-blist");
       const mine = view.you?.slot === slot;
       if (player.picks !== null) {
@@ -1273,7 +1455,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         }
       }
       const known = player.picks?.length ?? Math.max(player.pickCount, startersOf(view, slot).length);
-      const left = PICKS_PER_PLAYER - known;
+      const left = view.mode.picksPerPlayer - known;
       if (left > 0) list.append(el("li", "wx-srv-ck-bline-left", `${left} to go`));
       group.append(list);
       body.push(group);
@@ -1298,7 +1480,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         if (current.canLucky !== null) {
           body.push(twistItem("wx-srv-ck-lucky", "🪙 Lucky dip", "A coin picks one of these two for you.", current.canLucky, () => void move("lucky", null)));
         }
-        if (current.canChaos !== null) {
+        // The chaos shelf is not offered on a mode's anchor turn (09c §4 T12: too few exotic breads).
+        const anchorTurn = !isClassic(view.mode) && view.mode.anchorKind !== null && current.role === view.mode.anchorKind;
+        if (current.canChaos !== null && !anchorTurn) {
           body.push(
             twistItem(
               "wx-srv-ck-chaos",
@@ -1452,7 +1636,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         : `🕵️ Secret turn: ${mine ? "you are" : `${who} is`} choosing…`;
       cloche.append(el("p", "wx-srv-ck-cloche-text", words));
       if (!waitingJoin && view.blind) {
-        cloche.append(el("p", "wx-srv-ck-cloche-sub", "Blind mode: everything is revealed once all 10 are picked."));
+        cloche.append(el("p", "wx-srv-ck-cloche-sub", `Blind mode: everything is revealed once all ${view.mode.turns} are picked.`));
       }
       return [cloche];
     }
@@ -1612,15 +1796,27 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   function revealBanner(view: CookoutView, animate: boolean): HTMLElement {
     const banner = el("div", "wx-srv-ck-reveal");
     const head = el("p", "wx-srv-ck-reveal-title");
-    head.append(emojiSpan("wx-srv-ck-reveal-icon", "🧺"), doc.createTextNode(view.blind ? "The big reveal — your 10 ingredients" : "Your 10 ingredients"));
+    const count = view.mode.turns;
+    head.append(
+      emojiSpan("wx-srv-ck-reveal-icon", "🧺"),
+      doc.createTextNode(view.blind ? `The big reveal — your ${count} ingredients` : `Your ${count} ingredients`),
+    );
     banner.append(head);
     const picks = allPicks(view);
     const mineIds = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
-    const groups: Array<{ readonly label: string; readonly key: string; readonly items: PickSnap[] }> = slotOrder(view).map((slot) => ({
-      label: slotLabel(view, slot),
-      key: String(slot),
-      items: picks.filter((p) => p.turn !== null && (p.turn % 2 === 1 ? 1 : 2) === slot),
-    }));
+    // A mode's anchor (the bread) gets its own first row (09c §6.4); the fillings follow, by player.
+    const anchor = anchorKind(view.mode);
+    const anchorItem = anchor === null ? null : anchorPick(view.mode, picks);
+    const rest = anchorItem === null ? picks : picks.filter((p) => p !== anchorItem);
+    const groups: Array<{ readonly label: string; readonly key: string; readonly items: PickSnap[] }> = [];
+    if (anchor !== null && anchorItem !== null) groups.push({ label: capitalise(kindNoun(anchor)), key: "anchor", items: [anchorItem] });
+    for (const slot of slotOrder(view)) {
+      groups.push({
+        label: slotLabel(view, slot),
+        key: String(slot),
+        items: rest.filter((p) => p.turn !== null && (p.turn % 2 === 1 ? 1 : 2) === slot),
+      });
+    }
     groups.push({ label: "Extras", key: "extra", items: picks.filter((p) => p.turn === null) });
     let index = 0;
     for (const group of groups) {
@@ -1629,6 +1825,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       box.dataset["group"] = group.key;
       box.append(el("p", "wx-srv-ck-rgroup-who", group.label));
       const grid = el("div", "wx-srv-ck-reveal-grid");
+      // At most one player's picks to a row (5 Classic, 4 toasted sandwich): wide panes keep their rows full.
+      grid.style.setProperty("--ck-reveal-cols", String(view.mode.picksPerPlayer));
       for (const snap of group.items) {
         const tile = revealTile(view, snap, mineIds.has(snap.id));
         if (animate) {
@@ -1644,16 +1842,22 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (view.stars.enabled && view.stars.revealed && (view.stars.mine !== null || view.stars.partner !== null)) {
       banner.append(el("p", "wx-srv-ck-stars-revealed", "★ The stars are out — the chef makes them the heroes of every dish."));
     }
-    if (view.staples.length > 0) banner.append(staplesRow(view.staples));
+    if (view.staples.length > 0) banner.append(staplesRow(view.staples, !isClassic(view.mode) && view.mode.anchorKind === "bread"));
     return banner;
   }
 
-  /** "Plus cupboard staples:" and their thumbs (09b §D.5). */
-  function staplesRow(staples: readonly Staple[]): HTMLElement {
+  /** The staple a toasted sandwich gets free (09c §3.1): listed first and marked so. */
+  const FREE_SANDWICH_STAPLE = "butter";
+
+  /** "Plus cupboard staples:" and their thumbs (09b §D.5). `butterFree`: a toasted sandwich's butter goes first,
+   * marked "free" (09c §6.4). */
+  function staplesRow(staples: readonly Staple[], butterFree = false): HTMLElement {
     const row = el("div", "wx-srv-ck-staples");
     row.append(el("span", "wx-srv-ck-staples-label", "Plus cupboard staples:"));
     const list = el("span", "wx-srv-ck-staples-list");
-    for (const staple of staples) {
+    const free = butterFree ? staples.find((s) => s.id === FREE_SANDWICH_STAPLE) : undefined;
+    const ordered = free === undefined ? staples : [free, ...staples.filter((s) => s !== free)];
+    for (const staple of ordered) {
       const item = el("span", "wx-srv-ck-staple");
       item.dataset["ingredient"] = staple.id;
       const pic = ingredientPicture(doc, staple, { rendition: "thumb", className: "wx-srv-ck-mini-pic", alt: "" });
@@ -1661,6 +1865,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       pic.removeAttribute("aria-label");
       pic.setAttribute("aria-hidden", "true");
       item.append(pic, el("span", "wx-srv-ck-staple-name", staple.name));
+      if (staple === free) {
+        item.classList.add("wx-srv-ck-staple-free");
+        item.append(el("span", "wx-srv-ck-staple-free-tag", "free"));
+      }
       list.append(item);
     }
     row.append(list);
@@ -1690,7 +1898,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       const card = el("div", "wx-srv-ck-gate wx-srv-ck-cloche-gate");
       card.append(emojiSpan("wx-srv-ck-gate-icon wx-srv-ck-cloche-bell", "🛎️"));
       const words = el("div", "wx-srv-ck-gate-words");
-      words.append(el("p", "wx-srv-ck-gate-text", "Lift the cloche? One surprise 11th ingredient"));
+      words.append(el("p", "wx-srv-ck-gate-text", `Lift the cloche? One surprise ${ordinal(view.mode.turns + 1)} ingredient`));
       words.append(el("p", "wx-srv-ck-gate-sub", "Neither of you chose it — the chef has to use it."));
       card.append(words);
       if (view.you !== null) {
@@ -1840,15 +2048,13 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       // One heading row (the hat, the line, the clock), so the carousel below gets the rest of the screen.
       const head = el("div", "wx-srv-ck-chef-head");
       head.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
-      const count = allPicks(view).length;
-      const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
-      head.append(el("p", "wx-srv-ck-chef-text", `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`));
+      head.append(el("p", "wx-srv-ck-chef-text", chefWorkingText(view)));
       const elapsed = el("span", "wx-srv-ck-elapsed", formatElapsed(chefSince === null ? 0 : (clock.now() - chefSince) / 1000));
       elapsed.setAttribute("aria-hidden", "true");
       head.append(elapsed);
       box.append(head);
       // While the chef works: the chosen ingredients go round with their fun facts (09b §D.4).
-      const slides = allPicks(view);
+      const slides = anchorFirst(view.mode, allPicks(view));
       if (slides.length > 0) {
         carousel = createCarousel({ document: doc, clock, reducedMotion: () => reduced() }, slides);
         box.append(carousel.element);
@@ -1872,6 +2078,24 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     retry.disabled = busy.has("concepts");
     box.append(retry);
     return box;
+  }
+
+  /** The chef's working line: Classic's as before; a mode round names its dish and its anchor (09c §6.4). */
+  function chefWorkingText(view: CookoutView): string {
+    const count = allPicks(view).length;
+    if (isClassic(view.mode)) {
+      const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
+      return `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`;
+    }
+    const dishes = `three ${view.generation > 1 ? "new " : ""}${plural(dishNoun(view.mode))}`;
+    const anchor = anchorPick(view.mode, allPicks(view));
+    if (anchor !== null) return `The chef is making ${dishes} with your ${anchor.name}…`;
+    return `The chef is making ${dishes} from your ${count > 0 ? count : view.mode.turns} ingredients…`;
+  }
+
+  /** The plate shown while a dish has no picture: the dish type's, or the mode's own emoji. */
+  function plateEmoji(view: CookoutView, concept: Concept): string {
+    return !isClassic(view.mode) && view.mode.emoji !== "" ? view.mode.emoji : dishEmoji(concept.dishType);
   }
 
   /** A snap with the basket's picture when it came without one (a dish's copy of a basket item). */
@@ -1905,14 +2129,14 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       img.addEventListener("error", () => {
         open.remove();
         header.classList.add("wx-srv-ck-dish-pic-empty");
-        header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+        header.append(emojiSpan("wx-srv-ck-dish-plate", plateEmoji(view, concept)));
       });
       open.append(img);
       header.append(open);
       return header;
     }
     header.classList.add("wx-srv-ck-dish-pic-empty");
-    header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+    header.append(emojiSpan("wx-srv-ck-dish-plate", plateEmoji(view, concept)));
     if (archived) return header;
     if (view.images.state === "pending") {
       header.classList.add("wx-srv-ck-dish-pic-pending");
@@ -1939,6 +2163,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const box = el("div", "wx-srv-ck-recipe");
     box.dataset["concept"] = concept.id;
     box.dataset["generation"] = String(slot.generation);
+    if (concept.build !== null) box.append(el("p", "wx-srv-ck-recipe-build", concept.build.label));
     box.append(cooked.section(view, concept, slot, picture));
     const facts = el("div", "wx-srv-ck-recipe-facts");
     for (const [label, value] of [
@@ -2083,6 +2308,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     readonly match: ConceptId | null;
     /** The basket the dish was made from (for "Uses n/total"). */
     readonly basketSize: number;
+    /** The basket itself: a mode round's anchor (the bread) is found in it. */
+    readonly basket: readonly IngredientSnap[];
   }
 
   function currentDish(view: CookoutView, concept: Concept): DishContext {
@@ -2094,6 +2321,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       votes: view.vote?.votes ?? null,
       match: view.vote?.match ?? null,
       basketSize: allPicks(view).length,
+      basket: allPicks(view),
     };
   }
 
@@ -2106,6 +2334,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       votes: set.vote.votes,
       match: set.vote.match,
       basketSize: set.basket.length,
+      basket: set.basket,
     };
   }
 
@@ -2248,17 +2477,31 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const more = view.state === "finished" ? dishMore(view, concept, ctx) : null;
     if (more !== null) titleRow.append(more);
     body.append(titleRow);
+    const modeRound = !isClassic(view.mode);
+    const anchor = modeRound ? dishAnchor(view, ctx) : null;
+    if (anchor !== null) body.append(anchorLine(view, anchor));
     const tags = el("div", "wx-srv-ck-dish-tags");
     if (concept.vibe !== "") tags.append(el("span", "wx-srv-ck-tag wx-srv-ck-tag-vibe", concept.vibe));
-    if (concept.dishType !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.dishType)));
-    if (concept.technique !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.technique)));
+    if (modeRound && concept.build !== null) {
+      // 09c §6.4: the build ("Skillet-fried") in place of the dish type and technique.
+      tags.append(el("span", "wx-srv-ck-tag wx-srv-ck-tag-build", concept.build.label));
+    } else if (!modeRound || concept.build === null) {
+      if (concept.dishType !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.dishType)));
+      if (concept.technique !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.technique)));
+    }
     if (tags.childElementCount > 0) body.append(tags);
     const rule = ruleBadge(view, concept);
     if (rule !== null) body.append(rule);
     body.append(el("p", "wx-srv-ck-dish-desc", concept.description));
     const total = Math.max(ctx.basketSize, concept.pickedIngredients.length + concept.omitted.length);
     const uses = el("div", "wx-srv-ck-dish-uses");
-    uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${concept.pickedIngredients.length}/${total}`));
+    if (anchor !== null) {
+      // "Uses 6/7 fillings": the anchor is always used and not counted (09c §6.4).
+      const used = concept.pickedIngredients.filter((s) => s.id !== anchor.id).length;
+      uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${used}/${Math.max(total - 1, used)} fillings`));
+    } else {
+      uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${concept.pickedIngredients.length}/${total}`));
+    }
     // 28 px thumbs (09b §D.5): the name in the tooltip and for screen readers; left-out ones faded.
     const chips = el("div", "wx-srv-ck-uses-chips");
     for (const snap of concept.pickedIngredients) {
@@ -2299,6 +2542,37 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     card.append(body);
     return card;
+  }
+
+  /** The anchor (the bread) of the basket a dish was made from, from the basket's own snapshot (09c §3.4:
+   * the canonical name, never the chef's prose). */
+  function dishAnchor(view: CookoutView, ctx: DishContext): IngredientSnap | null {
+    if (anchorKind(view.mode) === null) return null;
+    const fromBasket = ctx.basket.find((s) => "kind" in s && isAnchorPick(view.mode, s as PickSnap));
+    if (fromBasket !== undefined) return fromBasket;
+    // An earlier set's basket carries plain snaps: its anchor is the current basket's when unswapped.
+    const current = anchorPick(view.mode, allPicks(view));
+    return current !== null && ctx.basket.some((s) => s.id === current.id) ? current : null;
+  }
+
+  /** "On Sourdough loaf" with the bread's thumbnail, under a dish's title. */
+  function anchorLine(view: CookoutView, anchor: IngredientSnap): HTMLElement {
+    const line = el("p", "wx-srv-ck-dish-anchor");
+    const pic = ingredientPicture(doc, withPicture(view, anchor), { rendition: "thumb", className: "wx-srv-ck-dish-anchor-pic", alt: "" });
+    pic.removeAttribute("role");
+    pic.removeAttribute("aria-label");
+    pic.setAttribute("aria-hidden", "true");
+    line.append(pic, el("span", "wx-srv-ck-dish-anchor-name", `On ${anchor.name}`));
+    return line;
+  }
+
+  /** The chef stage's header in a mode round: "🥪 Toasted sandwich" over the dishes (09c §6.4). */
+  function modeHeadSection(view: CookoutView): HTMLElement[] {
+    if (isClassic(view.mode) || view.concepts.state !== "ready") return [];
+    const head = el("p", "wx-srv-ck-stagehead");
+    if (view.mode.emoji !== "") head.append(emojiSpan("wx-srv-ck-stagehead-icon", view.mode.emoji));
+    head.append(doc.createTextNode(view.mode.label));
+    return [head];
   }
 
   /** The dish sets a rescue swap replaced: collapsed under "Earlier dishes", read-only. */
@@ -2358,7 +2632,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   /** The finished stage's sections, top to bottom. The swap shows above the dishes once proposed or done
    * (both players need it first), and below them as the "Rescue swap" button before that. */
-  const FINISHED_SECTIONS = ["basket", "gate", "chef", "swapTop", "vote", "dishes", "swapBottom", "earlier"] as const;
+  const FINISHED_SECTIONS = ["basket", "gate", "chef", "swapTop", "vote", "modeHead", "dishes", "swapBottom", "earlier"] as const;
   type FinishedSection = (typeof FINISHED_SECTIONS)[number];
 
   /** Redraws one section of the finished stage when its key changed. */
@@ -2441,6 +2715,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       sections.clear();
       const hosts: HTMLElement[] = [];
       for (const name of FINISHED_SECTIONS) {
+        // A Classic round's stage is exactly as before: no mode header host at all.
+        if (name === "modeHead" && isClassic(view.mode)) continue;
         const host = el("div", name === "dishes" ? "wx-srv-ck-dishes" : `wx-srv-ck-sec wx-srv-ck-sec-${name}`);
         sections.set(name, { element: host, key: "" });
         hosts.push(host);
@@ -2494,6 +2770,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       () => (!swapUp && view.concepts.state === "ready" ? swapSection(view) : []),
     );
     section("vote", JSON.stringify([view.vote, view.concepts.data?.map((c) => c.title) ?? null, you, names]), () => voteSection(view));
+    section("modeHead", JSON.stringify([view.mode, view.concepts.state]), () => modeHeadSection(view));
     drawChef(view);
     section(
       "earlier",
@@ -2543,6 +2820,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   function drawBar(view: CookoutView | undefined): void {
     if (view === undefined) {
+      titleIcon.textContent = "🍳";
+      title.removeAttribute("aria-label");
       modeBadge.hidden = true;
       helpButton.hidden = true;
       endButton.hidden = true;
@@ -2550,6 +2829,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       return;
     }
     helpButton.hidden = view.state !== "picking";
+    const modeRound = !isClassic(view.mode);
+    titleIcon.textContent = modeRound && view.mode.emoji !== "" ? view.mode.emoji : "🍳";
+    if (modeRound) title.setAttribute("aria-label", `${view.mode.label} Cookout`);
+    else title.removeAttribute("aria-label");
     modeBadge.hidden = false;
     modeBadge.textContent = view.blind ? "Blind" : "Open";
     modeBadge.dataset["mode"] = view.blind ? "blind" : "open";
@@ -2720,6 +3003,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     applyFocus(view);
     if (carousel !== null) carousel.start();
     // The first time this device opens this round while it is being picked: the intro (09b §D.2).
+    if (view.state === "picking") askOptions(view);
     if (view.state === "picking" && !intro.isOpen() && intro.isNew(view.seq)) intro.open(view);
     if (view.state !== "picking") intro.close();
     deps.afterChange();

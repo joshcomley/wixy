@@ -70,6 +70,7 @@ import { loadWorld } from "./adventure/world";
 import {
   abandonCookout,
   bankCookoutConcept,
+  CLASSIC_MODE_ID,
   createCookout,
   getCookout,
   getCookoutOptions,
@@ -96,12 +97,13 @@ import {
   skipCookout,
   type ConceptId,
   type CookoutOptions,
+  type ModeOption,
 } from "./cookout/api";
 import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
-import { createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
+import { CookoutStartError, createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -657,6 +659,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     model: cookoutModel,
     document: documentRef,
     openGame: (seq) => gameTabs.open("cookout", seq),
+    // A game mode's numbers for a card whose round is not read yet (09c §6.4), from the cached options.
+    modeOption: (id) => cookoutModeOptions?.find((mode) => mode.id === id) ?? null,
   });
   let voiceRecorder: VoiceRecorder | null = null;
   let callBusy = false;
@@ -1482,11 +1486,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openLightbox: (src, alt) => lightbox.open(src, alt),
     afterChange: () => threadScroll.afterContentChange(false),
     newId: () => cryptoRandomId(win),
+    loadOptions: () => loadCookoutOptions(),
   });
   // The start sheet (Open / Blind and the optional twists, then Start Cookout): from the ... menu, the
   // pane's New and the encore buttons. `GET /cookout/options` is read once per unlock (cleared on every
   // lock and wipe with `cookoutOptions = null`).
   let cookoutOptions: Promise<CookoutOptions | null> | null = null;
+  /** The game modes of the last options read, for the cards (null until one succeeded this unlock). */
+  let cookoutModeOptions: readonly ModeOption[] | null = null;
+  /** A card of a non-Classic round asked for the options once this unlock (09c §6.4). */
+  let cookoutModesAsked = false;
   function loadCookoutOptions(): Promise<CookoutOptions | null> {
     const session = currentSession;
     if (session === null) return Promise.resolve(null);
@@ -1499,19 +1508,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // A failed read is not cached: the next open asks again.
       void asked.then((options) => {
         if (options === null && cookoutOptions === asked) cookoutOptions = null;
+        if (options !== null && cookoutOptions === asked) {
+          cookoutModeOptions = options.modes;
+          // Cards drawn without their mode's numbers can have them now.
+          for (const message of confirmedBySeq.values()) {
+            const summary = parseCookoutSummary(message.cookout);
+            if (summary !== null && summary.mode !== CLASSIC_MODE_ID) patchCookout(message.seq);
+          }
+        }
       });
     }
     return cookoutOptions;
+  }
+
+  /** A non-Classic round's card needs its mode's numbers: read the options once (the read is shared with the
+   * start sheet's, so at most one is ever in flight). */
+  function askCookoutModes(messages: readonly Message[]): void {
+    if (cookoutModesAsked || cookoutModeOptions !== null) return;
+    const modeRound = messages.some((message) => {
+      const summary = parseCookoutSummary(message.cookout);
+      return summary !== null && summary.mode !== CLASSIC_MODE_ID;
+    });
+    if (!modeRound) return;
+    cookoutModesAsked = true;
+    void loadCookoutOptions();
   }
   const cookoutStart: CookoutStartSheet = createCookoutStartSheet({
     document: documentRef,
     start: (choices, clientId) => addCookout(choices, clientId),
     loadOptions: () => loadCookoutOptions(),
-    async search(q) {
+    async search(q, mode) {
       const session = currentSession;
       if (session === null) return { ok: false, kind: "unavailable" };
       try {
-        return await searchIngredients(session, q);
+        return await searchIngredients(session, q, mode);
       } catch (error) {
         if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
         return { ok: false, kind: "unavailable" };
@@ -2434,6 +2464,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
         blind: choices.blind,
+        // A Classic start sends no `mode`: the request is the core one exactly (09c A.3).
+        ...(choices.mode === CLASSIC_MODE_ID ? {} : { mode: choices.mode }),
         ...(choices.style === null ? {} : { style: choices.style }),
         ...(choices.challenge === null ? {} : { challenge: choices.challenge }),
         ...(choices.wildcard ? { wildcard: true } : {}),
@@ -2447,10 +2479,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     if (requestGeneration !== contentGeneration || currentSession === null) return;
     if (!result.ok) {
-      throw new Error(
+      // A game mode switched off meanwhile (09c §6.1): the cached options listed it, so they are read again.
+      const modeGone = result.kind === "game_unavailable" && choices.mode !== CLASSIC_MODE_ID;
+      if (modeGone) cookoutOptions = null;
+      // The failure's kind rides along: the sheet words a mode encore's refusal itself (09c §2.5).
+      throw new CookoutStartError(
+        result.kind,
         result.kind === "unsupported"
           ? "Cookout isn't available yet — try again in a moment."
-          : result.kind === "game_unavailable"
+          : modeGone
+            ? "That game isn't available right now"
+            : result.kind === "game_unavailable"
             ? "Cookout isn't available on this server right now."
             : result.kind === "invalid"
               ? "The kitchen can't start with those twists — change a choice and try again."
@@ -2920,6 +2959,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     wyrModel.observe(messages);
     adventureModel.observe(messages);
     cookoutModel.observe(messages);
+    askCookoutModes(messages);
     syncGames(messages);
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     threadScroll.afterContentChange(revealPillIfNotStuck);
@@ -3001,6 +3041,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     recipeBook.close();
     cookoutStart.close();
     cookoutOptions = null;
+    cookoutModeOptions = null;
+    cookoutModesAsked = false;
     partnerName = null;
     partnerSeq = 0;
     contentGeneration += 1;
@@ -3773,6 +3815,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       recipeBook.close();
       cookoutStart.close();
       cookoutOptions = null;
+      cookoutModeOptions = null;
+      cookoutModesAsked = false;
       wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3899,6 +3943,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       recipeBook.close();
       cookoutStart.close();
       cookoutOptions = null;
+      cookoutModeOptions = null;
+      cookoutModesAsked = false;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();

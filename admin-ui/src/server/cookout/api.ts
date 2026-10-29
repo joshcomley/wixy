@@ -16,6 +16,11 @@
 // before. Secret-by-design twists (the dinner vote, the secret stars) stay hidden from the partner in
 // BOTH modes until their own reveal; the server redacts them, and the parsers below drop them again if
 // a buggy server ever sent them early (the same second lock as the Blind picks).
+//
+// GAME MODES (spec/server-chat/09c-cookout-modes.md §5.4, frozen wire A.3) are additive too: a view,
+// summary, book entry or options body without `mode` is a Classic one (ten turns, five picks each), and
+// an unknown mode id parses as a generic mode carrying its own label. Every count that decided a round's
+// shape (`turns`, `picksPerPlayer`) is read from the view's mode, never assumed.
 
 import { sameOriginMediaUrl } from "../adventure/api";
 import { ServerLockedError, serverFetch } from "../api/http";
@@ -48,7 +53,8 @@ export type GateWait = "stars" | "wildcard";
 export type EncoreKind = "leftovers" | "remix";
 
 export const CONCEPT_IDS: readonly ConceptId[] = ["a", "b", "c"];
-/** Ten picks in a round: five each. */
+/** Ten picks in a Classic round: five each. Also the most turns any mode can have (the store's `turn`
+ * column allows 1..10). */
 export const TOTAL_PICKS = 10;
 export const PICKS_PER_PLAYER = 5;
 /** Ten picks plus the cloche's surprise eleventh. */
@@ -76,6 +82,95 @@ const WILDCARD_STATES: readonly string[] = ["off", "armed", "offered", "lifted",
 const SWAP_STATES: readonly string[] = ["none", "proposed", "done"];
 const VIAS: readonly string[] = ["pick", "lucky", "chaos", "seed", "wildcard", "swap"];
 
+export const CLASSIC_MODE_ID = "classic";
+
+/** One pick kind of a game mode (09c §5.4): its id ("bread"), label ("the bread") and banner prompt. */
+export interface ModeKind {
+  readonly id: string;
+  readonly label: string;
+  readonly prompt: string;
+}
+
+/** The game mode a round was created in (public: a setting, not partner data). */
+export interface CookoutModeInfo {
+  readonly id: string;
+  readonly label: string;
+  readonly emoji: string;
+  readonly turns: number;
+  readonly picksPerPlayer: number;
+  readonly kinds: readonly ModeKind[];
+  /** The kind every dish is built on ("bread"), or null (Classic). */
+  readonly anchorKind: string | null;
+}
+
+/** One mode of the start sheet's "What are we making?" (`GET /cookout/options` `modes`). */
+export interface ModeOption extends Omit<CookoutModeInfo, "kinds" | "anchorKind"> {
+  readonly blurb: string;
+  /** 1–3 lines; `{starter}` stands for the player who starts the round. */
+  readonly intro: readonly string[];
+  readonly twists: readonly string[];
+  /** The pick kinds a fridge raid may start with, or null for any (Classic). */
+  readonly fridgeKinds: readonly string[] | null;
+}
+
+/** A toasted sandwich's build (09c §3.3), as the view names it. */
+export interface BuildRef {
+  readonly id: string;
+  readonly label: string;
+}
+
+/** A mode as a Recipe book entry names it. */
+export interface ModeRef {
+  readonly id: string;
+  readonly label: string;
+  readonly emoji: string;
+}
+
+/** The mode of a view that carries none (an older server): today's game. */
+export const CLASSIC_MODE: CookoutModeInfo = {
+  id: CLASSIC_MODE_ID,
+  label: "Classic",
+  emoji: "🍳",
+  turns: TOTAL_PICKS,
+  picksPerPlayer: PICKS_PER_PLAYER,
+  kinds: [],
+  anchorKind: null,
+};
+
+export const CLASSIC_MODE_REF: ModeRef = { id: CLASSIC_MODE_ID, label: "Classic", emoji: "🍳" };
+
+/** Every twist a mode can allow (09a): Classic allows all twelve. */
+export const ALL_TWISTS: readonly string[] = [
+  "swap",
+  "vote",
+  "style",
+  "cooked",
+  "wildcard",
+  "fridge",
+  "challenge",
+  "veto",
+  "encore",
+  "lucky",
+  "stars",
+  "chaos",
+];
+
+export const CLASSIC_OPTION: ModeOption = {
+  id: CLASSIC_MODE_ID,
+  label: "Classic",
+  emoji: "🍳",
+  turns: TOTAL_PICKS,
+  picksPerPlayer: PICKS_PER_PLAYER,
+  blurb: "",
+  intro: [],
+  twists: ALL_TWISTS,
+  fridgeKinds: null,
+};
+
+export function isClassic(mode: { readonly id: string }): boolean {
+  return mode.id === CLASSIC_MODE_ID;
+}
+
 export function isStyleId(value: unknown): value is StyleId {
   return typeof value === "string" && STYLE_IDS.includes(value);
 }
@@ -89,6 +184,8 @@ export function isChallengeId(value: unknown): value is ChallengeId {
  * 09a §4.4: the twists add counts and flags only). */
 export interface CookoutSummary {
   readonly state: CookoutState;
+  /** The game mode's id ("classic" when the server sent none). */
+  readonly mode: string;
   readonly blind: boolean;
   readonly pickedCount: number;
   readonly concepts: ConceptsState;
@@ -130,6 +227,8 @@ export interface Staple {
  * swapped-in item. `facts` (09b §E.1) arrive only once the round has left picking. */
 export interface PickSnap extends IngredientSnap {
   readonly turn: number | null;
+  /** The pick kind it filled ("bread", "cheese"… — 09c §5.4), or null (Classic, an older server). */
+  readonly kind: string | null;
   readonly via: PickVia;
   readonly facts: readonly string[] | null;
 }
@@ -149,8 +248,9 @@ export interface CookoutPlayer {
 export interface CookoutTurn {
   readonly turn: number;
   readonly player: PlayerSlot;
-  /** The four fields below are null for anybody but the active player in a Blind round. */
-  readonly role: CookoutRole | null;
+  /** The four fields below are null for anybody but the active player in a Blind round. `role` is the
+   * turn's pick kind: a Classic bank role, or one of the mode's kinds ("bread", "cheese"…). */
+  readonly role: string | null;
   readonly waitingForJoin: boolean;
   readonly options: readonly [IngredientSnap, IngredientSnap] | null;
   readonly offerIndex: number | null;
@@ -277,6 +377,8 @@ export interface Concept {
   /** How the dish keeps the round's kitchen challenge (null without one). */
   readonly challengeNote: string | null;
   readonly totalMinutes: number | null;
+  /** How a single-dish mode's idea is made ("Skillet-fried"); null for Classic. */
+  readonly build: BuildRef | null;
 }
 
 export interface ConceptsView {
@@ -337,6 +439,8 @@ export interface RecipeSlot {
 export interface CookoutView {
   readonly seq: number;
   readonly state: CookoutState;
+  /** The round's game mode (Classic when the server sent none). */
+  readonly mode: CookoutModeInfo;
   readonly rev: number;
   readonly blind: boolean;
   readonly revealed: boolean;
@@ -433,8 +537,10 @@ export function parseCookoutSummary(value: unknown): CookoutSummary | null {
   if (typeof state !== "string" || !STATES.includes(state) || rev === null) return null;
   const concepts = record["concepts"];
   const swap = record["swap"];
+  const mode = record["mode"];
   return {
     state: state as CookoutState,
+    mode: typeof mode === "string" && ID_RE.test(mode) ? mode : CLASSIC_MODE_ID,
     blind: record["blind"] === true,
     pickedCount: asIntIn(record["pickedCount"], 0, TOTAL_PICKS) ?? 0,
     concepts: typeof concepts === "string" && CONCEPT_STATES.includes(concepts) ? (concepts as ConceptsState) : "none",
@@ -522,6 +628,10 @@ function parseSnaps(value: unknown, max: number): IngredientSnap[] | null {
   return out;
 }
 
+function asIngredientKind(value: unknown): string | null {
+  return typeof value === "string" && ID_RE.test(value) ? value : null;
+}
+
 /** A basket ingredient with its turn and how it got in. A missing `via` (a core-era server) is a pick. */
 export function parsePickSnap(value: unknown): PickSnap | null {
   const snap = parseSnap(value);
@@ -531,6 +641,7 @@ export function parsePickSnap(value: unknown): PickSnap | null {
   return {
     ...snap,
     turn: asIntIn(record["turn"], 1, TOTAL_PICKS),
+    kind: asIngredientKind(record["kind"]),
     via: typeof via === "string" && VIAS.includes(via) ? (via as PickVia) : "pick",
     facts: parseFacts(record["facts"]),
   };
@@ -578,18 +689,18 @@ function parseStaples(value: unknown): Staple[] {
   return out;
 }
 
-function parsePlayer(value: unknown, slot: PlayerSlot): CookoutPlayer | null {
+function parsePlayer(value: unknown, slot: PlayerSlot, picksPerPlayer: number): CookoutPlayer | null {
   const record = asRecord(value);
   if (record === null || asSlot(record["slot"]) !== slot) return null;
   const nameRaw = record["name"];
   const name = nameRaw === null || nameRaw === undefined ? null : asText(nameRaw, 120);
   if (name === null && (slot === 1 || (nameRaw !== null && nameRaw !== undefined))) return null;
-  const pickCount = asIntIn(record["pickCount"], 0, PICKS_PER_PLAYER);
+  const pickCount = asIntIn(record["pickCount"], 0, picksPerPlayer);
   if (pickCount === null) return null;
   const picksRaw = record["picks"];
   let picks: PickSnap[] | null = null;
   if (picksRaw !== null && picksRaw !== undefined) {
-    picks = parsePickSnaps(picksRaw, PICKS_PER_PLAYER);
+    picks = parsePickSnaps(picksRaw, picksPerPlayer);
     if (picks === null) return null;
   }
   return {
@@ -602,16 +713,26 @@ function parsePlayer(value: unknown, slot: PlayerSlot): CookoutPlayer | null {
   };
 }
 
-function parseCurrent(value: unknown): CookoutTurn | null {
+function parseCurrent(value: unknown, mode: CookoutModeInfo): CookoutTurn | null {
   const record = asRecord(value);
   if (record === null) return null;
-  const turn = asIntIn(record["turn"], 1, TOTAL_PICKS);
+  const turn = asIntIn(record["turn"], 1, mode.turns);
   const player = asSlot(record["player"]);
   if (turn === null || player === null) return null;
   // Odd turns are Slot 1's, even turns Slot 2's (spec §1.1): a view that says otherwise is not drawn.
   if ((turn % 2 === 1 ? 1 : 2) !== player) return null;
   const roleRaw = record["role"];
-  const role = typeof roleRaw === "string" && ROLES.includes(roleRaw) ? (roleRaw as CookoutRole) : null;
+  // A Classic turn names one of the four bank roles; a mode's turn one of the mode's own kinds.
+  const role =
+    typeof roleRaw !== "string"
+      ? null
+      : isClassic(mode)
+        ? ROLES.includes(roleRaw)
+          ? roleRaw
+          : null
+        : mode.kinds.some((k) => k.id === roleRaw)
+          ? roleRaw
+          : null;
   const optionsRaw = record["options"];
   let options: readonly [IngredientSnap, IngredientSnap] | null = null;
   let offerIndex: number | null = null;
@@ -657,13 +778,13 @@ function parseReplaced(value: unknown): ReplacedOption[] {
   return out;
 }
 
-function parseHistory(value: unknown): HistoryTurn[] {
+function parseHistory(value: unknown, turns: number): HistoryTurn[] {
   if (!Array.isArray(value)) return [];
   const out: HistoryTurn[] = [];
-  for (const raw of (value as unknown[]).slice(0, TOTAL_PICKS)) {
+  for (const raw of (value as unknown[]).slice(0, turns)) {
     const record = asRecord(raw);
     if (record === null) continue;
-    const turn = asIntIn(record["turn"], 1, TOTAL_PICKS);
+    const turn = asIntIn(record["turn"], 1, turns);
     const player = asSlot(record["player"]);
     const offersRaw = record["offers"];
     if (turn === null || player === null || !Array.isArray(offersRaw) || offersRaw.length > 3) continue;
@@ -693,6 +814,86 @@ function parseHistory(value: unknown): HistoryTurn[] {
     });
   }
   return out;
+}
+
+/** `{id, label}` of a build, or null (Classic, or a malformed one). */
+export function parseBuild(value: unknown): BuildRef | null {
+  const record = asRecord(value);
+  const id = record?.["id"];
+  const label = asText(record?.["label"], 60);
+  if (typeof id !== "string" || !ID_RE.test(id) || label === null || label.trim() === "") return null;
+  return { id, label };
+}
+
+/** A mode's turns: even (both players pick equally), 2..10 (the store's turn range). */
+function asTurns(value: unknown): number | null {
+  const turns = asIntIn(value, 2, TOTAL_PICKS);
+  return turns !== null && turns % 2 === 0 ? turns : null;
+}
+
+/** The mode's kinds: at most 8, one per id, each with a non-blank label and prompt. */
+function parseKinds(value: unknown): ModeKind[] {
+  if (!Array.isArray(value)) return [];
+  const out: ModeKind[] = [];
+  for (const raw of (value as unknown[]).slice(0, 8)) {
+    const record = asRecord(raw);
+    const id = record?.["id"];
+    const label = asText(record?.["label"], 60);
+    const prompt = asText(record?.["prompt"], 40);
+    if (typeof id !== "string" || !ID_RE.test(id) || label === null || label.trim() === "" || prompt === null || prompt.trim() === "") continue;
+    if (out.some((k) => k.id === id)) continue;
+    out.push({ id, label, prompt });
+  }
+  return out;
+}
+
+interface ModeHead {
+  readonly id: string;
+  readonly label: string;
+  readonly emoji: string;
+  readonly turns: number;
+  readonly picksPerPlayer: number;
+}
+
+/** The identity every mode shape shares; null when the id is missing or malformed. Counts that are
+ * missing or disagree with each other are not trusted: Classic's are used instead. */
+function parseModeHead(record: Record<string, unknown> | null): ModeHead | null {
+  const id = record?.["id"];
+  if (record === null || typeof id !== "string" || !ID_RE.test(id)) return null;
+  const label = asText(record["label"], 60);
+  const classic = id === CLASSIC_MODE_ID;
+  const fallbackLabel = classic ? CLASSIC_MODE.label : id.replace(/-+/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const turns = asTurns(record["turns"]);
+  const perPlayer = asIntIn(record["picksPerPlayer"], 1, PICKS_PER_PLAYER);
+  const counts =
+    turns !== null && perPlayer !== null && perPlayer * 2 === turns
+      ? { turns, picksPerPlayer: perPlayer }
+      : { turns: TOTAL_PICKS, picksPerPlayer: PICKS_PER_PLAYER };
+  return {
+    id,
+    label: label !== null && label.trim() !== "" ? label : fallbackLabel,
+    emoji: asText(record["emoji"], 16) ?? (classic ? CLASSIC_MODE.emoji : ""),
+    ...counts,
+  };
+}
+
+/** The view's `mode` block: Classic when absent or unreadable; an unknown id keeps its own label. */
+export function parseModeInfo(value: unknown): CookoutModeInfo {
+  const record = asRecord(value);
+  const head = parseModeHead(record);
+  if (head === null) return CLASSIC_MODE;
+  const kinds = parseKinds(record?.["kinds"]);
+  const anchor = record?.["anchorKind"];
+  return {
+    ...head,
+    kinds,
+    anchorKind: typeof anchor === "string" && kinds.some((k) => k.id === anchor) ? anchor : null,
+  };
+}
+
+function parseModeRef(value: unknown): ModeRef {
+  const head = parseModeHead(asRecord(value));
+  return head === null ? CLASSIC_MODE_REF : { id: head.id, label: head.label, emoji: head.emoji };
 }
 
 function parseConcept(value: unknown): Concept | null {
@@ -727,6 +928,7 @@ function parseConcept(value: unknown): Concept | null {
     omitted,
     challengeNote: asText(record["challengeNote"], 300),
     totalMinutes: asIntIn(record["totalMinutes"], 1, 10_000),
+    build: parseBuild(record["build"]),
   };
 }
 
@@ -1045,15 +1247,16 @@ export function parseCookoutView(value: unknown): CookoutView | null {
   const rev = asPosInt(record["rev"]);
   const state = record["state"];
   if (seq === null || rev === null || typeof state !== "string" || !STATES.includes(state)) return null;
+  const mode = parseModeInfo(record["mode"]);
   const playersRaw = record["players"];
   if (!Array.isArray(playersRaw) || playersRaw.length !== 2) return null;
-  const p1 = parsePlayer(playersRaw[0], 1);
-  const p2 = parsePlayer(playersRaw[1], 2);
+  const p1 = parsePlayer(playersRaw[0], 1, mode.picksPerPlayer);
+  const p2 = parsePlayer(playersRaw[1], 2, mode.picksPerPlayer);
   if (p1 === null || p2 === null) return null;
   const youRecord = asRecord(record["you"]);
   const youSlot = youRecord === null ? null : asSlot(youRecord["slot"]);
   const currentRaw = record["current"];
-  const current = currentRaw === null || currentRaw === undefined ? null : parseCurrent(currentRaw);
+  const current = currentRaw === null || currentRaw === undefined ? null : parseCurrent(currentRaw, mode);
   const s = state as CookoutState;
   // A round being picked has a turn; a turn that would not parse cannot be played (not drawn at all).
   if (s === "picking" && current === null) return null;
@@ -1093,6 +1296,7 @@ export function parseCookoutView(value: unknown): CookoutView | null {
   return {
     seq,
     state: s,
+    mode,
     rev,
     blind,
     revealed,
@@ -1103,7 +1307,9 @@ export function parseCookoutView(value: unknown): CookoutView | null {
         : { slot: youSlot, chaosUsed: youRecord?.["chaosUsed"] === true, vetoUsed: youRecord?.["vetoUsed"] === true },
     current: shownCurrent,
     // Blind: only the viewer's own turns, ever — even after the reveal (spec §1.3); the second lock again.
-    history: blind ? parseHistory(record["history"]).filter((t) => youSlot !== null && t.player === youSlot) : parseHistory(record["history"]),
+    history: blind
+      ? parseHistory(record["history"], mode.turns).filter((t) => youSlot !== null && t.player === youSlot)
+      : parseHistory(record["history"], mode.turns),
     staples: parseStaples(record["staples"]),
     concepts,
     images: parseImages(record["images"]),
@@ -1192,6 +1398,8 @@ export interface CreateCookoutInput {
   readonly sender: string;
   readonly deviceId: string;
   readonly blind: boolean;
+  /** The game mode; absent = Classic (a Classic start sends no `mode` at all: the core request). */
+  readonly mode?: string;
   readonly style?: StyleId | "spin" | null;
   readonly challenge?: ChallengeId | null;
   readonly wildcard?: boolean;
@@ -1436,6 +1644,55 @@ export interface CookoutOptions {
   /** The chef (and so style, challenge, cloche and stars) is available on this server. */
   readonly chef: boolean;
   readonly pictures: boolean;
+  /** The switched-on game modes, Classic first (Classic alone from a server without modes). */
+  readonly modes: readonly ModeOption[];
+}
+
+function parseIdList(value: unknown, max: number): string[] {
+  if (!Array.isArray(value)) return [];
+  const out: string[] = [];
+  for (const raw of (value as unknown[]).slice(0, max)) {
+    if (typeof raw === "string" && ID_RE.test(raw) && !out.includes(raw)) out.push(raw);
+  }
+  return out;
+}
+
+function parseModeOption(value: unknown): ModeOption | null {
+  const record = asRecord(value);
+  const head = parseModeHead(record);
+  if (record === null || head === null) return null;
+  const introRaw = record["intro"];
+  const intro = Array.isArray(introRaw)
+    ? (introRaw as unknown[]).filter((line): line is string => typeof line === "string" && line.trim() !== "" && line.length <= 200).slice(0, 3)
+    : [];
+  const twistsRaw = record["twists"];
+  const fridgeRaw = record["fridgeKinds"];
+  return {
+    ...head,
+    blurb: asText(record["blurb"], 200) ?? "",
+    intro,
+    // A mode that does not list its twists offers none (never more than the server allows); Classic, from a
+    // server that predates modes, offers all twelve as it always has.
+    twists: Array.isArray(twistsRaw)
+      ? parseIdList(twistsRaw, ALL_TWISTS.length * 2).filter((t) => ALL_TWISTS.includes(t))
+      : head.id === CLASSIC_MODE_ID
+        ? ALL_TWISTS
+        : [],
+    fridgeKinds: Array.isArray(fridgeRaw) ? parseIdList(fridgeRaw, 8) : null,
+  };
+}
+
+/** The listed modes, one per id, Classic always present and first (09c §5.4). */
+export function parseModeOptions(value: unknown): ModeOption[] {
+  const out: ModeOption[] = [];
+  if (Array.isArray(value)) {
+    for (const raw of (value as unknown[]).slice(0, 16)) {
+      const option = parseModeOption(raw);
+      if (option !== null && !out.some((o) => o.id === option.id)) out.push(option);
+    }
+  }
+  const classic = out.find((o) => o.id === CLASSIC_MODE_ID) ?? CLASSIC_OPTION;
+  return [classic, ...out.filter((o) => o.id !== CLASSIC_MODE_ID)];
 }
 
 function parseCatalogue(value: unknown, known: (id: unknown) => boolean): CatalogueEntry[] {
@@ -1459,6 +1716,7 @@ export function parseCookoutOptions(value: unknown): CookoutOptions | null {
     challenges: parseCatalogue(record["challenges"], isChallengeId),
     chef: record["chef"] === true,
     pictures: record["pictures"] === true,
+    modes: parseModeOptions(record["modes"]),
   };
 }
 
@@ -1483,13 +1741,15 @@ export type SearchResult =
   | { readonly ok: true; readonly ingredients: readonly IngredientSnap[] }
   | { readonly ok: false; readonly kind: "invalid" | "game_unavailable" | "unavailable" };
 
-/** `GET /cookout/ingredients?q=` — the fridge raid's bank search (≤ 20 bank entries). */
-export async function searchIngredients(session: ServerSession, q: string): Promise<SearchResult> {
+/** `GET /cookout/ingredients?q=&mode=` — the fridge raid's bank search (≤ 20 bank entries). A non-Classic
+ * `mode` searches only that mode's fridge kinds (09c §5.4); Classic sends no `mode` (the whole bank). */
+export async function searchIngredients(session: ServerSession, q: string, mode: string | null = null): Promise<SearchResult> {
   const query = q.trim();
   if (query.length < SEARCH_MIN || query.length > SEARCH_MAX) return { ok: false, kind: "invalid" };
+  const modeParam = mode === null || mode === CLASSIC_MODE_ID ? "" : `&mode=${encodeURIComponent(mode)}`;
   let response: Response;
   try {
-    response = await serverFetch(`/cookout/ingredients?q=${encodeURIComponent(query)}`, { method: "GET" }, session);
+    response = await serverFetch(`/cookout/ingredients?q=${encodeURIComponent(query)}${modeParam}`, { method: "GET" }, session);
   } catch (error) {
     if (error instanceof ServerLockedError) throw error;
     return { ok: false, kind: "unavailable" };
@@ -1584,9 +1844,13 @@ export interface BookRecipe {
   readonly dinnerPick: boolean;
   readonly style: SetupChip | null;
   readonly challenge: SetupChip | null;
-  /** The basket items the dish used (Remix starters) and the ones it left out (Leftovers starters). */
-  readonly ingredients: readonly IngredientSnap[];
-  readonly leftovers: readonly IngredientSnap[];
+  /** The basket items the dish used (Remix starters) and the ones it left out (Leftovers starters), each
+   * with its pick kind in a mode round (null for Classic, or from a server that does not send it). */
+  readonly ingredients: readonly KindedSnap[];
+  readonly leftovers: readonly KindedSnap[];
+  /** The game mode the dish came from (Classic when the server sent none). */
+  readonly mode: ModeRef;
+  readonly build: BuildRef | null;
 }
 
 export interface BookCooked {
@@ -1612,13 +1876,18 @@ function parseBookCooked(value: unknown): BookCooked | null {
   return { cookedAt, ratings, photo: parsePicture(record["photo"]) };
 }
 
+/** A snap with the pick kind it filled (a Recipe book starter): null for Classic or when not sent. */
+export interface KindedSnap extends IngredientSnap {
+  readonly kind: string | null;
+}
+
 /** Bank-listed snaps, skipping any that will not parse (a list for buttons, not a basket count). */
-function parseSnapList(value: unknown, max: number): IngredientSnap[] {
+function parseSnapList(value: unknown, max: number): KindedSnap[] {
   if (!Array.isArray(value)) return [];
-  const out: IngredientSnap[] = [];
+  const out: KindedSnap[] = [];
   for (const raw of (value as unknown[]).slice(0, max)) {
     const snap = parseSnap(raw);
-    if (snap !== null && !out.some((s) => s.id === snap.id)) out.push(snap);
+    if (snap !== null && !out.some((s) => s.id === snap.id)) out.push({ ...snap, kind: asIngredientKind((raw as Record<string, unknown>)["kind"]) });
   }
   return out;
 }
@@ -1663,6 +1932,8 @@ export function parseRecipeBook(value: unknown): readonly BookRecipe[] | null {
       challenge: parseChip(record["challenge"], isChallengeId),
       ingredients: parseSnapList(record["ingredients"], MAX_BASKET),
       leftovers: parseSnapList(record["leftovers"], MAX_BASKET),
+      mode: parseModeRef(record["mode"]),
+      build: parseBuild(record["build"]),
     });
   }
   return out;
@@ -1702,7 +1973,7 @@ export function allPicks(view: CookoutView): PickSnap[] {
   const [one, two] = view.players;
   const a = one.picks ?? [];
   const b = two.picks ?? [];
-  for (let i = 0; i < PICKS_PER_PLAYER; i += 1) {
+  for (let i = 0; i < view.mode.picksPerPlayer; i += 1) {
     const x = a[i];
     const y = b[i];
     if (x !== undefined) out.push(x);

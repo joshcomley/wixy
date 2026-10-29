@@ -8,6 +8,7 @@ vi.mock("../../src/server/api/http", async (importOriginal) => ({
 
 import {
   bankCookoutConcept,
+  CLASSIC_OPTION,
   cancelSwap,
   chaosCookout,
   chooseSwap,
@@ -93,6 +94,7 @@ describe("the message summary's twist fields", () => {
       }),
     ).toEqual({
       state: "finished",
+      mode: "classic",
       blind: true,
       pickedCount: 10,
       concepts: "ready",
@@ -579,13 +581,13 @@ describe("the start-sheet options", () => {
     expect(parseCookoutOptions(null)).toBeNull();
     expect(parseCookoutOptions([])).toBeNull();
     expect(parseCookoutOptions("x")).toBeNull();
-    expect(parseCookoutOptions({})).toEqual({ styles: [], challenges: [], chef: false, pictures: false });
-    expect(parseCookoutOptions({ styles: "x", challenges: 4, chef: "true" })).toEqual({ styles: [], challenges: [], chef: false, pictures: false });
+    expect(parseCookoutOptions({})).toEqual({ styles: [], challenges: [], chef: false, pictures: false, modes: [CLASSIC_OPTION] });
+    expect(parseCookoutOptions({ styles: "x", challenges: 4, chef: "true" })).toEqual({ styles: [], challenges: [], chef: false, pictures: false, modes: [CLASSIC_OPTION] });
   });
 
   it("is fetched from /cookout/options, and null when the route is missing or the read fails", async () => {
     serverFetch.mockResolvedValueOnce(json({ styles: [], challenges: [], chef: true, pictures: true }));
-    expect(await getCookoutOptions(SESSION)).toEqual({ styles: [], challenges: [], chef: true, pictures: true });
+    expect(await getCookoutOptions(SESSION)).toEqual({ styles: [], challenges: [], chef: true, pictures: true, modes: [CLASSIC_OPTION] });
     expect(serverFetch.mock.calls[0]?.[0]).toBe("/cookout/options");
     serverFetch.mockResolvedValueOnce(json({}, 404));
     expect(await getCookoutOptions(SESSION)).toBeNull();
