@@ -7,8 +7,9 @@ any tool at all:
   concepts from the ten picked ingredients plus the eight cupboard staples. The answer is checked
   by deterministic Python (`parse_concepts`): structure, an id whitelist, coverage, technique
   diversity and a lexical contraband scan of every prose field against the bank's names and
-  aliases. One repair run, naming the violations, is allowed under the same deadline; a second
-  failure ends the job `failed` (retryable by the players). There is no second LLM checker.
+  aliases. Up to `MAX_REPAIRS` repair runs, each naming the violations, are allowed under the same
+  deadline; the last failure ends the job `failed` (retryable by the players). There is no second
+  LLM checker.
 - **Stage 2 — "Bank this".** One run per tapped concept writes the full recipe (`parse_recipe`,
   the same two scan passes over the frozen manifest) and only a validated recipe is `banked`.
 
@@ -83,6 +84,7 @@ NON_SEASONING_STAPLE_IDS: Final = frozenset(
     {"butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"}
 )
 MAX_EXTRA_STAPLES: Final = 4
+MAX_REPAIRS: Final = 3
 DISH_TYPES: Final = (
     "bowl",
     "traybake",
@@ -312,8 +314,9 @@ def _concept_twist_lines(basket: Mapping[str, Any], forbidden_names: Sequence[st
     if challenge is not None:
         extra = ', and "totalMinutes": integer (5-30)' if challenge.id == "thirty-minutes" else ""
         lines.append(
-            f'{challenge.concept_directive} Each concept also has "challengeNote": string '
-            f"(1-{MAX_CHALLENGE_NOTE} chars) saying how it keeps the rule{extra}."
+            f"{challenge.concept_directive} EVERY concept object MUST also include "
+            f'"challengeNote": a string (1-{MAX_CHALLENGE_NOTE} chars) saying how it keeps '
+            f"the rule{extra}."
         )
     stars = twists.get("stars")
     if isinstance(stars, list) and stars:
@@ -371,6 +374,15 @@ introduce any other food: no unpicked fruit, vegetable, stock, garlic, herb, spi
 anything else, anywhere in any text. Water, salt and black-pepper are always free. At most \
 {MAX_EXTRA_STAPLES} of {pickable_staples} may be used \
 in one concept, and only when they are not already picked.
+- Ordinary cooking language is always fine ("crisp", "golden", "juices", "gravy" or "broth" made \
+from the dish's own picks, "oil" or "onion" when a picked item is that). The check only looks for \
+a real FOOD that is neither picked nor a staple, so never name one. Sides and components count: \
+no flatbread, pastry, scone, croutons, crisps, salsa, relish, cream, custard, syrup, caramel, \
+dumplings, noodles, cabbage, bechamel, pickle, wafer, crackers, curd or sugar unless that exact \
+item is picked or a staple. Describe each dish using only the picked items. Before you answer, \
+re-read every title, vibe, description and challengeNote and delete any food word that is not \
+the name of a picked item or a chosen staple (a sauce, side, filling, topping, dough, garnish or \
+flavour you did not pick still counts).
 - Each concept uses at least {MIN_PICKED_EACH} of the {count} picked ingredients, at least one \
 uses {MIN_PICKED_BEST} or more, and between them the three concepts use all {count}.
 - The three concepts must be genuinely different: three different (dishType, technique) pairs and \
@@ -479,6 +491,11 @@ Rules:
 dish uses and "staples" the cupboard staples it uses. Water, salt and black-pepper are always free \
 too. Use every manifest item and nothing else: never add any other food, and never mention any \
 other food in any text (no butter, flour, oil, sugar or milk unless it is in the manifest).
+- Ordinary cooking language is always fine ("crisp", "juices", "gravy" made from the dish's own \
+items); only avoid naming a real food that is not in the manifest. That includes tips and \
+serving suggestions: no rice, crisps, syrup, eggs, ale, stock or any other side, swap or \
+substitute. Before you answer, re-read every note, step and tip and delete any food word that \
+is not the name of a manifest item.
 - Quantities are for 2 servings, in metric. Every ingredient id must be used in at least one step.
 - British English, plain text, no markdown.
 {twist_block}
@@ -785,16 +802,8 @@ def parse_concepts(
                 omitted_ids=omitted_set,
                 problems=problems,
             )
-        for item in omitted:
-            found = bank.find_contraband_ingredients(
-                item["reason"],
-                allowed_ingredient_ids=selected_set,
-                allowed_staple_ids=staple_set | FREE_SEASONING_IDS,
-                omitted_ingredient_ids=omitted_set,
-                allow_omitted_mentions=True,
-            )
-            for name in found:
-                problems.append(f"{tag} omitted reason mentions '{name}', which is not a pick")
+        # An omitted reason is an explanation, never consumption: only the forbidden-id check
+        # (below) applies to it, so ordinary words in a reason never fail a concept.
 
         if forbidden:
             for field_name, value in scanned:
@@ -1740,9 +1749,9 @@ class CmdCookoutRunner:
         give_up_at = min(give_up_at, self._clock() + max(0.0, remaining_wall))
         run_id = spec.initial_run_id
         may_retry = run_id is None  # a resumed run has no known start, so no early retry
-        # A resumed run may already be the repair run (the store cannot say), so a rejected answer
-        # from one is never repaired again: at most ONE repair run per job (spec 3.2).
-        repaired = run_id is not None
+        # A resumed run may already be a repair run (the store cannot say), so it counts as one
+        # used: at most MAX_REPAIRS repair runs per job, all inside the one deadline.
+        repairs = 1 if run_id is not None else 0
         if run_id is None and remaining_wall <= 0:
             _LOGGER.warning("%s is already past its deadline; failing without a run", spec.name)
             await spec.finish_bad(None, False)
@@ -1784,10 +1793,10 @@ class CmdCookoutRunner:
                     len(parsed.violations),
                     "; ".join(parsed.violations[:3]),
                 )
-                if repaired or self._clock() >= give_up_at:
+                if repairs >= MAX_REPAIRS or self._clock() >= give_up_at:
                     await spec.finish_bad(run_id, False)
                     return
-                repaired = True
+                repairs += 1
                 retried = await self._start_run(
                     spec, spawn_lock, spec.prompt + build_repair_suffix(parsed.violations), run_id
                 )
@@ -1798,7 +1807,7 @@ class CmdCookoutRunner:
                 continue
             if status in ("error", "timeout", "cancelled"):
                 early = self._clock() - started <= timing.early_retry_s
-                if status == "error" and may_retry and early and not repaired:
+                if status == "error" and may_retry and early and repairs == 0:
                     may_retry = False
                     retried = await self._start_run(spec, spawn_lock, spec.prompt, run_id)
                     if retried is None:

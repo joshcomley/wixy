@@ -30,6 +30,7 @@ from normalise_names import PHRASES, PROPER_NOUNS  # noqa: E402
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO))
 from wixy_server.livechat.cookout_bank import FORBIDDEN_STOP_WORDS as _FORBIDDEN  # noqa: E402
+from wixy_server.livechat.cookout_bank import FORBIDDEN_CULINARY_WORDS  # noqa: E402
 
 BANK = REPO / "wixy_server" / "livechat" / "cookout_ingredients.json"
 
@@ -106,7 +107,15 @@ def validate(path: Path = BANK) -> list[str]:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return [f"cannot read {path}: {exc}"]
-    keys = {"version", "generated", "categories", "staples", "stopWords", "ingredients"}
+    keys = {
+        "version",
+        "generated",
+        "categories",
+        "staples",
+        "stopWords",
+        "culinaryWords",
+        "ingredients",
+    }
     if not isinstance(doc, dict) or set(doc) != keys:
         return [f"top level must be an object with exactly {sorted(keys)}"]
     if doc["version"] != 1:
@@ -239,6 +248,24 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append(f"category {cat}: empty")
         if cats[cat] / total > MAX_CATEGORY_SHARE:
             problems.append(f"category {cat}: more than {MAX_CATEGORY_SHARE:.0%} of the bank")
+    culinary = doc["culinaryWords"]
+    if not isinstance(culinary, list) or not all(
+        isinstance(w, str) and w == fold(w) and re.fullmatch(r"[a-z0-9]+", w) for w in culinary
+    ):
+        problems.append("culinaryWords must be a list of single lowercase words")
+    else:
+        if len(set(culinary)) != len(culinary):
+            problems.append("culinaryWords has duplicates")
+        for word in sorted(set(culinary) & (set(FORBIDDEN_CULINARY_WORDS) | set(stop_words or []))):
+            problems.append(f"culinaryWords contains {word!r}, a staple or stop word")
+        exact = {
+            t[0]
+            for i in by_id.values()
+            for n in (i.get("name"), *(i.get("aliases") or []))
+            if isinstance(n, str) and len(t := re.findall(r"[a-z0-9]+", fold(n))) == 1
+        }
+        for word in sorted(set(culinary) & exact):
+            problems.append(f"culinaryWords contains {word!r}, which is an ingredient's own name")
     if isinstance(stop_words, list):
         food = {
             t[0]

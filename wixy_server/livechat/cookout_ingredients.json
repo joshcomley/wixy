@@ -154,6 +154,33 @@
   "water",
   "coating"
  ],
+ "culinaryWords": [
+  "juice",
+  "juices",
+  "jus",
+  "gravy",
+  "starch",
+  "starches",
+  "stock",
+  "stocks",
+  "broth",
+  "crumb",
+  "crumbs",
+  "dressing",
+  "dressings",
+  "batter",
+  "crisp",
+  "drippings",
+  "stuffing",
+  "spread",
+  "spreads",
+  "root",
+  "roots",
+  "liquor",
+  "fond",
+  "dip",
+  "dips"
+ ],
  "ingredients": [
   {
    "id": "andouille-sausage",
@@ -16306,9 +16333,7 @@
   {
    "id": "bun-noodles",
    "name": "Bun noodles",
-   "aliases": [
-    "bún"
-   ],
+   "aliases": [],
    "category": "grains-bakery",
    "role": "base",
    "family": "rice-noodle",

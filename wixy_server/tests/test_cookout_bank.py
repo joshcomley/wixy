@@ -553,11 +553,12 @@ def test_scan_is_word_boundary_not_substring() -> None:
 def test_scan_longest_span_wins_for_compound_foods() -> None:
     picks = {"peanut-butter", "chicken-breast"}
     assert _found("Peanut butter chicken", picks) == []
-    assert _found("peanut butter with extra butter", picks) == ["Butter"]
+    # the bare word is shorthand for a used pick whose name contains it (round 2)
+    assert _found("peanut butter with extra butter", picks) == []
     coconut = {"coconut-milk"}
     assert _found("Coconut milk curry", coconut) == []
-    assert _found("coconut milk plus milk", coconut) == ["Milk"]
-    assert _found("COCONUT MILK, then Milk", coconut) == ["Milk"]
+    assert _found("coconut milk plus milk", coconut) == []
+    assert _found("COCONUT MILK, then Milk", coconut) == []
     assert _found("peanut butter and butter") == ["Peanut butter", "Butter"]
 
 
@@ -598,7 +599,17 @@ def test_scan_staple_words_are_not_suppressed_by_families() -> None:
     found = bank.find_contraband_ingredients(
         "whole milk, then milk", allowed_ingredient_ids={"whole-milk"}, allowed_staple_ids=set()
     )
-    assert found == ["Milk"]
+    # round 2: the bare word "milk" is shorthand for the used "Whole milk" (a pick whose name
+    # contains it); the staple is no longer smuggled by saying so
+    assert found == []
+    other = _mini(
+        _item("Whole milk", "dairy", "milk", role="accent"),
+        _item("Milk", "dairy", "milk", role="accent"),
+        _item("Flour", "grain", "flour", role="base"),
+    )
+    assert other.find_contraband_ingredients(
+        "whole milk, then flour", allowed_ingredient_ids={"whole-milk"}, allowed_staple_ids=set()
+    ) == ["Flour"]
 
 
 def test_scan_on_the_committed_bank_catches_the_spec_examples() -> None:
@@ -659,7 +670,8 @@ def test_committed_stop_words_hold_no_food() -> None:
 
 def test_unpicked_stock_and_spirit_are_flagged_on_the_committed_bank() -> None:
     bank = load_cookout_bank()
-    for text in ("Simmer in stock", "Deglaze with a little stock"):
+    # (a bare "stock" is a cooking by-product and passes since round 2; a named one does not)
+    for text in ("Simmer in chicken stock", "Deglaze with a little white wine and spirit"):
         found = bank.find_contraband_ingredients(
             text, allowed_ingredient_ids=set(), allowed_staple_ids=set()
         )
@@ -1072,3 +1084,128 @@ def test_validator_twist_simulation_and_exotic_coverage(
     problems = validator.validate(broken)
     assert any("role produce: exotic entries span fewer" in p for p in problems)
     assert any("role produce: fewer than 40 exotic families" in p for p in problems)
+
+
+# -- round 2: the chef must succeed (operator first play, round 11132) ----------------------------
+
+PRODUCTION_PICKS = {
+    "guar-beans",
+    "pea-shoots",
+    "mantis-shrimp",
+    "rolled-beef-joint",
+    "dried-mixed-mushrooms",
+    "lemongrass",
+    "vegetable-oil",
+    "dried-onion-granules",
+    "baby-potato",
+    "linguine",
+}
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        # every false positive the operator's first game hit, verbatim
+        "Mushroom sauce",
+        "Crisp onion with a pan gravy",
+        "a gravy made from the roasting juices",
+        "lemongrass-scented oil",
+        "crisp-tender pea shoots",
+        "thickened with a little starch from the potato",
+        "roasting juices spooned over the beef",
+        "Mushroom broth with linguine",
+        "onion and mushroom stock",
+    ],
+)
+def test_ordinary_cooking_prose_passes_on_the_production_basket(prose: str) -> None:
+    bank = load_cookout_bank()
+    assert (
+        bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=PRODUCTION_PICKS, allowed_staple_ids=set()
+        )
+        == []
+    ), prose
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "with fresh mango",
+        "topped with salmon",
+        "streaky bacon lardons",
+        "melted chocolate",
+        "grated cheese and garlic",
+        "mango chutney on the side",
+        "a handful of crisps",
+        "served with olive oil",
+        "a dollop of butter",
+    ],
+)
+def test_a_distinct_unpicked_food_is_still_contraband_on_the_production_basket(
+    prose: str,
+) -> None:
+    bank = load_cookout_bank()
+    assert bank.find_contraband_ingredients(
+        prose, allowed_ingredient_ids=PRODUCTION_PICKS, allowed_staple_ids=set()
+    ), prose
+
+
+def test_an_omitted_pick_is_still_caught_by_its_full_name_in_prose() -> None:
+    bank = load_cookout_bank()
+    picks = PRODUCTION_PICKS - {"rolled-beef-joint"}
+    found = bank.find_contraband_ingredients(
+        "a rolled beef joint, sliced",
+        allowed_ingredient_ids=picks,
+        allowed_staple_ids=set(),
+        omitted_ingredient_ids={"rolled-beef-joint"},
+    )
+    assert found == ["Rolled beef joint"]
+
+
+def test_a_culinary_word_never_counts_as_mentioning_a_removed_ingredient() -> None:
+    bank = load_cookout_bank()
+    assert not bank.mentions("rich roasting juices", "apple-juice")
+    assert not bank.mentions("a crisp finish", "ready-salted-crisps")
+    assert bank.mentions("a glass of apple juice", "apple-juice")
+
+
+@pytest.mark.parametrize("word", ["butter", "oil", "salt", "mango", "honey", "two words", "Crisp"])
+def test_the_loader_refuses_bad_culinary_words(
+    raw_bank: dict[str, Any], tmp_path: Path, word: str
+) -> None:
+    doc = _mutated(raw_bank, lambda d: d["culinaryWords"].append(word))
+    with pytest.raises(CookoutBankError):
+        parse_cookout_bank(doc)
+
+
+def test_the_committed_culinary_words_are_valid_and_cover_the_production_failures() -> None:
+    bank = load_cookout_bank()
+    assert {"crisp", "juices", "gravy", "starch", "stock", "broth"} <= bank.culinary_words
+
+
+def test_date_night_and_choux_buns_are_not_read_as_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("Candlelit date night supper", "baked into golden buns"):
+        assert (
+            bank.find_contraband_ingredients(
+                prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+            )
+            == []
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "stewed dates", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
+
+
+def test_a_dab_of_and_wafer_thin_are_not_read_as_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("with a dab of heat", "wafer-thin slices", "leave any grit behind"):
+        assert (
+            bank.find_contraband_ingredients(
+                prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+            )
+            == []
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "grilled dab with a wafer", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
