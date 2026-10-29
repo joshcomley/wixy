@@ -127,10 +127,21 @@ interface TwistChoices {
   readonly fridge?: string;
 }
 
+/** Opens the chat header's ... menu. A game tab runs full screen with the header hidden (decisions/00194), so
+ * the menu is reached from the Chat tab, as a player would. */
+async function openMoreMenu(page: Page): Promise<void> {
+  const chatTab = page.locator(".wx-srv-tab-chat");
+  if (await chatTab.isVisible()) {
+    await chatTab.click();
+    await humanPause(page);
+  }
+  await page.locator(".wx-srv-more-button").click();
+}
+
 /** Starts a Cookout from the ... menu and its start sheet (with the twists the test names). */
 async function startCookout(page: Page, twists: TwistChoices): Promise<{ seq: string; fridgeName: string | null }> {
   const before = await page.locator(".wx-srv-bubble-ck").count();
-  await page.locator(".wx-srv-more-button").click();
+  await openMoreMenu(page);
   await expect(page.locator(".wx-srv-more-cookout")).toBeVisible();
   await humanPause(page);
   await page.locator(".wx-srv-more-cookout").click();
@@ -295,7 +306,7 @@ test.describe("Cookout twists", () => {
     const pages = [pageA, pageB] as const;
 
     // -- Start sheet: a spun style, the one-pan challenge, stars, the cloche and a fridge raid -----------------
-    await pageA.locator(".wx-srv-more-button").click();
+    await openMoreMenu(pageA);
     await humanPause(pageA);
     await pageA.locator(".wx-srv-more-cookout").click();
     await expect(pageA.locator(".wx-srv-ck-twists-body")).toBeHidden(); // collapsed by default
@@ -457,11 +468,16 @@ test.describe("Cookout twists", () => {
     await expect(game(pageA).locator(".wx-srv-ck-hearts-mine .wx-srv-ck-heart-full")).toHaveCount(4);
     await expect(game(pageA).locator(".wx-srv-ck-hearts:not(.wx-srv-ck-hearts-mine) .wx-srv-ck-heart-full")).toHaveCount(5); // Bob's, read-only
 
-    // A photo goes into the round's mini chat first, then is linked as "our plate".
-    await pageA.locator('input[type="file"]').first().setInputFiles(PHOTO);
+    // A photo goes into the round's chat first (the chat FAB's pop-up: a game runs full screen), then is linked
+    // as "our plate".
+    await game(pageA).locator(".wx-srv-float-fab").click();
+    await expect(pageA.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
+    await pageA.locator('.wx-srv-gamepop input[type="file"]').first().setInputFiles(PHOTO);
     await humanPause(pageA);
-    await pageA.locator(".wx-chat-send-button").click();
-    await expect(game(pageA).locator(".wx-srv-game-mini-thumb")).toBeVisible({ timeout: 30_000 });
+    await pageA.locator(".wx-srv-gamepop .wx-chat-send-button").click();
+    await expect(pageA.locator(".wx-srv-gamepop .wx-srv-bubble img").first()).toBeVisible({ timeout: 30_000 });
+    await humanPause(pageA);
+    await pageA.locator(".wx-srv-gamepop-close").click();
     await humanPause(pageA);
     await game(pageA).locator(".wx-srv-ck-plates-add").click();
     const tile = pageA.locator(".wx-srv-ck-photos-tile").first();
@@ -472,9 +488,8 @@ test.describe("Cookout twists", () => {
     await eventually(pages, async () => (await game(pageB).locator(".wx-srv-ck-plates-change").count()) === 1, "Bob sees our plate");
 
     // -- The Recipe book lists it as cooked, with both ratings --------------------------------------------------
-    await pageB.locator(".wx-srv-more-button").click();
+    await game(pageB).locator(".wx-srv-ck-book").click(); // the pane's own button: the chat header is hidden in a game
     await humanPause(pageB);
-    await pageB.locator(".wx-srv-more-recipes").click();
     const entry = pageB.locator(".wx-srv-ck-book-entry").first();
     await expect(entry).toBeVisible();
     await expect(entry).toContainText(dishTitle);
