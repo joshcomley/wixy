@@ -110,10 +110,21 @@ function pickable(page: Page): Locator {
   return game(page).locator("button.wx-srv-ck-opt:not([disabled])");
 }
 
+/** Opens the chat header's ... menu. A game tab runs full screen with the header hidden (decisions/00194),
+ * so the menu is reached from the Chat tab, as a player would. */
+async function openMoreMenu(page: Page): Promise<void> {
+  const chatTab = page.locator(".wx-srv-tab-chat");
+  if (await chatTab.isVisible()) {
+    await chatTab.click();
+    await humanPause(page);
+  }
+  await page.locator(".wx-srv-more-button").click();
+}
+
 /** Starts a Cookout from the ... menu and its start sheet; the starter lands in the Cookout tab. */
 async function startCookout(page: Page, blind: boolean): Promise<string> {
   const before = await page.locator(".wx-srv-bubble-ck").count();
-  await page.locator(".wx-srv-more-button").click();
+  await openMoreMenu(page);
   await expect(page.locator(".wx-srv-more-cookout")).toBeVisible();
   await humanPause(page);
   await page.locator(".wx-srv-more-cookout").click();
@@ -308,10 +319,9 @@ test.describe("Cookout", () => {
     await expect(recipe).toContainText("Banked by Alice");
     await shot(pageB, "cookout-5-full-recipe");
 
-    // The Recipe book (the ... menu) lists it.
-    await pageB.locator(".wx-srv-more-button").click();
+    // The Recipe book (the pane's own title-row button: the chat header is hidden in a game) lists it.
+    await game(pageB).locator(".wx-srv-ck-book").click();
     await humanPause(pageB);
-    await pageB.locator(".wx-srv-more-recipes").click();
     const entries = pageB.locator(".wx-srv-ck-book-entry");
     await expect(entries).toHaveCount(1);
     await expect(entries.first()).toContainText(title);
@@ -451,7 +461,7 @@ test.describe("Cookout", () => {
     const stopAwake = keepAwake([pageA, pageB]);
 
     // An Adventure is open: its tab is the one game tab.
-    await pageA.locator(".wx-srv-more-button").click();
+    await openMoreMenu(pageA);
     await expect(pageA.locator(".wx-srv-more-adventure")).toBeVisible();
     await humanPause(pageA);
     await pageA.locator(".wx-srv-more-adventure").click();
@@ -465,7 +475,7 @@ test.describe("Cookout", () => {
     await expect(pageA.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
 
     // Starting Would-you-rather takes the Cookout tab's place; the card is still in the chat.
-    await pageA.locator(".wx-srv-more-button").click();
+    await openMoreMenu(pageA);
     await humanPause(pageA);
     await pageA.locator(".wx-srv-more-wyr").click();
     await expect(pageA.locator(".wx-srv-tab-wyr")).toBeVisible();
