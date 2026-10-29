@@ -262,9 +262,9 @@ describe("scene: the second spin and its landing", () => {
       r.at(T0 + lng.plan.durationMs / 1000 + 0.5);
       state.flick = true;
       const { up } = swipe(r, "lat", 150, 110, 2);
-      if (up.kind !== "spin") throw new Error("expected a spin");
-      // d3: the landing latitude satisfies sin(lat) = -sin(phi) for any lambda.
-      return Math.asin(-Math.sin(((up.plan.from + up.plan.delta) * Math.PI) / 180)) * (180 / Math.PI);
+      if (up.kind !== "spin" || up.landing === null) throw new Error("expected a spin with a landing");
+      // The point under the pin that the spin's POST carries.
+      return up.landing.point[1];
     };
     expect(Math.abs(latitudeFor(0.3) - latitudeFor(0.45))).toBeGreaterThan(5);
   });
