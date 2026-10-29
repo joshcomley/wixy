@@ -34,6 +34,7 @@ pluggable AI, HTML setup guide) is now **in progress** — see `spec/independenc
   `wixy_server/static/admin/` (committed; CI checks for drift).
 - `editor/` — the overlay injected into the live preview iframe (strict TS, esbuild) →
   bundles into `wixy_server/static/editor/`.
+- `wixy_server/livechat/cookout_ingredient_images.json` + `cookout_catalogue.json` — the Cookout picture **manifest** (pins one immutable pack of ingredient pictures kept OUTSIDE git, by sha256; the pictures are not in this repo — Inv 58, `docs/ai/livechat.md` §24.2, `docs/ai/runbook.md`) and the ingredient **catalogue** (`what`, `visual`, `facts`); both may legitimately be empty, in which case the game shows emoji tiles.
 - `e2e/` — Playwright end-to-end flows against a local full stack (spec/08 §2).
 - `projects/*.json` — per-site project registry (repo URL, domain, media limits);
   overridable per-deployment via `WIXY_SITE_REPO`/`WIXY_DOMAIN`/`WIXY_INDEXABLE` env
