@@ -86,6 +86,13 @@ All three act on **the pair currently on the table**: the live turn's `offers[of
 whose `turn`/`offer`/option ids no longer match the table is `409 bad_state` (stale), a replay of a
 recorded `moveId` is `200` with the current view and no event.
 
+**Core skip gains `optionIds` (orchestrator ruling after the X4 review).** Because veto and chaos
+change the live pair WITHOUT changing `offer`, the core `POST /cookout/{seq}/skip` body becomes
+`{sender, moveId, turn, offer, optionIds?: [id, id]}`. When present, `optionIds` must equal the live
+pair (order-free) or the skip is `409 bad_state`; the client always sends it. It stays optional on the
+wire only so a cached pre-twist client keeps working; a skip without it is judged on `turn`/`offer`
+alone, exactly as before. Test: veto (or chaos) then a skip naming the pre-veto pair → 409, no draw.
+
 **Replacement in place, never a hidden skip.** Veto and chaos replace option(s) *inside* the live
 offer, so `offerIndex` and `skipsRemaining` are unchanged and no skip is charged or refunded. Every
 replaced snapshot is kept in `cookout_turns.replaced` (§2.2) so it still counts as offered for the
