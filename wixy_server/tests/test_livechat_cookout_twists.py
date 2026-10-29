@@ -2196,3 +2196,45 @@ class TestSkipNamesThePair:
         new = tuple(s["id"] for s in live_of(store, seq).row.offers[0])
         assert do_skip((new[1], new[0]))[1] is True  # order-free
         assert len(live_of(store, seq).row.offers) == 2
+
+
+class TestFollowUpRulings:
+    def test_l1_the_swept_banner_goes_when_chaos_replaces_the_table_afterwards(
+        self, store: LiveChatStore, bank: FakeBank
+    ) -> None:
+        seq = open_round(store, bank)
+        join(store, bank, seq)
+        veto(store, bank, seq, ROSE)
+        assert view(store, bank, seq, JOSH)["current"]["vetoed"] is not None
+        chaos(store, bank, seq, JOSH)
+        assert view(store, bank, seq, JOSH)["current"]["vetoed"] is None
+        assert view(store, bank, seq, ROSE)["current"]["vetoed"] is None
+
+    def test_l1_chaos_then_veto_still_shows_the_banner(
+        self, store: LiveChatStore, bank: FakeBank
+    ) -> None:
+        seq = open_round(store, bank)
+        join(store, bank, seq)
+        chaos(store, bank, seq, JOSH)
+        veto(store, bank, seq, ROSE)
+        assert view(store, bank, seq, JOSH)["current"]["vetoed"] is not None
+
+    def test_l2_banking_a_pending_or_banked_dish_is_idempotent_while_a_swap_is_proposed(
+        self, store: LiveChatStore, bank: FakeBank
+    ) -> None:
+        seq = ready_round(store, bank)
+        bank_it(store, seq, "a", generation=1)  # pending
+        bank_recipe(store, seq, "b")  # banked
+        with pytest.raises(CookoutRecipePendingError):
+            propose(store, bank, seq, basket_of(store, seq)[0])  # pending blocks the proposal
+        assert store.set_cookout_recipe_run(seq, "a", "ra", expected_generation=1)
+        assert store.finish_cookout_recipe(
+            seq, "a", "ra", "banked", expected_generation=1, recipe_json=RECIPE
+        )
+        propose(store, bank, seq, basket_of(store, seq)[0])
+        rev = rnd(store, seq).rev
+        for concept in ("a", "b"):
+            assert bank_it(store, seq, concept, generation=1)[1] is False
+        assert rnd(store, seq).rev == rev
+        with pytest.raises(CookoutBadStateError):  # a genuinely new dish stays refused
+            bank_it(store, seq, "c", generation=1)

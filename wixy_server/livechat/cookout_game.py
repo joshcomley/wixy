@@ -835,14 +835,16 @@ def cookout_view_json(
         if shown and row is not None:
             index = len(row.offers) - 1
             chaos_pair = row.chaos_offer is not None and row.chaos_offer == index
-            swept = next(
-                (
-                    e
-                    for e in row.replaced
-                    if e.get("by") == "veto" and e.get("offer") == index and row.veto_offer == index
-                ),
-                None,
-            )
+            # The "swept" banner belongs to the table the veto changed: a later chaos shelf on the
+            # same offer replaced that table, so the banner is stale and goes (spec 09a §1.9).
+            swept = None
+            if row.veto_offer == index:
+                for e in reversed([e for e in row.replaced if e.get("offer") == index]):
+                    if e.get("by") == "chaos":
+                        break
+                    if e.get("by") == "veto":
+                        swept = e
+                        break
             vetoed = {"snap": _snap_json(swept["snap"])} if swept is not None else None
             active = viewer_slot == cur.player
             can_chaos = bool(active and live_pair and not chaos_used(turns, cur.player))

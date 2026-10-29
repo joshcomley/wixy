@@ -5244,8 +5244,6 @@ class LiveChatStore:
             self._cx_guard_generation(round_, generation)
             if round_.state != "finished" or round_.concepts != "ready":
                 raise CookoutBadStateError("the dish ideas are not ready to bank")
-            if round_.swap_state == "proposed":
-                raise CookoutBadStateError("finish or cancel the swap first")
             if concept_by_id(round_, concept_id) is None:
                 raise CookoutInvalidError("there is no such dish idea")
             existing = conn.execute(
@@ -5253,9 +5251,11 @@ class LiveChatStore:
                 "AND generation = ? AND concept_id = ?",
                 (anchor_seq, round_.generation, concept_id),
             ).fetchone()
+            if existing is not None and existing["state"] in ("pending", "banked"):
+                return round_, False  # idempotent, even while a swap is proposed
+            if round_.swap_state == "proposed":
+                raise CookoutBadStateError("finish or cancel the swap first")
             if existing is not None:
-                if existing["state"] in ("pending", "banked"):
-                    return round_, False
                 raise CookoutBadStateError("that recipe failed; try it again instead")
             state = "pending" if runner_available else "unavailable"
             conn.execute(
