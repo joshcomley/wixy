@@ -23,6 +23,7 @@ Usage: python fixture_server.py
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -113,6 +114,20 @@ from wixy_server.livechat.adventure_pack import CmdAdventureResearcher, PackTimi
 from wixy_server.livechat.adventure_pictures import WebPictureFinder  # noqa: E402
 from wixy_server.livechat.call_broker import CallBroker  # noqa: E402
 from wixy_server.livechat.cookout_ai import CookoutTiming  # noqa: E402
+from wixy_server.livechat.cookout_catalogue import Catalogue, CatalogueEntry  # noqa: E402
+from wixy_server.livechat.cookout_game import default_bank  # noqa: E402
+from wixy_server.livechat.cookout_pack import (  # noqa: E402
+    ImageRef,
+    PackManifest,
+    PackRef,
+    object_relpath,
+    write_placeholders,
+)
+from wixy_server.livechat.cookout_visuals import (  # noqa: E402
+    IngredientVisuals,
+    load_visuals,
+    search_path,
+)
 from wixy_server.livechat.grants import GrantFailureLimiter  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
@@ -376,6 +391,61 @@ def _simulate_upstream_commit(site_origin: Path, tmp_root: Path, title: str) -> 
     return result.stdout.strip()
 
 
+def _build_cookout_visuals(tmp_root: Path) -> IngredientVisuals:
+    """Cookout pictures for the picture-first e2e (spec 09b F.3).
+
+    A manifest names a card and a thumb sha for every bank ingredient and staple. One tiny valid
+    WebP per sha is written by `cookout_pack.write_placeholders` (the code behind
+    `cookout_pack.py placeholders --dest`) into a temp dir the server reads as
+    `WIXY_COOKOUT_IMAGES_DIR`. The catalogue gives every ingredient a `what` line and two facts; the
+    bank's longest name gets the 60-character `what` (the layout worst case)."""
+    images_dir = tmp_root / "cookout-images"
+    images_dir.mkdir(parents=True, exist_ok=True)
+    os.environ["WIXY_COOKOUT_IMAGES_DIR"] = str(images_dir)
+    bank = default_bank()
+    named = [(i.id, i.name) for i in bank.ingredients] + [(s.id, s.name) for s in bank.staples]
+    longest = max(named, key=lambda pair: len(pair[1]))[0]
+    items: dict[str, ImageRef] = {}
+    entries: dict[str, CatalogueEntry] = {}
+    for ingredient_id, name in named:
+        items[ingredient_id] = ImageRef(
+            card=hashlib.sha256(f"card:{ingredient_id}".encode()).hexdigest(),
+            thumb=hashlib.sha256(f"thumb:{ingredient_id}".encode()).hexdigest(),
+        )
+        what = (
+            "A deliberately long plain-words line that fills sixty chars."
+            if ingredient_id == longest
+            else f"Plain words about {name}."[:60]
+        )
+        entries[ingredient_id] = CatalogueEntry(
+            id=ingredient_id,
+            what=what,
+            visual="",
+            presentation="whole",
+            facts=(f"A fixture fact about {name}.", f"Another fixture fact about {name}."),
+            name_key="0" * 16,
+        )
+    shas = {sha for ref in items.values() for sha in (ref.card, ref.thumb)}
+    manifest = PackManifest(
+        pack_version=1,
+        pack=PackRef(
+            url="http://127.0.0.1:9/fixture-pack.tar",
+            sha256="0" * 64,
+            bytes=1,
+            objects=len(shas),
+            installed_bytes=1,
+        ),
+        items=items,
+        digest="0" * 64,
+    )
+    write_placeholders(manifest, images_dir)
+    return load_visuals(
+        search_path(None, images_dir, None),
+        manifest=manifest,
+        catalogue=Catalogue(entries),
+    )
+
+
 def main() -> None:
     tmp_root = Path(tempfile.mkdtemp(prefix="wixy-e2e-"))
     site_origin = _build_site_origin(tmp_root)
@@ -388,6 +458,7 @@ def main() -> None:
     # (413/409/missing-chunk cases) without multi-megabyte fixture uploads.
     os.environ["WIXY_SERVER_UPLOAD_CHUNK_BYTES"] = "65536"
 
+    cookout_visuals = _build_cookout_visuals(tmp_root)
     registry = load_registry(wixy_repo_root)
     _publish_initial_build(registry.get("e2e"), storage_root, "e2e")
 
@@ -557,6 +628,7 @@ def main() -> None:
         adventure_researcher=adventure_researcher,
         adventure_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
         cookout_timing=CookoutTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        cookout_visuals=cookout_visuals,
         cookout_cmd_client=CmdChatClient(
             portal_base_url=f"http://127.0.0.1:{fake_pin_port}",
             chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
@@ -629,6 +701,32 @@ def main() -> None:
         test-only routes — measured live (a GET returned the site's "Page not
         found" page, not this handler)."""
         return {"pin": TEST_SERVER_PIN}
+
+    @app.post("/test/cookout/chef-delay", include_in_schema=False)
+    async def _post_cookout_chef_delay(payload: dict[str, object]) -> dict[str, float]:
+        """How long the fake cmd holds the next chef runs (concept runs included) before settling, so
+        a test can watch the "chef is thinking" carousel for as long as it needs. Applies to runs
+        created afterwards; the file's default is restored by posting `seconds: 2`."""
+        seconds = payload["seconds"]
+        assert isinstance(seconds, (int, float))
+        fake_cmd_state.chat_spawn_delay_s = float(seconds)
+        return {"seconds": fake_cmd_state.chat_spawn_delay_s}
+
+    @app.post("/test/cookout/drop-picture", include_in_schema=False)
+    async def _post_drop_cookout_picture(payload: dict[str, object]) -> dict[str, bool]:
+        """Deletes one ingredient's two picture files and re-checks the store, exactly what a pack
+        missing an object looks like (the view then carries `image: null` and the client shows the
+        emoji tile)."""
+        ingredient_id = payload["id"]
+        assert isinstance(ingredient_id, str)
+        ref = cookout_visuals.manifest.items.get(ingredient_id)
+        if ref is None:
+            return {"dropped": False}
+        for directory in cookout_visuals.search:
+            for sha in (ref.card, ref.thumb):
+                (directory / object_relpath(sha)).unlink(missing_ok=True)
+        cookout_visuals.reload()
+        return {"dropped": True}
 
     @app.post("/test/server/seed-messages", include_in_schema=False)
     async def _post_seed_server_messages(payload: dict[str, object]) -> dict[str, int]:
