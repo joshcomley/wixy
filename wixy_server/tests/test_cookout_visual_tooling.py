@@ -323,7 +323,7 @@ def test_journal_resumes_and_skips_accepted(mods: dict[str, ModuleType], tmp_pat
         im.journal_append(j, {"id": "z", "state": "bogus"})
     state = im.journal_state(j)
     assert im.pending_work(["a", "b", "c", "d"], state, lambda _i: False) == ["b", "c", "d"]
-    assert im.pending_work(["b"], state, lambda _i: True) == []
+    assert im.pending_work(["b"], state, lambda _i: True) == ["b"]  # rendered still needs its check
 
 
 def test_renditions_and_pack_roundtrip(mods: dict[str, ModuleType], tmp_path: Path) -> None:
@@ -761,3 +761,49 @@ def test_html_report_is_standalone_and_lists_disagreements_first(
     )
     assert page.index("Abe") < page.index("Zed") and "data:image/webp;base64," in page
     assert "http://" not in page and "https://" not in page
+
+
+def test_render_only_then_check_later(mods: dict[str, ModuleType], tmp_path: Path) -> None:
+    im, c = mods["images"], mods["check"]
+    levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
+    subjects = {
+        n.lower(): im.Subject(
+            n.lower(),
+            n,
+            f"cat{i % 3}",
+            f"A plain {n}.",
+            f"one whole raw plain {n} tok{n.lower()}",
+            "whole",
+        )
+        for i, n in enumerate(_NAMES)
+    }
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, {})
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+
+    def go(render_only: bool) -> dict[str, int]:
+        return asyncio.run(
+            im.run_pipeline(
+                sorted(subjects),
+                subjects,
+                work,
+                comfy,
+                lambda: {},
+                judge,
+                c.HAIKU,
+                c.HAIKU,
+                c.SOL,
+                c.OPUS,
+                chunk_size=3,
+                review_path=tmp_path / "rev.json",
+                rng=random.Random(4),
+                sleep=lambda _s: None,
+                render_only=render_only,
+            )
+        )
+
+    first = go(True)
+    assert first["rendered"] == 6 and first["accepted"] == 0 and not judge.rewrites
+    assert all(e["state"] == "rendered" for e in im.journal_state(work.journal).values())
+    second = go(False)  # no re-render: the existing pictures are simply checked
+    assert second["rendered"] == 0 and second["accepted"] == 6 and comfy.renders == 6
