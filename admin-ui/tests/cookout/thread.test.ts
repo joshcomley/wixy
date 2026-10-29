@@ -664,3 +664,82 @@ describe("cookout: game modes", () => {
     thread.teardown();
   });
 });
+
+
+describe("cookout: a mode card's numbers from the options", () => {
+  let reads = 0;
+  let release: (response: Response) => void = () => {};
+
+  /** `/cookout/options` waits for `release`; counts the reads. */
+  function stubOptions(status = 200): void {
+    reads = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).includes("/cookout/options")) {
+          reads += 1;
+          return new Promise<Response>((resolve) => {
+            release = (response) => resolve(response);
+            void status;
+          });
+        }
+        throw new TypeError("offline");
+      }),
+    );
+  }
+
+  const ok = (body: Json): Response => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
+  const statusLine = (thread: ServerThreadView): string | undefined => thread.element.querySelector(".wx-srv-ck-mcard-status")?.textContent ?? undefined;
+
+  beforeEach(() => {
+    getCookout.mockImplementation(async () => ({ ok: false, kind: "unavailable" }));
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("makes exactly one options read however many renders and frames happen while it is in flight, then shows (n/8)", async () => {
+    stubOptions();
+    const { thread } = await mount([cookoutMessage(9, { mode: "toastie", pickedCount: 3, rev: 2 })]);
+    expect(reads).toBe(1);
+    expect(statusLine(thread)).toBe("Picking ingredients…");
+    for (let n = 4; n <= 6; n += 1) {
+      thread.handleStreamEvent({ type: "message_updated", message: cookoutMessage(9, { mode: "toastie", pickedCount: n, rev: n }) });
+      await flush();
+    }
+    expect(reads).toBe(1);
+    expect(statusLine(thread)).toBe("Picking ingredients…");
+    release(ok(optionsBody()));
+    await flush();
+    await flush();
+    expect(reads).toBe(1);
+    expect(statusLine(thread)).toBe("Picking ingredients (6/8)…");
+    thread.teardown();
+  });
+
+  it("a Classic-only thread makes no options read for its card", async () => {
+    stubOptions();
+    const { thread } = await mount([cookoutMessage(9, { pickedCount: 3 })]);
+    thread.handleStreamEvent({ type: "message_updated", message: cookoutMessage(9, { pickedCount: 4, rev: 3 }) });
+    await flush();
+    expect(reads).toBe(0);
+    expect(statusLine(thread)).toBe("Picking ingredients (4/10)…");
+    thread.teardown();
+  });
+
+  it("a failed read is not retried by the card within the same unlock", async () => {
+    stubOptions();
+    const { thread } = await mount([cookoutMessage(9, { mode: "toastie", pickedCount: 3, rev: 2 })]);
+    release(new Response("{}", { status: 500 }));
+    await flush();
+    await flush();
+    expect(reads).toBe(1);
+    for (let n = 4; n <= 6; n += 1) {
+      thread.handleStreamEvent({ type: "message_updated", message: cookoutMessage(9, { mode: "toastie", pickedCount: n, rev: n }) });
+      await flush();
+    }
+    expect(reads).toBe(1);
+    expect(statusLine(thread)).toBe("Picking ingredients…");
+    thread.teardown();
+  });
+});

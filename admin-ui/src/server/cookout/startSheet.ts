@@ -52,7 +52,8 @@ export interface EncorePreset {
   readonly kind: EncoreKind;
   /** The source dish's title, for the banner (null when unknown). */
   readonly title: string | null;
-  readonly candidates: readonly IngredientSnap[];
+  /** The starters on offer. `kind` (a mode round's pick kind) seats each one (09c §2.5); absent = unknown. */
+  readonly candidates: readonly EncoreCandidate[];
   /** The source round's game mode: an encore stays in it (09c §2.5). Absent = Classic. */
   readonly mode?: string;
 }
@@ -123,6 +124,53 @@ export interface CookoutStartSheet {
 /** At most two starters a round; one when the fridge raid supplies the other (09a §1.3). */
 export function encoreSeedLimit(hasFridge: boolean): number {
   return hasFridge ? 1 : 2;
+}
+
+/** An encore starter on offer, with its pick kind when the wire says it. */
+export type EncoreCandidate = IngredientSnap & { readonly kind?: string | null };
+
+/** Where an encore starter sits: anywhere (Classic: two starters, one per player), the first turn (a mode's
+ * fridge kind — a toasted sandwich's bread), the filling turn, or nowhere (`reason` says why). */
+export type EncoreSeat = "any" | "first" | "filling";
+
+export interface EncoreSeatRule {
+  readonly seat: EncoreSeat | null;
+  readonly reason: string | null;
+}
+
+/** The fridge kinds of a mode in words ("bread"). */
+function fridgeWord(mode: ModeOption): string {
+  return (mode.fridgeKinds ?? []).map((k) => k.replace(/-+/g, " ")).join(" or ");
+}
+
+/** A mode whose first turn takes only its fridge kinds (Toasted sandwich: the bread). */
+function seatsByKind(mode: ModeOption): boolean {
+  return mode.id !== CLASSIC_MODE_ID && mode.fridgeKinds !== null && mode.fridgeKinds.length > 0;
+}
+
+/** Where one encore starter may sit (09c §2.5): a leftovers encore's starters are always fillings (exactly
+ * one); a remix seats at most one of the mode's first-turn kind (not when the fridge raid already supplies it)
+ * and at most one filling; a remix starter whose kind is unknown cannot be seated. */
+export function encoreSeat(mode: ModeOption, encoreKind: EncoreKind, candidate: EncoreCandidate, hasFridge: boolean): EncoreSeatRule {
+  if (!seatsByKind(mode)) return { seat: "any", reason: null };
+  if (encoreKind === "leftovers") return { seat: "filling", reason: null };
+  const kind = candidate.kind ?? null;
+  if (kind === null) return { seat: null, reason: "Can't be a starter here" };
+  if (mode.fridgeKinds?.includes(kind) === true) {
+    return hasFridge ? { seat: null, reason: `Your fridge ${fridgeWord(mode)} is the ${fridgeWord(mode)}` } : { seat: "first", reason: null };
+  }
+  return { seat: "filling", reason: null };
+}
+
+/** Thrown by the caller's `start` when the server refused the round: `kind` says why. */
+export class CookoutStartError extends Error {
+  constructor(
+    readonly kind: "unsupported" | "invalid" | "game_unavailable" | "unavailable",
+    message: string,
+  ) {
+    super(message);
+    this.name = "CookoutStartError";
+  }
 }
 
 /** The fridge raid row's words for a mode (09c §6.1): Classic's own, else "Start with a bread you have at
@@ -380,10 +428,36 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     return [c.style !== null, c.challenge !== null, c.wildcard, c.stars, c.fridgeSeedId !== null].filter(Boolean).length;
   }
 
-  /** Keep the encore's starters within the limit the fridge raid leaves. */
+  function seatOf(candidate: EncoreCandidate): EncoreSeatRule {
+    if (encore === null) return { seat: null, reason: null };
+    return encoreSeat(chosenMode(), encore.kind, candidate, fridgeChosen !== null);
+  }
+
+  /** Keep the encore's starters to what the round can seat: Classic, within the limit the fridge raid leaves;
+   * a mode round, one per seat (a leftovers encore: one filling) and none that cannot be seated. With none
+   * left, the first starter that can be seated is ticked so the encore can still start at once. */
   function trimEncore(): void {
-    const limit = encoreSeedLimit(fridgeChosen !== null);
-    if (encoreSeeds.length > limit) encoreSeeds = encoreSeeds.slice(0, limit);
+    if (encore === null) return;
+    if (!seatsByKind(chosenMode())) {
+      const limit = encoreSeedLimit(fridgeChosen !== null);
+      if (encoreSeeds.length > limit) encoreSeeds = encoreSeeds.slice(0, limit);
+      return;
+    }
+    const kept: string[] = [];
+    const seats = new Set<EncoreSeat>();
+    for (const id of encoreSeeds) {
+      const candidate = encore.candidates.find((c) => c.id === id);
+      const seat = candidate === undefined ? null : seatOf(candidate).seat;
+      if (seat === null || seats.has(seat)) continue;
+      seats.add(seat);
+      kept.push(id);
+    }
+    if (encore.kind === "leftovers") kept.splice(1);
+    if (kept.length === 0) {
+      const first = encore.candidates.find((c) => seatOf(c).seat !== null);
+      if (first !== undefined) kept.push(first.id);
+    }
+    encoreSeeds = kept;
   }
 
   function chipButton(group: string, id: string, icon: string, label: string, on: boolean, hint: string, onPick: () => void): HTMLButtonElement {
@@ -440,13 +514,21 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       doc.createTextNode(encore.title !== null ? `${what} of “${encore.title}”` : what),
     );
     const limit = encoreSeedLimit(fridgeChosen !== null);
-    encoreHint.textContent =
-      limit === 1
+    const mode = chosenMode();
+    const byKind = seatsByKind(mode);
+    const word = fridgeWord(mode);
+    encoreHint.textContent = !byKind
+      ? limit === 1
         ? "Choose 1 starter to begin the basket with (the fridge raid takes the other place)."
-        : "Choose 1 or 2 starters to begin the basket with — you both see them.";
+        : "Choose 1 or 2 starters to begin the basket with — you both see them."
+      : encore.kind === "leftovers" || fridgeChosen !== null
+        ? `Choose 1 filling to begin the basket with${fridgeChosen !== null ? ` (your fridge ${word} is the ${word})` : ""}.`
+        : `Choose a ${word}, a filling, or one of each to begin the basket with — you both see them.`;
+    const current = encore;
     encoreList.replaceChildren(
       ...encore.candidates.map((snap) => {
         const on = encoreSeeds.includes(snap.id);
+        const rule = seatOf(snap);
         const item = plainButton("wx-srv-ck-encore-seed", "");
         item.setAttribute("role", "checkbox");
         item.setAttribute("aria-checked", on ? "true" : "false");
@@ -454,12 +536,27 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
         item.classList.toggle("wx-srv-ck-encore-seed-on", on);
         item.append(glyph("wx-srv-ck-encore-box", on ? "☑" : "☐"), glyph("wx-srv-ck-encore-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"));
         item.append(el("span", "wx-srv-ck-encore-name", snap.name));
-        // A full set of starters leaves the others to be swapped in, not added.
-        item.disabled = busy || (!on && encoreSeeds.length >= limit && limit > 1);
+        if (rule.reason !== null) item.append(el("span", "wx-srv-ck-encore-why", rule.reason));
+        if (byKind) {
+          // One starter per seat: ticking another of the same seat swaps it in (09c §2.5).
+          item.disabled = busy || rule.seat === null;
+        } else {
+          // A full set of starters leaves the others to be swapped in, not added.
+          item.disabled = busy || (!on && encoreSeeds.length >= limit && limit > 1);
+        }
         item.addEventListener("click", () => {
           if (busy) return;
           if (encoreSeeds.includes(snap.id)) encoreSeeds = encoreSeeds.filter((id) => id !== snap.id);
-          else if (encoreSeeds.length < limit) encoreSeeds = [...encoreSeeds, snap.id];
+          else if (byKind) {
+            const seat = seatOf(snap).seat;
+            if (seat === null) return;
+            const sameSeat = (id: string): boolean => {
+              const other = current.candidates.find((c) => c.id === id);
+              return other !== undefined && seatOf(other).seat === seat;
+            };
+            const rest = encoreSeeds.filter((id) => !sameSeat(id));
+            encoreSeeds = current.kind === "leftovers" ? [snap.id] : [...rest, snap.id];
+          } else if (encoreSeeds.length < limit) encoreSeeds = [...encoreSeeds, snap.id];
           else encoreSeeds = [...encoreSeeds.slice(1), snap.id];
           refresh();
         });
@@ -520,7 +617,10 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       return;
     }
     const entries = modeLocked ? listed.filter((m) => m.id === modeChosen) : listed;
+    // Redrawing the tiles must not drop the focus from the group (a tap, the arrows): it moves to the chosen tile.
+    const hadFocus = tiles.contains(doc.activeElement);
     tiles.replaceChildren(...(entries.length > 0 ? entries : [chosenMode()]).map((m) => modeTile(m)));
+    if (hadFocus) tiles.querySelector<HTMLElement>(".wx-srv-ck-mtile-on")?.focus();
     lockedNote.hidden = !modeLocked;
   }
 
@@ -702,7 +802,13 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     } catch (thrown) {
       if (started === generation) {
         error.textContent =
-          thrown instanceof Error && thrown.message !== "" ? thrown.message : "Couldn't start a Cookout — try again.";
+          thrown instanceof CookoutStartError && thrown.kind === "invalid" && chosen.encore !== null && seatsByKind(chosenMode())
+            ? chosen.encore.kind === "leftovers"
+              ? "Pick one filling to start with."
+              : `Pick one ${fridgeWord(chosenMode())} and one filling to start with.`
+            : thrown instanceof Error && thrown.message !== ""
+              ? thrown.message
+              : "Couldn't start a Cookout — try again.";
         error.hidden = false;
         setBusy(false);
         // A mode switched off meanwhile (09c §6.1): read the options again so its tile goes.
@@ -734,6 +840,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       fridgeChosen = null;
       fridge.reset();
     }
+    // The encore's seating rules come with the mode's entry: re-seat its starters now.
+    trimEncore();
     refresh();
   }
 

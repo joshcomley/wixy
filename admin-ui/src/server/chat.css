@@ -7635,9 +7635,12 @@ button.wx-srv-ck-card:disabled {
   color: var(--ck-muted);
 }
 
+/* Tiles at least 68 px wide, so a bank name breaks between its words: a word only splits when it is longer
+   than the whole tile (desktop Chromium has no hyphenation dictionary, so `hyphens: auto` alone cannot help).
+   Four a row on a 360 px phone; more where the pane is wider. */
 .wx-srv-ck-reveal-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
   gap: 6px 3px;
 }
 
@@ -9050,6 +9053,12 @@ button.wx-srv-ck-rtile {
 
 .wx-srv-ck-start-with-modes .wx-srv-ck-mode-icon {
   font-size: 1.375rem;
+}
+
+/* Why an encore starter cannot be seated in this game ("Your fridge bread is the bread"). */
+.wx-srv-ck-encore-why {
+  font-size: 0.6875rem;
+  color: var(--ck-muted);
 }
 
 .wx-srv-ck-mtiles-note {

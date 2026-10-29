@@ -1073,7 +1073,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         conceptId: concept.id,
         kind: "leftovers",
         title: concept.title,
-        candidates: concept.omitted.map((o) => o.ingredient),
+        // Each starter with its pick kind from the basket (a mode round seats them by kind, 09c §2.5).
+        candidates: concept.omitted.map((o) => ({ ...o.ingredient, kind: allPicks(view).find((p) => p.id === o.ingredient.id)?.kind ?? null })),
         mode: view.mode.id,
       },
     });

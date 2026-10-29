@@ -627,3 +627,27 @@ describe("game modes", () => {
     expect(Object.keys(JSON.parse(String((serverFetch.mock.calls[1]?.[1] as RequestInit).body)))).not.toContain("mode");
   });
 });
+
+describe("game modes: the Recipe book's starters keep their pick kind", () => {
+  it("ingredients and leftovers carry kind, null when absent or malformed", () => {
+    const [first] = bookBody()["recipes"] as Json[];
+    const recipes =
+      parseRecipeBook({
+        recipes: [
+          {
+            ...first,
+            generation: 1,
+            ingredients: [{ ...SOURDOUGH, kind: "bread" }, { ...RIBEYE }, { ...SALMON, kind: "BAD KIND" }, { ...LENTILS, kind: 7 }],
+            leftovers: [{ ...SOURDOUGH, kind: "main" }],
+          },
+        ],
+      }) ?? [];
+    expect(recipes[0]?.ingredients.map((i) => [i.id, i.kind])).toEqual([
+      ["sourdough-loaf", "bread"],
+      ["ribeye-steak", null],
+      ["salmon-fillet", null],
+      ["red-lentils", null],
+    ]);
+    expect(recipes[0]?.leftovers.map((i) => i.kind)).toEqual(["main"]);
+  });
+});

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CookoutOptions, IngredientSnap, SearchResult } from "../../src/server/cookout/api";
 import { CLASSIC_OPTION, parseSnap } from "../../src/server/cookout/api";
-import { clocheHint, createCookoutStartSheet, fridgeWords, type EncorePreset, type StartChoices, type StartPreset } from "../../src/server/cookout/startSheet";
+import { CookoutStartError, clocheHint, createCookoutStartSheet, encoreSeat, fridgeWords, type EncorePreset, type StartChoices, type StartPreset } from "../../src/server/cookout/startSheet";
 import { PARSLEY } from "./fixtures";
 import { HAM, PICKLES, SOURDOUGH, toastieOption, toastieOptions, type Json } from "./modeFixtures";
 import { TOMATOES, flush, q, qa, visible } from "./twistFixtures";
@@ -109,7 +109,12 @@ const ENCORE: EncorePreset = {
   conceptId: "c",
   kind: "remix",
   title: "Skillet Ham & Cheddar Melt",
-  candidates: [ingredient(SOURDOUGH), ingredient(HAM), ingredient(PICKLES)],
+  // Each starter with its pick kind, as a mode round's Recipe book entry sends it (09c §2.5).
+  candidates: [
+    { ...ingredient(SOURDOUGH), kind: "bread" },
+    { ...ingredient(HAM), kind: "main" },
+    { ...ingredient(PICKLES), kind: "finish" },
+  ],
   mode: "toastie",
 };
 
@@ -517,3 +522,180 @@ describe("a start that fails because the mode went away", () => {
   });
 });
 
+
+// -- Encore seats (09c §2.5): a toasted sandwich seats one bread and one filling ---------------------------------
+
+const TOASTIE_OPTION = toastieOptions().modes[1]!;
+const withKind = (raw: Json, kind: string | null): EncorePreset["candidates"][number] => (kind === null ? ingredient(raw) : { ...ingredient(raw), kind });
+
+function remix(candidates: EncorePreset["candidates"], kind: "remix" | "leftovers" = "remix"): EncorePreset {
+  return { fromSeq: 30, generation: 1, conceptId: "c", kind, title: "Dish", candidates, mode: "toastie" };
+}
+
+const seedsOf = (m: Made): string[] => qa(m.sheet.element, ".wx-srv-ck-encore-seed-on").map((n) => n.dataset["ingredient"] ?? "");
+const seed = (m: Made, id: string): HTMLButtonElement => q<HTMLButtonElement>(m.sheet.element, `.wx-srv-ck-encore-seed[data-ingredient="${id}"]`);
+
+describe("encoreSeat", () => {
+  const bread = withKind(SOURDOUGH, "bread");
+  const filling = withKind(HAM, "main");
+  it("Classic seats any starter anywhere", () => {
+    expect(encoreSeat(CLASSIC_OPTION, "remix", filling, false)).toEqual({ seat: "any", reason: null });
+    expect(encoreSeat(CLASSIC_OPTION, "leftovers", withKind(HAM, null), true)).toEqual({ seat: "any", reason: null });
+  });
+  it("a leftovers encore's starters are fillings", () => {
+    expect(encoreSeat(TOASTIE_OPTION, "leftovers", filling, false)).toEqual({ seat: "filling", reason: null });
+    expect(encoreSeat(TOASTIE_OPTION, "leftovers", withKind(HAM, null), false).seat).toBe("filling");
+  });
+  it("a remix bread takes the first seat, unless the fridge raid already supplies one", () => {
+    expect(encoreSeat(TOASTIE_OPTION, "remix", bread, false)).toEqual({ seat: "first", reason: null });
+    expect(encoreSeat(TOASTIE_OPTION, "remix", bread, true)).toEqual({ seat: null, reason: "Your fridge bread is the bread" });
+  });
+  it("a remix filling takes the filling seat, with or without a fridge bread", () => {
+    expect(encoreSeat(TOASTIE_OPTION, "remix", filling, false).seat).toBe("filling");
+    expect(encoreSeat(TOASTIE_OPTION, "remix", filling, true).seat).toBe("filling");
+  });
+  it("a remix starter of unknown kind cannot be seated", () => {
+    expect(encoreSeat(TOASTIE_OPTION, "remix", withKind(HAM, null), false)).toEqual({ seat: null, reason: "Can't be a starter here" });
+    expect(encoreSeat(TOASTIE_OPTION, "remix", ingredient(HAM), false)).toEqual({ seat: null, reason: "Can't be a starter here" });
+  });
+});
+
+describe("a toasted sandwich remix's starters", () => {
+  const candidates = [withKind(SOURDOUGH, "bread"), withKind(HAM, "main"), withKind(PICKLES, "produce")];
+
+  it("ticks the first seatable starter by default and starts with it", async () => {
+    const m = make(BOTH);
+    await openWith(m, { encore: remix(candidates) });
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+    expect(q(m.sheet.element, ".wx-srv-ck-encore-hint").textContent).toContain("Choose a bread, a filling, or one of each");
+  });
+
+  it("a filling is added beside the bread (two seeds), and a second filling swaps out the first", async () => {
+    const m = make(BOTH);
+    await openWith(m, { encore: remix(candidates) });
+    seed(m, "smoked-ham").click();
+    expect(seedsOf(m).sort()).toEqual(["smoked-ham", "sourdough-loaf"]);
+    seed(m, "dill-pickles").click();
+    expect(seedsOf(m).sort()).toEqual(["dill-pickles", "sourdough-loaf"]);
+    go(m).click();
+    expect(m.starts()[0]?.encore?.seedIds.slice().sort()).toEqual(["dill-pickles", "sourdough-loaf"]);
+  });
+
+  it("a kind-less starter is disabled and says why", async () => {
+    const m = make(BOTH);
+    await openWith(m, { encore: remix([withKind(PARSLEY, null), ...candidates]) });
+    const parsley = seed(m, "flat-leaf-parsley");
+    expect(parsley.disabled).toBe(true);
+    expect(parsley.querySelector(".wx-srv-ck-encore-why")?.textContent).toBe("Can't be a starter here");
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+  });
+
+  it("choosing a fridge bread drops the bread starter and disables bread starters with the reason", async () => {
+    const m = make(BOTH, async () => {}, async () => ({ ok: true, ingredients: [ingredient(SOURDOUGH)] }));
+    await openWith(m, { encore: remix(candidates) });
+    expandTwists(m);
+    m.type("sour");
+    m.fire();
+    await flush();
+    q<HTMLButtonElement>(m.sheet.element, '.wx-srv-ck-fridge-option[data-ingredient="sourdough-loaf"]').click();
+    expect(seed(m, "sourdough-loaf").disabled).toBe(true);
+    expect(seed(m, "sourdough-loaf").querySelector(".wx-srv-ck-encore-why")?.textContent).toBe("Your fridge bread is the bread");
+    expect(seedsOf(m)).toEqual(["smoked-ham"]);
+    expect(q(m.sheet.element, ".wx-srv-ck-encore-hint").textContent).toBe("Choose 1 filling to begin the basket with (your fridge bread is the bread).");
+    go(m).click();
+    expect(m.starts()[0]).toMatchObject({ fridgeSeedId: "sourdough-loaf", encore: { seedIds: ["smoked-ham"] } });
+  });
+
+  it("a start refused as invalid says to pick one bread and one filling", async () => {
+    const m = make(BOTH, async () => {
+      throw new CookoutStartError("invalid", "The kitchen can't start with those twists");
+    });
+    await openWith(m, { encore: remix(candidates) });
+    go(m).click();
+    await flush();
+    expect(q(m.sheet.element, ".wx-srv-ck-start-error").textContent).toBe("Pick one bread and one filling to start with.");
+  });
+
+  it("options arriving after open re-seat the starters", async () => {
+    let resolve: (o: CookoutOptions | null) => void = () => {};
+    const m = make(BOTH, async () => {}, async () => ({ ok: true, ingredients: [] }), () => new Promise((r) => (resolve = r)));
+    m.sheet.open({ encore: remix([withKind(PARSLEY, null), ...candidates]) });
+    await flush();
+    expect(seedsOf(m)).toEqual(["flat-leaf-parsley"]); // nothing is known about the mode yet
+    resolve(BOTH);
+    await flush();
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+  });
+});
+
+describe("a toasted sandwich leftovers encore", () => {
+  const candidates = [withKind(HAM, "main"), withKind(PICKLES, "produce")];
+
+  it("keeps exactly one filling: ticking another replaces it", async () => {
+    const m = make(BOTH);
+    await openWith(m, { encore: remix(candidates, "leftovers") });
+    expect(seedsOf(m)).toEqual(["smoked-ham"]);
+    expect(q(m.sheet.element, ".wx-srv-ck-encore-hint").textContent).toBe("Choose 1 filling to begin the basket with.");
+    seed(m, "dill-pickles").click();
+    expect(seedsOf(m)).toEqual(["dill-pickles"]);
+    go(m).click();
+    expect(m.starts()[0]?.encore?.seedIds).toEqual(["dill-pickles"]);
+  });
+
+  it("a start refused as invalid says to pick one filling", async () => {
+    const m = make(BOTH, async () => {
+      throw new CookoutStartError("invalid", "nope");
+    });
+    await openWith(m, { encore: remix(candidates, "leftovers") });
+    go(m).click();
+    await flush();
+    expect(q(m.sheet.element, ".wx-srv-ck-start-error").textContent).toBe("Pick one filling to start with.");
+  });
+});
+
+describe("a Classic encore", () => {
+  it("keeps the two-starter behaviour: two seeds, then the others are disabled until one is unticked", async () => {
+    const m = make(BOTH);
+    const classic: EncorePreset = { fromSeq: 30, generation: 1, conceptId: "c", kind: "remix", title: "T", candidates: [ingredient(SOURDOUGH), ingredient(HAM), ingredient(PICKLES)] };
+    await openWith(m, { encore: classic });
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+    seed(m, "smoked-ham").click();
+    expect(seedsOf(m)).toEqual(["sourdough-loaf", "smoked-ham"]);
+    expect(seed(m, "dill-pickles").disabled).toBe(true);
+    seed(m, "sourdough-loaf").click();
+    seed(m, "dill-pickles").click();
+    expect(seedsOf(m).sort()).toEqual(["dill-pickles", "smoked-ham"]);
+    expect(q(m.sheet.element, ".wx-srv-ck-encore-hint").textContent).toBe("Choose 1 or 2 starters to begin the basket with — you both see them.");
+  });
+
+  it("a Classic start refused as invalid keeps the caller's own words", async () => {
+    const m = make(BOTH, async () => {
+      throw new CookoutStartError("invalid", "The kitchen can't start with those twists — change a choice and try again.");
+    });
+    await openWith(m);
+    go(m).click();
+    await flush();
+    expect(q(m.sheet.element, ".wx-srv-ck-start-error").textContent).toBe("The kitchen can't start with those twists — change a choice and try again.");
+  });
+});
+
+describe("focus stays on the mode tiles", () => {
+  it("a tap on a tile leaves the focus on the now-checked tile, not on the body", async () => {
+    const m = make(BOTH);
+    await openWith(m);
+    tileOf(m, "toastie").focus();
+    tileOf(m, "toastie").click();
+    expect(document.activeElement).toBe(tileOf(m, "toastie"));
+    expect(document.activeElement?.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("the arrow keys keep it on the chosen tile too", async () => {
+    const m = make(BOTH);
+    await openWith(m);
+    tileOf(m, "classic").focus();
+    tileOf(m, "classic").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(tileOf(m, "toastie"));
+    tileOf(m, "toastie").dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true, cancelable: true }));
+    expect(document.activeElement).toBe(tileOf(m, "classic"));
+  });
+});

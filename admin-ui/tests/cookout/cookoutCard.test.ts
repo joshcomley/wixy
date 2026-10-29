@@ -152,11 +152,12 @@ describe("the status line in a Toasted sandwich round", () => {
     expect(cookoutStatusLine(toastie({ pickedCount: 3 }), CLASSIC_MODE)).toBe("Picking ingredients…");
   });
 
-  it("Classic lines are unchanged, whatever mode is handed in", () => {
+  it("Classic lines are unchanged; a mode that disagrees with the summary leaves the count out", () => {
     expect(cookoutStatusLine(summary({ pickedCount: 4 }))).toBe("Picking ingredients (4/10)…");
-    expect(cookoutStatusLine(summary({ pickedCount: 4 }), TOASTIE)).toBe("Picking ingredients (4/10)…");
     expect(cookoutStatusLine(summary({ pickedCount: 4 }), CLASSIC_MODE)).toBe("Picking ingredients (4/10)…");
-    expect(cookoutStatusLine(summary({ state: "finished", concepts: "ready" }), TOASTIE)).toBe("3 dish ideas ready");
+    // The view says toasted sandwich while the summary says Classic (review shot 16): never "/10", never "/8".
+    expect(cookoutStatusLine(summary({ pickedCount: 4 }), TOASTIE)).toBe("Picking ingredients…");
+    expect(cookoutStatusLine(summary({ state: "finished", concepts: "ready" }), TOASTIE)).toBe("3 ideas ready");
     expect(cookoutStatusLine(summary({ state: "finished", concepts: "ready", generation: 2 }))).toBe("3 new dish ideas ready");
   });
 });
@@ -207,3 +208,85 @@ describe("the card in a Toasted sandwich round", () => {
     expect([...card.querySelectorAll(".wx-srv-ck-badge")].map((b) => b.textContent)).toEqual(["Toasted sandwich", "Blind"]);
   });
 });
+
+describe("a mode card before its round is read (the cached options' numbers)", () => {
+  const TOASTIE_ENTRY = { id: "toastie", label: "Toasted sandwich", emoji: "🥪", turns: 8 };
+
+  function makeWith(modeOption: (id: string) => typeof TOASTIE_ENTRY | null) {
+    const model = createCookoutModel({
+      session: () => null,
+      viewer: () => "Josh",
+      fetchRound: async () => ({ ok: false, kind: "unavailable" }),
+      onChange: () => {},
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    const cards = createCookoutCards({ model, document, openGame: vi.fn(), modeOption });
+    return { model, cards };
+  }
+
+  it("uses the options' entry: the count, the dish words and the badge", () => {
+    const { cards } = makeWith(() => TOASTIE_ENTRY);
+    const status = (patch: Partial<CookoutSummary>): string => {
+      const card = cards.create(message(41, summary({ mode: "toastie", ...patch })));
+      return card.querySelector(".wx-srv-ck-mcard-status")?.textContent ?? "";
+    };
+    expect(status({ pickedCount: 3 })).toBe("Picking ingredients (3/8)…");
+    expect(status({ state: "finished", pickedCount: 8, concepts: "pending" })).toBe("All 8 picked — chef is thinking…");
+    expect(status({ state: "finished", concepts: "ready" })).toBe("3 toasted sandwich ideas ready");
+    const card = cards.create(message(41, summary({ mode: "toastie", pickedCount: 3 })));
+    expect(card.querySelector(".wx-srv-ck-mcard-mode")?.textContent).toBe("Toasted sandwich");
+    expect(card.querySelector(".wx-srv-ck-mcard-icon")?.textContent).toBe("🥪");
+  });
+
+  it("with no entry (options not read) there is no count and never a /10", () => {
+    const { cards } = makeWith(() => null);
+    const card = cards.create(message(41, summary({ mode: "toastie", pickedCount: 3 })));
+    expect(card.querySelector(".wx-srv-ck-mcard-status")?.textContent).toBe("Picking ingredients…");
+    expect(card.querySelector(".wx-srv-ck-mcard-mode")).toBeNull();
+    expect(card.textContent).not.toContain("/10");
+  });
+
+  it("a toastie summary never draws /10, whatever mode or view is handed in, for every count and state", () => {
+    const modes: Array<CardModeArg> = [null, CLASSIC_MODE, parseModeInfo(TOASTIE_MODE), { id: "toastie", label: "T", emoji: "", turns: 8 }, { id: "other", label: "O", emoji: "", turns: 10 }];
+    for (const mode of modes) {
+      for (let picked = 0; picked <= 8; picked += 1) {
+        for (const state of ["picking", "finished", "abandoned"] as const) {
+          for (const concepts of ["none", "pending", "ready", "failed", "unavailable"] as const) {
+            for (const generation of [1, 2]) {
+              const text = cookoutStatusLine(summary({ mode: "toastie", state, pickedCount: picked, concepts, generation }), mode);
+              expect(text, `${mode?.id} ${state} ${picked} ${concepts}`).not.toContain("/10");
+              expect(text).not.toContain("10 picked");
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it("a rendered card with a Classic view for a toastie summary does not draw a count either", () => {
+    const { cards, model } = makeWith(() => TOASTIE_ENTRY);
+    const view = parseCookoutView(finishedView({ seq: 41 }));
+    if (view === null) throw new Error("fixture");
+    model.apply(view);
+    const card = cards.create(message(41, summary({ mode: "toastie", state: "finished", concepts: "pending" })));
+    expect(card.textContent).not.toContain("10");
+  });
+});
+
+describe("the mode card's head", () => {
+  it("carries wx-srv-ck-mcard-head-mode only for a mode round", () => {
+    const { cards, model } = make();
+    const classic = cards.create(message(41, summary({})));
+    expect(classic.querySelector(".wx-srv-ck-mcard-head")?.classList.contains("wx-srv-ck-mcard-head-mode")).toBe(false);
+    const msg = message(42, summary({ mode: "toastie", pickedCount: 1 }));
+    const card = cards.create(msg);
+    const view = parseCookoutView(toastiePicking({ seq: 42, turn: 2 }));
+    if (view === null) throw new Error("fixture");
+    model.apply(view);
+    cards.render(card, msg);
+    expect(card.querySelector(".wx-srv-ck-mcard-head")?.classList.contains("wx-srv-ck-mcard-head-mode")).toBe(true);
+  });
+});
+
+type CardModeArg = { id: string; label: string; emoji: string; turns: number } | null;

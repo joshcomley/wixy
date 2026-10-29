@@ -1844,9 +1844,10 @@ export interface BookRecipe {
   readonly dinnerPick: boolean;
   readonly style: SetupChip | null;
   readonly challenge: SetupChip | null;
-  /** The basket items the dish used (Remix starters) and the ones it left out (Leftovers starters). */
-  readonly ingredients: readonly IngredientSnap[];
-  readonly leftovers: readonly IngredientSnap[];
+  /** The basket items the dish used (Remix starters) and the ones it left out (Leftovers starters), each
+   * with its pick kind in a mode round (null for Classic, or from a server that does not send it). */
+  readonly ingredients: readonly KindedSnap[];
+  readonly leftovers: readonly KindedSnap[];
   /** The game mode the dish came from (Classic when the server sent none). */
   readonly mode: ModeRef;
   readonly build: BuildRef | null;
@@ -1875,13 +1876,18 @@ function parseBookCooked(value: unknown): BookCooked | null {
   return { cookedAt, ratings, photo: parsePicture(record["photo"]) };
 }
 
+/** A snap with the pick kind it filled (a Recipe book starter): null for Classic or when not sent. */
+export interface KindedSnap extends IngredientSnap {
+  readonly kind: string | null;
+}
+
 /** Bank-listed snaps, skipping any that will not parse (a list for buttons, not a basket count). */
-function parseSnapList(value: unknown, max: number): IngredientSnap[] {
+function parseSnapList(value: unknown, max: number): KindedSnap[] {
   if (!Array.isArray(value)) return [];
-  const out: IngredientSnap[] = [];
+  const out: KindedSnap[] = [];
   for (const raw of (value as unknown[]).slice(0, max)) {
     const snap = parseSnap(raw);
-    if (snap !== null && !out.some((s) => s.id === snap.id)) out.push(snap);
+    if (snap !== null && !out.some((s) => s.id === snap.id)) out.push({ ...snap, kind: asIngredientKind((raw as Record<string, unknown>)["kind"]) });
   }
   return out;
 }

@@ -1234,3 +1234,28 @@ describe("Toasted sandwich mode: the intro card", () => {
     expect(lines(h.pane)).not.toContain("You'll see each other's picks as you go.");
   });
 });
+
+describe("Toasted sandwich mode: Encore with the leftovers", () => {
+  it("passes the omitted candidates with the kind the basket recorded for each, and the round's mode", () => {
+    const h = makeHarness();
+    h.show(toastieFinished());
+    q<HTMLButtonElement>(h.pane, '.wx-srv-ck-dish[data-concept="a"] .wx-srv-ck-dish-more-btn').click();
+    q<HTMLButtonElement>(h.pane, '.wx-srv-ck-dish[data-concept="a"] .wx-srv-ck-dish-menu-item').click();
+    expect(h.openStartSheet).toHaveBeenCalledTimes(1);
+    const preset = h.openStartSheet.mock.calls[0]?.[0] as { encore: { mode?: string; kind: string; candidates: Array<{ id: string; kind: string | null }> }; mode?: string };
+    expect(preset.encore.kind).toBe("leftovers");
+    expect(preset.encore.mode).toBe("toastie");
+    expect(preset.encore.candidates).toMatchObject([{ id: "dill-pickles", kind: "produce" }]);
+  });
+
+  it("a candidate not in the basket gets kind null", () => {
+    const h = makeHarness();
+    const raw = toastieFinished();
+    const data = ((raw["concepts"] as Json)["data"] as Json[]).map((c) => ({ ...c, omitted: [{ ingredient: { id: "stray-item", name: "Stray", category: "vegetables", emoji: "🥕", blurb: "" }, reason: "Left out." }] }));
+    h.show({ ...raw, concepts: { state: "ready", data, error: null } });
+    q<HTMLButtonElement>(h.pane, '.wx-srv-ck-dish[data-concept="a"] .wx-srv-ck-dish-more-btn').click();
+    q<HTMLButtonElement>(h.pane, '.wx-srv-ck-dish[data-concept="a"] .wx-srv-ck-dish-menu-item').click();
+    const preset = h.openStartSheet.mock.calls[0]?.[0] as { encore: { candidates: Array<{ id: string; kind: string | null }> } };
+    expect(preset.encore.candidates).toMatchObject([{ id: "stray-item", kind: null }]);
+  });
+});
