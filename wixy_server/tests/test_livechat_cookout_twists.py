@@ -2168,3 +2168,31 @@ class TestErasure:
 
     def test_attachment_results_import_is_used(self) -> None:
         assert AttachmentResult is not None
+
+
+class TestSkipNamesThePair:
+    def test_a_skip_naming_the_pre_veto_or_pre_chaos_pair_is_stale_and_draws_nothing(
+        self, store: LiveChatStore, bank: FakeBank
+    ) -> None:
+        seq = open_round(store, bank)
+        join(store, bank, seq)
+        old = tuple(s["id"] for s in live_of(store, seq).row.offers[0])
+        veto(store, bank, seq, ROSE)
+        calls = len(bank.calls)
+        rev = rnd(store, seq).rev
+
+        def do_skip(ids: tuple[str, str] | None) -> Any:
+            return store.skip_cookout(
+                anchor_seq=seq, sender=JOSH, email=None, move_id=move_id(), turn=1, offer=0,
+                bank=bank, option_ids=ids,
+            )  # fmt: skip
+
+        with pytest.raises(CookoutBadStateError):
+            do_skip(old)
+        assert len(bank.calls) == calls and rnd(store, seq).rev == rev
+        chaos(store, bank, seq, JOSH)
+        with pytest.raises(CookoutBadStateError):
+            do_skip(old)
+        new = tuple(s["id"] for s in live_of(store, seq).row.offers[0])
+        assert do_skip((new[1], new[0]))[1] is True  # order-free
+        assert len(live_of(store, seq).row.offers) == 2

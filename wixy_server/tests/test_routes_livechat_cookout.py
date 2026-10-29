@@ -1562,3 +1562,24 @@ class TestCookedRoutes:
             assert photo["photo"]["attachmentId"] == "att-route-1"
             unlinked = post(client, h, path, sender="Josh", messageSeq=None, attachmentId=None)
             assert unlinked.json()["recipes"]["a"]["cooked"]["photo"] is None
+
+
+class TestSkipOptionIdsRoute:
+    def test_skip_naming_a_stale_pair_is_bad_state_and_absent_option_ids_still_works(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, h, _):
+            seq = create(client, h)
+            post(client, h, f"/cookout/{seq}/join", sender="Rose")
+            old = table(client, h, seq, "Josh")
+            post(client, h, f"/cookout/{seq}/chaos", **old)
+            skip = {"sender": "Josh", "moveId": mv(), "turn": 1, "offer": 0}
+            stale = post(client, h, f"/cookout/{seq}/skip", optionIds=old["optionIds"], **skip)
+            assert stale.status_code == 409 and stale.json() == {"error": "bad_state"}
+            bad = post(client, h, f"/cookout/{seq}/skip", optionIds=["only"], **skip)
+            assert bad.status_code == 422
+            fresh = table(client, h, seq, "Josh")["optionIds"]
+            ok = post(client, h, f"/cookout/{seq}/skip", optionIds=fresh[::-1], **skip)
+            assert ok.status_code == 200 and ok.json()["current"]["offerIndex"] == 1
+            plain = post(client, h, f"/cookout/{seq}/skip", **{**skip, "moveId": mv(), "offer": 1})
+            assert plain.status_code == 200

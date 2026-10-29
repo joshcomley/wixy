@@ -4130,6 +4130,7 @@ class LiveChatStore:
         turn: int,
         offer: int,
         bank: CookoutBankLike,
+        option_ids: tuple[str, str] | None = None,
         rng: random.Random | None = None,
         now: float | None = None,
     ) -> Moved:
@@ -4151,6 +4152,8 @@ class LiveChatStore:
             live = self._cx_live_turn(round_, turns, slot, turn)
             if offer != len(live.offers) - 1:
                 raise CookoutBadStateError("that pair is no longer on the table")
+            if option_ids is not None and {s["id"] for s in live.offers[offer]} != set(option_ids):
+                raise CookoutBadStateError("the table changed: those are not the two options")
             if offer >= MAX_SKIPS:
                 raise CookoutSkipExhaustedError("no skips left: pick one of these two")
             inputs = draw_inputs(turns, live.player)

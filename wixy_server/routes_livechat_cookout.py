@@ -119,6 +119,9 @@ class CookoutSkipIn(BaseModel):
     moveId: str
     turn: StrictInt
     offer: StrictInt
+    optionIds: list[str] | None = None
+    """Spec 09a §1.2: the pair the player saw. A veto or the chaos shelf changes the pair without
+    changing `offer`, so when present it must equal the live pair (order-free)."""
 
 
 class CookoutPickIn(BaseModel):
@@ -627,18 +630,24 @@ async def join_cookout(seq: int, body: CookoutSenderIn, request: Request) -> JSO
 @router.post("/cookout/{seq}/skip", response_model=None)
 async def skip_cookout(seq: int, body: CookoutSkipIn, request: Request) -> JSONResponse:
     """Deal a fresh pair for the same turn (two skips a turn, then a pick is forced)."""
-    if _bad_move_id(body.moveId) or _bad_table(body.turn, body.offer):
+    if (
+        _bad_move_id(body.moveId)
+        or _bad_table(body.turn, body.offer)
+        or (body.optionIds is not None and _bad_pair(body.optionIds))
+    ):
         await require_server_token(request)
-        return _invalid("moveId must be 8-64 characters, turn 1-10, offer 0-2")
+        return _invalid("moveId must be 8-64 characters, turn 1-10, offer 0-2, two optionIds")
     bank = _bank(request)
     if bank is None:
         await require_server_token(request)
         return _unavailable()
+    pair = (body.optionIds[0], body.optionIds[1]) if body.optionIds is not None else None
     return await _mutation(
         request,
         seq,
         body.sender,
         lambda store, sender, email: store.skip_cookout(
+            option_ids=pair,
             anchor_seq=seq,
             sender=sender,
             email=email,
