@@ -437,9 +437,12 @@ class FakeCmdState:
         if self.chat_spawn_plans:
             plan = self.chat_spawn_plans.pop(0)
         else:
+            # Cookout runs never read `chat_spawn_response_text` (an Adventure pack in the e2e
+            # fixture): they get `cookout_response_text` or the canned answer at poll time.
+            is_cookout = str(body.get("caller") or "").startswith("wixy-cookout-")
             plan = FakeSpawnPlan(
                 final_status=self.chat_spawn_final_status,
-                response_text=self.chat_spawn_response_text,
+                response_text=None if is_cookout else self.chat_spawn_response_text,
                 running_polls=self.chat_spawn_running_polls,
                 delay_s=self.chat_spawn_delay_s,
             )

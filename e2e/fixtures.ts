@@ -95,7 +95,17 @@ async function bootServer(workerIndex: number): Promise<{ server: FixtureServer;
   throw new Error(`fixture server failed to start after ${BOOT_ATTEMPTS} attempts:\n${lastFailure}`);
 }
 
-export const test = base.extend<object, { fixtureServer: FixtureServer }>({
+export const test = base.extend<{ cleanGames: void }, { fixtureServer: FixtureServer }>({
+  // Every test starts with no game round left in the shared chat by an earlier test on this worker:
+  // an open round makes the page offer a game tab on load (server-adventure left one, and
+  // server-wyr's "no game, no tabs" then failed depending on which worker ran what).
+  cleanGames: [
+    async ({ fixtureServer }, use) => {
+      await fetch(`${fixtureServer.baseURL}/test/server/clear-games`, { method: "POST" });
+      await use();
+    },
+    { auto: true },
+  ],
   fixtureServer: [
     async ({}, use, workerInfo) => {
       const { server, child } = await bootServer(workerInfo.workerIndex);

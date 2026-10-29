@@ -2570,9 +2570,9 @@ positions taken are in [decisions/00193](../../decisions/00193-server-chat-cooko
   holds **Chat** plus the ONE open game tab, and opening or offering Cookout replaces an open would-you-rather or
   Adventure tab (and vice versa); the shared `itemChat.ts` mini chat strip and pop-up (tagged "Cookout" by
   `gameLabelFor` in `thread.ts`) reuse the `wyrSeq`/`wyrRef`/`wyrRefKind = "cookout"` contract. The `...` menu in
-  `thread.ts` gains **Cookout** (a small start sheet: Open game / Blind game) and **Recipe book**. Modules: `api.ts`
+  `thread.ts` gains **Cookout** (a small start sheet: Open mode / Blind mode) and **Recipe book**. Modules: `api.ts`
   (defensive parsers + REST), `model.ts` (per-round view cache, monotonic-`rev` guard, exponential poll backoff while
-  `concepts`, `images` or any `recipes[id]` is `pending`), `cookoutGame.ts` (the pane and start sheet), `cookoutCard.ts`
+  `concepts`, `images` or any `recipes[id]` is `pending`), `cookoutGame.ts` (the pane), `startSheet.ts` (the Open / Blind start sheet), `cookoutCard.ts`
   (the main-chat card on the anchor message), `recipeBook.ts` (the full-height Recipe book, the Holiday-bank pattern,
   closed on lock/wipe; tapping an entry opens that round at that dish). The pane, top to bottom: a basket of ten slot
   pills and a turn banner (and **Join Cookout** for a non-player), the two ingredient cards with **Pick this** and the

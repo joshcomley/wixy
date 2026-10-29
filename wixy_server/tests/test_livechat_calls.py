@@ -292,8 +292,9 @@ def test_credits_and_queues_bounded_then_terminal_cleanup() -> None:
     assert broker.next_media(b) is None
     broker.remove(a)
     assert broker.call is None and not b.media and not b.outstanding
-    with pytest.raises(ValueError):
-        broker.command(b, CallAction(type="ready", callId=epoch))
+    # A `ready` that crossed the disconnect is ignored like a late `end`; it never revives the pair.
+    broker.command(b, CallAction(type="ready", callId=epoch))
+    assert broker.call is None and not b.closed
 
 
 def test_expiry_during_silence_and_shutdown() -> None:
@@ -338,6 +339,23 @@ def test_late_terminal_controls_only_ignore_the_former_pair_epoch() -> None:
         broker.frame(c, frame(old, 0, 1))
     assert broker.call and broker.call.id == new
     assert not a.media and not b.media and not c.media
+
+
+def test_ready_crossing_the_other_sides_failure_keeps_the_socket() -> None:
+    """The callee's audio setup fails while the caller is still preparing: the caller's `ready`
+    arrives after the pair ended. It must be ignored, not close the caller's socket (which made
+    its client drop the failure notice: the e2e microphone-rejection flake)."""
+    broker, a, b, c = peers()
+    broker.command(a, Invite(type="invite", requestId="one", targetConnectionId=b.id))
+    assert broker.call
+    epoch = broker.call.id
+    broker.command(b, CallAction(type="accept", callId=epoch))
+    broker.command(b, CallAction(type="failed", callId=epoch))
+    assert broker.call is None
+    broker.command(a, CallAction(type="ready", callId=epoch))
+    assert not a.closed and not b.closed and broker.call is None
+    with pytest.raises(ValueError, match="ownership"):
+        broker.command(c, CallAction(type="ready", callId=epoch))
 
 
 def test_glare_and_delayed_accept_cannot_transfer_pair() -> None:
