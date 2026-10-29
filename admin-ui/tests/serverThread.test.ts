@@ -332,6 +332,8 @@ describe("mountServerThread", () => {
     await view.attach(SESSION);
 
     const input = view.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+    // Let Android offer its general file browser instead of forcing the photo picker.
+    expect(input.hasAttribute("accept")).toBe(false);
     const file = new File([new Uint8Array([1, 2, 3])], "photo.jpg", { type: "image/jpeg" });
     Object.defineProperty(input, "files", { value: [file], configurable: true });
     input.dispatchEvent(new Event("change"));
