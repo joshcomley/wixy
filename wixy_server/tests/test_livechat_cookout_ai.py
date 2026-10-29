@@ -2624,3 +2624,149 @@ class TestRealBankWithTwists:
                 )
             )
             assert "forbidden" in text, staple
+
+
+# -- follow-up: the staples sentence, late work after a swap, the real bank --------------------
+
+
+class TestStaplesRuleSentence:
+    @pytest.mark.parametrize("staple", tuple(STAPLE_NAMES))
+    def test_a_removed_staple_is_dropped_from_the_at_most_rule(self, staple: str) -> None:
+        prompt = _twist_prompt(ConceptTwists(forbidden_ids=frozenset({staple})))
+        rule = prompt.split("At most 4 of ", 1)[1].split(" may be used", 1)[0]
+        kept = [s for s in STAPLE_NAMES if s != staple]
+        assert rule == ", ".join(kept[:-1]) + " and " + kept[-1]
+        assert staple not in rule
+
+    def test_with_nothing_removed_the_sentence_is_the_core_wording(self) -> None:
+        assert (
+            "At most 4 of butter, plain-flour, cooking-oil, granulated-sugar and milk may be used"
+            in _twist_prompt(ConceptTwists(style="picnic"))
+        )
+
+
+class TestLateGenerationOneWork:
+    def test_a_repair_run_is_not_started_for_a_generation_that_was_swapped_away(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import wixy_server.livechat.cookout_ai as module
+
+        store = FakeStore()
+        store.add_round()
+        bad = canned_concepts_obj()
+        bad["concepts"][0]["description"] += " Topped with fresh mango."
+        state = FakeCmdState(chat_spawn_plans=[FakeSpawnPlan(response_text=json.dumps(bad))])
+        original = module.parse_concepts
+
+        def parse_then_swap(*args: Any, **kwargs: Any) -> Any:
+            result = original(*args, **kwargs)
+            store.complete_swap(1)  # the swap lands while the rejected answer is being judged
+            return result
+
+        monkeypatch.setattr(module, "parse_concepts", parse_then_swap)
+        _drive_concepts(_runner(store, _client(state), tmp_path))
+        assert len(state.chat_spawn_runs) == 1, "no repair run for the superseded generation"
+        row = store.rounds[1]
+        assert row["generation"] == 2 and row["concepts"] == "pending"
+        assert not any(c[0].startswith("finish") and c[4] for c in store.claims)
+
+    def test_cmd_going_unreachable_after_a_swap_cannot_end_generation_2(
+        self, tmp_path: Path
+    ) -> None:
+        from wixy_server.livechat.cookout_ai import _RunUnavailableError
+
+        store, state = FakeStore(), FakeCmdState()
+        store.add_round()
+        runner = _runner(store, _client(state), tmp_path)
+
+        async def swap_then_unreachable(caller: str, prompt: str) -> str:
+            store.complete_swap(1)
+            raise _RunUnavailableError("cmd could not be reached")
+
+        runner._spawn = swap_then_unreachable  # type: ignore[method-assign]
+        _drive_concepts(runner)
+        row = store.rounds[1]
+        assert row["generation"] == 2 and row["concepts"] == "pending"
+        assert ("finish:c", 1, 1, None, False) in store.claims, (
+            "the unavailable write named generation 1 and was refused"
+        )
+
+    def test_cmd_going_unreachable_for_a_late_recipe_cannot_end_generation_2(
+        self, tmp_path: Path
+    ) -> None:
+        from wixy_server.livechat.cookout_ai import _RunUnavailableError
+
+        store, state = FakeStore(), FakeCmdState()
+        store.add_round(concepts="ready", concepts_json=canned_concepts_text())
+        store.add_recipe(1, "a")
+        runner = _runner(store, _client(state), tmp_path)
+
+        async def swap_then_unreachable(caller: str, prompt: str) -> str:
+            store.complete_swap(1)
+            store.rounds[1]["concepts"] = "ready"
+            store.rounds[1]["concepts_json"] = canned_concepts_text()
+            store.add_recipe(1, "a")
+            raise _RunUnavailableError("cmd could not be reached")
+
+        runner._spawn = swap_then_unreachable  # type: ignore[method-assign]
+        _drive_recipe(runner)
+        assert store.rounds[1]["recipes"]["a"]["state"] == "pending"
+        assert ("finish:r:a", 1, 1, None, False) in store.claims
+
+
+class TestRemovedPickableStaplesRealBank:
+    """The five staple-swap cases, once more against the real bank (09a §8)."""
+
+    @pytest.mark.parametrize("staple", tuple(STAPLE_NAMES))
+    def test_prompt_concepts_and_recipes(self, real_bank: Any, staple: str) -> None:
+        twists = ConceptTwists(forbidden_ids=frozenset({staple}))
+        payload = basket_payload(real_bank, REAL_PICKS, twists=twists)
+        assert payload is not None
+        assert staple not in [s["id"] for s in payload["staples"]]
+        name = display_name(real_bank, staple)
+        prompt = build_concepts_prompt(payload, forbidden_names=[name])
+        assert f"staple: {name}." in prompt
+        rule = prompt.split("At most 4 of ", 1)[1].split(" may be used", 1)[0]
+        assert staple not in rule
+        base = canned_cookout_concepts(prompt)
+        assert base is not None
+
+        def parse(obj: dict[str, Any]) -> str:
+            return _violations(
+                parse_concepts(
+                    json.dumps(obj), bank=real_bank, picked_ids=REAL_PICKS, twists=twists
+                )
+            )
+
+        assert parse(base) == ""
+        short = STAPLE_NAMES[staple][1]
+        for spelling in (name, name.lower(), short):
+            obj = copy.deepcopy(base)
+            obj["concepts"][0]["description"] += f" Finished with {spelling}."
+            assert "removed and may not appear anywhere" in parse(obj), (staple, spelling)
+            obj = copy.deepcopy(base)
+            obj["concepts"][0]["omitted"][0]["reason"] = f"No {spelling} needed."
+            assert "removed and may not appear anywhere" in parse(obj), (staple, spelling)
+        for key in ("stapleIds", "pickedIngredientIds"):
+            obj = copy.deepcopy(base)
+            obj["concepts"][0][key].append(staple)
+            assert "forbidden" in parse(obj), (staple, key)
+        # recipes: generation-1 recipes stay readable; generation 2 may not use or name it
+        concept = copy.deepcopy(base["concepts"][0])
+        old = copy.deepcopy(concept)
+        old["stapleIds"] = [*old["stapleIds"], staple]
+        recipe = _recipe(old)
+        assert parse_recipe(json.dumps(recipe), bank=real_bank, concept=old).violations == ()
+        rt = RecipeTwists(forbidden_ids=frozenset({staple}))
+        fresh = _recipe(concept)
+        assert parse_recipe(json.dumps(fresh), bank=real_bank, concept=concept, twists=rt).value
+        fresh["ingredients"].append({"id": staple, "quantity": "1 portion", "note": ""})
+        assert "forbidden" in _violations(
+            parse_recipe(json.dumps(fresh), bank=real_bank, concept=concept, twists=rt)
+        )
+        for spelling in (name, short):
+            text_recipe = _recipe(concept)
+            text_recipe["steps"][0]["text"] = f"Stir in the {spelling} now."
+            assert "removed and may not appear anywhere" in _violations(
+                parse_recipe(json.dumps(text_recipe), bank=real_bank, concept=concept, twists=rt)
+            ), (staple, spelling)

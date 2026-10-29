@@ -14,7 +14,7 @@ import {
   type CookoutGameApi,
 } from "../../src/server/cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "../../src/server/cookout/model";
-import { createCookoutStartSheet } from "../../src/server/cookout/startSheet";
+import { createCookoutStartSheet, type StartChoices } from "../../src/server/cookout/startSheet";
 import {
   FULL_RECIPE,
   LENTILS,
@@ -87,6 +87,19 @@ function make(): Harness {
     retryPictures: vi.fn(),
     bank: vi.fn(),
     retryRecipe: vi.fn(),
+    lucky: vi.fn(),
+    chaos: vi.fn(),
+    veto: vi.fn(),
+    star: vi.fn(),
+    wildcard: vi.fn(),
+    vote: vi.fn(),
+    proposeSwap: vi.fn(),
+    chooseSwap: vi.fn(),
+    cancelSwap: vi.fn(),
+    markCooked: vi.fn(),
+    rate: vi.fn(),
+    linkPhoto: vi.fn(),
+    photos: vi.fn(),
   };
   const lockNow = vi.fn();
   const openStartSheet = vi.fn();
@@ -202,20 +215,27 @@ describe("words", () => {
   });
 });
 
+/** The start sheet's twist deps: no chef until a test says so, and an empty pantry. */
+const SHEET_DEPS = {
+  loadOptions: async () => null,
+  search: async () => ({ ok: true as const, ingredients: [] }),
+};
+
 describe("the start sheet", () => {
   it("defaults to Open, can choose Blind, and starts in the chosen mode, closing when it started", async () => {
     let resolve: () => void = () => {};
     const start = vi.fn(() => new Promise<void>((r) => (resolve = r)));
-    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
+    const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
     document.body.append(sheet.element);
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     expect(sheet.element.hidden).toBe(false);
     expect(q(sheet.element, '[data-mode="open"]').getAttribute("aria-checked")).toBe("true");
     q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]').click();
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
     const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
     go.click();
-    expect(start).toHaveBeenCalledWith(true, "start-2");
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ blind: true, style: null, encore: null }), "start-1");
     expect(go.disabled).toBe(true);
     expect(go.textContent).toBe("Starting…");
     resolve();
@@ -224,10 +244,11 @@ describe("the start sheet", () => {
     expect(sheet.element.hidden).toBe(true);
   });
 
-  it("is one radio group: arrows move the choice, only the chosen mode is a tab stop, and Tab stays inside", () => {
-    const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}), newId: ids() });
+  it("is one radio group: arrows move the choice, only the chosen mode is a tab stop, and Tab stays inside", async () => {
+    const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start: vi.fn(async () => {}), newId: ids() });
     document.body.append(sheet.element);
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     const open = q<HTMLButtonElement>(sheet.element, '[data-mode="open"]');
     const blind = q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]');
     expect([open.tabIndex, blind.tabIndex]).toEqual([0, -1]);
@@ -247,9 +268,10 @@ describe("the start sheet", () => {
     expect(document.activeElement).toBe(go);
   });
 
-  it("opens with the given mode preselected (New in the pane), and Cancel closes it", () => {
-    const sheet = createCookoutStartSheet({ document, start: vi.fn(async () => {}), newId: ids() });
-    sheet.open(true);
+  it("opens with the given mode preselected (New in the pane), and Cancel closes it", async () => {
+    const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start: vi.fn(async () => {}), newId: ids() });
+    sheet.open({ blind: true });
+    await flush(); // the twist options are read before Start is live
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-cancel").click();
     expect(sheet.isOpen()).toBe(false);
@@ -258,12 +280,14 @@ describe("the start sheet", () => {
   it("stays open with the reason when the round could not start", async () => {
     const sheet = createCookoutStartSheet({
       document,
+      ...SHEET_DEPS,
       start: vi.fn(async () => {
         throw new Error("Cookout isn't available on this server right now.");
       }),
       newId: ids(),
     });
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
     await flush();
     expect(sheet.isOpen()).toBe(true);
@@ -275,8 +299,9 @@ describe("the start sheet", () => {
     const start = vi.fn(async () => {
       throw new Error("Couldn't start a Cookout — try again.");
     });
-    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
+    const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
     go.click();
     await flush();
@@ -287,9 +312,10 @@ describe("the start sheet", () => {
     await flush();
     sheet.close();
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     go.click();
     await flush();
-    expect(start.mock.calls).toEqual([
+    expect(start.mock.calls.map((call: unknown[]) => [(call[0] as StartChoices).blind, call[1]])).toEqual([
       [false, "start-1"],
       [false, "start-1"],
       [true, "start-2"],
@@ -297,12 +323,14 @@ describe("the start sheet", () => {
     ]);
   });
 
-  it("opening again while a start is in flight changes nothing (no second Start beside it)", () => {
+  it("opening again while a start is in flight changes nothing (no second Start beside it)", async () => {
     const start = vi.fn(() => new Promise<void>(() => {}));
-    const sheet = createCookoutStartSheet({ document, start, newId: ids() });
-    sheet.open(true);
+    const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
+    sheet.open({ blind: true });
+    await flush(); // the twist options are read before Start is live
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
-    sheet.open(false);
+    sheet.open({ blind: false });
+    await flush(); // the twist options are read before Start is live
     expect(q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").disabled).toBe(true);
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
   });
@@ -311,7 +339,7 @@ describe("the start sheet", () => {
     const h = make();
     h.show(finishedView({ blind: true }));
     q<HTMLButtonElement>(h.pane, ".wx-srv-ck-new").click();
-    expect(h.openStartSheet).toHaveBeenCalledWith(true);
+    expect(h.openStartSheet).toHaveBeenCalledWith(expect.objectContaining({ blind: true, style: null, challenge: null, wildcard: false, stars: false, fridge: null }));
   });
 });
 
@@ -358,15 +386,25 @@ describe("the draft: two cards, two skips", () => {
     expect(q(h.pane, ".wx-srv-ck-final").textContent).toBe("Final pair — pick one of the two above");
   });
 
-  it("a skip sends the turn and the offer on screen with a fresh move id", async () => {
+  it("a skip sends the turn, the offer and the pair on screen with a fresh move id", async () => {
     const h = make();
     h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, SALMON] }));
     h.api.skip.mockResolvedValue(ok(pickingView({ turn: 3, offerIndex: 2, options: [RIBEYE, SALMON], rev: 9 })));
     q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").click();
-    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1 });
+    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, optionIds: [LENTILS.id, SALMON.id] });
     expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").disabled).toBe(true);
     await flush();
     expect(h.pane.querySelector(".wx-srv-ck-final")).not.toBeNull();
+  });
+
+  it("a skip after the pair changed in place (a veto, same offer) names the NEW pair, not the one it replaced", async () => {
+    const h = make();
+    h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, SALMON] }));
+    h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, RIBEYE], rev: 9 }));
+    h.api.skip.mockResolvedValue(ok(pickingView({ turn: 3, offerIndex: 2, options: [RIBEYE, SALMON], rev: 10 })));
+    q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").click();
+    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, optionIds: [LENTILS.id, RIBEYE.id] });
+    await flush();
   });
 
   it("a pick resends the SAME move id after a lost answer, and says it is in the basket", async () => {
@@ -541,7 +579,7 @@ describe("the chef", () => {
     h.show(finishedView({ concepts: "failed", images: "none" }));
     h.api.retryConcepts.mockResolvedValue(ok(finishedView({ concepts: "pending", images: "none", rev: 13 })));
     q<HTMLButtonElement>(h.pane, ".wx-srv-ck-retry").click();
-    expect(h.api.retryConcepts).toHaveBeenCalledWith(41);
+    expect(h.api.retryConcepts).toHaveBeenCalledWith(41, 1);
     await flush();
     expect(h.pane.querySelector(".wx-srv-ck-chef-working")).not.toBeNull();
   });
@@ -573,7 +611,7 @@ describe("the chef", () => {
     const cardC = q(h.pane, '.wx-srv-ck-dish[data-concept="c"]');
     h.api.retryPictures.mockResolvedValue(ok(finishedView({ concepts: "ready", images: "pending", rev: 14 })));
     q<HTMLButtonElement>(cardC, ".wx-srv-ck-dish-retry").click();
-    expect(h.api.retryPictures).toHaveBeenCalledWith(41);
+    expect(h.api.retryPictures).toHaveBeenCalledWith(41, 1);
   });
 
   it("Bank this → Writing recipe… → Banked ✓, each dish on its own, then the full recipe", async () => {
@@ -585,7 +623,7 @@ describe("the chef", () => {
     ((pendingA["recipes"] as Json)["a"] as Json)["state"] = "pending";
     h.api.bank.mockResolvedValue(ok(pendingA));
     q<HTMLButtonElement>(card("a"), ".wx-srv-ck-bank").click();
-    expect(h.api.bank).toHaveBeenCalledWith(41, "a", "move-1");
+    expect(h.api.bank).toHaveBeenCalledWith(41, "a", "move-1", 1);
     expect(q(card("a"), ".wx-srv-ck-bank").textContent).toBe("Saving…");
     await flush();
     expect(q(card("a"), ".wx-srv-ck-writing").textContent).toBe("Writing recipe…");
@@ -622,7 +660,7 @@ describe("the chef", () => {
     expect(retry.textContent).toBe("Recipe didn't finish — Try again");
     h.api.retryRecipe.mockResolvedValue(ok(finishedView({ concepts: "ready", images: "done", rev: 13 })));
     retry.click();
-    expect(h.api.retryRecipe).toHaveBeenCalledWith(41, "c");
+    expect(h.api.retryRecipe).toHaveBeenCalledWith(41, "c", 1);
   });
 
   it("a banked recipe the client cannot read says so instead of offering a retry the server would refuse", () => {

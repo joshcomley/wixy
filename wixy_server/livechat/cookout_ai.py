@@ -335,11 +335,28 @@ def _concept_twist_lines(basket: Mapping[str, Any], forbidden_names: Sequence[st
     return lines
 
 
+STAPLE_ORDER: Final = ("butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk")
+
+
+def _pickable_staples_phrase(basket: Mapping[str, Any]) -> str:
+    """ "butter, plain-flour, ... and milk": the pickable staples still on offer. A staple removed
+    by a rescue swap (the payload's `twists.forbidden`) is dropped from the sentence as it is from
+    the staples list; with nothing removed this is exactly the core wording."""
+    twists = basket.get("twists")
+    removed = twists.get("forbidden") if isinstance(twists, Mapping) else None
+    gone = {str(i) for i in removed} if isinstance(removed, list) else set()
+    names = [i for i in STAPLE_ORDER if i not in gone]
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def build_concepts_prompt(basket: Mapping[str, Any], *, forbidden_names: Sequence[str] = ()) -> str:
     """The Stage-1 prompt. Without a `twists` object in `basket` the text is exactly the core's;
     otherwise the count words follow the basket size and the twist lines are added before the
     answer schema. `forbidden_names` are the display names of the payload's forbidden ids."""
     count = _count_word(len(basket.get("ingredients") or []) or 10)
+    pickable_staples = _pickable_staples_phrase(basket)
     twist_lines = _concept_twist_lines(basket, forbidden_names)
     twist_block = ("\n" + "\n".join(twist_lines) + "\n") if twist_lines else ""
     return f"""You are a creative, practical home-cooking chef. Two friends have picked {count} \
@@ -352,7 +369,7 @@ Rules:
 - Use ONLY the picked ingredients (by "id") and the cupboard staples (by "id"). Never \
 introduce any other food: no unpicked fruit, vegetable, stock, garlic, herb, spice, sauce or \
 anything else, anywhere in any text. Water, salt and black-pepper are always free. At most \
-{MAX_EXTRA_STAPLES} of butter, plain-flour, cooking-oil, granulated-sugar and milk may be used \
+{MAX_EXTRA_STAPLES} of {pickable_staples} may be used \
 in one concept, and only when they are not already picked.
 - Each concept uses at least {MIN_PICKED_EACH} of the {count} picked ingredients, at least one \
 uses {MIN_PICKED_BEST} or more, and between them the three concepts use all {count}.

@@ -47,12 +47,18 @@ describe("the message summary", () => {
       concepts: "none",
       bankedCount: 0,
       rev: 3,
+      // A core-era summary reads as the twists' "off" values.
+      generation: 1,
+      waiting: [],
+      swap: "none",
+      dinnerDecided: false,
+      cookedCount: 0,
     });
   });
 
   it("defaults unknown or out-of-range counts and states rather than trusting them", () => {
     const s = parseCookoutSummary({ state: "finished", blind: "yes", pickedCount: 99, concepts: "odd", bankedCount: -1, rev: 2 });
-    expect(s).toEqual({ state: "finished", blind: false, pickedCount: 0, concepts: "none", bankedCount: 0, rev: 2 });
+    expect(s).toEqual({ state: "finished", blind: false, pickedCount: 0, concepts: "none", bankedCount: 0, rev: 2, generation: 1, waiting: [], swap: "none", dinnerDecided: false, cookedCount: 0 });
   });
 
   it("is null for anything that is not a summary", () => {
@@ -85,7 +91,7 @@ describe("the round view", () => {
     expect(view.players[0].name).toBe("Josh");
     expect(view.players[0].picks?.map((p) => p.id)).toEqual(["thick-white-toast"]);
     expect(view.players[1].picks?.map((p) => p.id)).toEqual(["ribeye-steak"]);
-    expect(view.you).toEqual({ slot: 1 });
+    expect(view.you).toEqual({ slot: 1, chaosUsed: false, vetoUsed: false });
     expect(view.current).toMatchObject({ turn: 3, player: 1, role: "protein", offerIndex: 1, skipsRemaining: 1 });
     expect(view.current?.options?.map((o) => o.id)).toEqual(["ribeye-steak", "salmon-fillet"]);
     expect(view.staples).toHaveLength(8);
@@ -254,10 +260,10 @@ describe("the calls", () => {
   it("maps the server's conflicts to their own kinds", async () => {
     for (const error of ["not_your_turn", "not_player", "skip_exhausted", "exhausted", "bad_state"]) {
       serverFetch.mockResolvedValueOnce(json({ error }, 409));
-      expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0 })).toEqual({ ok: false, kind: error });
+      expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0, optionIds: ["a-b", "c-d"] })).toEqual({ ok: false, kind: error });
     }
     serverFetch.mockResolvedValueOnce(json({ error: "mystery" }, 409));
-    expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0 })).toEqual({ ok: false, kind: "bad_state" });
+    expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0, optionIds: ["a-b", "c-d"] })).toEqual({ ok: false, kind: "bad_state" });
     serverFetch.mockResolvedValueOnce(json({}, 404));
     expect((await getCookout(SESSION, 41, "Josh")).ok).toBe(false);
     serverFetch.mockResolvedValueOnce(json({}, 422));
@@ -278,13 +284,13 @@ describe("the calls", () => {
   it("sends a pick, a bank and a recipe retry to their routes with their bodies", async () => {
     serverFetch.mockResolvedValue(json(finishedView()));
     await pickCookout(SESSION, 41, { sender: "Josh", moveId: "m2", turn: 10, offer: 2, ingredientId: "white-miso" });
-    await bankCookoutConcept(SESSION, 41, "b", { sender: "Josh", moveId: "m3" });
-    await retryCookoutRecipe(SESSION, 41, "c", { sender: "Josh" });
+    await bankCookoutConcept(SESSION, 41, "b", { sender: "Josh", moveId: "m3", generation: 1 });
+    await retryCookoutRecipe(SESSION, 41, "c", { sender: "Josh", generation: 1 });
     const calls = serverFetch.mock.calls.map((c) => [c[0], JSON.parse(String((c[1] as RequestInit).body))]);
     expect(calls).toEqual([
       ["/cookout/41/pick", { sender: "Josh", moveId: "m2", turn: 10, offer: 2, ingredientId: "white-miso" }],
-      ["/cookout/41/concepts/b/bank", { sender: "Josh", moveId: "m3" }],
-      ["/cookout/41/concepts/c/recipe/retry", { sender: "Josh" }],
+      ["/cookout/41/concepts/b/bank", { sender: "Josh", moveId: "m3", generation: 1 }],
+      ["/cookout/41/concepts/c/recipe/retry", { sender: "Josh", generation: 1 }],
     ]);
   });
 

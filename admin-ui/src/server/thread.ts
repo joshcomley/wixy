@@ -71,7 +71,22 @@ import {
   bankCookoutConcept,
   createCookout,
   getCookout,
+  getCookoutOptions,
+  getRoundPhotos,
   joinCookout,
+  linkRecipePhoto,
+  luckyCookout,
+  markCooked,
+  chaosCookout,
+  vetoCookout,
+  starCookout,
+  wildcardCookout,
+  voteCookout,
+  proposeSwap,
+  chooseSwap,
+  cancelSwap,
+  rateRecipe,
+  searchIngredients,
   parseCookoutSummary,
   pickCookout,
   retryCookoutConcepts,
@@ -79,12 +94,13 @@ import {
   retryCookoutRecipe,
   skipCookout,
   type ConceptId,
+  type CookoutOptions,
 } from "./cookout/api";
 import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
-import { createCookoutStartSheet, type CookoutStartSheet } from "./cookout/startSheet";
+import { createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -458,7 +474,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
   cookoutItem.addEventListener("click", () => {
     closeMoreMenu();
-    cookoutStart.open(false, header.offsetHeight);
+    cookoutStart.open({}, header.offsetHeight);
   });
   recipeBookItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -1406,24 +1422,72 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       skip: (seq, input) => skipCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
       pick: (seq, input) => pickCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
       abandon: (seq) => abandonCookout(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
-      retryConcepts: (seq) => retryCookoutConcepts(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
-      retryPictures: (seq) => retryCookoutPictures(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
-      bank: (seq, conceptId, moveId) =>
-        bankCookoutConcept(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "", moveId }),
-      retryRecipe: (seq, conceptId) => retryCookoutRecipe(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "" }),
+      retryConcepts: (seq, generation) => retryCookoutConcepts(cookoutSession(), seq, { sender: identity.getName() ?? "", generation }),
+      retryPictures: (seq, generation) => retryCookoutPictures(cookoutSession(), seq, { sender: identity.getName() ?? "", generation }),
+      bank: (seq, conceptId, moveId, generation) =>
+        bankCookoutConcept(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "", moveId, generation }),
+      retryRecipe: (seq, conceptId, generation) =>
+        retryCookoutRecipe(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "", generation }),
+      lucky: (seq, input) => luckyCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      chaos: (seq, input) => chaosCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      veto: (seq, input) => vetoCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      star: (seq, ingredientId) => starCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ingredientId }),
+      wildcard: (seq, moveId, lift) => wildcardCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, lift }),
+      vote: (seq, generation, conceptId) => voteCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", generation, conceptId }),
+      proposeSwap: (seq, moveId, ingredientId) =>
+        proposeSwap(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, ingredientId }),
+      chooseSwap: (seq, moveId, ingredientId) => chooseSwap(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, ingredientId }),
+      cancelSwap: (seq) => cancelSwap(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
+      markCooked: (seq, generation, conceptId, cooked) =>
+        markCooked(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", cooked }),
+      rate: (seq, generation, conceptId, rating) =>
+        rateRecipe(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", rating }),
+      linkPhoto: (seq, generation, conceptId, messageSeq, attachmentId) =>
+        linkRecipePhoto(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", messageSeq, attachmentId }),
+      photos: (seq) => getRoundPhotos(cookoutSession(), seq, identity.getName() ?? ""),
     },
     roundMessage: (seq) => confirmedBySeq.get(seq),
     partner: () => partnerName,
-    openStartSheet: (blind) => cookoutStart.open(blind, header.offsetHeight),
+    openStartSheet: (preset) => cookoutStart.open(preset, header.offsetHeight),
     openBook: () => recipeBook.open(header.offsetHeight),
     openLightbox: (src, alt) => lightbox.open(src, alt),
     afterChange: () => threadScroll.afterContentChange(false),
     newId: () => cryptoRandomId(win),
   });
-  // The start sheet (Open / Blind, then Start Cookout): from the ... menu and the pane's New.
+  // The start sheet (Open / Blind and the optional twists, then Start Cookout): from the ... menu, the
+  // pane's New and the encore buttons. `GET /cookout/options` is read once per unlock (cleared on every
+  // lock and wipe with `cookoutOptions = null`).
+  let cookoutOptions: Promise<CookoutOptions | null> | null = null;
+  function loadCookoutOptions(): Promise<CookoutOptions | null> {
+    const session = currentSession;
+    if (session === null) return Promise.resolve(null);
+    if (cookoutOptions === null) {
+      const asked = getCookoutOptions(session).catch((error: unknown) => {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return null;
+      });
+      cookoutOptions = asked;
+      // A failed read is not cached: the next open asks again.
+      void asked.then((options) => {
+        if (options === null && cookoutOptions === asked) cookoutOptions = null;
+      });
+    }
+    return cookoutOptions;
+  }
   const cookoutStart: CookoutStartSheet = createCookoutStartSheet({
     document: documentRef,
-    start: (blind, clientId) => addCookout(blind, clientId),
+    start: (choices, clientId) => addCookout(choices, clientId),
+    loadOptions: () => loadCookoutOptions(),
+    async search(q) {
+      const session = currentSession;
+      if (session === null) return { ok: false, kind: "unavailable" };
+      try {
+        return await searchIngredients(session, q);
+      } catch (error) {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return { ok: false, kind: "unavailable" };
+      }
+    },
     newId: () => cryptoRandomId(win),
   });
   gameMounted = true;
@@ -1437,6 +1501,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function resetGames(): void {
     itemChat.reset();
     gameTabs.reset();
+    cookoutGame.forgetAll();
     seenAnchor.wyr = 0;
     seenAnchor.adventure = 0;
     seenAnchor.cookout = 0;
@@ -1589,7 +1654,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     document: documentRef,
     hooks,
     getSession: () => currentSession,
-    openRecipe: (seq, conceptId) => void openCookoutRecipe(seq, conceptId),
+    openRecipe: (seq, conceptId, generation) => void openCookoutRecipe(seq, conceptId, generation),
+    openEncore: (encore) => cookoutStart.open({ encore }, header.offsetHeight),
   });
   element.appendChild(recipeBook.element);
   element.appendChild(cookoutStart.element);
@@ -2324,17 +2390,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * message appears at once; the starter lands in the Cookout tab and takes Turn 1 (the other person is
    * OFFERED it, with a dot, by `syncGames`). Throws with the words to show when it could not start, so the
    * sheet stays open with them; a lock closes everything instead. */
-  async function addCookout(blind: boolean, clientId: string): Promise<void> {
+  async function addCookout(choices: StartChoices, clientId: string): Promise<void> {
     const session = currentSession;
     if (session === null) return;
     const requestGeneration = contentGeneration;
     let result: Awaited<ReturnType<typeof createCookout>>;
     try {
+      // Only the twists actually chosen go on the wire: a twist-free start is the core request exactly.
       result = await createCookout(session, {
         clientId,
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
-        blind,
+        blind: choices.blind,
+        ...(choices.style === null ? {} : { style: choices.style }),
+        ...(choices.challenge === null ? {} : { challenge: choices.challenge }),
+        ...(choices.wildcard ? { wildcard: true } : {}),
+        ...(choices.stars ? { stars: true } : {}),
+        ...(choices.fridgeSeedId === null ? {} : { fridgeSeedId: choices.fridgeSeedId }),
+        ...(choices.encore === null ? {} : { encore: choices.encore }),
       });
     } catch (error) {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
@@ -2347,7 +2420,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           ? "Cookout isn't available yet — try again in a moment."
           : result.kind === "game_unavailable"
             ? "Cookout isn't available on this server right now."
-            : "Couldn't start a Cookout — try again.",
+            : result.kind === "invalid"
+              ? "The kitchen can't start with those twists — change a choice and try again."
+              : "Couldn't start a Cookout — try again.",
       );
     }
     addConfirmed(result.message);
@@ -2357,9 +2432,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   /** The Recipe book's tap: open that round's dish in the Cookout tab, loading its message first. */
-  async function openCookoutRecipe(seq: number, conceptId: ConceptId): Promise<void> {
+  async function openCookoutRecipe(seq: number, conceptId: ConceptId, generation: number): Promise<void> {
     if (await ensureMessageLoaded(seq)) {
-      cookoutGame.openRecipe(seq, conceptId);
+      cookoutGame.openRecipe(seq, conceptId, generation);
       return;
     }
     if (currentSession !== null) composer.setError("Couldn't open that recipe — try again.");
@@ -2892,6 +2967,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     holidayBank.close();
     recipeBook.close();
     cookoutStart.close();
+    cookoutOptions = null;
     partnerName = null;
     partnerSeq = 0;
     contentGeneration += 1;
@@ -3659,6 +3735,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       holidayBank.close();
       recipeBook.close();
       cookoutStart.close();
+      cookoutOptions = null;
       wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3781,6 +3858,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       holidayBank.close();
       recipeBook.close();
       cookoutStart.close();
+      cookoutOptions = null;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();
