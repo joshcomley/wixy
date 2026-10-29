@@ -713,3 +713,362 @@ def test_a_stop_word_never_hides_an_omitted_item() -> None:
         )
         == []
     )
+
+
+# -- twists: exotic pairs, replacements, wildcard, search, helpers (spec 09a section 5.1) ----------
+
+COMMITTED = load_cookout_bank(REAL_BANK)
+
+
+def _exotic_draw(bank: CookoutBank, seed: int = 1, **over: Any) -> tuple[Ingredient, Ingredient]:
+    return _draw(bank, seed, rarity_mode="exotic", **over)
+
+
+def test_exotic_pair_invariants_on_the_committed_bank() -> None:
+    rng = random.Random(7)
+    for role in ROLES:
+        seen: set[str] = set()
+        for turn in range(40):
+            if turn % 4 == 0:
+                seen.clear()  # a round only ever draws a handful of exotic pairs
+            one, two = COMMITTED.draw_pair(
+                role=role,
+                seen_ids=seen,
+                picked_families=set(),
+                offered_families=set(),
+                player_offered_categories=[],
+                rng=rng,
+                rarity_mode="exotic",
+            )
+            assert one.rarity == two.rarity == "exotic"
+            assert one.role == two.role == role
+            assert one.category != two.category and one.family != two.family
+            assert not ({one.id, two.id} & seen)
+            seen.update((one.id, two.id))
+
+
+def test_exotic_pair_respects_picked_families_and_relaxes_the_offered_preference() -> None:
+    bank = _mini(
+        _item("Teff", "a", "teff", "exotic"),
+        _item("Fonio", "b", "fonio", "exotic"),
+        _item("Quinoa", "c", "quinoa", "exotic"),
+        _item("Rice", "a", "rice"),
+    )
+    for seed in range(30):
+        one, two = _exotic_draw(bank, seed, picked_families={"teff"})
+        assert {one.id, two.id} == {"fonio", "quinoa"}
+        # Avoiding the offered families alone would leave nothing, so the soft rule relaxes.
+        one, two = _exotic_draw(bank, seed, offered_families={"fonio", "quinoa", "teff"})
+        assert one.family != two.family and one.rarity == two.rarity == "exotic"
+        # While a pairing exists without them, they are avoided.
+        one, two = _exotic_draw(bank, seed, offered_families={"teff"})
+        assert {one.id, two.id} == {"fonio", "quinoa"}
+
+
+def test_exotic_pair_exhaustion() -> None:
+    only_everyday = _mini(_item("Rice", "a", "rice"), _item("Toast", "b", "toast"))
+    with pytest.raises(CookoutExhaustedError):
+        _exotic_draw(only_everyday)
+    one_category = _mini(
+        _item("Teff", "a", "teff", "exotic"), _item("Fonio", "a", "fonio", "exotic")
+    )
+    with pytest.raises(CookoutExhaustedError):
+        _exotic_draw(one_category)
+    two_exotics = _mini(
+        _item("Teff", "a", "teff", "exotic"), _item("Fonio", "b", "fonio", "exotic")
+    )
+    assert {o.id for o in _exotic_draw(two_exotics)} == {"teff", "fonio"}
+    with pytest.raises(CookoutExhaustedError):
+        _exotic_draw(two_exotics, seen_ids={"teff"})
+    with pytest.raises(CookoutExhaustedError):
+        _exotic_draw(two_exotics, picked_families={"fonio"})
+
+
+def test_normal_draw_is_unchanged_by_the_new_parameter() -> None:
+    for seed in range(20):
+        assert _draw(COMMITTED, seed) == _draw(COMMITTED, seed, rarity_mode="normal")
+
+
+def _replace(bank: CookoutBank, keep: str, seed: int = 1, **over: Any) -> Ingredient:
+    kwargs: dict[str, Any] = {
+        "role": "base",
+        "keep_id": keep,
+        "seen_ids": {keep},
+        "picked_families": set(),
+        "offered_families": set(),
+        "player_offered_categories": [],
+        "rng": random.Random(seed),
+    }
+    kwargs.update(over)
+    result: Ingredient = bank.draw_replacement(**kwargs)
+    return result
+
+
+def test_replacement_keeps_the_pair_legal_on_the_committed_bank() -> None:
+    rng = random.Random(11)
+    for role in ROLES:
+        seen: set[str] = set()
+        for _ in range(60):
+            kept, swept = COMMITTED.draw_pair(
+                role=role,
+                seen_ids=seen,
+                picked_families=set(),
+                offered_families=set(),
+                player_offered_categories=[],
+                rng=rng,
+            )
+            seen.update((kept.id, swept.id))
+            extra = COMMITTED.draw_replacement(
+                role=role,
+                keep_id=kept.id,
+                seen_ids=seen,
+                picked_families=set(),
+                offered_families=set(),
+                player_offered_categories=[],
+                rng=rng,
+            )
+            assert extra.role == role and extra.id not in seen
+            assert extra.category != kept.category and extra.family != kept.family
+            assert "everyday" in (kept.rarity, extra.rarity)
+            seen.add(extra.id)
+
+
+def test_replacement_must_be_everyday_when_the_kept_option_is_not() -> None:
+    bank = _mini(
+        _item("Teff", "a", "teff", "exotic"),
+        _item("Rice", "b", "rice"),
+        _item("Naan", "c", "naan", "uncommon"),
+        _item("Toast", "d", "toast", "exotic"),
+    )
+    for seed in range(40):
+        assert _replace(bank, "teff", seed).id == "rice"
+    with pytest.raises(CookoutExhaustedError):
+        _replace(bank, "teff", seen_ids={"teff", "rice"})
+    # An everyday keeper leaves every tier open.
+    assert {_replace(bank, "rice", seed).id for seed in range(120)} == {"teff", "naan", "toast"}
+
+
+def test_replacement_exotic_mode_and_exhaustion() -> None:
+    bank = _mini(
+        _item("Teff", "a", "teff", "exotic"),
+        _item("Fonio", "b", "fonio", "exotic"),
+        _item("Rice", "c", "rice"),
+        _item("Naan", "d", "naan", "uncommon"),
+    )
+    for seed in range(30):
+        assert _replace(bank, "teff", seed, rarity_mode="exotic").id == "fonio"
+    with pytest.raises(CookoutExhaustedError):
+        _replace(bank, "teff", seen_ids={"teff", "fonio"}, rarity_mode="exotic")
+    with pytest.raises(CookoutBankError):
+        _replace(bank, "nope")
+
+
+def test_replacement_excludes_keepers_category_and_family_and_prefers_new_families() -> None:
+    bank = _mini(
+        _item("Rice", "a", "rice"),
+        _item("Brown rice", "b", "rice"),
+        _item("Pasta", "a", "pasta"),
+        _item("Toast", "c", "toast"),
+        _item("Naan", "d", "naan"),
+    )
+    for seed in range(40):
+        assert _replace(bank, "rice", seed).id in {"toast", "naan"}
+        assert _replace(bank, "rice", seed, offered_families={"toast"}).id == "naan"
+    # Relaxed when every candidate family has been offered.
+    assert _replace(bank, "rice", offered_families={"toast", "naan"}).id in {"toast", "naan"}
+
+
+def test_replacement_prefers_the_least_shown_category() -> None:
+    bank = _mini(
+        _item("Rice", "a", "rice"),
+        _item("Toast", "b", "toast"),
+        _item("Naan", "c", "naan"),
+    )
+    for seed in range(30):
+        shown = ["b", "b", "c"]
+        assert _replace(bank, "rice", seed, player_offered_categories=shown).id == "naan"
+
+
+def test_wildcard_invariants_on_the_committed_bank() -> None:
+    rng = random.Random(5)
+    seen = {"butter", "milk"}
+    picked = {"butter"}
+    for _ in range(200):
+        card = COMMITTED.draw_wildcard(
+            seen_ids=seen,
+            picked_families=picked,
+            offered_families=set(),
+            basket_categories={"vegetables"},
+            rng=rng,
+        )
+        assert card.rarity in ("uncommon", "exotic")
+        assert card.id not in seen and card.id not in STAPLE_IDS
+        assert card.family not in picked
+        assert card.category != "vegetables"
+
+
+def test_wildcard_tiers_are_balanced_and_pickable_staples_excluded() -> None:
+    bank = _mini(
+        _item("Teff", "a", "teff", "exotic"),
+        _item("Naan", "b", "naan", "uncommon"),
+        _item("Rice", "c", "rice"),
+        _item("Butter", "d", "butter", "uncommon"),
+    )
+    rng = random.Random(9)
+    tally: collections.Counter[str] = collections.Counter()
+    for _ in range(2000):
+        card = bank.draw_wildcard(
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            basket_categories=set(),
+            rng=rng,
+        )
+        tally[card.id] += 1
+    assert set(tally) == {"teff", "naan"}
+    assert 850 < tally["teff"] < 1150
+
+
+def test_wildcard_soft_preferences_relax_category_first_then_family() -> None:
+    bank = _mini(
+        _item("Teff", "a", "teff", "exotic"),
+        _item("Naan", "b", "naan", "uncommon"),
+    )
+
+    def wild(**over: Any) -> str:
+        kwargs: dict[str, Any] = {
+            "seen_ids": set(),
+            "picked_families": set(),
+            "offered_families": set(),
+            "basket_categories": set(),
+            "rng": random.Random(2),
+        }
+        kwargs.update(over)
+        return bank.draw_wildcard(**kwargs).id
+
+    for seed in range(20):
+        rng = random.Random(seed)
+        assert wild(basket_categories={"a"}, rng=rng) == "naan"
+        assert wild(offered_families={"teff"}, rng=rng) == "naan"
+        both = wild(basket_categories={"a", "b"}, offered_families={"teff"}, rng=rng)
+        assert both == "naan"
+    everything = wild(basket_categories={"a", "b"}, offered_families={"teff", "naan"})
+    assert everything in {"teff", "naan"}
+    with pytest.raises(CookoutExhaustedError):
+        wild(seen_ids={"teff", "naan"})
+    with pytest.raises(CookoutExhaustedError):
+        wild(picked_families={"teff", "naan"})
+
+
+def test_search_folds_accents_prefixes_and_multiple_tokens() -> None:
+    bank = _mini(
+        _item("Café noir", "a", "coffee", role="accent"),
+        _item("Red onion", "b", "onion", role="produce", aliases=("scarlet onion",)),
+        _item("Spring onion", "b", "spring-onion", role="produce"),
+        _item("Streaky bacon", "c", "bacon", role="protein"),
+    )
+    assert [i.name for i in bank.search("CAFE")] == ["Café noir"]
+    assert [i.name for i in bank.search("caf n")] == ["Café noir"]
+    assert [i.id for i in bank.search("on")] == ["red-onion", "spring-onion"]
+    assert [i.id for i in bank.search("scar on")] == ["red-onion"]
+    assert [i.id for i in bank.search("onion red")] == ["red-onion"]
+    assert bank.search("") == () and bank.search("   ") == () and bank.search("zzz") == ()
+    assert len(bank.search("on", limit=1)) == 1 and bank.search("on", limit=0) == ()
+
+
+def test_search_ranking_exact_prefix_name_then_alias_then_rarity_then_name() -> None:
+    bank = _mini(
+        _item("Onion", "a", "onion", "exotic"),
+        _item("Onion rings", "b", "rings"),
+        _item("Spring onion", "c", "spring"),
+        _item("Shallot", "d", "shallot", aliases=("french onion",)),
+        _item("Zesty onion", "e", "zesty", "uncommon"),
+        _item("Brown onion", "f", "brown", "uncommon"),
+    )
+    assert [i.id for i in bank.search("onion")] == [
+        "onion",  # exact name (beats the everyday rarity of the rest)
+        "onion-rings",  # name prefix
+        "spring-onion",  # other name matches: everyday first, then uncommon by name
+        "brown-onion",
+        "zesty-onion",
+        "shallot",  # alias match last
+    ]
+
+
+def test_search_on_the_committed_bank_finds_staples_and_nothing_outside_it() -> None:
+    for staple in ("butter", "plain flour", "cooking oil", "granulated sugar", "milk"):
+        assert any(i.name.lower() == staple for i in COMMITTED.search(staple))
+    assert all(i.id != "water" for i in COMMITTED.search("water"))
+    for hit in COMMITTED.search("chic", limit=50):
+        assert COMMITTED.ingredient(hit.id) is hit
+
+
+def test_mentions_by_name_alias_plural_family_and_staple_short_form() -> None:
+    bank = _scan_bank()
+    assert bank.mentions("a bowl of Pak choi", "pak-choi")
+    assert bank.mentions("stir in some bok choy", "pak-choi")
+    assert bank.mentions("two mangoes", "mango")
+    assert bank.mentions("crispy bacon bits", "streaky-bacon")  # bare family word
+    assert bank.mentions("a knob of butter", "butter")
+    assert bank.mentions("a cup of flour", "plain-flour")  # bare short form
+    assert bank.mentions("a drizzle of oil", "cooking-oil")
+    assert bank.mentions("a spoon of sugar", "granulated-sugar")
+    assert not bank.mentions("a bowl of rice", "mango")
+    assert not bank.mentions("anything", "no-such-id")
+
+
+def test_mentions_longest_span_consumes_and_ignores_stop_words() -> None:
+    bank = _scan_bank()
+    assert not bank.mentions("spread on peanut butter", "butter")
+    assert bank.mentions("spread on peanut butter", "peanut-butter")
+    assert not bank.mentions("coconut milk sauce", "milk")
+    assert bank.mentions("coconut milk sauce", "coconut-milk")
+    stoppy = _mini(_item("Rye bread", "a", "bread"), stop_words=frozenset({"bread"}))
+    assert stoppy.mentions("a slice of bread", "rye-bread")
+
+
+def test_food_free_tokens_drops_recognised_foods_only() -> None:
+    bank = _mini(
+        _item("Baking powder", "a", "baking-powder", role="accent"),
+        _item("Pot barley", "b", "barley"),
+        _item("Rice", "c", "rice"),
+    )
+    assert bank.food_free_tokens("Add baking powder, then bake in the oven") == (
+        "add",
+        "then",
+        "bake",
+        "in",
+        "the",
+        "oven",
+    )
+    assert bank.food_free_tokens("one pot of pot barley and rice") == ("one", "pot", "of", "and")
+    assert bank.food_free_tokens("") == ()
+    assert bank.food_free_tokens("no foods here") == ("no", "foods", "here")
+
+
+@pytest.mark.parametrize("role", ROLES)
+def test_first_role_leads_the_schedule_for_every_role(role: RoleKey) -> None:
+    bank = _mini(_item("Rice", "a", "rice"))
+    for seed in range(40):
+        schedule = bank.shuffle_role_schedule(random.Random(seed), first_role=role)
+        assert schedule[0] == role
+        assert sorted(schedule) == sorted(cookout_bank.ROLE_SCHEDULE)
+        plain = bank.shuffle_role_schedule(random.Random(seed))
+        assert plain == bank.shuffle_role_schedule(random.Random(seed), first_role=None)
+
+
+def test_validator_twist_simulation_and_exotic_coverage(
+    raw_bank: dict[str, Any], tmp_path: Path
+) -> None:
+    assert validator.simulate_twist_rounds(REAL_BANK, rounds=40) == []
+
+    def strip_exotic_produce(doc: dict[str, Any]) -> None:
+        for item in doc["ingredients"]:
+            if item["role"] == "produce" and item["rarity"] == "exotic":
+                item["rarity"] = "uncommon"
+
+    broken = tmp_path / "broken.json"
+    broken.write_text(json.dumps(_mutated(raw_bank, strip_exotic_produce)), encoding="utf-8")
+    problems = validator.validate(broken)
+    assert any("role produce: exotic entries span fewer" in p for p in problems)
+    assert any("role produce: fewer than 40 exotic families" in p for p in problems)

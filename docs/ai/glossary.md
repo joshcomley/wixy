@@ -234,3 +234,41 @@ real provisioning failure (decisions/00031).
   (public addresses only, vetted at connect time, bounded, polite); see Inv 56.
 - **Live trail** — the dragger's finger trail, relayed id-less as `adventure_live` SSE frames and
   never stored.
+
+## Cookout (the two-player cooking game, workspace 00058, Inv 57)
+
+- **Round** (`cookout_rounds`) — one game, anchored to a text-less message. `state` is `picking` (turns 1..10, five
+  picks each, strictly alternating, slot 1 on odd turns), `finished` (all ten picked) or `abandoned` (a newer Cookout
+  started, or **End game** — never from `finished`). `blind` is chosen at the start and never changes.
+- **Slot / seat** — slot 1 is the starter; slot 2 is bound only by an explicit **Join**. Identity is the
+  would-you-rather rule (`slot_of`: the name key, plus the Access email when both sides have one), so Blind mode is a
+  no-peeking feature, not a security boundary (Inv 57).
+- **Turn, offer, skip** — a turn is one player choosing one ingredient. An **offer** is a pair of ingredients the
+  server dealt (`offerIndex` 0, 1 or 2); **Skip** ("Neither") deals a fresh pair for the same turn, at most twice
+  (`skipsRemaining`), and the third pair must be picked from (`skip_exhausted`). A skip never passes the turn.
+- **Role** — the culinary part a turn draws for: `base`, `protein`, `produce` (twice) or `accent`, in a per-round
+  shuffled order, each served to both players on paired turns. Blind mode hides it from the non-active player too.
+- **Basket** — the ten picked ingredients. **Staples** — the eight cupboard items (`water`, `salt`, `black-pepper`
+  free; `butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk` also pickable) a dish may add, at most four
+  unpicked non-seasoning ones. **Family** — a group of close variants (the three onions) of which only one is ever
+  picked in a round. **Rarity** — `everyday`, `uncommon`, `exotic` (draw weights 8 : 3 : 1; every pair has an
+  everyday side).
+- **Revealed** — Open rounds always; a Blind round exactly when `finished`. It shows the ten picks to both, never the
+  partner's skipped or unchosen pairs, and never happens for an `abandoned` round.
+- **Concepts state** (`cookout_rounds.concepts`) — `none` (not finished) → `pending` ("Chef is inventing 3
+  dishes…") → `ready` (the three **dishes**, ids `a|b|c`, each with a title, vibe, dish type, technique, description,
+  the picked ingredients it uses, the staples it adds and the omitted ones with reasons) | `failed` (retryable) |
+  `unavailable` (no AI runner, e.g. the standalone edition).
+- **Images state** (`cookout_rounds.images`) — the dishes' PICTURES: `none` (no ComfyUI) → `pending` → `done` (all
+  three) | `failed` (a slot is missing; the ones drawn are kept and **Retry picture** draws only the rest).
+  `images_generation` fences each attempt; the pictures are private photo attachments on the anchor.
+- **Recipe state** (`cookout_recipes.state`, per dish) — no row = not asked; `pending` ("Writing recipe…") →
+  `banked` ("Banked ✓", appears in the Recipe book) | `failed` | `unavailable`. A dish is `banked` only when a valid
+  full recipe is stored. **Bank this** is the tap that asks.
+- **Recipe book** — the full-height screen listing every `banked` recipe newest first; derived, not stored
+  separately, so deleting a round's message removes its recipes.
+- **Contraband scan** — the deterministic check of every word of an AI answer against the bank's ingredient names
+  and aliases, rejecting any food that is not a used pick, a declared staple or a stop word; one repair run, then
+  `failed`. **Frozen manifest** — the fixed list of ingredient and staple ids a dish's recipe may use (plus water,
+  salt and pepper).
+- **`moveId`** — the client-made id (8-64 chars) of one skip, pick or bank; replaying it is a no-op 200.

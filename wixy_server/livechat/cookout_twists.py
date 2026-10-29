@@ -1,4 +1,15 @@
-"""Cookout twist catalogues (local stand-in for X1's module, spec 09a §3.3). NOT committed by X3."""
+# ruff: noqa: E501  (the frozen catalogue wording is one long string per directive)
+"""The Cookout twist catalogues (workspace 00058, spec/server-chat/09a-cookout-twists.md §3).
+
+Pure, static data: the eight chef's styles (twist T3) and four kitchen challenges (T7), identified
+by fixed enum ids. This is the ONLY text a twist adds to a chef prompt or a picture prompt, so no
+client string ever reaches a model (governing rule 5). A catalogue test asserts every directive and picture
+phrase names no bank food, so a style can never smuggle an ingredient into the chef's mind.
+
+`NO_OVEN_WORDS` and `COOKING_VESSEL_WORDS` feed the deterministic challenge checks; they are matched
+against `CookoutBank.food_free_tokens`, so a recognised food such as "baking powder" or "pot barley"
+is never read as a technique or a vessel.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +29,8 @@ StyleId = Literal[
     "campfire",
 ]
 ChallengeId = Literal["one-pan", "no-oven", "thirty-minutes", "six-steps"]
+
+_SYSTEM_RNG = secrets.SystemRandom()
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,14 +173,19 @@ COOKING_VESSEL_WORDS: tuple[tuple[str, ...], ...] = (
     ("oven",),
 )
 
+_STYLES_BY_ID: dict[str, Style] = {s.id: s for s in STYLES}
+_CHALLENGES_BY_ID: dict[str, Challenge] = {c.id: c for c in CHALLENGES}
+
 
 def style_by_id(style_id: str) -> Style | None:
-    return next((s for s in STYLES if s.id == style_id), None)
+    return _STYLES_BY_ID.get(style_id)
 
 
 def challenge_by_id(challenge_id: str) -> Challenge | None:
-    return next((c for c in CHALLENGES if c.id == challenge_id), None)
+    return _CHALLENGES_BY_ID.get(challenge_id)
 
 
 def spin_style(rng: random.Random | None = None) -> StyleId:
-    return (rng or secrets.SystemRandom()).choice(STYLE_IDS)
+    """The style wheel's answer. The SERVER spins (cryptographic RNG by default) so the client's
+    animation can only land on what was already decided."""
+    return (rng or _SYSTEM_RNG).choice(STYLE_IDS)
