@@ -1,0 +1,267 @@
+# dairy-eggs
+Butter |  | accent | butter | everyday | Golden and creamy, the cook's richest friend for frying, melting and finishing
+Salted butter |  | accent | butter | everyday | Lightly salted butter that seasons toast, veg and pan sauces as it melts
+Unsalted butter |  | accent | butter | everyday | Clean, sweet butter for baking and delicate sauces where you control the salt
+Cultured butter |  | accent | butter | uncommon | Tangy, nutty butter from soured cream, wonderful on warm bread
+Clarified butter |  | accent | butter | uncommon | Pure golden butterfat that fries hot without burning
+Ghee |  | accent | butter | uncommon | Nutty, toasted clarified butter for curries and dals
+Brown butter | beurre noisette | accent | butter | uncommon | Butter cooked until nutty and hazelnut-brown, superb over fish and pasta
+Garlic butter |  | accent | butter | everyday | Butter whipped with garlic and parsley for bread, steak and snails
+Smen |  | accent | butter | exotic | Moroccan aged, funky preserved butter that deepens tagines
+Milk |  | accent | milk | everyday | Fresh cold milk for sauces, porridge, batters and tea
+Whole milk | full-fat milk | accent | milk | everyday | Creamy full-fat milk that makes silky custards and white sauce
+Semi-Skimmed milk |  | accent | milk | everyday | Lighter everyday milk for cereal, tea and gentle sauces
+Skimmed milk |  | accent | milk | everyday | Light, thin milk for loosening batters and mashed potato
+Goat's milk |  | accent | milk | uncommon | Slightly tangy, sweet milk with a distinctive farmyard flavour
+Sheep's milk |  | accent | milk | exotic | Rich, sweet milk prized for yoghurt and cheesemaking
+Buffalo milk |  | accent | milk | exotic | Extra-rich, creamy milk behind the best mozzarella
+Jersey milk |  | accent | milk | uncommon | Golden, rich milk with a thick cream line on top
+Buttermilk |  | accent | milk | everyday | Tangy cultured milk that makes pancakes, scones and fried chicken tender
+Kefir |  | accent | milk | uncommon | Fizzy, tart fermented milk, lovely in smoothies and dressings
+Dulce de leche |  | accent | milk | uncommon | Slow-cooked milk caramel, spooned over pancakes and ice cream
+Powdered milk | milk powder | accent | milk | uncommon | Dried milk that adds richness to bread and malted drinks
+Whey |  | accent | milk | exotic | The tangy liquid left from cheesemaking, good for baking and brining
+Single cream |  | accent | cream | everyday | Light pouring cream for soups, coffee and gentle sauces
+Double cream |  | accent | cream | everyday | Thick, luxurious cream that whips, pours and enriches anything
+Whipping cream |  | accent | cream | everyday | Cream that whips into soft, billowy clouds for desserts
+Clotted cream |  | accent | cream | uncommon | Crusty-topped Cornish cream for piling onto scones with jam
+Soured cream | sour cream | accent | cream | everyday | Cool, tangy cream to dollop on chilli, jacket potatoes and tacos
+Crème fraîche | creme fraiche | accent | cream | everyday | Mild, tangy French cream that will not curdle in hot sauces
+Squirty cream |  | accent | cream | everyday | Aerosol whipped cream for sundaes and hot chocolate
+Mascarpone |  | accent | cream | uncommon | Velvety Italian cream cheese for tiramisu and risotto
+Cream cheese |  | accent | fresh-cheese | everyday | Smooth, mildly tangy spread for bagels, frosting and cheesecake
+Quark |  | accent | fresh-cheese | uncommon | Fresh, tangy curd cheese for dips, bakes and cheesecakes
+Skyr |  | accent | yoghurt | uncommon | Thick Icelandic cultured dairy, high in protein and gently sour
+Fromage frais |  | accent | fresh-cheese | everyday | Light, smooth fresh cheese for puddings and dips
+Natural yoghurt | plain yoghurt | accent | yoghurt | everyday | Tangy and cooling, ideal for marinades, dressings and curries
+Greek yoghurt |  | accent | yoghurt | everyday | Thick, strained yoghurt, delicious with honey and nuts
+Set yoghurt |  | accent | yoghurt | uncommon | Soft, spoonable yoghurt set in the pot with a delicate tang
+Labneh |  | accent | yoghurt | uncommon | Thick strained yoghurt cheese, swirled with olive oil and za'atar
+Raita |  | accent | yoghurt | uncommon | Cooling yoghurt with cucumber and mint to tame a hot curry
+Tzatziki |  | accent | yoghurt | everyday | Garlicky Greek yoghurt and cucumber dip for grilled meats
+Coconut yoghurt |  | accent | yoghurt | uncommon | Creamy, lightly tropical cultured coconut for bowls and curries
+Lassi |  | accent | yoghurt | uncommon | Chilled Indian yoghurt drink, salty or sweet and sometimes mango
+Ayran |  | accent | yoghurt | exotic | Salty Turkish yoghurt drink that cools spicy kebabs
+Ice cream |  | accent | frozen-dairy | everyday | Cold, creamy scoops for crumbles, pies and affogato
+Gelato |  | accent | frozen-dairy | uncommon | Dense, silky Italian ice cream served slightly softer
+Custard |  | accent | cream | everyday | Warm vanilla egg custard for poured-over sponge puddings
+Crème pâtissière | creme patissiere | accent | cream | uncommon | Thick vanilla pastry cream for tarts and eclairs
+Cheddar |  | protein | cheddar | everyday | Sharp, crumbly British classic for sandwiches, sauces and toasties
+Mature Cheddar |  | protein | cheddar | everyday | Well-aged, tangy cheddar with a satisfying bite
+Mild Cheddar |  | protein | cheddar | everyday | Gentle, creamy cheddar that melts smoothly
+Extra mature Cheddar |  | protein | cheddar | uncommon | Intense, crystalline, deeply savoury aged cheddar
+Smoked Cheddar |  | protein | cheddar | uncommon | Cheddar cold-smoked over oak for a campfire edge
+Red Leicester |  | protein | british-cheese | everyday | Orange, nutty, mellow cheese that grills beautifully
+Double Gloucester |  | protein | british-cheese | everyday | Smooth, buttery waxy cheese with a mellow tang
+Single Gloucester |  | protein | british-cheese | uncommon | Lighter, milder Gloucestershire cheese with a delicate flavour
+Cheshire |  | protein | british-cheese | uncommon | Crumbly, moist, lightly salty cheese from one of Britain's oldest recipes
+Lancashire |  | protein | british-cheese | uncommon | Creamy, crumbly cheese that toasts and melts wonderfully
+Wensleydale |  | protein | british-cheese | uncommon | Flaky, honeyed Yorkshire cheese, great with fruit cake
+Cranberry Wensleydale |  | protein | british-cheese | uncommon | Sweet-tart cranberries in crumbly, creamy Wensleydale
+Caerphilly |  | protein | british-cheese | uncommon | Fresh, lemony, crumbly Welsh cheese from the South Wales valleys
+Cornish Yarg |  | protein | british-cheese | uncommon | Cheese wrapped in nettle leaves, mushroomy rind and lemony centre
+Stilton |  | protein | blue-cheese | everyday | Rich, tangy, veined English blue, a Christmas favourite
+White Stilton |  | protein | british-cheese | uncommon | Young, crumbly, mild unveined Stilton, often mixed with fruit
+Shropshire blue |  | protein | blue-cheese | uncommon | Orange-hued, creamy blue with a mellow bite
+Stinking Bishop |  | protein | british-cheese | exotic | Famously pungent, washed-rind cheese with a sticky orange rind
+Cheshire blue |  | protein | blue-cheese | uncommon | Crumbly, savoury blue with a gentle tang
+Dorset blue vinney |  | protein | blue-cheese | exotic | Rare, hard skimmed-milk blue, sharp and peppery
+Sage Derby |  | protein | british-cheese | uncommon | Mellow cheese marbled green with sage
+Applewood |  | protein | british-cheese | uncommon | Smoky, paprika-dusted cheddar-style cheese
+Cotswold |  | protein | british-cheese | uncommon | Double Gloucester flecked with chives and onion
+Tintern |  | protein | british-cheese | exotic | Welsh cheddar flavoured with chives and shallots
+Y Fenni |  | protein | british-cheese | exotic | Welsh cheddar sparked with mustard seed and ale
+Caboc |  | protein | british-cheese | exotic | Scottish cream cheese rolled in toasted oatmeal
+Crowdie |  | protein | british-cheese | exotic | Fresh, tangy Scottish crumbly cheese, lovely with oatcakes
+Dunlop |  | protein | british-cheese | uncommon | Sweet, smooth Scottish cheese similar to a mild cheddar
+Isle of Mull Cheddar |  | protein | cheddar | exotic | Rich, tangy cheddar made on the Hebridean island
+Kirkham's Lancashire |  | protein | british-cheese | exotic | Farmhouse Lancashire with a buttery, lactic bite
+Cornish Brie |  | protein | soft-cheese | uncommon | Soft, bloomy-rinded British brie, buttery and mild
+Waterloo |  | protein | soft-cheese | exotic | Creamy, mushroomy Berkshire cheese with a bloomy rind
+Baron Bigod |  | protein | soft-cheese | exotic | Rich, farmhouse Suffolk brie with a truffle-like finish
+Tunworth |  | protein | soft-cheese | exotic | Cabbagey, earthy soft cheese from Hampshire, camembert-style
+Rollright |  | protein | soft-cheese | exotic | Washed-rind Oxfordshire cheese with a savoury, meaty aroma
+Ticklemore |  | protein | goat-cheese | exotic | Firm, crumbly Devon goat's cheese with a clean flavour
+Brie |  | protein | soft-cheese | everyday | Soft, bloomy-rinded French cheese, melting into buttery richness
+Camembert |  | protein | soft-cheese | everyday | Earthy Normandy cheese that bakes into a molten dip
+Brie de Meaux |  | protein | soft-cheese | uncommon | The king of bries, earthy and complex with a runny heart
+Brillat-Savarin |  | protein | soft-cheese | uncommon | Triple-cream Normandy cheese, luxurious, lactic and gently tangy
+Chaource |  | protein | soft-cheese | uncommon | Creamy Champagne cheese with a white rind and a fresh, lactic bite
+Coulommiers |  | protein | soft-cheese | uncommon | Small, tender soft-ripened cheese, close cousin to brie
+Reblochon |  | protein | soft-cheese | uncommon | Nutty Alpine washed-rind cheese, essential for tartiflette
+Munster |  | protein | soft-cheese | uncommon | Pungent Alsace washed-rind cheese, often paired with cumin
+Époisses | epoisses | protein | soft-cheese | exotic | Powerfully pungent, spoonable Burgundy cheese washed in marc brandy
+Pont-l'Évêque | pont leveque | protein | soft-cheese | uncommon | Square Normandy cheese, soft, golden and farmyard-rich
+Livarot |  | protein | soft-cheese | exotic | Strong, washed-rind Normandy cheese banded with reeds
+Maroilles |  | protein | soft-cheese | exotic | Pungent northern French cheese, spicy and strong
+Neufchâtel | neufchatel | protein | soft-cheese | uncommon | Heart-shaped bloomy-rind cheese, salty and mushroomy
+Vacherin Mont d'or | vacherin | protein | soft-cheese | exotic | Seasonal spruce-wrapped cheese, baked until spoonable and woodsy
+Saint-Nectaire | st nectaire | protein | soft-cheese | uncommon | Auvergne cheese, nutty and earthy with a mushroom rind
+Morbier |  | protein | semi-hard-cheese | uncommon | Semi-soft cheese with a layer of ash through the middle
+Raclette |  | protein | semi-hard-cheese | uncommon | Cheese for melting and scraping over potatoes and charcuterie
+Comté | comte | protein | semi-hard-cheese | uncommon | Nutty, fruity Jura mountain cheese with caramel notes
+Beaufort |  | protein | semi-hard-cheese | exotic | Alpine cheese with a sweet, creamy, fruity flavour
+Cantal |  | protein | semi-hard-cheese | uncommon | Auvergne cheese, tangy and grassy, like a French cheddar
+Mimolette |  | protein | semi-hard-cheese | exotic | Bright orange French cheese with a nutty, aged flavour
+Tomme de Savoie | tomme | protein | semi-hard-cheese | uncommon | Mild, earthy mountain cheese with a grey crust
+Ossau-Iraty |  | protein | semi-hard-cheese | exotic | Basque sheep's cheese, nutty and sweet
+Roquefort |  | protein | blue-cheese | uncommon | Pungent sheep's milk blue, salty and tangy, aged in caves
+Bleu d'auvergne |  | protein | blue-cheese | uncommon | Creamy cow's milk blue with a peppery tang
+Fourme d'ambert |  | protein | blue-cheese | uncommon | Mild, creamy French blue with a hint of hazelnut
+Bleu de Bresse |  | protein | blue-cheese | exotic | Mild, creamy blue with a soft white rind
+Crottin de Chavignol | crottin | protein | goat-cheese | uncommon | Small Loire goat's cheese, nutty when aged and grilled on salad
+Sainte-Maure de Touraine |  | protein | goat-cheese | uncommon | Log-shaped goat's cheese threaded with a straw
+Valençay | valencay | protein | goat-cheese | exotic | Ash-coated pyramid of Loire goat's cheese, fresh and lemony
+Pélardon | pelardon | protein | goat-cheese | exotic | Small Cévennes goat's cheese, earthy and nutty
+Banon |  | protein | goat-cheese | exotic | Provençal goat's cheese wrapped in chestnut leaves
+Rocamadour |  | protein | goat-cheese | exotic | Delicate small goat's cheese from the Dordogne, creamy and sweet
+Selles-sur-Cher |  | protein | goat-cheese | exotic | Ash-coated Loire goat's cheese, firm, sweet and nutty
+Chèvre | chevre | protein | goat-cheese | everyday | Tangy goat's cheese, crumbled onto salads and tarts
+Goat's cheese log |  | protein | goat-cheese | everyday | Creamy log of goat's cheese for slicing onto toasts
+Garlic and herb cream cheese |  | protein | fresh-cheese | everyday | Soft, garlic and herb cheese for spreading and stuffing
+Fromage Blanc |  | accent | fresh-cheese | uncommon | Fresh, light curd cheese, mild and spoonable
+Cancoillotte |  | accent | fresh-cheese | exotic | Runny cooked cheese spread from Franche-Comté
+Parmesan | parmigiano reggiano | accent | hard-cheese | everyday | Salty, crystalline Italian hard cheese grated over pasta and risotto
+Grana Padano |  | accent | hard-cheese | everyday | Milder, sweeter cousin of parmesan for grating and shaving
+Pecorino Romano | pecorino | accent | hard-cheese | uncommon | Sharp, salty sheep's cheese, essential for carbonara
+Pecorino Toscano |  | protein | semi-hard-cheese | uncommon | Mellow Tuscan sheep's cheese, lovely with honey and pears
+Pecorino Sardo |  | protein | semi-hard-cheese | exotic | Sardinian sheep's cheese, nutty when young and piquant when aged
+Mozzarella |  | protein | pasta-filata | everyday | Stretchy, milky cheese for pizza, caprese and bakes
+Buffalo mozzarella | mozzarella di bufala | protein | pasta-filata | uncommon | Soft, milky, tangy balls from buffalo milk, best eaten fresh
+Burrata |  | protein | pasta-filata | uncommon | Mozzarella pouch filled with oozing cream and curd
+Scamorza |  | protein | pasta-filata | uncommon | Pear-shaped stretched-curd cheese, often smoked, for grilling
+Provolone |  | protein | pasta-filata | uncommon | Firm, smooth Italian cheese, mild or piquant, for sandwiches and baking
+Caciocavallo |  | protein | pasta-filata | exotic | Teardrop-shaped southern Italian stretched-curd cheese, tangy and firm
+Ricotta |  | protein | fresh-cheese | everyday | Soft, sweet whey curds for lasagne, pancakes and ravioli
+Ricotta salata |  | accent | hard-cheese | uncommon | Pressed, salted ricotta, crumbled or grated over pasta and salads
+Gorgonzola |  | protein | blue-cheese | everyday | Creamy, tangy Italian blue that melts into sauces
+Gorgonzola piccante |  | protein | blue-cheese | uncommon | Aged, firmer, sharper gorgonzola with a bold blue tang
+Taleggio |  | protein | soft-cheese | uncommon | Soft, fruity washed-rind cheese from Lombardy that melts beautifully
+Fontina |  | protein | semi-hard-cheese | uncommon | Alpine Italian cheese, nutty and rich, the heart of fonduta
+Asiago |  | protein | semi-hard-cheese | uncommon | Nutty Veneto cheese, mild when fresh and sharp when aged
+Montasio |  | protein | semi-hard-cheese | exotic | Friulian cheese with a sweet, grassy flavour, used in frico
+Robiola |  | protein | soft-cheese | exotic | Creamy, tangy Piedmont cheese with a delicate rind
+Stracchino | crescenza | protein | soft-cheese | uncommon | Very soft, spreadable northern Italian cheese, fresh and milky
+Stracciatella |  | protein | pasta-filata | exotic | Shreds of mozzarella soaked in cream, the heart of burrata
+Bel paese |  | protein | semi-hard-cheese | uncommon | Mild, buttery Italian cheese that melts smoothly
+Castelmagno |  | protein | semi-hard-cheese | exotic | Crumbly, tangy Piedmont cheese, rare and mildly blue
+Manchego |  | protein | sheep-cheese | everyday | Nutty Spanish sheep's cheese, perfect with quince paste
+Idiazabal |  | protein | sheep-cheese | exotic | Smoked Basque sheep's cheese, firm and buttery
+Mahón | mahon | protein | semi-hard-cheese | exotic | Menorcan cow's cheese, tangy and salty with a buttery bite
+Cabrales |  | protein | blue-cheese | exotic | Spanish blue cave-aged in Asturias, fierce and spicy
+Tetilla |  | protein | soft-cheese | uncommon | Galician breast-shaped cow's cheese, mild and creamy
+Torta del Casar |  | protein | sheep-cheese | exotic | Spoonable Extremaduran sheep's cheese set with thistle rennet
+Zamorano |  | protein | sheep-cheese | uncommon | Firm, nutty, aged Spanish sheep's cheese
+Queso fresco |  | protein | fresh-cheese | uncommon | Crumbly, mild Latin American fresh cheese for tacos and beans
+Cotija |  | accent | hard-cheese | uncommon | Salty, crumbly Mexican cheese sprinkled over elote and tacos
+Oaxaca cheese | queso oaxaca | protein | pasta-filata | uncommon | Stringy Mexican cheese wound into balls, ideal for quesadillas
+Paneer |  | protein | fresh-cheese | uncommon | Firm, mild Indian curd cheese that soaks up spiced sauces
+Gruyère | gruyere | protein | alpine-cheese | everyday | Nutty, savoury Swiss cheese for fondue and French onion soup
+Emmental | emmenthal | protein | alpine-cheese | everyday | Swiss cheese with big holes and a sweet, nutty flavour
+Appenzeller |  | protein | alpine-cheese | uncommon | Spicy, herb-washed Swiss cheese with a fruity aroma
+Raclette Suisse |  | protein | alpine-cheese | uncommon | Swiss melting cheese scraped hot over potatoes and pickles
+Sbrinz |  | accent | hard-cheese | exotic | Hard, aged Swiss cheese grated over pasta or shaved
+Tête de Moine | tete de moine | protein | alpine-cheese | exotic | Swiss cheese shaved into rosettes with a special tool
+Vacherin Fribourgeois |  | protein | alpine-cheese | exotic | Swiss cheese used in fondue, creamy and fruity
+Jarlsberg |  | protein | alpine-cheese | everyday | Mild, sweet, nutty Norwegian cheese with large holes
+Gouda |  | protein | dutch-cheese | everyday | Smooth, caramel-sweet Dutch cheese that melts well
+Young Gouda |  | protein | dutch-cheese | everyday | Mild, creamy gouda for sandwiches and snacking
+Aged Gouda | oud gouda | protein | dutch-cheese | uncommon | Hard, crystalline, butterscotch-tinged Dutch cheese
+Smoked Gouda |  | protein | dutch-cheese | uncommon | Smooth Dutch cheese with a gentle smoky aroma
+Edam |  | protein | dutch-cheese | everyday | Mild, slightly salty Dutch cheese in a red wax coat
+Leerdammer |  | protein | dutch-cheese | uncommon | Sweet, holey Dutch cheese, mild and nutty
+Maasdam |  | protein | dutch-cheese | uncommon | Sweet, nutty cheese with large holes
+Leyden | leidse kaas | protein | dutch-cheese | exotic | Dutch cheese spiced with cumin and caraway
+Boerenkaas |  | protein | dutch-cheese | exotic | Raw-milk farmhouse Dutch cheese, rich and complex
+Havarti |  | protein | danish-cheese | uncommon | Buttery Danish cheese with small holes and a mild tang
+Danish blue | danablu | protein | blue-cheese | everyday | Sharp, salty, creamy blue that crumbles over salads
+Port Salut |  | protein | semi-hard-cheese | uncommon | Mild, buttery, orange-rinded cheese made by monks
+Monterey Jack |  | protein | american-cheese | everyday | Mild, buttery American cheese that melts into quesadillas
+Pepper Jack |  | protein | american-cheese | everyday | Monterey Jack spiked with chilli flakes for a gentle heat
+Colby |  | protein | american-cheese | uncommon | Mild, moist, orange American cheese, softer than cheddar
+American cheese slices |  | protein | american-cheese | everyday | Soft, meltable slices made for burgers and grilled sandwiches
+Cheese spread |  | accent | processed-cheese | everyday | Soft, spreadable cheese for sandwiches and crackers
+Grated cheese |  | accent | processed-cheese | everyday | Ready-grated melting cheese for pizza toppings and pasta bakes
+Halloumi |  | protein | grilling-cheese | everyday | Squeaky Cypriot cheese that grills golden without melting
+Feta |  | accent | brined-cheese | everyday | Salty, tangy Greek brined cheese crumbled onto salads and pies
+Kefalotyri |  | accent | hard-cheese | uncommon | Hard, salty Greek cheese for frying as saganaki
+Graviera |  | protein | semi-hard-cheese | uncommon | Nutty, sweet Greek sheep's cheese, delicious fried or sliced
+Kasseri |  | protein | pasta-filata | uncommon | Mild Greek stretched-curd cheese with a buttery, slightly tangy taste
+Mizithra |  | accent | fresh-cheese | exotic | Fresh or dried Greek whey cheese, grated over pasta
+Manouri |  | protein | fresh-cheese | exotic | Creamy, mild Greek cheese for grilling or serving with honey
+Anthotyro |  | protein | fresh-cheese | exotic | Soft Greek whey cheese, lightly salty and crumbly
+Saganaki cheese |  | protein | grilling-cheese | uncommon | Firm Greek cheese pan-fried until crisp and flambéed with lemon
+Akkawi |  | protein | brined-cheese | exotic | Mild, salty Middle Eastern brined cheese, often sweetened in kunafa
+Nabulsi |  | protein | brined-cheese | exotic | Palestinian brined cheese with mastic and mahleb, salty and chewy
+Jibneh arabieh |  | protein | fresh-cheese | exotic | Soft, mild Gulf white cheese for breakfast flatbreads
+Bryndza |  | protein | sheep-cheese | exotic | Tangy, creamy Slovak sheep's cheese, spread on potato dumplings
+Sirene |  | protein | brined-cheese | uncommon | Bulgarian white brined cheese, salty and crumbly
+Kashkaval |  | protein | semi-hard-cheese | uncommon | Balkan stretched-curd cheese, mild and good for frying
+Oscypek |  | protein | smoked-cheese | exotic | Smoked Polish mountain sheep's cheese, grilled with cranberry jam
+Beyaz peynir |  | protein | brined-cheese | uncommon | Turkish white brined cheese for breakfast spreads
+Lor |  | protein | fresh-cheese | exotic | Turkish whey curd cheese, soft and mild for pastries
+Çökelek | cokelek | protein | fresh-cheese | exotic | Crumbly Turkish buttermilk curd, tangy and fresh
+Queijo da serra |  | protein | sheep-cheese | exotic | Portuguese sheep's cheese, spoonable, buttery and rich
+Queijo fresco |  | protein | fresh-cheese | uncommon | Fresh Portuguese cow's cheese, mild and light
+Chhena |  | protein | fresh-cheese | exotic | Soft Bengali milk curd used for sweet rasgulla
+Cheese curds |  | protein | fresh-cheese | uncommon | Squeaky fresh curds for poutine and deep-frying
+Cottage cheese |  | protein | fresh-cheese | everyday | Soft, lumpy fresh curds, lovely with pineapple or spooned on toast
+Cream cheese spread |  | accent | fresh-cheese | everyday | Smooth, spreadable cheese for bagels and sandwiches
+Blue cheese |  | protein | blue-cheese | everyday | Pungent, creamy veined cheese for dressings and steaks
+Grilling cheese |  | protein | grilling-cheese | uncommon | Firm squeaky cheese that holds shape when seared
+Smoked cheese |  | protein | smoked-cheese | uncommon | Firm cheese cured over wood smoke, great in toasties
+Goat's Cheddar |  | protein | goat-cheese | uncommon | Hard goat's milk cheese, sweet and nutty with a clean tang
+Sheep's Cheddar |  | protein | sheep-cheese | exotic | Firm, sweet sheep's milk cheese made cheddar-style
+Hard goat's cheese |  | protein | goat-cheese | uncommon | Aged, firm goat's cheese for shaving and grating
+Soft goat's cheese |  | protein | goat-cheese | everyday | Fresh, tangy goat's cheese for crumbling over beetroot and tarts
+Sheep's feta |  | accent | brined-cheese | uncommon | Rich, creamy feta made from sheep's milk
+Cheese rind |  | accent | hard-cheese | exotic | Parmesan rind simmered into soups for deep savoury richness
+Washed-Rind cheese |  | protein | soft-cheese | uncommon | Pungent, sticky-orange cheese bathed in brine or beer
+Triple-Cream cheese |  | protein | soft-cheese | uncommon | Luxuriously rich, mild, buttery bloomy-rind cheese
+Cheese and onion filling |  | accent | cheese-filling | everyday | Sharp cheese blended with onion for pies and pasties
+Fondue cheese |  | protein | alpine-cheese | uncommon | Blend of nutty Alpine cheeses for melting into a fondue
+Hen's egg | egg | protein | egg | everyday | Everyday hen's egg, boiled, fried, scrambled or baked
+Large egg |  | protein | egg | everyday | Bigger hen's egg, a baker's standard for cakes and custards
+Free-Range egg |  | protein | egg | everyday | Egg from hens that roam outdoors, with a deep golden yolk
+Organic egg |  | protein | egg | uncommon | Egg from organically fed hens, rich and golden
+Brown egg |  | protein | egg | everyday | Brown-shelled hen's egg, a farmhouse breakfast staple
+White egg |  | protein | egg | everyday | White-shelled hen's egg, mild and reliable
+Blue egg |  | protein | egg | exotic | Pale blue-shelled egg from Araucana hens
+Duck egg |  | protein | egg | uncommon | Large, rich egg with a creamy yolk, wonderful fried or baked
+Quail egg |  | protein | egg | uncommon | Tiny speckled eggs for canapes, salads and ramen
+Goose egg |  | protein | egg | exotic | Huge, rich egg equal to three hen's eggs, perfect for omelettes
+Turkey egg |  | protein | egg | exotic | Large, speckled egg with a mild flavour, rarely seen
+Pheasant egg |  | protein | egg | exotic | Small olive-shelled egg with a rich yolk
+Ostrich egg |  | protein | egg | exotic | Gigantic egg that makes an omelette for twenty
+Salted duck egg | salted egg | protein | cured-egg | uncommon | Brine-cured duck egg with a vivid orange, salty yolk
+Century egg | thousand-year egg | protein | cured-egg | exotic | Alkaline-cured egg with dark jelly white and creamy yolk
+Tea egg |  | protein | cured-egg | uncommon | Hard-boiled egg simmered in tea, soy and spices
+Soy-Marinated egg | ramen egg | protein | cured-egg | uncommon | Soft-boiled egg steeped in soy and mirin for ramen
+Pickled egg |  | protein | cured-egg | uncommon | Hard-boiled egg preserved in spiced vinegar, a pub classic
+Egg white |  | protein | egg-part | everyday | The clear white, whisked for meringues or used to lighten batter
+Egg yolk |  | protein | egg-part | everyday | The rich golden yolk, enriching custard, hollandaise and pasta
+Whisked egg whites |  | protein | egg-part | everyday | Stiffly beaten whites for soufflés, meringues and mousse
+Beaten egg |  | protein | egg-part | everyday | Whisked whole egg used to bind, glaze and enrich
+Egg wash |  | accent | egg-part | everyday | Beaten egg brushed on pastry for a glossy golden finish
+Liquid egg white |  | protein | egg-part | uncommon | Pasteurised carton egg white, ready to whip
+Dried egg powder |  | accent | egg-part | exotic | Dehydrated whole egg, a camping and wartime baking staple
+Boiled egg |  | protein | egg-dish | everyday | Classic boiled egg with a runny yolk for soldiers
+Soft-Boiled egg |  | protein | egg-dish | everyday | Egg cooked to a set white and soft golden yolk
+Hard-Boiled egg |  | protein | egg-dish | everyday | Firm-set egg for salads, sandwiches and scotch eggs
+Poached egg |  | protein | egg-dish | everyday | Delicately set egg with a runny yolk, on toast or spinach
+Fried egg |  | protein | egg-dish | everyday | Crisp-edged egg with a runny yolk, tops burgers and rice bowls
+Scrambled egg |  | protein | egg-dish | everyday | Soft, creamy curds of gently cooked eggs on buttered toast
+Omelette |  | protein | egg-dish | everyday | Folded eggs around cheese or herbs, quick and satisfying
+Egg custard |  | protein | egg-dish | uncommon | Baked egg and milk set into a wobbly, nutmeg-dusted pudding
+Meringue |  | accent | egg-dish | everyday | Crisp, airy baked sugar and egg whites, perfect under cream and fruit
+Mayonnaise |  | accent | egg-dish | everyday | Creamy emulsion of egg yolk and oil for sandwiches and chips
+Hollandaise |  | accent | egg-dish | uncommon | Buttery lemon and egg yolk sauce poured over asparagus and eggs
+Egg mayonnaise |  | accent | egg-dish | everyday | Chopped boiled egg in mayonnaise, a sandwich filler
+Tamago |  | protein | egg-dish | uncommon | Sweet layered Japanese rolled omelette
+Curried egg |  | protein | egg-dish | uncommon | Boiled egg in a mild curry mayonnaise or sauce
+Devilled egg |  | protein | egg-dish | uncommon | Halved boiled egg with a piped spicy yolk filling
+Shakshuka eggs |  | protein | egg-dish | uncommon | Eggs poached in spiced tomato and pepper sauce
+Eggnog |  | accent | egg-dish | uncommon | Festive creamy drink of egg, milk and nutmeg
+Zabaglione |  | accent | egg-dish | uncommon | Italian warm whipped egg yolk, sugar and Marsala dessert
+Egg noodle dough |  | base | egg-dish | uncommon | Eggy fresh dough rolled for silky noodles
+Choux paste |  | base | egg-dish | uncommon | Eggy cooked dough that puffs into eclairs and profiteroles

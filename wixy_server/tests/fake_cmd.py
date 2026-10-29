@@ -21,6 +21,7 @@ import json
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect
@@ -178,6 +179,160 @@ CANNED_ADVENTURE_PACK: JsonObject = {
 default final answer of the fake chat-spawn runs, and what the e2e fixture serves."""
 
 
+BASKET_MARKER = "BASKET_JSON: "
+CONCEPT_MARKER = "CONCEPT_JSON: "
+"""The single-line JSON markers `wixy_server.livechat.cookout_ai`'s prompts carry (duplicated here
+on purpose: the fake stands in for cmd and must not import the code under test)."""
+
+
+def _marked_json(prompt: str, marker: str) -> dict[str, Any] | None:
+    for line in prompt.splitlines():
+        if line.startswith(marker):
+            value = json.loads(line[len(marker) :])
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def _join_names(names: list[str]) -> str:
+    if len(names) <= 1:
+        return "".join(names)
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+_CHALLENGE_NOTES = {
+    "one-pan": "Everything cooks together in one single pan.",
+    "no-oven": "Made entirely on the hob or under the grill.",
+    "thirty-minutes": "Ready from start to table in half an hour.",
+    "six-steps": "A short method of just a few easy steps.",
+}
+"""The fake chef's `challengeNote` per challenge id (duplicated on purpose, like the markers; no
+food word and no oven word, so it passes every deterministic check)."""
+
+
+def canned_cookout_concepts(prompt: str) -> dict[str, Any] | None:
+    """A valid Stage-1 answer for the ten- or eleven-ingredient basket in `prompt`: three concepts
+    using ids[0:8], ids[N-8:N] and ids[0:7] (so every pick is used, one concept uses 8, each uses
+    7+) with three distinct (dishType, technique) pairs, naming only foods the concept uses. The
+    prompt's `twists` object (if any) is honoured: every star is used in every concept (its name is
+    in the description), the wildcard in the first two, and each challenge's rule is kept."""
+    basket = _marked_json(prompt, BASKET_MARKER)
+    if basket is None:
+        return None
+    raw = basket.get("ingredients")
+    if not isinstance(raw, list) or len(raw) not in (10, 11):
+        return None
+    records = [r for r in raw if isinstance(r, dict)]
+    ids = [str(r["id"]) for r in records]
+    names = {str(r["id"]): str(r["name"]) for r in records}
+    twists = basket.get("twists")
+    twists = twists if isinstance(twists, dict) else {}
+    stars = [str(i) for i in twists.get("stars") or []]
+    wildcard = twists.get("wildcard")
+    challenge = twists.get("challenge")
+    last = ("bake", "roast", "Golden")
+    if challenge == "no-oven":
+        last = ("platter", "grill", "Quick")
+    plan = [
+        ("a", ids[0:8], "Sunday Supper", "stew", "simmer", "Slow-simmered"),
+        ("b", ids[len(ids) - 8 :], "Fresh and Light", "salad", "no-cook", "Bright"),
+        ("c", ids[0:7], "Weeknight Comfort", last[0], last[1], last[2]),
+    ]
+    concepts: list[dict[str, Any]] = []
+    for position, (cid, window, vibe, dish_type, technique, adjective) in enumerate(plan):
+        wanted = set(window) | set(stars)
+        if isinstance(wildcard, str) and position < 2:
+            wanted.add(wildcard)
+        used = [i for i in ids if i in wanted]
+        omitted = [i for i in ids if i not in used]
+        lead = [names[i] for i in used[:2]]
+        concept: dict[str, Any] = {
+            "id": cid,
+            "title": f"{adjective} {_join_names(lead)} {dish_type.capitalize()}",
+            "vibe": vibe,
+            "dishType": dish_type,
+            "technique": technique,
+            "description": (
+                f"A simple supper for two built around {_join_names([names[i] for i in used])}"
+                ", finished with a pinch of salt and black pepper."
+            ),
+            "pickedIngredientIds": list(used),
+            "stapleIds": ["salt", "black-pepper"],
+            "omitted": [
+                {"id": i, "reason": "Saved for another night so this dish stays focused."}
+                for i in omitted
+            ],
+        }
+        if isinstance(challenge, str):
+            concept["challengeNote"] = _CHALLENGE_NOTES.get(challenge, "Keeps to the rule.")
+            if challenge == "thirty-minutes":
+                concept["totalMinutes"] = 25
+        concepts.append(concept)
+    return {"concepts": concepts}
+
+
+def canned_cookout_recipe(prompt: str) -> dict[str, Any] | None:
+    """A valid Stage-2 answer covering exactly the manifest in `prompt` (and, when the prompt's
+    `twists` object names a challenge, a `cookware` list and a method that keeps the rule)."""
+    concept = _marked_json(prompt, CONCEPT_MARKER)
+    manifest = concept.get("manifest") if concept is not None else None
+    if not isinstance(manifest, dict):
+        return None
+    items = [
+        i
+        for key in ("ingredients", "staples")
+        for i in (manifest.get(key) or [])
+        if isinstance(i, dict)
+    ]
+    if len(items) < 2:
+        return None
+    half = len(items) // 2
+    first, second = items[:half], items[half:]
+    ingredients: list[dict[str, Any]] = [
+        {"id": str(i["id"]), "quantity": "1 portion", "note": ""} for i in items
+    ]
+    steps: list[dict[str, Any]] = [
+        {
+            "text": f"Prepare {_join_names([str(i['name']) for i in group])} and set them ready.",
+            "minutes": 10,
+            "uses": [str(i["id"]) for i in group],
+        }
+        for group in (first, second)
+    ]
+    recipe: dict[str, Any] = {
+        "serves": 2,
+        "prepMinutes": 10,
+        "cookMinutes": 20,
+        "ingredients": ingredients,
+        "steps": steps,
+        "tips": ["Taste as you go and adjust the seasoning at the end."],
+    }
+    twists = concept.get("twists") if concept is not None else None
+    if isinstance(twists, dict) and twists.get("challenge"):
+        recipe["cookware"] = (
+            ["Large pan"]
+            if twists["challenge"] == "one-pan"
+            else [
+                "Large pan",
+                "Chopping board",
+            ]
+        )
+    return recipe
+
+
+def canned_cookout_response(caller: object, prompt: object) -> str | None:
+    """The fake's answer for a Cookout run (`wixy-cookout-concepts` / `wixy-cookout-recipe`), built
+    from the basket or concept the prompt carries; `None` for any other caller."""
+    if not isinstance(prompt, str):
+        return None
+    if caller == "wixy-cookout-concepts":
+        value = canned_cookout_concepts(prompt)
+    elif caller == "wixy-cookout-recipe":
+        value = canned_cookout_recipe(prompt)
+    else:
+        return None
+    return json.dumps(value) if value is not None else None
+
+
 @dataclass
 class FakeSpawnPlan:
     """How ONE fake chat-spawn run behaves: it reports `running` for `running_polls` polls and until
@@ -273,6 +428,9 @@ class FakeCmdState:
     """A non-201 makes `POST /api/chat-spawn/runs` refuse with that status (cmd refusing a run)."""
     chat_spawn_final_status: str = "completed"
     chat_spawn_response_text: str | None = None
+    cookout_response_text: str | None = None
+    """A forced final answer for the Cookout runs (`wixy-cookout-*` callers) ONLY. They never read
+    `chat_spawn_response_text`, which the e2e fixture sets to an Adventure pack."""
     """The final assistant message a run settles with; `None` = `CANNED_ADVENTURE_PACK` as JSON."""
     chat_spawn_running_polls: int = 0
     chat_spawn_delay_s: float = 0.0
@@ -317,9 +475,12 @@ class FakeCmdState:
         if self.chat_spawn_plans:
             plan = self.chat_spawn_plans.pop(0)
         else:
+            # Cookout runs never read `chat_spawn_response_text` (an Adventure pack in the e2e
+            # fixture): they get `cookout_response_text` or the canned answer at poll time.
+            is_cookout = str(body.get("caller") or "").startswith("wixy-cookout-")
             plan = FakeSpawnPlan(
                 final_status=self.chat_spawn_final_status,
-                response_text=self.chat_spawn_response_text,
+                response_text=None if is_cookout else self.chat_spawn_response_text,
                 running_polls=self.chat_spawn_running_polls,
                 delay_s=self.chat_spawn_delay_s,
             )
@@ -569,15 +730,14 @@ def create_fake_cmd_app(state: FakeCmdState | None = None) -> FastAPI:
         }
         if status == "completed":
             text = run.plan.response_text
-            row["response_text"] = (
-                text
-                if text is not None
-                else (
-                    state.chat_spawn_response_text
-                    if state.chat_spawn_response_text is not None
-                    else json.dumps(CANNED_ADVENTURE_PACK)
-                )
-            )
+            caller = str(run.body.get("caller") or "")
+            if text is None and caller.startswith("wixy-cookout-"):
+                text = state.cookout_response_text
+                if text is None:
+                    text = canned_cookout_response(caller, run.body.get("prompt"))
+            elif text is None:
+                text = state.chat_spawn_response_text
+            row["response_text"] = text if text is not None else json.dumps(CANNED_ADVENTURE_PACK)
         elif status in ("error", "timeout"):
             row["error_text"] = run.plan.error_text or "process exited before end_turn"
         return row

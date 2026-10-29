@@ -1,0 +1,60 @@
+# fungi
+Button mushroom | white mushroom; white button mushroom | produce | mushroom-agaricus | everyday | Mild and mellow; slice raw into salads or fry in butter until golden
+Chestnut mushroom | cremini; brown mushroom | produce | mushroom-agaricus | everyday | Nuttier and firmer than white; excellent in stews, risotto and on toast
+Flat mushroom | field mushroom; open cup mushroom | produce | mushroom-agaricus | everyday | Broad and savoury; grill with garlic butter or stuff with cheese
+Portobello mushroom | portabella | produce | mushroom-agaricus | everyday | Giant meaty cap; roast whole, or grill as a burger patty
+Baby button mushroom |  | produce | mushroom-agaricus | everyday | Tiny and tender; leave whole in pies, casseroles and pickles
+Shiitake mushroom | shiitake; oriental mushroom | produce | mushroom-shiitake | everyday | Smoky, umami-rich caps; sear for stir-fries, ramen and broths
+Dried shiitake mushroom | dried shiitake; donko | produce | mushroom-shiitake | everyday | Soak to a deep savoury liquor; the soaking water is as good as the mushroom
+Oyster mushroom | grey oyster mushroom | produce | mushroom-oyster | everyday | Delicate, velvety fans; tear and fry quickly over high heat
+King oyster mushroom | king trumpet mushroom; eryngii | produce | mushroom-oyster | uncommon | Thick meaty stem; slice into scallop-style discs and sear
+Pink oyster mushroom |  | produce | mushroom-oyster | uncommon | Bacony aroma when fried; cook hot and fast before the colour fades
+Yellow oyster mushroom | golden oyster mushroom | produce | mushroom-oyster | uncommon | Fragrant with a faint nutty sweetness; good simply sauteed
+Enoki mushroom | enokitake; golden needle mushroom | produce | mushroom-enoki | everyday | Crisp, slender strands; add to hot pot and miso soup at the last minute
+Shimeji mushroom | beech mushroom; brown clamshell mushroom | produce | mushroom-shimeji | uncommon | Slightly bitter raw but nutty when cooked; superb in noodles and sauces
+White shimeji mushroom | white beech mushroom | produce | mushroom-shimeji | uncommon | Milder and sweeter than brown; sautee briefly with butter and soy
+Maitake mushroom | hen of the woods; sheepshead mushroom | produce | mushroom-maitake | uncommon | Ruffled clusters with a rich, earthy flavour; roast until crisp-edged
+Lion's mane mushroom | pom pom mushroom; bearded tooth mushroom | produce | mushroom-lions-mane | uncommon | Shreds like crab meat; pan-fry in slabs until golden
+Nameko mushroom |  | produce | mushroom-nameko | uncommon | Naturally glossy and silky; thickens miso soup beautifully
+Chicken of the woods | sulphur shelf | produce | mushroom-chicken-of-the-woods | exotic | Foraged bracket fungus with a firm, chicken-like bite; cook thoroughly
+Giant puffball |  | produce | mushroom-puffball | uncommon | Foraged and sliced like steak; fry in breadcrumbs while pure white inside
+Girolle | chanterelle | produce | mushroom-chanterelle | everyday | Apricot-scented golden trumpets; saute gently with butter and shallot
+Pied de mouton | hedgehog mushroom; sweet tooth | produce | mushroom-chanterelle | exotic | Firm, sweet and nutty; a woodland cousin of the girolle for sauteing
+Black trumpet | horn of plenty; trompette de la mort | produce | mushroom-chanterelle | uncommon | Smoky and fruity; superb in cream sauces and with fish
+Cep | porcini; penny bun; king bolete | produce | mushroom-porcini | everyday | Prized wild mushroom; thick slices fried in butter taste of hazelnuts
+Dried porcini | dried ceps; funghi secchi | produce | mushroom-porcini | everyday | Intense, meaty and concentrated; rehydrate for risotto, ragu and gravy
+Morel | morel mushroom; spring morel | produce | mushroom-morel | uncommon | Honeycombed caps with deep earthy flavour; always cook through, ideally with cream
+Dried morel |  | produce | mushroom-morel | uncommon | Soak in warm water and rinse well; superb with veal and in sauces
+Blewit | wood blewit | produce | mushroom-blewit | exotic | Lilac-hued autumn mushroom; always cook through, lovely with eggs and onions
+St George's mushroom |  | produce | mushroom-st-georges | uncommon | Spring mushroom smelling of fresh meal; fry or stew gently
+Horse mushroom |  | produce | mushroom-agaricus | uncommon | Large wild relative of the field mushroom with an aniseed note; grill or fry
+Parasol mushroom |  | produce | mushroom-parasol | uncommon | Tall wild mushroom; fry the cap whole in breadcrumbs like a schnitzel
+Saffron milk cap |  | produce | mushroom-milk-cap | exotic | Orange Mediterranean mushroom; grill with olive oil, garlic and salt
+Slippery Jack |  | produce | mushroom-bolete | uncommon | Soft, mild bolete; peel the sticky cap and fry or dry the slices
+Bay bolete |  | produce | mushroom-bolete | uncommon | Wild bolete with firm flesh and sweet flavour; slice and saute
+Honey fungus |  | produce | mushroom-honey | uncommon | Foraged woodland clusters; must be well boiled before frying
+Cauliflower fungus |  | produce | mushroom-cauliflower | uncommon | Wild frilly mushroom with crunch and a mild nutty flavour; add to soup
+Fairy ring champignon |  | produce | mushroom-champignon | uncommon | Small dried-in-summer wild mushroom with an almond scent; ideal in omelettes
+Wood ear mushroom | cloud ear; black fungus; jelly ear | produce | mushroom-wood-ear | everyday | Dried and soaked; adds snap to hot and sour soup and stir-fries
+Snow fungus | white fungus; silver ear | produce | mushroom-snow-fungus | exotic | Soak, then simmer into gelatinous, delicately sweet soups and desserts
+Straw mushroom | paddy straw mushroom | produce | mushroom-straw | uncommon | Silky, egg-shaped mushrooms used in Thai curries and stir-fries
+Tinned straw mushrooms |  | produce | mushroom-straw | uncommon | Convenient and tender; add to Thai soups just before serving
+Matsutake | pine mushroom | produce | mushroom-matsutake | exotic | Spicy, resinous Japanese delicacy; grill lightly or add to rice
+Black winter truffle | perigord truffle; black truffle | produce | truffle | exotic | Earthy perfume; shave over eggs, pasta and potatoes, or tuck under chicken skin
+White truffle | alba truffle | produce | truffle | exotic | Pungent and intoxicating; shave raw over risotto, pasta or fried eggs
+Summer truffle |  | produce | truffle | exotic | Milder, nutty truffle; shave thin over salads, pasta and eggs
+Burgundy truffle | autumn truffle | produce | truffle | exotic | Hazelnut and mushroom notes; grate over buttered noodles or risotto
+Truffle slices in brine | preserved truffle | produce | truffle | exotic | Jarred slices to stir through sauces and mash for year-round perfume
+Mixed wild mushrooms | wild mushroom mix | produce | mushroom-wild-mix | uncommon | A seasonal medley of forest varieties; saute hot and finish with parsley
+Dried mixed mushrooms | dried wild mushroom mix | produce | mushroom-wild-mix | uncommon | Soak for stock, risotto or a deep mushroom gravy
+Dried chanterelles | dried girolles | produce | mushroom-chanterelle | uncommon | Soak briefly for a fruity, peppery lift in creamy sauces
+Pickled mushrooms | marinated mushrooms | produce | mushroom-agaricus | uncommon | Tangy, herby; serve on antipasti boards and in salads
+Pickled enoki |  | produce | mushroom-enoki | uncommon | Brined Japanese-style strands; tangy topping for rice and noodles
+Smoked mushrooms |  | produce | mushroom-agaricus | uncommon | Wood-smoked caps; slice into pasta, omelettes and sandwiches
+Blue foot mushroom | pied bleu | produce | mushroom-blewit | uncommon | Lilac-stemmed wild mushroom; saute and serve with game
+Brown beech mushroom |  | produce | mushroom-shimeji | uncommon | Crunchy clusters; roast on a tray with soy and sesame
+Wine cap mushroom | king stropharia | produce | mushroom-stropharia | uncommon | Garden-grown mushroom with potato-like earthiness; grill or fry
+Chanterelle mushrooms in brine |  | produce | mushroom-chanterelle | uncommon | Jarred golden trumpets; drain and fry with garlic and parsley
+Stuffing mushrooms | large cup mushrooms | produce | mushroom-agaricus | everyday | Deep cups made for filling; bake with garlic, breadcrumbs and herbs
+Elm oyster mushroom |  | produce | mushroom-oyster | uncommon | Pale, firm, crunchy; stir-fry and braise
+Pioppino mushroom | black poplar mushroom; velvet pioppini | produce | mushroom-pioppino | uncommon | Crunchy stems and nutty caps; superb in sauteed medleys

@@ -1,0 +1,216 @@
+# spices-seasonings
+Ground cumin | cumin powder | accent | cumin | everyday | Earthy, warm backbone of curries, chilli and taco seasoning
+Cumin seeds | jeera | accent | cumin | everyday | Toast whole until fragrant to start dals and spiced rice
+Black cumin seeds | kala jeera; shahi jeera | accent | cumin | exotic | Slender, smoky-sweet seeds from the Himalayas for royal biryanis
+Nigella seeds | kalonji; black onion seeds | accent | nigella | uncommon | Tiny black seeds with an oniony, peppery tang; scatter on naan
+Coriander seeds |  | accent | coriander-spice | everyday | Citrusy, nutty seeds to crush for curries and pickling
+Ground coriander | coriander powder | accent | coriander-spice | everyday | Mellow citrus spice that thickens and rounds out curry bases
+Fennel seeds | saunf | accent | fennel-spice | everyday | Sweet aniseed seeds for sausages, breads and after-dinner chewing
+Ground fennel |  | accent | fennel-spice | uncommon | Fine liquorice-sweet powder for rubs and spice blends
+Fennel pollen |  | accent | fennel-spice | exotic | Golden, honeyed dust prized for pork and roast vegetables
+Aniseed | anise seed | accent | anise | uncommon | Sweet liquorice seeds for baking, liqueurs and fish soups
+Star anise |  | accent | anise | everyday | Eight-pointed pod with warm liquorice flavour for pho and braises
+Dill seeds |  | accent | dill-spice | uncommon | Pungent seeds for pickles and Scandinavian breads
+Celery seeds |  | accent | celery-spice | uncommon | Bitter, aromatic seeds for coleslaw, brines and Bloody Marys
+Celery salt |  | accent | celery-spice | uncommon | Savoury salt with celery seed, for cocktails and egg salad
+Ajwain | carom seeds; bishop's weed | accent | ajwain | exotic | Thyme-like seeds with a sharp bite for Indian fried snacks
+Fenugreek seeds | methi seeds | accent | fenugreek-spice | uncommon | Bitter, maple-scented seeds; toast lightly in curries and pickles
+Ground fenugreek |  | accent | fenugreek-spice | exotic | Maple-sweet bitter powder for spice mixes and Ethiopian cooking
+Mustard seeds |  | accent | mustard-seed | everyday | Pop in hot oil for nutty heat in Indian dishes
+Black mustard seeds |  | accent | mustard-seed | uncommon | Pungent seeds that crackle in hot oil for South Indian cooking
+Yellow mustard seeds |  | accent | mustard-seed | everyday | Mild seeds for pickling and homemade mustard
+Brown mustard seeds |  | accent | mustard-seed | uncommon | Hotter seeds used for tempering and whole-grain mustard
+Mustard powder | English mustard powder | accent | mustard-seed | everyday | Fiery when mixed with water; whisk into dressings, cheese sauces and rubs
+White poppy seeds | khus khus | accent | poppy-seed | exotic | Creamy seeds ground to thicken kormas
+Whole allspice berries |  | accent | allspice | uncommon | Pea-size berries to simmer in pickles, brines and stews
+Whole cloves |  | accent | clove | everyday | Intensely aromatic buds studded in ham and onions
+Ground cloves |  | accent | clove | everyday | Powerful, numbing warmth for mulled wine and baking
+Cinnamon sticks | cinnamon quills | accent | cinnamon | everyday | Sweet bark for simmering into rice, syrups and curries
+Ground cinnamon |  | accent | cinnamon | everyday | Warm and sweet; dust over toast, porridge and apple pie
+Ceylon cinnamon | true cinnamon | accent | cinnamon | uncommon | Delicate, floral cinnamon in fine papery quills
+Cassia bark | Chinese cinnamon | accent | cinnamon | uncommon | Robust, spicy-sweet bark for braises and five spice
+Ground nutmeg |  | accent | nutmeg | everyday | Warm and nutty; grate into bechamel, custard and spinach
+Whole nutmeg |  | accent | nutmeg | uncommon | Hard seed grated fresh for the best aroma
+Mace blades |  | accent | nutmeg | exotic | Lacy crimson covering of nutmeg with a gentler, saffron-like warmth
+Ground mace |  | accent | nutmeg | exotic | Fine, delicate nutmeg-citrus powder for pound cake and sausages
+Green cardamom pods | cardamom | accent | cardamom | uncommon | Floral, eucalyptus-scented pods; crack for rice, chai and buns
+Ground cardamom |  | accent | cardamom | uncommon | Sweet, perfumed powder for baking and coffee
+Cardamom seeds |  | accent | cardamom | uncommon | Husked tiny black seeds with intense floral aroma
+Black cardamom pods | brown cardamom | accent | cardamom | exotic | Smoky, camphor-like pods for slow stews and curries
+Ground turmeric | haldi | accent | turmeric-spice | everyday | Golden earthy powder that colours curries, rice and pickles
+Ground ginger spice |  | accent | ginger-spice | uncommon | Dry, peppery ginger for gingerbread and parkin
+Saffron threads | saffron | accent | saffron | exotic | Costly crimson stigmas giving honeyed, floral flavour and golden colour
+Saffron powder |  | accent | saffron | exotic | Ground saffron that dissolves quickly into rice and milk
+Sweet paprika |  | accent | paprika | everyday | Mild, fruity red powder for goulash and devilled eggs
+Smoked paprika | pimenton | accent | paprika | everyday | Oak-smoked, brick-red powder with a barbecue depth
+Hot smoked paprika | pimenton picante | accent | paprika | uncommon | Smoky Spanish paprika with a fiery kick
+Hungarian paprika |  | accent | paprika | uncommon | Deep, sweet-peppery paprika, the heart of goulash
+Cayenne pepper | cayenne | accent | chilli-powder | everyday | Clean sharp heat for sauces, rubs and cheese straws
+Chilli powder |  | accent | chilli-powder | everyday | Mixed ground chilli with cumin and garlic for chilli con carne
+Hot chilli powder |  | accent | chilli-powder | everyday | Straight ground red chilli for firing up curries
+Kashmiri chilli powder |  | accent | chilli-powder | uncommon | Mild, vividly red powder that colours curries with little heat
+Chilli flakes | crushed chilli; red pepper flakes | accent | chilli-flakes | everyday | Sprinkle over pizza, pasta or eggs for easy heat
+Aleppo pepper | Aleppo chilli flakes | accent | chilli-flakes | uncommon | Fruity, mildly hot, slightly oily flakes from Syria
+Urfa biber | Urfa pepper | accent | chilli-flakes | exotic | Dark, raisiny Turkish flakes with smoky, wine-like depth
+Maras pepper | Maras biber | accent | chilli-flakes | uncommon | Sun-dried Turkish flakes, rich, mild and slightly sweet
+Gochugaru powder | fine korean chilli powder | accent | chilli-flakes | uncommon | Finely ground version for smooth gochujang-style sauces
+Piment d'espelette | Espelette pepper | accent | chilli-powder | exotic | Basque red pepper powder with mild warmth and a fruity, smoky note
+Ancho chilli | dried poblano | accent | dried-chilli | uncommon | Sweet, raisiny and mild dried poblano for mole and chilli
+Guajillo chilli |  | accent | dried-chilli | uncommon | Tangy, berry-fruity dried chilli with a medium heat
+Pasilla chilli | chile negro | accent | dried-chilli | uncommon | Dark, rich dried chilli with prune and cocoa notes
+Mulato chilli |  | accent | dried-chilli | exotic | Chocolatey, sweet dried chilli for mole sauces
+Chipotle chilli | smoked jalapeno | accent | dried-chilli | uncommon | Smoke-dried jalapeno with deep campfire heat
+Chipotle powder |  | accent | dried-chilli | uncommon | Smoky, medium-hot powder for marinades and mayonnaise
+Arbol chilli | chile de arbol | accent | dried-chilli | uncommon | Slender, searingly hot Mexican chilli with nutty flavour
+Cascabel chilli |  | accent | dried-chilli | exotic | Round rattling chilli with nutty, woody warmth
+Pequin chilli |  | accent | dried-chilli | exotic | Tiny, fierce dried chilli with a citrusy bite
+Thai bird's eye chilli dried | dried bird's eye chilli | accent | dried-chilli | uncommon | Small, sharply hot dried chillies for stir-fries and sambals
+Sichuan dried chillies | facing heaven chilli | accent | dried-chilli | uncommon | Fragrant, medium-hot pods fried in oil for Chinese dishes
+Kashmiri dried chillies |  | accent | dried-chilli | uncommon | Wrinkled red pods that give brilliant colour without fierce heat
+Byadgi chilli |  | accent | dried-chilli | exotic | Deeply coloured, mildly hot Indian chilli for rich masalas
+Habanero powder |  | accent | chilli-powder | exotic | Fruity, blazing hot powder for adventurous hot sauces
+Ghost pepper powder | bhut jolokia powder | accent | chilli-powder | exotic | Extremely hot, slow-building powder; use a pinch
+Carolina Reaper flakes |  | accent | chilli-powder | exotic | Painfully hot, fruity flakes for brave cooks only
+Pink peppercorns |  | accent | peppercorn | uncommon | Rosy, fruity berries with a delicate resinous peppery note
+White pepper |  | accent | peppercorn | everyday | Earthy, sharp pepper for pale sauces and Chinese soups
+Ground white pepper |  | accent | peppercorn | everyday | Fine heat for light sauces where specks would show
+Green peppercorns |  | accent | peppercorn | uncommon | Fresh-tasting, mild unripe berries for steak sauces
+Red peppercorns |  | accent | peppercorn | exotic | Fully ripe berries, sweet and fruity with soft heat
+Long pepper | pippali | accent | peppercorn | exotic | Slim catkin with a sweet-hot, cinnamon-like pungency
+Tellicherry peppercorns |  | accent | peppercorn | uncommon | Large, bold, fruity peppercorns from India's Malabar coast
+Cubeb pepper | tailed pepper | accent | peppercorn | exotic | Peppery berry with eucalyptus and allspice notes
+Szechuan peppercorns | Sichuan pepper | accent | sichuan-pepper | uncommon | Citrusy, tongue-numbing husks for mapo tofu
+Green Sichuan peppercorns |  | accent | sichuan-pepper | exotic | Brighter, more lemony and floral numbing pepper
+Sansho pepper | Japanese pepper | accent | sichuan-pepper | exotic | Lemony, mouth-tingling powder sprinkled on grilled eel
+Timut pepper | Nepalese pepper | accent | sichuan-pepper | exotic | Grapefruity, citrus-tingly pepper from Nepal
+Mixed peppercorns | peppercorn medley | accent | peppercorn | everyday | Blend of black, white, green and pink for grinding
+Grains of Paradise | melegueta pepper | accent | grains-of-paradise | exotic | West African seeds with peppery, gingery, cardamom-like heat
+Sumac |  | accent | sumac | uncommon | Tart, lemony crimson powder for salads, kebabs and hummus
+Amchur | mango powder | accent | souring-spice | uncommon | Tangy dried green mango powder for curries and chaat
+Anardana | dried pomegranate seeds | accent | souring-spice | exotic | Sour chewy seeds for chutneys and North Indian dishes
+Tamarind pods |  | accent | souring-spice | uncommon | Sticky, sweet-sour pulp pods for curries and chutneys
+Kokum |  | accent | souring-spice | exotic | Dried purple fruit rind that sours coastal Indian curries
+Citric acid | sour salt | accent | souring-spice | uncommon | Clean sharp powder for sour sweets and preserving
+Dried orange zest | dried orange peel | accent | citrus-zest | uncommon | Sweet-bitter citrus flecks for baking and braises
+Dried lemon zest | dried lemon peel | accent | citrus-zest | uncommon | Bright, lemony flecks for rubs and dressings
+Dried lime zest |  | accent | citrus-zest | exotic | Sharp green-fresh flecks for marinades and seafood
+Dried mandarin peel | chenpi | accent | citrus-zest | exotic | Aged tangerine peel with mellow, sweet complexity for Chinese braises
+Vanilla pods | vanilla beans | accent | vanilla | uncommon | Plump pods with tiny seeds, the finest flavour for custards
+Vanilla paste |  | accent | vanilla | uncommon | Thick paste with flecked seeds for baking and ice cream
+Vanilla powder |  | accent | vanilla | exotic | Ground whole pods, sugarless, for dusting and baking
+Tonka beans |  | accent | tonka | exotic | Aromatic seeds tasting of vanilla, almond and cherry; grate sparingly
+Mahleb | mahlab | accent | mahleb | exotic | Ground cherry stone kernels with a bitter almond-cherry note for breads
+Mastic | mastiha | accent | mastic | exotic | Resin crystals with a piney, cooling flavour for Greek sweets
+Liquorice root | licorice root | accent | liquorice | exotic | Sweet woody root for infusions and braises
+Liquorice powder |  | accent | liquorice | exotic | Sweet-earthy powder for baking, ice cream and spice rubs
+Asafoetida | hing | accent | asafoetida | exotic | Pungent resin that mellows into savoury onion-garlic flavour in dals
+Annatto seeds | achiote | accent | annatto | exotic | Brick-red seeds that colour oil and rice with a peppery, nutty note
+Achiote paste | recado rojo | accent | annatto | exotic | Yucatan seasoning paste of annatto, citrus and spices
+Ground galangal | laos powder | accent | galangal-spice | exotic | Peppery, citrus powder substituting for fresh in curries
+Zedoary | white turmeric root | accent | turmeric-spice | exotic | Mango-ginger tasting rhizome used in Indonesian pastes
+Dried chillies whole |  | accent | dried-chilli | everyday | Whole red pods to infuse oil or toss in stews
+Curry powder | madras curry powder | accent | spice-blend | everyday | Mild all-purpose British-Indian blend of turmeric, cumin and coriander
+Garam masala |  | accent | spice-blend | everyday | Fragrant finishing blend of warming spices for North Indian dishes
+Tandoori masala |  | accent | spice-blend | uncommon | Red-hued blend for yoghurt marinades and grilled meat
+Chaat masala |  | accent | spice-blend | uncommon | Tangy, salty blend with dried mango and black salt for snacks
+Panch phoron | Bengali five spice | accent | spice-blend | exotic | Whole fenugreek, nigella, mustard, cumin and fennel seeds for tempering
+Sambar powder |  | accent | spice-blend | uncommon | South Indian lentil stew blend with toasted chillies and coriander
+Rasam powder |  | accent | spice-blend | exotic | Peppery, tangy blend for South Indian pepper soup
+Kitchen King masala |  | accent | spice-blend | exotic | Well-rounded Indian curry blend with warm spices
+Biryani masala |  | accent | spice-blend | uncommon | Aromatic blend of cardamom, cinnamon, mace and cloves for rice dishes
+Pav bhaji masala |  | accent | spice-blend | exotic | Tangy, spicy blend for Mumbai street vegetable mash
+Ras el Hanout |  | accent | spice-blend | uncommon | Moroccan "top of the shop" blend of a dozen or more aromatics
+Baharat |  | accent | spice-blend | uncommon | Middle Eastern blend of pepper, cumin and cinnamon for lamb and rice
+Za'atar | zaatar | accent | spice-blend | uncommon | Thyme, sumac and sesame mix for flatbreads and labneh
+Harissa powder |  | accent | spice-blend | uncommon | Dried North African chilli, caraway and garlic blend
+Berbere |  | accent | spice-blend | exotic | Fiery Ethiopian blend of chilli, fenugreek and warm spices
+Mitmita |  | accent | spice-blend | exotic | Fiery Ethiopian bird's eye chilli blend with cardamom and cloves
+Ethiopian korarima | false cardamom | accent | cardamom | exotic | Smoky, camphor-edged Ethiopian cardamom for coffee and stews
+Advieh | Persian spice mix | accent | spice-blend | exotic | Floral Persian blend with rose petals, cardamom and cinnamon for rice
+Hawaij | Yemeni spice mix | accent | spice-blend | exotic | Yemeni blends: soup version with turmeric and pepper, coffee with ginger
+Shawarma spice |  | accent | spice-blend | uncommon | Cumin, turmeric, paprika and cinnamon for rotisserie-style meats
+Lebanese seven spice | seven spice; sabaa baharat | accent | spice-blend | uncommon | Warm blend of allspice, cinnamon and nutmeg for kibbeh and rice
+Cajun seasoning |  | accent | spice-blend | everyday | Peppery, garlicky blend of paprika and cayenne for Louisiana dishes
+Creole seasoning |  | accent | spice-blend | uncommon | Herbier cousin of Cajun with oregano and thyme
+Old bay seasoning | seafood seasoning | accent | spice-blend | uncommon | Celery salt and paprika blend, a Chesapeake seafood classic
+Jerk seasoning |  | accent | spice-blend | uncommon | Fiery Jamaican mix of allspice, thyme and scotch bonnet
+Taco seasoning |  | accent | spice-blend | everyday | Cumin, paprika and chilli blend for tacos and fajitas
+Fajita seasoning |  | accent | spice-blend | everyday | Smoky, citrusy blend for sizzling peppers and chicken
+Chilli con carne seasoning |  | accent | spice-blend | everyday | Cumin and oregano-forward mix for a quick chilli
+Ranch seasoning |  | accent | spice-blend | uncommon | Dried herb, garlic and onion mix for dressings and dips
+Montreal steak seasoning | steak seasoning | accent | spice-blend | uncommon | Coarse mix of pepper, coriander, garlic and dill for steak crusts
+Barbecue rub | BBQ rub | accent | spice-blend | everyday | Sweet-smoky paprika and sugar rub for ribs and brisket
+Pumpkin pie spice |  | accent | spice-blend | uncommon | Cinnamon, ginger, nutmeg and clove mix for autumn baking
+Mixed spice |  | accent | spice-blend | everyday | British sweet baking blend for hot cross buns and fruit cake
+Apple pie spice |  | accent | spice-blend | uncommon | Cinnamon-heavy mix for apple desserts
+Gingerbread spice | lebkuchen spice | accent | spice-blend | uncommon | Cinnamon, ginger, clove and cardamom blend for festive baking
+Mulling spices |  | accent | spice-blend | uncommon | Cinnamon, clove and orange peel for warm wine and cider
+Pickling spice |  | accent | spice-blend | everyday | Mustard seed, bay, peppercorn and dill seed for jars
+Chinese five spice | five spice powder | accent | spice-blend | everyday | Star anise, fennel, clove, cassia and pepper blend for duck and pork
+Thirteen spice | shisanxiang | accent | spice-blend | exotic | Chinese braising blend of many warming spices
+Shichimi togarashi | seven spice japanese | accent | spice-blend | uncommon | Chilli, orange peel, sesame and nori sprinkle for noodles
+Ichimi togarashi |  | accent | spice-blend | exotic | Pure ground Japanese chilli for dusting soups
+Nanami togarashi |  | accent | spice-blend | exotic | Chilli-orange peel Japanese pepper mix, a close cousin of shichimi
+Gomasio | sesame salt | accent | spice-blend | exotic | Toasted sesame crushed with salt as a table seasoning
+Jamaican curry powder |  | accent | spice-blend | exotic | Allspice and turmeric-rich blend for goat and chicken curry
+Colombo powder | Caribbean curry | accent | spice-blend | exotic | Antillean blend of mustard, coriander and turmeric
+Adobo seasoning |  | accent | spice-blend | uncommon | Garlicky all-purpose Latin blend with oregano and pepper
+Sazon seasoning |  | accent | spice-blend | uncommon | Annatto, cumin and coriander mix for Latin rice and beans
+Peri peri seasoning | piri piri seasoning | accent | spice-blend | uncommon | Fiery African bird's eye chilli blend for grilled chicken
+Suya spice | yaji | accent | spice-blend | exotic | Nigerian peanut and chilli spice for grilled skewers
+Chermoula spice |  | accent | spice-blend | exotic | Dry coriander, cumin and paprika mix for North African fish
+Tabil | tabil spice | accent | spice-blend | exotic | Tunisian blend of coriander, caraway, garlic and chilli
+Zhug spice |  | accent | spice-blend | exotic | Dried Yemeni chilli-coriander-cardamom blend
+Everything bagel seasoning |  | accent | spice-blend | uncommon | Sesame, poppy, garlic and onion mix with salt
+Lemon pepper |  | accent | spice-blend | everyday | Cracked pepper with dried lemon zest for chicken and fish
+Garlic salt |  | accent | seasoned-salt | everyday | Salt and garlic powder for bread and wings
+Onion salt |  | accent | seasoned-salt | everyday | Salt and onion powder for burgers and fries
+Seasoned salt |  | accent | seasoned-salt | everyday | All-purpose salt with paprika, garlic and onion
+Chip shop salt |  | accent | seasoned-salt | uncommon | Fine salt for sprinkling over fish and chips
+Sea salt |  | accent | salt | everyday | Mineral-rich evaporated salt for all-round seasoning
+Flaky sea salt | flaked sea salt | accent | salt | everyday | Crisp pyramid flakes to finish steak, caramel and cookies
+Maldon salt flakes |  | accent | salt | uncommon | Delicate crunchy flakes from Essex for finishing
+Fleur de sel |  | accent | salt | exotic | Hand-raked French sea salt, pale and moist, for finishing
+Himalayan pink salt |  | accent | salt | uncommon | Rosy rock salt mined in Pakistan, mild and mineral
+Kala namak | black salt | accent | salt | exotic | Sulphurous Indian salt that gives vegan egg dishes a savoury aroma
+Smoked sea salt | smoked salt | accent | salt | uncommon | Oak- or hickory-smoked flakes for instant barbecue flavour
+Hawaiian black lava salt | black lava salt | accent | salt | exotic | Charcoal-laced black crystals for dramatic finishing
+Hawaiian red alaea salt | red salt | accent | salt | exotic | Clay-rich red salt with an earthy mild flavour
+Celtic grey salt | grey sea salt | accent | salt | uncommon | Moist, mineral salt raked from French tidal flats
+Kosher salt |  | accent | salt | everyday | Coarse flaky salt cooks love for seasoning by pinch
+Rock salt |  | accent | salt | everyday | Chunky crystals for grinders and salt crusts
+Table salt |  | accent | salt | everyday | Fine free-flowing salt for baking and brines
+Truffle salt |  | accent | salt | exotic | Sea salt scented with black truffle for eggs and chips
+Lemon salt |  | accent | salt | uncommon | Sea salt blended with lemon zest for fish and rim sprinkles
+Rosemary salt |  | accent | salt | uncommon | Flaky salt crushed with rosemary for lamb and potatoes
+Szechuan pepper salt | Sichuan pepper salt | accent | salt | uncommon | Toasted salt and numbing pepper for fried foods
+Bamboo salt |  | accent | salt | exotic | Korean sea salt roasted in bamboo until mellow
+Persian blue salt |  | accent | salt | exotic | Rare blue-flecked rock salt with a subtle sweetness
+Cyprus black flake salt |  | accent | salt | exotic | Pyramid flakes coloured with activated charcoal
+Curing salt | pink salt | accent | salt | exotic | Nitrite salt for charcuterie and bacon, used by weight
+Sel gris de Guerande |  | accent | salt | exotic | Grey sea salt from Brittany, mineral and slightly briny
+Garlic pepper |  | accent | spice-blend | uncommon | Coarse black pepper and garlic mix for steak
+Porcini powder | dried porcini dust | accent | mushroom-powder | uncommon | Ground dried boletes with deep umami depth
+Shiitake powder |  | accent | mushroom-powder | uncommon | Savoury dried mushroom powder for stocks and rubs
+Mushroom seasoning powder |  | accent | mushroom-powder | uncommon | Savoury umami dusting for soups and stir-fries
+Dried seaweed flakes |  | accent | seaweed-seasoning | uncommon | Briny flakes for sprinkling on rice and soups
+Dulse flakes |  | accent | seaweed-seasoning | exotic | Smoky, bacon-like red seaweed flakes
+Nori strips | kizami nori | accent | seaweed-seasoning | uncommon | Finely cut toasted nori for rice bowls and noodles
+Bonito flakes | katsuobushi | accent | seaweed-seasoning | uncommon | Smoky dried fish shavings that dance on hot dishes and make dashi
+Dried onion granules |  | accent | onion-spice | everyday | Savoury sweet granules for rubs and stews
+Dried parsley |  | accent | dried-herb | everyday | Pale-green flakes for general finishing, mild and grassy
+Dried basil |  | accent | dried-herb | everyday | Sweet, minty flakes for tomato sauces and stews
+Dried mint |  | accent | dried-herb | everyday | Cool dried leaves for tzatziki, peas and Middle Eastern salads
+Dried chives |  | accent | dried-herb | everyday | Light oniony flakes for dips and baked potatoes
+Dried tarragon |  | accent | dried-herb | uncommon | Subtle aniseed leaves to season chicken and creamy sauces
+Dried marjoram |  | accent | dried-herb | uncommon | Sweet, floral leaves for sausages and stuffings
+Dried savory |  | accent | dried-herb | exotic | Peppery flakes for bean dishes and sausages
+Dried coriander leaf |  | accent | dried-herb | uncommon | Mild green flakes for curries when fresh is not to hand
+Dried curry leaves |  | accent | curry-leaf | uncommon | Brittle leaves with mellow curry flavour for tempering
+Dried kaffir lime leaves | dried makrut lime leaves | accent | citrus-leaf | uncommon | Crisp leaves keeping the citrus perfume for Thai soups
+Dried galangal |  | accent | galangal-spice | exotic | Hard slices to rehydrate in Thai soups and curries
+Ground cassia |  | accent | cinnamon | uncommon | Robust, bold cinnamon-style powder for baking
+Sugar cinnamon mix | cinnamon sugar | accent | cinnamon | everyday | Sweet dusting for toast, churros and doughnuts
+Dried elderflower |  | accent | edible-flower | exotic | Dried blooms for teas and syrups
+Dried lavender |  | accent | edible-flower | uncommon | Fragrant dried buds for baking and herbes de Provence
+Spicy salt tajin style | chilli lime salt | accent | seasoned-salt | uncommon | Dried chilli, lime and salt for fruit and corn

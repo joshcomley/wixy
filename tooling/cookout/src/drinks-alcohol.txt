@@ -1,0 +1,170 @@
+# drinks-alcohol
+Red wine |  | accent | wine-red | everyday | Fruity, tannic splash for stews, ragu and braises
+Dry white wine | white wine | accent | wine-white | everyday | Crisp acidity for deglazing, risotto and seafood sauces
+Rose wine | rosé | accent | wine-rose | everyday | Pale, gently fruity wine for light sauces and poaching
+Cabernet Sauvignon |  | accent | wine-red | everyday | Full-bodied blackcurranty red for robust beef dishes
+Merlot |  | accent | wine-red | uncommon | Soft plummy red that rounds out tomato sauces
+Pinot Noir |  | accent | wine-red | everyday | Light silky red, ideal for coq au vin and mushrooms
+Chianti |  | accent | wine-red | uncommon | Tuscan red with cherry and acidity for Italian sauces
+Malbec |  | accent | wine-red | everyday | Dark plummy Argentine red for steak sauces
+Rioja |  | accent | wine-red | everyday | Oaky Spanish red for chorizo stews
+Burgundy |  | accent | wine-red | exotic | Classic French red used for boeuf bourguignon
+Sauvignon Blanc |  | accent | wine-white | everyday | Zesty herbaceous white for seafood and cream sauces
+Chardonnay |  | accent | wine-white | everyday | Rounded buttery white for chicken and creamy sauces
+Pinot Grigio |  | accent | wine-white | everyday | Light dry white for risottos and mussels
+Riesling |  | accent | wine-white | uncommon | Aromatic white with sweetness for pork and spiced dishes
+Chablis |  | accent | wine-white | uncommon | Steely mineral Burgundy white for oysters and fish sauces
+Muscadet |  | accent | wine-white | uncommon | Bone-dry Loire white, the classic partner for moules
+Marsala |  | accent | wine-fortified | uncommon | Sicilian fortified wine, nutty and sweet, for veal and zabaglione
+Madeira |  | accent | wine-fortified | uncommon | Caramelly fortified wine for rich gravies and cake
+Dry sherry | fino | accent | wine-fortified | everyday | Crisp nutty sherry for soups and mushrooms
+Amontillado sherry |  | accent | wine-fortified | everyday | Amber sherry with hazelnut depth
+Oloroso sherry |  | accent | wine-fortified | exotic | Dark, rich, raisiny sherry for stews
+Pedro Ximenez sherry | PX sherry | accent | wine-fortified | uncommon | Syrupy black sweet sherry for pouring over ice cream
+Cream sherry |  | accent | wine-fortified | everyday | Sweet raisiny sherry for trifle and Christmas cake
+Ruby port |  | accent | wine-fortified | uncommon | Fruity sweet fortified wine for sauces and cheese
+Tawny port |  | accent | wine-fortified | everyday | Nutty aged port for glazes and poached pears
+Vintage port |  | accent | wine-fortified | exotic | Deep complex port, special enough to cook with sparingly
+White port |  | accent | wine-fortified | uncommon | Light sweet fortified wine for aperitifs and sauces
+Sweet vermouth | red vermouth | accent | wine-fortified | uncommon | Herbal spiced wine for cocktails and braises
+Dry vermouth | white vermouth | accent | wine-fortified | uncommon | Botanical white wine, a cook's secret for sauces
+Sparkling wine |  | accent | wine-sparkling | everyday | Fizzy white for celebration sauces and cocktails
+Champagne |  | accent | wine-sparkling | exotic | Prestige bubbly for risotto and sauces
+Prosecco |  | accent | wine-sparkling | everyday | Light Italian fizz for spritzes and desserts
+Cava |  | accent | wine-sparkling | uncommon | Spanish dry sparkling wine for sauces and sangria
+Sauternes |  | accent | wine-sweet | uncommon | Honeyed botrytised dessert wine for foie gras and poaching
+Moscato |  | accent | wine-sweet | uncommon | Lightly fizzy grapey sweet wine
+Mulled wine |  | accent | wine-red | everyday | Spiced warm red wine for winter poaching and drinks
+Cooking wine |  | accent | wine-cooking | everyday | Budget seasoned wine made for the pan
+Plum wine | umeshu | accent | wine-asian | exotic | Sweet-tart Japanese plum liqueur-wine
+Lager |  | accent | beer | everyday | Crisp light beer for batters and steaming shellfish
+Pale ale |  | accent | beer | everyday | Hoppy amber beer for cheese sauces and batter
+Brown ale |  | accent | beer | uncommon | Malty nutty beer for beef stews
+Stout |  | accent | beer | everyday | Dark roasty beer for pies and chocolate cakes
+Porter |  | accent | beer | uncommon | Dark chocolatey ale for braising and puddings
+India pale ale | IPA | accent | beer | everyday | Bitter citrusy beer, bold in marinades
+Wheat beer | weissbier | accent | beer | uncommon | Cloudy banana-and-clove beer for mussels and batters
+Belgian ale | Belgian dubbel | accent | beer | uncommon | Dark fruity abbey beer for carbonnade
+Lambic |  | accent | beer | exotic | Sour wild-fermented Belgian beer
+Real ale | bitter | accent | beer | everyday | British cask beer for pies and rarebit
+Non-alcoholic beer | alcohol-free beer | accent | beer | uncommon | Beer flavour for batters without the alcohol
+Cider | dry cider | accent | cider | everyday | Apple-based drink for pork, sauces and sipping
+Sweet cider |  | accent | cider | everyday | Fruity, softer cider for glazes and puddings
+Perry | pear cider | accent | cider | uncommon | Pear-based cider, delicate and floral
+Brandy |  | accent | spirit | everyday | Grape spirit for flambé, Christmas pudding and sauces
+Cognac |  | accent | spirit | exotic | Premium French grape brandy for rich sauces and desserts
+Armagnac |  | accent | spirit | uncommon | Rustic French brandy with prunes and spice
+Calvados |  | accent | spirit | exotic | Apple brandy from Normandy for pork and tarte tatin
+Scotch whisky |  | accent | spirit | uncommon | Smoky malt spirit for sauces and cranachan
+Bourbon |  | accent | spirit | uncommon | Sweet American whiskey with vanilla and caramel
+Irish whiskey |  | accent | spirit | everyday | Smooth triple-distilled whiskey for coffee and cakes
+Rye whiskey |  | accent | spirit | uncommon | Spicy American whiskey for cocktails and glazes
+Dark rum |  | accent | spirit | everyday | Molasses-rich spirit for fruitcake and glazes
+White rum |  | accent | spirit | everyday | Clean cane spirit for cocktails and marinades
+Spiced rum |  | accent | spirit | uncommon | Vanilla-and-spice rum for desserts and baking
+Overproof rum |  | accent | spirit | exotic | Potent rum for flaming puddings
+Gin |  | accent | spirit | everyday | Juniper-scented spirit for cocktails and cured salmon
+Sloe gin |  | accent | spirit | uncommon | Deep ruby gin infused with sloe berries
+Vodka |  | accent | spirit | everyday | Neutral spirit for sauces and pie crusts
+Tequila |  | accent | spirit | uncommon | Agave spirit for marinades and margaritas
+Mezcal |  | accent | spirit | uncommon | Smoky agave spirit with earthy depth
+Aquavit |  | accent | spirit | exotic | Caraway-scented Scandinavian spirit for cured fish
+Grappa |  | accent | spirit | uncommon | Grape pomace brandy from Italy
+Ouzo |  | accent | spirit | uncommon | Aniseed Greek spirit for seafood and cocktails
+Pastis |  | accent | spirit | uncommon | Aniseed French spirit for fish soups
+Absinthe |  | accent | spirit | exotic | Herbal wormwood spirit, a splash goes a long way
+Pisco |  | accent | spirit | uncommon | South American grape brandy
+Cachaça | cachaca | accent | spirit | exotic | Brazilian sugarcane spirit for caipirinhas
+Kirsch |  | accent | spirit | uncommon | Clear cherry brandy for fondue and cakes
+Poitín | poteen | accent | spirit | exotic | Potent Irish moonshine
+Baijiu |  | accent | spirit | uncommon | Fiery Chinese grain spirit
+Soju |  | accent | spirit | uncommon | Mild Korean distilled spirit
+Triple sec |  | accent | liqueur | everyday | Clear orange liqueur for crepes and margaritas
+Amaretto |  | accent | liqueur | everyday | Sweet almond liqueur for tiramisu and baking
+Coffee liqueur |  | accent | liqueur | uncommon | Sweet coffee spirit for tiramisu and martinis
+Limoncello |  | accent | liqueur | uncommon | Italian lemon liqueur for cakes and drizzle
+Crème de cassis | cassis | accent | liqueur | uncommon | Blackcurrant liqueur for kir and sauces
+Crème de menthe |  | accent | liqueur | uncommon | Mint liqueur for chocolate desserts
+Elderflower liqueur |  | accent | liqueur | everyday | Floral sweet liqueur for fruit salads and cocktails
+Sambuca |  | accent | liqueur | uncommon | Aniseed Italian liqueur for coffee
+Orange bitters |  | accent | liqueur | exotic | Citrusy dash for cocktails and glazes
+Advocaat |  | accent | liqueur | uncommon | Thick egg-and-brandy liqueur for snowballs
+Maraschino liqueur |  | accent | liqueur | uncommon | Bittersweet cherry liqueur
+Espresso |  | accent | coffee | everyday | Concentrated shot for tiramisu and sauces
+Instant coffee |  | accent | coffee | everyday | Dried coffee granules for cakes and desserts
+Ground coffee |  | accent | coffee | everyday | Roasted coffee for brewing, rubs and sweet bakes
+Cold brew coffee |  | accent | coffee | everyday | Smooth chilled coffee for desserts and drinks
+Coffee beans |  | accent | coffee | uncommon | Whole roasted beans for infusions and decorations
+Decaf coffee |  | accent | coffee | uncommon | Mellow coffee flavour for evening desserts
+Chicory coffee |  | accent | coffee | exotic | Roasted chicory root drink with bitter-nutty depth
+Matcha |  | accent | tea | everyday | Bright green powdered Japanese tea for baking and lattes
+Earl Grey tea |  | accent | tea | everyday | Bergamot-scented black tea for infusing creams
+English breakfast tea |  | accent | tea | everyday | Strong black tea for brews and tea loaf
+Green tea |  | accent | tea | everyday | Light grassy tea for marinades and smoking
+Jasmine tea |  | accent | tea | uncommon | Floral tea for poaching and syrups
+Chai tea | chai | accent | tea | everyday | Spiced black tea for lattes and cakes
+Lapsang souchong |  | accent | tea | uncommon | Smoky Chinese black tea for smoking and marinades
+Oolong tea |  | accent | tea | exotic | Semi-oxidised tea, floral and toasty
+Camomile tea | chamomile tea | accent | tea | everyday | Soothing apple-scented floral infusion
+Peppermint tea |  | accent | tea | everyday | Cooling fresh mint infusion for syrups
+Rooibos tea | red bush tea | accent | tea | everyday | Naturally sweet red African infusion
+Hibiscus tea |  | accent | tea | uncommon | Tart crimson floral infusion for syrups
+Hojicha |  | accent | tea | exotic | Roasted Japanese green tea, nutty and mellow
+Kombucha |  | accent | fermented-drink | everyday | Tangy fizzy fermented tea
+Water kefir |  | accent | fermented-drink | uncommon | Sugary fermented water, lightly fizzy
+Elderflower cordial |  | accent | cordial | everyday | Floral syrup for drinks, jellies and fruit
+Lemon barley water |  | accent | cordial | everyday | Traditional sweet-sharp refresher
+Blackcurrant cordial |  | accent | cordial | everyday | Intense fruity squash for drinks and sauces
+Ginger cordial |  | accent | cordial | uncommon | Spicy syrup for tonics
+Lime cordial |  | accent | cordial | uncommon | Sharp sweet lime concentrate for cocktails
+Grenadine |  | accent | cordial | everyday | Pomegranate syrup, bright red and sweet
+Orgeat |  | accent | cordial | exotic | Almond and orange-flower syrup for cocktails
+Squash |  | accent | cordial | everyday | Fruity concentrated drink diluted with water
+Orange juice |  | accent | juice | everyday | Fresh citrus juice for marinades and glazes
+Apple juice |  | accent | juice | everyday | Sweet fruit juice for poaching and pork
+Cranberry juice |  | accent | juice | everyday | Tart red juice for sauces and punches
+Pineapple juice |  | accent | juice | everyday | Sweet tangy juice for marinades and curries
+Lemon juice |  | accent | juice | everyday | Sharp juice for dressings and baking
+Lime juice |  | accent | juice | everyday | Zesty juice for ceviche and Thai sauces
+Grapefruit juice |  | accent | juice | everyday | Bitter-sweet juice for glazes
+Pomegranate juice |  | accent | juice | everyday | Tart ruby juice for glazes and drinks
+Tomato juice |  | accent | juice | everyday | Savoury juice for Bloody Marys and soups
+Beetroot juice |  | accent | juice | everyday | Earthy red juice for soups and cures
+Grape juice |  | accent | juice | everyday | Sweet juice for poaching and jellies
+Carrot juice |  | accent | juice | everyday | Sweet orange juice for soups and cakes
+Cherry juice |  | accent | juice | uncommon | Tart juice for jellies and sauces
+Mango juice |  | accent | juice | everyday | Sweet tropical juice for curries and smoothies
+Yuzu juice |  | accent | juice | uncommon | Aromatic Japanese citrus juice
+Coconut milk |  | accent | plant-milk | everyday | Rich creamy liquid for curries and desserts
+Coconut cream |  | accent | plant-milk | everyday | Thick rich cream for sauces and desserts
+Coconut water |  | accent | plant-milk | everyday | Light slightly sweet liquid from young coconuts
+Oat milk |  | accent | plant-milk | everyday | Creamy mild plant milk for porridge and baking
+Almond milk |  | accent | plant-milk | everyday | Light nutty milk for smoothies and cooking
+Soya milk | soy milk | accent | plant-milk | everyday | Neutral plant milk for custards and sauces
+Rice milk |  | accent | plant-milk | uncommon | Thin sweet milk for puddings
+Hazelnut milk |  | accent | plant-milk | uncommon | Toasty nutty milk for lattes and desserts
+Cashew milk |  | accent | plant-milk | uncommon | Creamy smooth plant milk for sauces
+Hemp milk |  | accent | plant-milk | exotic | Grassy nutty milk
+Pea milk |  | accent | plant-milk | uncommon | Creamy high-protein plant milk
+Horchata |  | accent | plant-milk | exotic | Sweet cinnamon rice or tiger nut drink
+Ginger beer |  | accent | fizzy | everyday | Spicy fizzy drink for marinades, cake and cocktails
+Cola |  | accent | fizzy | everyday | Fizzy caramel drink for glazing ham and cakes
+Lemonade |  | accent | fizzy | everyday | Fizzy lemon drink for batters and scones
+Tonic water |  | accent | fizzy | everyday | Bitter quinine fizz for gin and batters
+Soda water | sparkling water | accent | fizzy | everyday | Plain fizz for light tempura batters
+Ginger ale |  | accent | fizzy | everyday | Mild ginger fizz for glazes and drinks
+Root beer |  | accent | fizzy | everyday | Sweet sassafras-and-vanilla American soda
+Cream soda |  | accent | fizzy | everyday | Vanilla fizzy drink
+Dandelion and burdock |  | accent | fizzy | uncommon | Old British botanical soft drink
+Sarsaparilla |  | accent | fizzy | exotic | Root-based soft drink with root beer notes
+Orange liqueur |  | accent | liqueur | everyday | Sweet orange spirit for crepes, soufflés and sauces
+Cream liqueur | Irish cream | accent | liqueur | everyday | Whiskey and cream drink for desserts and coffee
+Hazelnut liqueur |  | accent | liqueur | uncommon | Sweet nutty spirit for desserts and coffee
+Bitter aperitif |  | accent | liqueur | uncommon | Bitter red Italian spirit for spritzes
+Aromatic bitters |  | accent | liqueur | uncommon | Concentrated spiced dash for cocktails and baking
+Aniseed liqueur |  | accent | liqueur | uncommon | Liquorice-scented spirit for fish soups
+Herbal liqueur |  | accent | liqueur | uncommon | Monastic spirit steeped with dozens of herbs
+Raspberry liqueur |  | accent | liqueur | exotic | Rich berry liqueur for sauces and desserts
+Melon liqueur |  | accent | liqueur | uncommon | Bright green sweet melon spirit
+Passion fruit liqueur |  | accent | liqueur | exotic | Tropical sweet-tart spirit for cocktails
+Coffee cream liqueur |  | accent | liqueur | uncommon | Sweet coffee and cream spirit

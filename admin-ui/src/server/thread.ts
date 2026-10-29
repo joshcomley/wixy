@@ -21,6 +21,7 @@ import {
   deleteMessage,
   getHistory,
   getUsage,
+  parseWyrRefKind,
   sendCanvasMessage,
   sendMessage,
   sendViewOnceMessage,
@@ -66,6 +67,41 @@ import { createAdventureGame, type AdventureGame } from "./adventure/adventureGa
 import { createHolidayBank, type HolidayBank } from "./adventure/holidayBank";
 import { createAdventureModel, type AdventureModel } from "./adventure/model";
 import { loadWorld } from "./adventure/world";
+import {
+  abandonCookout,
+  bankCookoutConcept,
+  createCookout,
+  getCookout,
+  getCookoutOptions,
+  getRoundPhotos,
+  joinCookout,
+  linkRecipePhoto,
+  luckyCookout,
+  markCooked,
+  chaosCookout,
+  vetoCookout,
+  starCookout,
+  wildcardCookout,
+  voteCookout,
+  proposeSwap,
+  chooseSwap,
+  cancelSwap,
+  rateRecipe,
+  searchIngredients,
+  parseCookoutSummary,
+  pickCookout,
+  retryCookoutConcepts,
+  retryCookoutPictures,
+  retryCookoutRecipe,
+  skipCookout,
+  type ConceptId,
+  type CookoutOptions,
+} from "./cookout/api";
+import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
+import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
+import { createCookoutModel, type CookoutModel } from "./cookout/model";
+import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
+import { createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -341,6 +377,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   bankItemHint.textContent = "Places you've saved";
   bankItem.append(bankItemTitle, bankItemHint);
   moreMenu.appendChild(bankItem);
+  const cookoutItem = documentRef.createElement("button");
+  cookoutItem.type = "button";
+  cookoutItem.className = "wx-srv-more-item wx-srv-more-cookout";
+  cookoutItem.setAttribute("role", "menuitem");
+  cookoutItem.setAttribute("data-srv-gesture-boundary", "");
+  const cookoutItemTitle = documentRef.createElement("span");
+  cookoutItemTitle.className = "wx-srv-more-item-title";
+  cookoutItemTitle.textContent = "Cookout";
+  const cookoutItemHint = documentRef.createElement("span");
+  cookoutItemHint.className = "wx-srv-more-item-hint";
+  cookoutItemHint.textContent = "Pick 10 ingredients, see what the chef invents";
+  cookoutItem.append(cookoutItemTitle, cookoutItemHint);
+  moreMenu.appendChild(cookoutItem);
+  const recipeBookItem = documentRef.createElement("button");
+  recipeBookItem.type = "button";
+  recipeBookItem.className = "wx-srv-more-item wx-srv-more-recipes";
+  recipeBookItem.setAttribute("role", "menuitem");
+  recipeBookItem.setAttribute("data-srv-gesture-boundary", "");
+  const recipeBookItemTitle = documentRef.createElement("span");
+  recipeBookItemTitle.className = "wx-srv-more-item-title";
+  recipeBookItemTitle.textContent = "Recipe book";
+  const recipeBookItemHint = documentRef.createElement("span");
+  recipeBookItemHint.className = "wx-srv-more-item-hint";
+  recipeBookItemHint.textContent = "Dishes you've banked together";
+  recipeBookItem.append(recipeBookItemTitle, recipeBookItemHint);
+  moreMenu.appendChild(recipeBookItem);
   const topicsItem = documentRef.createElement("button");
   topicsItem.type = "button";
   topicsItem.className = "wx-srv-more-item wx-srv-more-topics";
@@ -413,6 +475,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   bankItem.addEventListener("click", () => {
     closeMoreMenu();
     holidayBank.open(header.offsetHeight);
+  });
+  cookoutItem.addEventListener("click", () => {
+    closeMoreMenu();
+    cookoutStart.open({}, header.offsetHeight);
+  });
+  recipeBookItem.addEventListener("click", () => {
+    closeMoreMenu();
+    recipeBook.open(header.offsetHeight);
   });
   fryItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -569,6 +639,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     document: documentRef,
     openGame: (seq) => gameTabs.open("adventure", seq),
     loadWorld: () => loadWorld(),
+  });
+  // Cookout (workspace 00058): the model holds each round's viewer-filtered view (a Blind round shows
+  // each person only their own side); the card draws it in the main chat and the pane plays it.
+  const cookoutModel: CookoutModel = createCookoutModel({
+    session: () => currentSession,
+    viewer: () => identity.getName(),
+    fetchRound: (session, seq, viewer) => getCookout(session, seq, viewer),
+    onChange: (seq) => {
+      patchCookout(seq);
+      gameTabs.refresh();
+    },
+    setTimeout: (fn, ms) => win.setTimeout(fn, ms),
+    clearTimeout: (id) => win.clearTimeout(id),
+  });
+  const cookoutCards: CookoutCards = createCookoutCards({
+    model: cookoutModel,
+    document: documentRef,
+    openGame: (seq) => gameTabs.open("cookout", seq),
   });
   let voiceRecorder: VoiceRecorder | null = null;
   let callBusy = false;
@@ -1232,8 +1320,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (open && adventureGame.pane.parentElement === null) game.pane.after(adventureGame.pane);
     else if (!open && adventureGame.pane.parentElement !== null) adventureGame.pane.remove();
   }
+  /** The Cookout pane follows the same rule: in the chat only while its game is open, so a chat that is
+   * not cooking carries no hidden second game pane (and `.wx-srv-game` still means the one open game). */
+  function syncCookoutPane(): void {
+    const open = gameTabs.seqOf("cookout") !== null;
+    if (open && cookoutGame.pane.parentElement === null) game.pane.after(cookoutGame.pane);
+    else if (!open && cookoutGame.pane.parentElement !== null) cookoutGame.pane.remove();
+  }
   function applyGameLayout(): void {
-    if (gameMounted) syncAdventurePane();
+    if (gameMounted) {
+      syncAdventurePane();
+      syncCookoutPane();
+    }
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
@@ -1337,6 +1435,90 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openBank: () => holidayBank.open(header.offsetHeight),
     afterChange: () => threadScroll.afterContentChange(false),
   });
+  function cookoutSession(): ServerSession {
+    if (currentSession === null) throw new ServerLockedError();
+    return currentSession;
+  }
+  const cookoutGame: CookoutGame = createCookoutGame({
+    document: documentRef,
+    model: cookoutModel,
+    tabs: gameTabs,
+    itemChat,
+    float: gameFloat,
+    hooks,
+    api: {
+      join: (seq) => joinCookout(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
+      skip: (seq, input) => skipCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      pick: (seq, input) => pickCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      abandon: (seq) => abandonCookout(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
+      retryConcepts: (seq, generation) => retryCookoutConcepts(cookoutSession(), seq, { sender: identity.getName() ?? "", generation }),
+      retryPictures: (seq, generation) => retryCookoutPictures(cookoutSession(), seq, { sender: identity.getName() ?? "", generation }),
+      bank: (seq, conceptId, moveId, generation) =>
+        bankCookoutConcept(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "", moveId, generation }),
+      retryRecipe: (seq, conceptId, generation) =>
+        retryCookoutRecipe(cookoutSession(), seq, conceptId, { sender: identity.getName() ?? "", generation }),
+      lucky: (seq, input) => luckyCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      chaos: (seq, input) => chaosCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      veto: (seq, input) => vetoCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ...input }),
+      star: (seq, ingredientId) => starCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", ingredientId }),
+      wildcard: (seq, moveId, lift) => wildcardCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, lift }),
+      vote: (seq, generation, conceptId) => voteCookout(cookoutSession(), seq, { sender: identity.getName() ?? "", generation, conceptId }),
+      proposeSwap: (seq, moveId, ingredientId) =>
+        proposeSwap(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, ingredientId }),
+      chooseSwap: (seq, moveId, ingredientId) => chooseSwap(cookoutSession(), seq, { sender: identity.getName() ?? "", moveId, ingredientId }),
+      cancelSwap: (seq) => cancelSwap(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
+      markCooked: (seq, generation, conceptId, cooked) =>
+        markCooked(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", cooked }),
+      rate: (seq, generation, conceptId, rating) =>
+        rateRecipe(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", rating }),
+      linkPhoto: (seq, generation, conceptId, messageSeq, attachmentId) =>
+        linkRecipePhoto(cookoutSession(), seq, generation, conceptId, { sender: identity.getName() ?? "", messageSeq, attachmentId }),
+      photos: (seq) => getRoundPhotos(cookoutSession(), seq, identity.getName() ?? ""),
+    },
+    roundMessage: (seq) => confirmedBySeq.get(seq),
+    partner: () => partnerName,
+    openStartSheet: (preset) => cookoutStart.open(preset, header.offsetHeight),
+    openBook: () => recipeBook.open(header.offsetHeight),
+    openLightbox: (src, alt) => lightbox.open(src, alt),
+    afterChange: () => threadScroll.afterContentChange(false),
+    newId: () => cryptoRandomId(win),
+  });
+  // The start sheet (Open / Blind and the optional twists, then Start Cookout): from the ... menu, the
+  // pane's New and the encore buttons. `GET /cookout/options` is read once per unlock (cleared on every
+  // lock and wipe with `cookoutOptions = null`).
+  let cookoutOptions: Promise<CookoutOptions | null> | null = null;
+  function loadCookoutOptions(): Promise<CookoutOptions | null> {
+    const session = currentSession;
+    if (session === null) return Promise.resolve(null);
+    if (cookoutOptions === null) {
+      const asked = getCookoutOptions(session).catch((error: unknown) => {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return null;
+      });
+      cookoutOptions = asked;
+      // A failed read is not cached: the next open asks again.
+      void asked.then((options) => {
+        if (options === null && cookoutOptions === asked) cookoutOptions = null;
+      });
+    }
+    return cookoutOptions;
+  }
+  const cookoutStart: CookoutStartSheet = createCookoutStartSheet({
+    document: documentRef,
+    start: (choices, clientId) => addCookout(choices, clientId),
+    loadOptions: () => loadCookoutOptions(),
+    async search(q) {
+      const session = currentSession;
+      if (session === null) return { ok: false, kind: "unavailable" };
+      try {
+        return await searchIngredients(session, q);
+      } catch (error) {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return { ok: false, kind: "unavailable" };
+      }
+    },
+    newId: () => cryptoRandomId(win),
+  });
   gameMounted = true;
   threadWrap.after(game.pane);
   element.appendChild(gameTabs.tabBar);
@@ -1350,8 +1532,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     gameFloat.reset();
     itemChat.reset();
     gameTabs.reset();
+    cookoutGame.forgetAll();
     seenAnchor.wyr = 0;
     seenAnchor.adventure = 0;
+    seenAnchor.cookout = 0;
   }
 
   /** The other person's display name, as the latest message from anyone else shows it (the two
@@ -1361,7 +1545,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   /** The newest game anchor of each game this tab has already considered offering: a game tab is
    * offered once per NEW round, never again for one already seen — with one game at a time, an
    * older unfinished round of one game must not keep pushing out the other game's tab. */
-  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0 };
+  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0, cookout: 0 };
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
@@ -1495,6 +1679,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openTrip: (seq) => void openAdventureTrip(seq),
   });
   element.appendChild(holidayBank.element);
+
+  // The Recipe book (workspace 00058): every banked Cookout dish, a tap opens its full recipe in the game.
+  const recipeBook: RecipeBook = createRecipeBook({
+    document: documentRef,
+    hooks,
+    getSession: () => currentSession,
+    openRecipe: (seq, conceptId, generation) => void openCookoutRecipe(seq, conceptId, generation),
+    openEncore: (encore) => cookoutStart.open({ encore }, header.offsetHeight),
+  });
+  element.appendChild(recipeBook.element);
+  element.appendChild(cookoutStart.element);
 
   // The game's topic picker (workspace 00052): opened from the ⋯ menu and from the game tab.
   const wyrTopics: WyrTopicsView = createWyrTopics({
@@ -2223,6 +2418,60 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     gameTabs.open("adventure", result.message.seq);
   }
 
+  /** Starts a Cookout round from the start sheet: the server abandons an unfinished one and the anchor
+   * message appears at once; the starter lands in the Cookout tab and takes Turn 1 (the other person is
+   * OFFERED it, with a dot, by `syncGames`). Throws with the words to show when it could not start, so the
+   * sheet stays open with them; a lock closes everything instead. */
+  async function addCookout(choices: StartChoices, clientId: string): Promise<void> {
+    const session = currentSession;
+    if (session === null) return;
+    const requestGeneration = contentGeneration;
+    let result: Awaited<ReturnType<typeof createCookout>>;
+    try {
+      // Only the twists actually chosen go on the wire: a twist-free start is the core request exactly.
+      result = await createCookout(session, {
+        clientId,
+        sender: identity.getName() ?? "",
+        deviceId: identity.getDeviceId(),
+        blind: choices.blind,
+        ...(choices.style === null ? {} : { style: choices.style }),
+        ...(choices.challenge === null ? {} : { challenge: choices.challenge }),
+        ...(choices.wildcard ? { wildcard: true } : {}),
+        ...(choices.stars ? { stars: true } : {}),
+        ...(choices.fridgeSeedId === null ? {} : { fridgeSeedId: choices.fridgeSeedId }),
+        ...(choices.encore === null ? {} : { encore: choices.encore }),
+      });
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return;
+    }
+    if (requestGeneration !== contentGeneration || currentSession === null) return;
+    if (!result.ok) {
+      throw new Error(
+        result.kind === "unsupported"
+          ? "Cookout isn't available yet — try again in a moment."
+          : result.kind === "game_unavailable"
+            ? "Cookout isn't available on this server right now."
+            : result.kind === "invalid"
+              ? "The kitchen can't start with those twists — change a choice and try again."
+              : "Couldn't start a Cookout — try again.",
+      );
+    }
+    addConfirmed(result.message);
+    renderThreadList();
+    threadScroll.scrollToBottom();
+    gameTabs.open("cookout", result.message.seq);
+  }
+
+  /** The Recipe book's tap: open that round's dish in the Cookout tab, loading its message first. */
+  async function openCookoutRecipe(seq: number, conceptId: ConceptId, generation: number): Promise<void> {
+    if (await ensureMessageLoaded(seq)) {
+      cookoutGame.openRecipe(seq, conceptId, generation);
+      return;
+    }
+    if (currentSession !== null) composer.setError("Couldn't open that recipe — try again.");
+  }
+
   /** Pages older history in until the message `seq` is loaded (a banked trip may be months back),
    * so its card, its chat and its round are all there when its tab opens. */
   async function ensureMessageLoaded(seq: number): Promise<boolean> {
@@ -2260,9 +2509,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function syncGames(messages: readonly Message[]): void {
     let newestWyr: Message | undefined;
     let newestAdventure: Message | undefined;
+    let newestCookout: Message | undefined;
     for (const m of messages) {
       if (m.wyr !== undefined && m.wyr !== null) newestWyr = m;
       if (m.adventure !== undefined && m.adventure !== null) newestAdventure = m;
+      if (parseCookoutSummary(m.cookout) !== null) newestCookout = m;
     }
     const offers: Array<{ readonly key: GameKey; readonly seq: number }> = [];
     if (newestWyr !== undefined && newestWyr.wyr !== undefined && newestWyr.wyr !== null && newestWyr.seq > seenAnchor.wyr) {
@@ -2287,6 +2538,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         offers.push({ key: "adventure", seq: newestAdventure.seq });
       }
     }
+    const cookoutSummary = newestCookout === undefined ? null : parseCookoutSummary(newestCookout.cookout);
+    if (newestCookout !== undefined && cookoutSummary !== null && newestCookout.seq > seenAnchor.cookout) {
+      seenAnchor.cookout = newestCookout.seq;
+      // Still being picked, or the chef still at work: worth a tab with a dot.
+      const active =
+        cookoutSummary.state === "picking" || (cookoutSummary.state === "finished" && cookoutSummary.concepts === "pending");
+      const current = gameTabs.seqOf("cookout");
+      if (newestCookout.seq !== current && (active || (current !== null && newestCookout.seq > current))) {
+        offers.push({ key: "cookout", seq: newestCookout.seq });
+      }
+    }
     const newest = offers.reduce<(typeof offers)[number] | undefined>((a, b) => (a === undefined || b.seq > a.seq ? b : a), undefined);
     if (newest !== undefined) gameTabs.offer(newest.key, newest.seq);
     gameTabs.refresh();
@@ -2296,7 +2558,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * message (`wyrRef`) belongs to — or null when it is not a game's chat. The server says which
    * game (`wyrRefKind`, resolved at read time, so it is right even when the anchor is older than
    * the loaded history); an older server does not, and the anchor message itself is asked. */
-  function gameLabelFor(anchorSeq: number, kind?: "wyr" | "adventure" | null): string | null {
+  function gameLabelFor(anchorSeq: number, rawKind?: unknown): string | null {
+    const kind = parseWyrRefKind(rawKind);
+    if (kind === "cookout") return "Cookout";
     if (kind === "adventure") return "Adventure";
     if (kind === "wyr") return "WYR";
     const anchor = confirmedBySeq.get(anchorSeq);
@@ -2306,8 +2570,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       return "WYR";
     }
     if (anchor.adventure !== undefined && anchor.adventure !== null) return "Adventure";
+    if (parseCookoutSummary(anchor.cookout) !== null) return "Cookout";
     if (anchor.wyr !== undefined && anchor.wyr !== null) return "WYR";
     return null;
+  }
+
+  /** Redraws one Cookout's main-chat card in place (no bubble rebuild). */
+  function patchCookout(seq: number): void {
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return;
+    const container = rendered.element.querySelector<HTMLElement>(".wx-srv-ck-mcard");
+    if (container === null) return;
+    cookoutCards.render(container, rendered.message);
+    threadScroll.afterContentChange(false);
   }
 
   /** Redraws one adventure's main-chat card in place (no bubble rebuild). */
@@ -2351,7 +2626,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const tag = documentRef.createElement("span");
         // The WYR tag keeps its original class too: styles and e2e select on it.
         tag.className = label === "WYR" ? "wx-srv-bubble-gametag wx-srv-bubble-wyrtag" : "wx-srv-bubble-gametag";
-        tag.dataset["game"] = label === "WYR" ? "wyr" : "adventure";
+        tag.dataset["game"] = label === "WYR" ? "wyr" : label === "Cookout" ? "cookout" : "adventure";
         tag.textContent = label;
         bubble.appendChild(tag);
       }
@@ -2367,6 +2642,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     } else if (message.adventure !== undefined && message.adventure !== null) {
       bubble.classList.add("wx-srv-bubble-adv");
       bubble.appendChild(adventureCards.create(message));
+    } else if (parseCookoutSummary(message.cookout) !== null) {
+      bubble.classList.add("wx-srv-bubble-ck");
+      bubble.appendChild(cookoutCards.create(message));
     } else if (message.canvas === true) {
       bubble.classList.add("wx-srv-bubble-canvas");
       const surface = documentRef.createElement("div");
@@ -2559,6 +2837,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         patchQuote(message.seq);
         if (message.wyr !== undefined && message.wyr !== null) patchWyr(message.seq);
         if (message.adventure !== undefined && message.adventure !== null) patchAdventure(message.seq);
+        if (parseCookoutSummary(message.cookout) !== null) patchCookout(message.seq);
       }
       if (rendered !== undefined && rendered.message !== message) {
         teardownMessageActions(message.seq);
@@ -2640,6 +2919,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     drawingLayer.syncMessages(messages);
     wyrModel.observe(messages);
     adventureModel.observe(messages);
+    cookoutModel.observe(messages);
     syncGames(messages);
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     threadScroll.afterContentChange(revealPillIfNotStuck);
@@ -2715,8 +2995,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     drawingLayer.wiped();
     wyrModel.reset();
     adventureModel.reset();
+    cookoutModel.reset();
     resetGames();
     holidayBank.close();
+    recipeBook.close();
+    cookoutStart.close();
+    cookoutOptions = null;
     partnerName = null;
     partnerSeq = 0;
     contentGeneration += 1;
@@ -3479,12 +3763,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       drawingLayer.detach();
       wyrModel.reset();
       adventureModel.reset();
+      cookoutModel.reset();
       resetGames();
       closeUnheardView();
       closeMoreMenu();
       gallery.close();
       links.close();
       holidayBank.close();
+      recipeBook.close();
+      cookoutStart.close();
+      cookoutOptions = null;
       wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3520,6 +3808,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           addConfirmed(event.message);
           links.messageChanged(event.message);
           holidayBank.messageChanged(event.message);
+          recipeBook.messageChanged(event.message);
           renderThreadList(
             isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender),
           );
@@ -3546,6 +3835,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           confirmedBySeq.delete(event.seq);
           links.messageDeleted(event.seq);
           holidayBank.messageDeleted(event.seq);
+          recipeBook.messageDeleted(event.seq);
           // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
           drawingLayer.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
@@ -3587,6 +3877,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       drawingLayer.teardown();
       wyrModel.reset();
       adventureModel.reset();
+      cookoutModel.reset();
       resetGames();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -3605,6 +3896,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       gallery.close();
       links.close();
       holidayBank.close();
+      recipeBook.close();
+      cookoutStart.close();
+      cookoutOptions = null;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
       observer?.disconnect();

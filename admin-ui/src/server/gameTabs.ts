@@ -4,7 +4,7 @@
 // pane takes the thread's place, FULL SCREEN (decisions/00194):
 //
 //   [ the game's pane, from the very top of the chat view to the tab bar ]
-//   [ Chat | WYR | Adventure ]                      <- this bar
+//   [ Chat | WYR | Adventure | Cookout ]            <- this bar (holding Chat + ONE game)
 //
 // While a game tab shows, the chat header and the chat composer are hidden (the thread does this on
 // every layout change, keyed on `activeTab()`): the conversation is reached through the pane's chat
@@ -23,7 +23,7 @@
 
 import type { ItemChat } from "./itemChat";
 
-export type GameKey = "wyr" | "adventure";
+export type GameKey = "wyr" | "adventure" | "cookout";
 export type GameTab = "chat" | GameKey;
 
 export interface GameRegistration {

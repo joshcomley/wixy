@@ -66,18 +66,20 @@ interface Harness {
   layout: ReturnType<typeof vi.fn>;
   wyr: FakeGame;
   adventure: FakeGame;
+  cookout: FakeGame;
 }
 
-function make(register: readonly ("wyr" | "adventure")[] = ["wyr", "adventure"]): Harness {
+function make(register: readonly GameKey[] = ["wyr", "adventure", "cookout"]): Harness {
   const popup = fakePopup();
   const layout = vi.fn();
   const deps: GameTabsDeps = { document, itemChat: popup, onLayoutChange: layout };
   const tabs = createGameTabs(deps);
   const wyr = fakeGame("wyr", "WYR");
   const adventure = fakeGame("adventure", "Adventure");
-  for (const game of [wyr, adventure]) if (register.includes(game.key)) tabs.register(game);
-  document.body.append(tabs.tabBar, wyr.pane, adventure.pane);
-  return { tabs, popup, layout, wyr, adventure };
+  const cookout = fakeGame("cookout", "Cookout");
+  for (const game of [wyr, adventure, cookout]) if (register.includes(game.key)) tabs.register(game);
+  document.body.append(tabs.tabBar, wyr.pane, adventure.pane, cookout.pane);
+  return { tabs, popup, layout, wyr, adventure, cookout };
 }
 
 /** The visible tab buttons' texts (without the dots), in bar order. */
@@ -587,5 +589,61 @@ describe("game tabs with the real item chat", () => {
     expect(itemChat.isPopupOpen()).toBe(false);
     expect(mounts[mounts.length - 1]).toBeNull();
     expect(tabs.chatTarget()).toBeNull();
+  });
+});
+
+describe("game tabs: Cookout is the third game (spec 09 5.1)", () => {
+  it("GameKey admits wyr, adventure and cookout, and Cookout registers like the others", () => {
+    const keys: GameKey[] = ["wyr", "adventure", "cookout"];
+    const h = make(keys);
+    h.tabs.open("cookout", 50);
+    expect(h.tabs.seqOf("cookout")).toBe(50);
+    expect(h.tabs.activeTab()).toBe("cookout");
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Cookout"]);
+    const tab = h.tabs.tabBar.querySelector<HTMLButtonElement>(".wx-srv-tab-cookout");
+    expect(tab?.dataset["game"]).toBe("cookout");
+    expect(tab?.getAttribute("aria-label")).toBe("Cookout game");
+    expect(h.cookout.pane.hidden).toBe(false);
+    expect(h.tabs.chatTarget()).toBe(50);
+  });
+
+  it("opening Cookout replaces an open WYR or Adventure tab, and either of them replaces Cookout", () => {
+    const h = make();
+    h.tabs.open("wyr", 7);
+    h.tabs.open("cookout", 50);
+    expect(h.wyr.reset).toHaveBeenCalledTimes(1);
+    expect(h.tabs.seqOf("wyr")).toBeNull();
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Cookout"]);
+    h.tabs.open("adventure", 30);
+    expect(h.cookout.reset).toHaveBeenCalledTimes(1);
+    expect(h.tabs.seqOf("cookout")).toBeNull();
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Adventure"]);
+    h.tabs.open("cookout", 51);
+    expect(h.adventure.reset).toHaveBeenCalledTimes(1);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Cookout"]);
+  });
+
+  it("offering Cookout replaces the open game with a dotted Cookout tab and leaves the screen on Chat", () => {
+    const h = make();
+    h.tabs.open("adventure", 30);
+    h.tabs.offer("cookout", 50);
+    expect(h.adventure.reset).toHaveBeenCalledTimes(1);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Cookout"]);
+    expect(dotted(h.tabs, ".wx-srv-tab-cookout")).toBe(true);
+    expect(h.tabs.activeTab()).toBe("chat");
+    expect(h.cookout.pane.hidden).toBe(true);
+  });
+
+  it("a closed Cookout round is not offered again, and its pop-up chat closes with it", () => {
+    const h = make();
+    h.tabs.open("cookout", 50);
+    h.popup.openFor(50);
+    h.tabs.close("cookout");
+    expect(h.popup.closePopup).toHaveBeenCalledTimes(1);
+    expect(h.cookout.reset).toHaveBeenCalledTimes(1);
+    h.tabs.offer("cookout", 50);
+    expect(h.tabs.seqOf("cookout")).toBeNull();
+    h.tabs.offer("cookout", 52);
+    expect(h.tabs.seqOf("cookout")).toBe(52);
   });
 });

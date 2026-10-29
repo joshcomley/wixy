@@ -6,6 +6,7 @@ import { ServerErasureOutcomeUnknownError, ServerLockedError, serverFetch } from
 import type { DrawingSummary } from "./drawings";
 import type { WyrSummary } from "./wyr";
 import type { AdventureSummary } from "../adventure/api";
+import type { CookoutSummary } from "../cookout/api";
 import type { ServerSession } from "../types";
 
 import type { AttachmentTranscript } from "../mediaRender";
@@ -97,12 +98,27 @@ export interface Message {
    * chat of — null/absent for an ordinary message or on a server that predates the game chat. */
   readonly wyrRef?: number | null;
   /** Which game `wyrRef` belongs to (resolved by the server at read time, so a client paging history
-   * need not have the anchor loaded): "wyr" or "adventure"; null with `wyrRef`. Absent from a server
-   * that predates Adventure Time (read as unknown: the anchor itself, if loaded, says). */
-  readonly wyrRefKind?: "wyr" | "adventure" | null;
+   * need not have the anchor loaded): "wyr", "adventure" or "cookout"; null with `wyrRef`. Absent from
+   * a server that predates Adventure Time (read as unknown: the anchor itself, if loaded, says). Read it
+   * through `parseWyrRefKind`, which turns anything else into "unknown". */
+  readonly wyrRefKind?: WyrRefKind | null;
   /** The Adventure Time round anchored to this message (summary only: never the spin, landing or
    * pack). Absent or null on a server that predates the game, or on an ordinary message. */
   readonly adventure?: AdventureSummary | null;
+  /** The Cookout round anchored to this message (spec/server-chat/09-cookout.md §4.2): states and counts
+   * only — never an ingredient, an option or a recipe. Absent or null on a server that predates the game,
+   * or on an ordinary message. Read it through `parseCookoutSummary` (cookout/api.ts): the wire is not
+   * trusted to have this shape. */
+  readonly cookout?: CookoutSummary | null;
+}
+
+/** The games a game-chat message (`wyrRef`) can belong to. */
+export type WyrRefKind = "wyr" | "adventure" | "cookout";
+
+/** `wyrRefKind` as one of the known games, or null when absent or not one this client knows (the
+ * caller then asks the anchor message itself). */
+export function parseWyrRefKind(value: unknown): WyrRefKind | null {
+  return value === "wyr" || value === "adventure" || value === "cookout" ? value : null;
 }
 
 export interface HistoryPage {

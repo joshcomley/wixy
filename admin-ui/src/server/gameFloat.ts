@@ -21,7 +21,7 @@
 
 import type { Message } from "./api/messages";
 import { attachmentLabel, createFloatModel, type FloatModel, type FloatSource, type UnseenMessage } from "./gameFloatModel";
-import type { GameTab } from "./gameTabs";
+import type { GameKey, GameTab } from "./gameTabs";
 import type { ItemChat } from "./itemChat";
 
 export interface GameFloatDeps {
@@ -29,7 +29,7 @@ export interface GameFloatDeps {
   readonly win: Window;
   readonly itemChat: Pick<ItemChat, "openPopup" | "closePopup" | "isPopupOpen" | "popupSeq">;
   /** Which tab shows and which item each game has open. */
-  readonly tabs: { activeTab(): GameTab; seqOf(key: "wyr" | "adventure"): number | null };
+  readonly tabs: { activeTab(): GameTab; seqOf(key: GameKey): number | null };
   /** Puts the ordinary composer into `host` (the quick-reply box) — `null` returns it to the thread. */
   mountComposer(host: HTMLElement | null): void;
   /** Whether a voice note is being recorded (the box must not close under it). */

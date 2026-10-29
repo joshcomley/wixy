@@ -1,0 +1,206 @@
+# oils-fats-condiments
+Cooking oil |  | accent | cooking-oil | everyday | Plain all-purpose oil for frying, roasting and greasing tins
+Vegetable oil |  | accent | cooking-oil | everyday | Neutral blended oil that takes high heat without adding flavour
+Sunflower oil |  | accent | seed-oil | everyday | Light, neutral oil for frying, baking and dressings
+Rapeseed oil | canola oil | accent | seed-oil | everyday | Mild, golden oil that suits roasting, frying and mayonnaise
+Cold-pressed rapeseed oil |  | accent | seed-oil | uncommon | Nutty, golden British oil good for dressings and gentle frying
+Olive oil |  | accent | olive-oil | everyday | Fruity everyday oil for sauteing, roasting and dressing
+Extra virgin olive oil |  | accent | olive-oil | everyday | Peppery first-press oil best drizzled over finished dishes
+Light olive oil |  | accent | olive-oil | everyday | Mild olive oil with a high smoke point for frying
+Pomace olive oil |  | accent | olive-oil | uncommon | Budget olive oil extracted from pressed pulp, used for frying
+Arbequina olive oil |  | accent | olive-oil | uncommon | Soft, fruity Catalan oil with almond notes
+Picual olive oil |  | accent | olive-oil | uncommon | Robust, bitter Spanish oil, stable and grassy
+Koroneiki olive oil |  | accent | olive-oil | uncommon | Intense Greek oil, peppery and herbal
+Tuscan olive oil |  | accent | olive-oil | uncommon | Grassy, peppery oil to finish soups and bruschetta
+Sicilian olive oil |  | accent | olive-oil | uncommon | Fruity oil with tomato leaf and artichoke notes
+Lemon-infused olive oil |  | accent | infused-oil | uncommon | Olive oil pressed with lemons, lovely over fish and salad
+Garlic-infused oil | garlic oil | accent | infused-oil | uncommon | Smooth garlic flavour without the bite of raw cloves
+Chilli oil |  | accent | infused-oil | everyday | Fiery red oil for drizzling over noodles, pizza and eggs
+Chilli crisp oil | crispy chilli oil | accent | infused-oil | uncommon | Chilli oil full of crunchy fried garlic and shallot
+Rosemary-infused oil |  | accent | infused-oil | uncommon | Piney herb oil for roast potatoes and focaccia
+Basil oil |  | accent | infused-oil | uncommon | Bright green herb oil to swirl over soups and mozzarella
+Truffle oil |  | accent | infused-oil | uncommon | Pungent finishing oil scented with truffle
+Black truffle oil |  | accent | infused-oil | exotic | Earthy, intense drizzle for pasta, eggs and chips
+Porcini oil |  | accent | infused-oil | exotic | Dried mushroom-scented oil for risotto and polenta
+Sesame oil |  | accent | sesame-oil | everyday | Pale oil used for light stir-frying and dressings
+Toasted sesame oil |  | accent | sesame-oil | everyday | Dark, nutty oil to finish noodles and stir-fries
+Groundnut oil | peanut oil | accent | nut-oil | everyday | High-heat oil beloved for stir-frying and deep-frying
+Walnut oil |  | accent | nut-oil | uncommon | Rich, nutty oil for salads, never for high heat
+Hazelnut oil |  | accent | nut-oil | uncommon | Toasty finishing oil for dressings and baking
+Almond oil |  | accent | nut-oil | uncommon | Delicate sweet oil for dressings and patisserie
+Pistachio oil |  | accent | nut-oil | exotic | Vivid green oil with a rich nutty taste
+Macadamia oil |  | accent | nut-oil | exotic | Buttery, mild oil with a high smoke point
+Hemp seed oil |  | accent | seed-oil | exotic | Grassy, nutty cold oil for dressings
+Flaxseed oil | linseed oil | accent | seed-oil | exotic | Delicate cold oil used for dressings only
+Black seed oil | nigella oil | accent | seed-oil | exotic | Peppery, bitter oil pressed from nigella seeds
+Mustard oil |  | accent | seed-oil | uncommon | Pungent oil central to Bengali and north Indian cooking
+Corn oil |  | accent | seed-oil | everyday | Neutral, golden oil for frying and baking
+Soya oil | soybean oil | accent | seed-oil | everyday | Neutral oil common in bottled dressings and frying
+Safflower oil |  | accent | seed-oil | uncommon | Light oil with a very high smoke point
+Grapeseed oil |  | accent | seed-oil | uncommon | Clean, light oil that suits searing and mayonnaise
+Rice bran oil |  | accent | seed-oil | uncommon | Mild oil prized for high-heat frying
+Coconut oil |  | accent | tropical-oil | everyday | Solid white fat with a sweet coconut scent
+Refined coconut oil |  | accent | tropical-oil | uncommon | Flavourless coconut oil for frying
+Palm oil |  | accent | tropical-oil | uncommon | Semi-solid oil used for frying across Asia and Africa
+Red palm oil |  | accent | tropical-oil | exotic | Orange, carroty oil central to West African stews
+Avocado oil |  | accent | tropical-oil | uncommon | Mild green oil with a very high smoke point
+Argan oil |  | accent | nut-oil | exotic | Toasted Moroccan nut oil, stirred into amlou and couscous
+Perilla oil |  | accent | seed-oil | exotic | Herbal Korean oil drizzled on vegetables and noodles
+Camellia oil | tea seed oil | accent | seed-oil | exotic | Light East Asian oil for frying and dressing
+Cooking spray | spray oil | accent | cooking-oil | everyday | Aerosol oil for a light film in non-stick pans
+Lard | pork lard | accent | animal-fat | everyday | Creamy pork fat for flaky pastry and crisp roast potatoes
+Leaf lard |  | accent | animal-fat | exotic | Pure fat from around pig kidneys, ideal for delicate pastry
+Chicken schmaltz | schmaltz | accent | animal-fat | exotic | Rendered chicken fat for matzo balls and rye bread
+Bacon fat | bacon grease | accent | animal-fat | everyday | Smoky drippings saved from the frying pan
+Vegetable suet |  | accent | animal-fat | everyday | Shredded palm-based suet for dumplings and mincemeat
+Margarine |  | accent | spread | everyday | Soft spread for baking and toast
+Vegetable shortening | white fat | accent | spread | uncommon | White solid fat for crumbly pastry and biscuits
+Olive oil spread |  | accent | spread | everyday | Light spreadable blend with olive oil
+Sesame seed paste |  | accent | seed-paste | uncommon | Smooth ground sesame paste for dips and sauces
+Black tahini |  | accent | seed-paste | exotic | Paste from unhulled black sesame, rich and bitter
+Malt vinegar |  | accent | malt-vinegar | everyday | Brown, tangy vinegar for chips and pickling
+Non-brewed condiment |  | accent | malt-vinegar | uncommon | Sharp, cheaper cousin of malt vinegar for the chippy
+Distilled white vinegar | spirit vinegar | accent | white-vinegar | everyday | Clear, harsh vinegar for pickling
+White wine vinegar |  | accent | wine-vinegar | everyday | Crisp, light vinegar for dressings and hollandaise
+Red wine vinegar |  | accent | wine-vinegar | everyday | Robust vinegar for vinaigrettes and stews
+Sherry vinegar |  | accent | wine-vinegar | uncommon | Nutty, aged Spanish vinegar for gazpacho and pan sauces
+Champagne vinegar |  | accent | wine-vinegar | uncommon | Delicate, refined vinegar for light dressings
+Cider vinegar | apple cider vinegar | accent | fruit-vinegar | everyday | Fruity apple vinegar for slaws, chutneys and dressings
+Balsamic vinegar |  | accent | balsamic-vinegar | everyday | Dark, sweet-sour Modena vinegar for salads and strawberries
+Aged balsamic vinegar |  | accent | balsamic-vinegar | uncommon | Syrupy, complex balsamic for drizzling over cheese
+Traditional balsamic vinegar | tradizionale | accent | balsamic-vinegar | exotic | Barrel-aged for years, used by the drop
+White balsamic vinegar |  | accent | balsamic-vinegar | uncommon | Pale, sweet vinegar that does not stain sauces
+Balsamic glaze | balsamic reduction | accent | balsamic-vinegar | everyday | Thick, sticky reduction for drizzling on plates
+Rice vinegar |  | accent | rice-vinegar | everyday | Mild, slightly sweet vinegar for sushi rice and dressings
+Black rice vinegar | chinkiang vinegar | accent | rice-vinegar | uncommon | Malty, smoky Chinese vinegar for dumpling dips
+Sushi vinegar |  | accent | rice-vinegar | uncommon | Seasoned rice vinegar with sugar and salt
+Coconut vinegar |  | accent | fruit-vinegar | exotic | Cloudy, mild vinegar from fermented coconut sap
+Raspberry vinegar |  | accent | fruit-vinegar | uncommon | Fruity, ruby vinegar for dressings and game
+Tarragon vinegar |  | accent | herb-vinegar | uncommon | Aniseed-scented vinegar for bearnaise and mayonnaise
+Pomegranate molasses |  | accent | fruit-syrup | uncommon | Tart, dark syrup used in Middle Eastern cooking
+Verjuice | verjus | accent | fruit-vinegar | exotic | Sour juice of unripe grapes, gentler than vinegar
+Sugar cane vinegar |  | accent | fruit-vinegar | exotic | Mellow vinegar made from fermented cane juice
+Date vinegar |  | accent | fruit-vinegar | exotic | Rich, fruity vinegar from Middle Eastern dates
+Pickling vinegar | spiced vinegar | accent | white-vinegar | everyday | Vinegar pre-spiced for jars of onions and eggs
+Yellow mustard | American mustard | accent | mustard | everyday | Bright, mild mustard for hot dogs and burgers
+English mustard |  | accent | mustard | everyday | Fiery yellow mustard that clears the sinuses
+Dijon mustard |  | accent | mustard | everyday | Smooth, sharp French mustard for dressings and sauces
+Wholegrain mustard |  | accent | mustard | everyday | Coarse, textured mustard with whole seeds
+Honey mustard |  | accent | mustard | everyday | Sweet, mellow mustard for glazing and dipping
+German mustard |  | accent | mustard | uncommon | Sweet, mild brown mustard for sausages
+Bavarian sweet mustard |  | accent | mustard | uncommon | Sugary Munich mustard served with weisswurst
+Meaux mustard |  | accent | mustard | uncommon | Coarse French mustard with a gentle heat
+Chinese hot mustard |  | accent | mustard | uncommon | Eye-watering paste served with spring rolls
+Tarragon mustard |  | accent | mustard | uncommon | Dijon-style mustard scented with fresh tarragon
+Beer mustard |  | accent | mustard | uncommon | Pub-style mustard made with ale
+Mustard fruits | mostarda | accent | mustard | exotic | Candied fruit in mustard syrup from northern Italy
+Garlic mayonnaise | aioli | accent | mayonnaise | everyday | Mayonnaise sharpened with plenty of raw garlic
+Light mayonnaise |  | accent | mayonnaise | everyday | Lighter mayonnaise with a slightly thinner body
+Japanese mayonnaise |  | accent | mayonnaise | uncommon | Rich, tangy mayonnaise made with egg yolks and rice vinegar
+Sriracha mayonnaise |  | accent | mayonnaise | uncommon | Creamy mayonnaise with a chilli kick
+Chipotle mayonnaise |  | accent | mayonnaise | uncommon | Smoky, spicy mayonnaise for burgers and tacos
+Truffle mayonnaise |  | accent | mayonnaise | uncommon | Mayonnaise scented with black truffle
+Wasabi mayonnaise |  | accent | mayonnaise | uncommon | Mayonnaise with nasal-clearing green horseradish heat
+Vegan mayonnaise |  | accent | mayonnaise | uncommon | Egg-free mayonnaise made with aquafaba or soya
+Tartare sauce | tartar sauce | accent | mayonnaise | everyday | Mayonnaise with capers, gherkins and herbs for fish
+Salad cream |  | accent | salad-cream | everyday | Tangy, pourable British cream for ham salad
+Thousand Island dressing |  | accent | dressing | everyday | Pink mayonnaise dressing with pickle relish
+Caesar dressing |  | accent | dressing | everyday | Creamy anchovy, garlic and parmesan dressing
+Ranch dressing |  | accent | dressing | everyday | Buttermilk and herb dressing for wings and salad
+Blue cheese dressing |  | accent | dressing | uncommon | Creamy dressing loaded with crumbled blue cheese
+French dressing |  | accent | dressing | everyday | Simple oil and vinegar dressing with mustard
+Italian dressing |  | accent | dressing | everyday | Herby oil and vinegar dressing with garlic
+Honey and mustard dressing |  | accent | dressing | everyday | Sweet-sharp dressing for salads and chicken
+Greek salad dressing |  | accent | dressing | uncommon | Lemon, oregano and olive oil dressing
+Sesame ginger dressing |  | accent | dressing | uncommon | Nutty, zesty dressing for slaws and noodles
+Green goddess dressing |  | accent | dressing | uncommon | Herb-laden creamy dressing with anchovy
+Lemon vinaigrette |  | accent | dressing | everyday | Zesty lemon and oil dressing
+Balsamic vinaigrette |  | accent | dressing | everyday | Dark, sweet vinaigrette for leaves
+Miso dressing |  | accent | dressing | uncommon | Savoury Japanese dressing with miso and sesame
+Yuzu dressing |  | accent | dressing | exotic | Citrus-bright Japanese dressing
+Tomato ketchup | ketchup | accent | ketchup | everyday | Sweet, tangy tomato condiment for chips and burgers
+Banana ketchup |  | accent | ketchup | exotic | Sweet, bright red Filipino ketchup made from bananas
+Mushroom ketchup |  | accent | ketchup | exotic | Old English savoury seasoning from fermented mushrooms
+Walnut ketchup |  | accent | ketchup | exotic | Dark, tangy Victorian relish of pickled green walnuts
+Brown sauce |  | accent | brown-sauce | everyday | Tangy, fruity sauce for bacon sandwiches
+Fruity brown sauce |  | accent | brown-sauce | everyday | Sweeter brown sauce with dates and apples
+Piccalilli |  | accent | pickle | everyday | Mustard-yellow chopped vegetable pickle for ham and cheese
+Ploughman pickle | sweet brown pickle | accent | pickle | everyday | Chunky sweet brown pickle for cheese lunches
+Sweet pickle relish | pickle relish | accent | relish | everyday | Chopped sweet gherkins for hot dogs and burgers
+Corn relish |  | accent | relish | uncommon | Sweet-sour sweetcorn and pepper relish
+Burger relish |  | accent | relish | everyday | Tangy onion and gherkin relish
+Onion relish |  | accent | relish | everyday | Soft sweet-sour onion for sausages and cheese
+Beetroot relish |  | accent | relish | uncommon | Earthy sweet-sour relish with horseradish
+Chilli jam |  | accent | jam-chutney | everyday | Sweet, sticky, mildly hot jam for cheese and burgers
+Red onion marmalade | onion chutney | accent | jam-chutney | everyday | Slow-cooked sweet onions with vinegar
+Caramelised onion chutney |  | accent | jam-chutney | everyday | Dark, sweet onion chutney for cheese
+Mango chutney |  | accent | chutney | everyday | Sweet, spiced mango condiment for curry and poppadoms
+Tomato chutney |  | accent | chutney | everyday | Sweet-sour spiced tomato relish
+Apple and sultana chutney |  | accent | chutney | everyday | Fruity autumn chutney for cold meat and cheese
+Plum chutney |  | accent | chutney | uncommon | Dark, spicy chutney for game and cheese
+Coriander chutney | green chutney | accent | chutney | uncommon | Fresh, zingy Indian herb chutney
+Tamarind chutney | imli chutney | accent | chutney | uncommon | Sweet-sour brown chutney for chaat and samosas
+Coconut chutney |  | accent | chutney | uncommon | Cool South Indian chutney for dosa
+Lime pickle |  | accent | pickle | everyday | Salty, searingly hot Indian pickle
+Mixed pickle |  | accent | pickle | uncommon | Spiced Indian pickle of mixed vegetables in oil
+Mango pickle |  | accent | pickle | uncommon | Sour, spicy raw mango in mustard oil
+Aubergine pickle | brinjal pickle | accent | pickle | uncommon | Sweet-hot aubergine pickle from South Asia
+Mint sauce |  | accent | herb-sauce | everyday | Sharp chopped mint in vinegar for roast lamb
+Mint jelly |  | accent | herb-sauce | everyday | Sweet green jelly for lamb
+Apple sauce |  | accent | fruit-sauce | everyday | Tart stewed apple for roast pork
+Cranberry sauce |  | accent | fruit-sauce | everyday | Tart red berry sauce for turkey
+Redcurrant jelly |  | accent | fruit-sauce | uncommon | Glossy tart jelly for game and gravy
+Cumberland sauce |  | accent | fruit-sauce | uncommon | Port, orange and redcurrant sauce for ham
+Bread sauce |  | accent | fruit-sauce | uncommon | Creamy clove-spiced sauce for roast poultry
+Horseradish sauce |  | accent | horseradish | everyday | Creamy, nose-prickling sauce for roast beef
+Creamed horseradish |  | accent | horseradish | everyday | Grated horseradish folded into cream
+Prepared horseradish |  | accent | horseradish | everyday | Grated horseradish in vinegar
+Wasabi paste |  | accent | wasabi | everyday | Green, sinus-clearing paste for sushi
+Wasabi powder |  | accent | wasabi | uncommon | Dried horseradish powder mixed with water into a paste
+Mint yoghurt |  | accent | yoghurt-dip | everyday | Fresh mint stirred into yoghurt for kebabs
+Garlic sauce | garlic dip | accent | dip | everyday | Creamy takeaway garlic dip
+Sweet chilli sauce |  | accent | chilli-sauce | everyday | Sticky, sweet and mild chilli dipping sauce
+Capers |  | accent | capers | everyday | Salty pickled flower buds for fish and pasta
+Salted capers |  | accent | capers | uncommon | Cured in salt, more floral than brined ones
+Caperberries |  | accent | capers | uncommon | Larger pickled fruit of the caper bush on a stalk
+Cornichons |  | accent | gherkin | everyday | Tiny, crunchy sour French gherkins
+Dill pickles |  | accent | gherkin | everyday | Garlicky, dill-brined cucumbers
+Bread and butter pickles |  | accent | gherkin | uncommon | Sweet-sour sliced cucumber pickles
+Pickled onions |  | accent | pickled-onion | everyday | Sharp, crunchy small onions in malt vinegar
+Silverskin onions | cocktail onions | accent | pickled-onion | everyday | Tiny pale pickled onions
+Pickled red cabbage |  | accent | pickled-veg | everyday | Sharp purple cabbage for Christmas and cold meats
+Pickled beetroot |  | accent | pickled-veg | everyday | Sweet-sharp sliced beetroot in vinegar
+Pickled walnuts |  | accent | pickled-veg | exotic | Black vinegary walnuts for cheese
+Pickled jalapenos |  | accent | pickled-veg | everyday | Sliced pickled green chillies for nachos
+Pepperoncini |  | accent | pickled-veg | uncommon | Mild, tangy pickled Greek peppers
+Giardiniera |  | accent | pickled-veg | uncommon | Italian mixed vegetable pickle in vinegar or oil
+Tapenade | olive tapenade | accent | olive-paste | uncommon | Olive, caper and anchovy paste
+Black olive paste |  | accent | olive-paste | uncommon | Salty black olive spread
+Green olive paste |  | accent | olive-paste | uncommon | Grassy green olive spread
+Sun-dried tomato paste |  | accent | tomato-paste-spread | uncommon | Concentrated sweet-sharp tomato spread
+Roasted red pepper spread |  | accent | pepper-spread | uncommon | Smoky sweet pepper spread
+Ajvar |  | accent | pepper-spread | exotic | Balkan roasted red pepper and aubergine relish
+Muhammara |  | accent | pepper-spread | exotic | Syrian walnut and roasted pepper dip
+Baba ganoush |  | accent | dip | uncommon | Smoky aubergine and tahini dip
+Hummus | houmous | accent | dip | everyday | Chickpea and tahini dip
+Guacamole |  | accent | dip | everyday | Mashed avocado with lime and coriander
+Taramasalata |  | accent | dip | uncommon | Pink cod roe dip
+Sour cream and chive dip |  | accent | dip | everyday | Cool tangy party dip
+Honey |  | accent | sweet-spread | everyday | Golden floral sweetener for toast and glazes
+Runny honey |  | accent | sweet-spread | everyday | Pourable clear honey
+Set honey |  | accent | sweet-spread | everyday | Thick creamy honey
+Manuka honey |  | accent | sweet-spread | exotic | Dark New Zealand honey with a medicinal bite
+Heather honey |  | accent | sweet-spread | uncommon | Dark, jelly-like honey with a bitter-floral edge
+Acacia honey |  | accent | sweet-spread | uncommon | Pale, delicate honey that stays liquid
+Strawberry jam |  | accent | jam | everyday | Classic sweet red preserve
+Raspberry jam |  | accent | jam | everyday | Tart, seedy red jam
+Apricot jam |  | accent | jam | everyday | Sweet-tart jam also used as a glaze
+Blackcurrant jam |  | accent | jam | uncommon | Deep, tart jam with a musky tang
+Damson jam |  | accent | jam | uncommon | Dark plum jam with a sharp stone-fruit bite
+Seville orange marmalade | orange marmalade | accent | marmalade | everyday | Bittersweet breakfast preserve
+Lemon curd |  | accent | fruit-curd | everyday | Zesty buttery spread for tarts and toast
+Maple syrup |  | accent | syrup | everyday | Sweet tree sap syrup for pancakes
+Agave syrup | agave nectar | accent | syrup | uncommon | Mild liquid sweetener from agave
+Date syrup | silan | accent | syrup | exotic | Dark, caramel-rich Middle Eastern syrup
+Pandan paste |  | accent | flavouring-paste | exotic | Green, vanilla-grassy paste for Southeast Asian sweets
+Vanilla bean paste |  | accent | flavouring-paste | uncommon | Thick paste flecked with vanilla seeds

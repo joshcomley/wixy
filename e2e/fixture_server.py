@@ -112,6 +112,7 @@ from wixy_server.livechat import janitor as livechat_janitor  # noqa: E402
 from wixy_server.livechat.adventure_pack import CmdAdventureResearcher, PackTiming  # noqa: E402
 from wixy_server.livechat.adventure_pictures import WebPictureFinder  # noqa: E402
 from wixy_server.livechat.call_broker import CallBroker  # noqa: E402
+from wixy_server.livechat.cookout_ai import CookoutTiming  # noqa: E402
 from wixy_server.livechat.grants import GrantFailureLimiter  # noqa: E402
 from wixy_server.livechat.pinclient import CmdPinVerifier  # noqa: E402
 from wixy_server.livechat.store import LiveChatStore  # noqa: E402
@@ -555,6 +556,11 @@ def main() -> None:
         transcriber=transcriber,
         adventure_researcher=adventure_researcher,
         adventure_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        cookout_timing=CookoutTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        cookout_cmd_client=CmdChatClient(
+            portal_base_url=f"http://127.0.0.1:{fake_pin_port}",
+            chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
+        ),
         adventure_picture_finder=adventure_picture_finder,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
