@@ -54,6 +54,33 @@ anything older (a younger entry may belong to the older side of a blue/green ove
 monotonic `images_generation`: a late or superseded attempt cannot attach to, or fail, a newer attempt's round. ComfyUI
 output uses the existing `wyr_` prefix, so Inv 54's sweeper owns it.
 
+**Twists extend the same rules (workspace 00058, spec 09a, decisions/00200).** Everything below is server-side Python in
+`cookout_view_json` and the store, not DOM hiding. **Stars (T11) and dinner votes (T2) are hidden from the partner in BOTH
+modes** until their own reveal, which is one transition with the lock (`stars_locked`; both votes cast): a revealed
+secret that could still change would not be a commitment. Before the reveal the partner sees only `partnerChosen` /
+`partnerVoted`. Archived generations apply the vote rule independently: a one-sided archived vote is never serialised,
+to anyone. **Lucky dip, chaos shelf and veto are decided and committed on the server** (`secrets.SystemRandom`; the
+client only animates the answer), each request names the table it saw and a stale one is `409 bad_state`; the chaos pair
+and the partner's chaos flag follow the Blind rules, and **the veto exists only in Open mode** (`409 bad_state` in
+Blind). **Starters** (fridge raid, encore) are public in both modes from the start. **Banked recipes and their
+pictures stay tied to their generation**: a rescue swap archives the old dish set into `cookout_generations`
+(read-only), the swapped-out ingredient is forbidden in every later generation even as a declared cupboard staple, and
+background jobs present the generation they captured (`expected_generation`) to every claim and completion, so a late
+generation-1 job cannot touch generation 2. A **We cooked it!** photo is a *link* to an ordinary non-view-once mini-chat
+photo (never a new upload path, never a view-once attachment — Inv 52) and unlinks, with a `rev` bump, when that message
+is deleted. An **encore** keeps only a nulling link (`ON DELETE SET NULL`) to its source round and copies the seed
+snapshots, so deleting the source never touches the new round and the source's title is never copied. **Prompts carry
+only food records plus server-owned text chosen by a fixed enum id** (style and challenge directives, the wildcard and
+star ids, the forbidden ids): votes, ratings, cooked marks, photos, player names, who starred or swapped what and encore
+links never reach cmd, whose hidden ledger keeps the twist text like it keeps the core's. Standalone refuses the
+chef-only start-sheet options (style, challenge, wildcard, stars) and never produces the concepts or recipes that
+vote, swap, We cooked it! and encore need. Honest limits: "hero" stars are checked by name and presence, not by how
+generous the quantity is; `one-pan` relies on the declared `cookware` plus a fixed vessel-word scan; the bank-dictionary
+scan still cannot see a food the bank lacks; Blind secrecy for stars and votes inherits the shared-sign-in name limit.
+Also enforced by `test_livechat_cookout_twists.py`, `test_cookout_twists_catalogue.py` and the twist cases of the
+other Cookout test files; end to end by `e2e/tests/server-cookout-twists.spec.ts`. Decision:
+[00200](../../decisions/00200-server-chat-cookout-twists/decision.md).
+
 *Enforced by:* `wixy_server/tests/test_livechat_cookout.py` (migration from a real v20 database, the state machine and
 every transition, explicit Join, strict alternation, the two-skip rule, Open vs Blind redaction on every response
 including mutations, reveal on finish, partner offers hidden after finish, no reveal on abandon, `slot_of` email

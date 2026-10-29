@@ -272,3 +272,35 @@ real provisioning failure (decisions/00031).
   `failed`. **Frozen manifest** — the fixed list of ingredient and staple ids a dish's recipe may use (plus water,
   salt and pepper).
 - **`moveId`** — the client-made id (8-64 chars) of one skip, pick or bank; replaying it is a no-op 200.
+
+### Cookout twists (workspace 00058, spec 09a, Inv 57)
+
+- **Twist** — one of twelve optional extras on a Cookout round. *Start-sheet twists* (style, challenge, cloche, stars, fridge
+  raid) are fixed at creation; *in-game twists* (lucky dip, chaos shelf, veto, dinner vote, rescue swap, We cooked it!) are
+  buttons the players may ignore; *encore* is a new-round entry point. A round with no twist is the core game exactly.
+- **Style / Challenge** — the Chef's style (eight fixed ids, or `spin` resolved by the server) and the Kitchen challenge
+  (`one-pan`, `no-oven`, `thirty-minutes`, `six-steps`), both static enums in `cookout_twists.py`. The challenge is
+  validated by deterministic Python; the style only shapes the prompt and the picture phrase.
+- **Starter** — a bank ingredient placed into the basket at creation (fridge raid, or an encore seed) as a seeded turn. At most
+  two per round; public in both modes; counts towards the player's five.
+- **Lucky dip / Chaos shelf / Veto** — server-decided drafting twists on the live pair. Dip: a coin picks for you. Chaos
+  (once per player): both options become exotic. Veto (once per player, **Open mode only**): the partner sweeps one option
+  off your table. They replace in place, so `offerIndex` and `skipsRemaining` do not change. Used tokens are derived from the
+  turns (`chaos_offer`, `veto_offer`), never stored on the round.
+- **Wildcard states** (`cookout_rounds.wildcard`) — `off` → (cloche armed) `armed` → at the tenth pick `offered` → `lifted`
+  (an 11th ingredient was drawn) or `declined`.
+- **Gate** — the pause between the Big Reveal and the chef: with the cloche armed or stars on, a finished round keeps
+  `concepts = none` until the cloche is answered and both stars are set (`view.gate.waitingFor`). It has no timeout.
+- **Star / stars_locked** — each player secretly stars one of their own picks; the chef must make both the heroes. Reveal and
+  lock are one transition, once both are set on a finished round.
+- **Dinner vote** — each player secretly taps the dish they would eat tonight; both are revealed and locked together; a
+  match is "Tonight's dinner!". Never banks anything.
+- **Generation** (`cookout_rounds.generation`) — which set of three dishes is on the table. Starts at 1; a completed **rescue
+  swap** (states `none` → `proposed` → `done`, once per round) archives the old set into `cookout_generations` (read-only,
+  the "Earlier dishes") and starts generation 2. Concept ids `a|b|c` repeat per generation, so Bank, vote and the retries
+  carry `generation`. Banked recipes stay tied to the generation they were made in.
+- **Forbidden ids** — the swapped-out ingredient: forbidden in every later generation, even as a declared cupboard staple.
+- **We cooked it!** — a banked recipe marked cooked (`cooked_at`, `cooked_by`), with a 1-5 rating per player and an optional
+  link to a real mini-chat photo, beside the AI's picture.
+- **Encore** — a new round seeded from a finished one: *leftovers* (the ingredients a dish left out) or *remix* (a banked dish's
+  own ingredients). Stores only a nulling link to its source.

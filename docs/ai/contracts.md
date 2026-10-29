@@ -306,6 +306,21 @@ header.
 | POST | `server/cookout/{seq}/concepts/retry` | `retry_cookout_concepts` | `{"sender":str}` — valid for a `finished` round whose `concepts` is `failed` (or `unavailable` while a runner now exists); resets the concepts job AND the picture fields and restarts. Already `pending` is a 200 no-op | 200 `<CookoutView>`; 409 `bad_state`, `not_player`; 404 |
 | POST | `server/cookout/{seq}/pictures/retry` | `retry_cookout_pictures` | `{"sender":str}` — valid when `concepts == "ready"`, `images != "pending"`, at least one of `a\|b\|c` has no picture and pictures are available; keeps the pictures already drawn and regenerates only the missing ones. Already `pending` is a 200 no-op | 200 `<CookoutView>`; 409 `bad_state`, `not_player`; 404 |
 | POST | `server/cookout/{seq}/concepts/{conceptId}/recipe/retry` | `retry_cookout_recipe` | `{"sender":str}` — valid for a concept whose recipe is `failed` (or `unavailable` while a runner now exists) in a `finished` round with `concepts = ready`. Already `pending` is a 200 no-op | 200 `<CookoutView>`; 409 `bad_state`, `not_player`; 404 |
+| GET | `server/cookout/options` | `get_cookout_options` | — (declared BEFORE `cookout/{seq}`) | 200 `{"styles":[{id,label,emoji,blurb}],"challenges":[{id,label,emoji,blurb}],"chef":bool,"pictures":bool}` — the fixed twist catalogues (livechat.md §24.1); `chef` = a runner exists (false on the standalone edition, so the sheet hides style / challenge / cloche / stars), `pictures` = ComfyUI is configured. Directive and picture text never leave the server. `Cache-Control: no-store`; 401 locked |
+| GET | `server/cookout/ingredients?q=<2..40 chars>` | `search_cookout_ingredients` | — (declared BEFORE `cookout/{seq}`) | 200 `{"ingredients":[<Ingredient>]}` (≤ 20 bank entries; the Fridge-raid search); 422 `invalid` (`q` shorter than 2 or longer than 40); 503 `game_unavailable` (no bank); 401 locked |
+| POST | `server/cookout/{seq}/lucky` | `lucky_cookout` | `{"sender":str,"moveId":str(8-64),"turn":int,"offer":int,"optionIds":[id,id]}` — Lucky dip: the server flips a coin between the two live options and commits it as a pick (same turn advance and Turn-10 behaviour; shares `pick_move_id`; sets `cookout_turns.lucky`). `optionIds` must equal the live pair (order-free) | 200 `<CookoutView>` (a replayed `moveId` is a 200, nothing drawn); 409 `bad_state` (stale turn / offer / pair), `not_your_turn`, `not_player`; 422 `invalid`; 404; 503 |
+| POST | `server/cookout/{seq}/chaos` | `chaos_cookout` | same body as `lucky` — Chaos shelf: the active player, once per round, replaces BOTH live options with an exotic pair (no skip charged or refunded; the replaced snapshots stay in the turn's `replaced`) | 200 `<CookoutView>`; 409 `token_used` (already spent), `exhausted` (no exotic pair; nothing spent), `bad_state`, `not_your_turn`, `not_player`; 422; 404 |
+| POST | `server/cookout/{seq}/veto` | `veto_cookout` | `{"sender":str,"moveId":str(8-64),"turn":int,"offer":int,"ingredientId":str}` — Partner veto: **Open mode only**; the non-active bound player, once per round, sweeps one live option off the active player's table; it is replaced in place by one legal fresh option | 200 `<CookoutView>`; 409 `bad_state` (Blind round, the active player, stale pair), `token_used`, `exhausted` (nothing spent), `not_player`; 422; 404. A pick of the swept option afterwards is `409 bad_state` (it was legal when seen), not 422 |
+| POST | `server/cookout/{seq}/star` | `star_cookout` | `{"sender":str,"ingredientId":str}` — Secret stars: sets or changes the caller's star on one of THEIR OWN picks. State-idempotent. May start the concepts job (the chef gate) | 200 `<CookoutView>`; 409 `bad_state` (stars off, abandoned, or a DIFFERENT star after `stars.revealed` / once concepts left `none`), `not_player`; 422 `invalid` (not one of the caller's own picks); 404 |
+| POST | `server/cookout/{seq}/wildcard` | `wildcard_cookout` | `{"sender":str,"moveId":str(8-64),"lift":bool}` — answers the cloche (`lift: true` draws a surprise 11th ingredient, `false` declines); may start concepts. A replay is a 200; a different answer after the cloche was answered is `bad_state` | 200 `<CookoutView>`; 409 `bad_state`, `exhausted` (no wildcard can be drawn — the cloche stays offered and Decline still works), `not_player`; 404 |
+| POST | `server/cookout/{seq}/vote` | `vote_cookout` | `{"sender":str,"generation":int,"conceptId":"a"\|"b"\|"c"}` — Dinner vote. State-idempotent; changeable until both voted, then both are revealed and locked | 200 `<CookoutView>`; 409 `bad_state` (not `ready`, a non-current `generation`, a different vote after the reveal), `not_player`; 422; 404 |
+| POST | `server/cookout/{seq}/swap/propose` | `propose_cookout_swap` | `{"sender":str,"moveId":str(8-64),"ingredientId":str}` — Rescue swap, step 1: send one basket ingredient (not a star) back; the server deals a replacement pair | 200 `<CookoutView>`; 409 `bad_state` (not `finished`+`ready`, a swap already used or proposed), `recipe_pending` (a current-generation recipe is being written), `exhausted` (no pair), `not_player`; 422 (a star / not in the basket); 404 |
+| POST | `server/cookout/{seq}/swap/choose` | `choose_cookout_swap` | `{"sender":str,"moveId":str(8-64),"ingredientId":str}` — step 2: only the OTHER player chooses one of the two (choosing is the consent). Archives the current generation, bumps `generation`, restarts the concepts job and the pictures | 200 `<CookoutView>`; 409 `bad_state` (not proposed / id not in the pair), `not_your_turn` (the proposer), `recipe_pending`, `not_player`; 404 |
+| POST | `server/cookout/{seq}/swap/cancel` | `cancel_cookout_swap` | `{"sender":str}` — either player while `proposed` → `none` (the swap is not used up). `none` is a 200 no-op | 200 `<CookoutView>`; 409 `bad_state` (already `done`), `not_player`; 404 |
+| POST | `server/cookout/{seq}/recipes/{generation}/{conceptId}/cooked` | `mark_cookout_cooked` | `{"sender":str,"cooked":bool}` — We cooked it!: `true` stamps `cooked_at` / `cooked_by` (idempotent), `false` clears the stamp, both ratings and the photo link. Acts on that exact BANKED row of ANY generation | 200 `<CookoutView>`; 409 `bad_state` (the row does not exist or is not banked), `not_player`; 404 |
+| POST | `server/cookout/{seq}/recipes/{generation}/{conceptId}/rating` | `rate_cookout_recipe` | `{"sender":str,"rating":1..5\|null}` — the caller's OWN slot rating (needs cooked); visible to both at once | 200 `<CookoutView>`; 409 `bad_state` (not banked / not cooked), `not_player`; 422; 404 |
+| POST | `server/cookout/{seq}/recipes/{generation}/{conceptId}/photo` | `link_cookout_photo` | `{"sender":str,"messageSeq":int\|null,"attachmentId":str\|null}` — links the exact mini-chat photo `GET …/photos` returned, validated in the write transaction (a ready, non-view-once photo on a message in THIS round's mini chat) and stored as sent, never re-selected. Both null unlinks; exactly one null is 422 | 200 `<CookoutView>`; 409 `bad_state` (stale / deleted / not ready / wrong round / view-once / not cooked), `not_player`; 422; 404 |
+| GET | `server/cookout/{seq}/photos?as=<sender>` | `get_cookout_photos` | — | 200 `{"photos":[{"messageSeq":int,"attachmentId":str,"sender":str,"createdAt":float,"picture":<CookoutPicture>}]}` — ONE entry per non-view-once message in the round's mini chat that has a ready photo (its lowest-ordinal ready one at GET time), newest first, ≤ 50; 409 `not_player`; 404; 401 locked |
 | GET | `server/usage` | `usage` | — | `{"usedBytes":int,"quotaBytes":int,"freeBytes":int,"mediaAvailable":bool,"erasurePending":bool,"transcriptionAvailable":bool}` — the last is true only while cmd's capability probe answers `{"private":true}` (cached 60 s; always false on the standalone edition); it is what shows the Transcribe control |
 | POST | `server/uploads` | `init_upload` | `{"kind":"photo"\|"video"\|"voice","mimeType":str,"sizeBytes":int(≥1),"filename":str\|null}` | 201 `{"uploadId":hex32,"chunkBytes":int,"maxBytes":int}`; 413 `{"error":"too_large","maxBytes":int}`; 415 `{"error":"unsupported_type"}`; 422 (FastAPI validation error — e.g. `sizeBytes` 0 or negative; nothing is reserved); 507 `{"error":"storage_full"}`; 503 `{"error":"media_unavailable"}` (ffmpeg, ffprobe or `pillow-heif` unavailable; text chat is unaffected) |
 | PUT | `server/uploads/{id}/chunks/{index}` | `put_chunk` | raw `application/octet-stream` body, ≤`chunkBytes` | 204; 413 `{"error":"too_large","maxBytes":int}`; 422 (index out of range); 404 (unknown upload) |
@@ -328,7 +343,7 @@ reactions:[<Reaction>], createdAt:float, replyTo:<ReplyTo>\|null,
 viewOnce:{durationS:int\|null, tease:bool, spotlight:bool}\|null, drawings:[<DrawingSummary>],
 wyr:{state:str, rev:int}\|null, wyrRef:int\|null, wyrRefKind:"wyr"\|"adventure"\|"cookout"\|null,
 adventure:{state:str, pack:str, rev:int}\|null,
-cookout:{state:str, blind:bool, pickedCount:int, concepts:str, bankedCount:int, rev:int}\|null}`
+cookout:{state:str, blind:bool, pickedCount:int, concepts:str, bankedCount:int, rev:int, generation:int, waiting:("stars"\|"wildcard")[], swap:str, dinnerDecided:bool, cookedCount:int}\|null}`
 (`spotlight` = transitional alias of `tease`, remove after 2026-10-27, decisions/00172).
 `wyr` is the round summary on a would-you-rather round's own message (never the answers); `wyrRef` is the
 anchor seq of the game round (of ANY game — would-you-rather or Adventure Time) a message was sent in the
@@ -345,6 +360,42 @@ or the pack — fetch `GET server/adventure/{seq}`); `null` for every other mess
 **never an ingredient, an offer, a name or a recipe**, so the broadcast leaks nothing in Blind mode — fetch
 `GET server/cookout/{seq}?as=`); `wyrRefKind = "cookout"` when a message was sent in a Cookout round's mini chat;
 `null` for every other message (livechat.md §24, Inv 57).
+
+**Cookout twists (livechat.md §24.1, spec 09a §4) change these earlier Cookout rows additively** (a core-era client keeps
+working; a round that uses no twist is byte-for-byte the core):
+
+- `POST server/cookout` gains optional `style` (`StyleId` | `"spin"` | null), `challenge` (`ChallengeId` | null), `wildcard`
+  (bool), `stars` (bool), `fridgeSeedId` (a bank id | null) and `encore`
+  (`{fromSeq, generation, conceptId, kind:"leftovers"|"remix", seedIds:[1-2 ids]}` | null); extra keys are still 422. An
+  unknown enum, an unknown seed, an invalid encore source or a chef-only option (style / challenge / wildcard / stars)
+  without a runner is `422 invalid`. All are immutable for the round.
+- `POST …/skip` gains optional `optionIds:[id,id]`; present, it must equal the live pair (order-free) or the skip is `409
+  bad_state` (a veto or chaos can change the pair without changing `offer`).
+- `POST …/concepts/{conceptId}/bank`, `…/concepts/retry`, `…/pictures/retry` and `…/recipe/retry` gain optional
+  `generation:int`; a mismatch with the round's current generation — or a missing one on a generation-2 round — is `409
+  bad_state` with no write, event or job. A Bank whose `moveId` is in the round's `bank_move_ids` ledger is a 200 replay
+  across generations. Bank and recipe retry are `409 bad_state` while a swap is `proposed`.
+- New errors: `409 token_used` (chaos / veto already spent by the caller) and `409 recipe_pending` (a swap while a
+  current-generation recipe is being written).
+- `<CookoutView>` gains (all defensive-parser friendly): `setup:{style:{id,label,emoji}|null, styleSpun, challenge, wildcard,
+  stars, fridgeRaid, encore:{kind,fromSeq,fromTitle}|null}`, `generation`, `starters:[<PickSnap>]` (public in both modes),
+  `players[].chaosUsed|vetoUsed`, `you.chaosUsed|vetoUsed`, `current.chaosPair|vetoed|canChaos|canLucky|canVeto`,
+  per-turn `seed|replaced|chaosOffer|lucky` in `history`, `basket` (the effective basket once revealed), `gate:{waitingFor:
+  ("stars"|"wildcard")[]}`, `wildcard:{state:"off"|"armed"|"offered"|"lifted"|"declined", ingredient}`,
+  `stars:{enabled,mine,partnerChosen,revealed,partner}`, `vote:{you,partnerVoted,revealed,votes,match}|null`,
+  `swap:{state:"none"|"proposed"|"done", available, by, out, pair, in}`, `concepts.data[].challengeNote|totalMinutes`,
+  `recipes.<id>.generation|cooked`, `<RecipeSlot>.data.cookware?`, and `generations:[{generation, basket, concepts,
+  pictures, vote:{votes,match}, recipes}]` for the archived (read-only) dish sets. `<PickSnap>` = `<Ingredient>` plus
+  `turn:1..10|null` and `via:"pick"|"lucky"|"chaos"|"seed"|"wildcard"|"swap"`. **Redaction is server-side Python** (Inv 57):
+  stars and votes are hidden from the partner in BOTH modes until their own reveal; the partner's `picks`, chaos flag and
+  chaos pair follow the Blind rules; `canVeto` is `null` in Blind; archived `votes`/`match` are non-null only when both
+  archived votes exist; an abandoned round reveals nothing new.
+- `Message.cookout` gains `generation:int`, `waiting:("stars"|"wildcard")[]`, `swap:"none"|"proposed"|"done"`,
+  `dinnerDecided:bool` (true only after both votes are revealed and match) and `cookedCount:int` — counts and flags only.
+- `GET server/cookout/bank` entries gain `generation`, `cooked:{cookedAt, ratings:[{name,rating}], photo}|null`,
+  `dinnerPick:bool`, `style` / `challenge` (`{id,label,emoji}|null`), `ingredients:[<Ingredient>]` and
+  `leftovers:[<Ingredient>]` (the dish's omitted items, which feed the Remix / Leftovers encore buttons); archived-generation
+  entries resolve from `cookout_generations`.
 `<DrawingSummary>` = `{id:int, rev:int}` — never the strokes themselves (spec/server-chat/
 07-live-drawing.md §4); a client that sees an entry it lacks, or a newer `rev` than it has,
 fetches the body with `GET server/messages/{seq}/drawings`. `<Drawing>` (that route's own
