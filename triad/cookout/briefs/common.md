@@ -23,3 +23,8 @@
 - Report progress with the `lane-monitor` check-in calls. Stuck, or the brief does not hold: send me a
   `BLOCKER` (what, what you tried, what you need) and wait.
 - Design questions → the Architect (`ask-architect` skill); scope questions → me.
+- **Never edit `.git/info/exclude`.** `git rev-parse --git-path info/exclude` resolves to the ONE file
+  shared by every worktree of this clone, so an entry there hides that file from every other builder
+  (measured 2026-10-28/29: twice it hid a real module another parcel had to commit). Keep any test
+  stand-in under `wixy_server/tests/` (never at the real module's path) and check before each handoff
+  that `git ls-tree -r HEAD --name-only` lists every file you created.
