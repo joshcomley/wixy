@@ -1,0 +1,1 @@
+Server chat: Cookout ingredient-picking game — WYR seat rule over a cookie, server-side Blind redaction, deterministic contraband scan instead of a second LLM checker, three tables, eight staples, bank-this recipes

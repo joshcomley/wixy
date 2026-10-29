@@ -49,6 +49,8 @@ MIN_TOTAL, MAX_TOTAL = 2500, 4000
 MIN_PER_ROLE = 200
 MIN_EVERYDAY_FAMILIES = 30
 MIN_CATEGORIES_PER_ROLE = 2
+MIN_EXOTIC_CATEGORIES_PER_ROLE = 3
+MIN_EXOTIC_FAMILIES_PER_ROLE = 40
 MAX_CATEGORY_SHARE = 0.25
 SIMULATED_ROUNDS = 500
 MANDATORY_WORDS = ("toast", "sugar", "parsley", "beef", "cream")
@@ -220,6 +222,16 @@ def validate(path: Path = BANK) -> list[str]:
         families = {i["family"] for i in in_role if i.get("rarity") == "everyday"}
         if len(families) < MIN_EVERYDAY_FAMILIES:
             problems.append(f"role {role}: {len(families)} everyday families, need >= 30")
+        exotic_in_role = [i for i in in_role if i.get("rarity") == "exotic"]
+        if len({i["category"] for i in exotic_in_role}) < MIN_EXOTIC_CATEGORIES_PER_ROLE:
+            problems.append(
+                f"role {role}: exotic entries span fewer than "
+                f"{MIN_EXOTIC_CATEGORIES_PER_ROLE} categories"
+            )
+        if len({i["family"] for i in exotic_in_role}) < MIN_EXOTIC_FAMILIES_PER_ROLE:
+            problems.append(
+                f"role {role}: fewer than {MIN_EXOTIC_FAMILIES_PER_ROLE} exotic families"
+            )
         if len({i["category"] for i in in_role}) < MIN_CATEGORIES_PER_ROLE:
             problems.append(f"role {role}: spans fewer than {MIN_CATEGORIES_PER_ROLE} categories")
     for cat in CATEGORY_IDS:
@@ -246,6 +258,8 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append(f"rarity {rarity}: {share:.1%} outside {low:.0%}-{high:.0%}")
     if not problems:
         problems.extend(simulate_rounds(path))
+    if not problems:
+        problems.extend(simulate_twist_rounds(path))
     return problems
 
 
@@ -303,6 +317,117 @@ def simulate_rounds(path: Path, rounds: int = SIMULATED_ROUNDS) -> list[str]:
                 if len(problems) > 20:
                     return problems
             picked_families.add(pair[rng.randrange(2)].family)
+    return problems
+
+
+def simulate_twist_rounds(path: Path, rounds: int = SIMULATED_ROUNDS) -> list[str]:
+    """500 rounds through the twist draws (spec 09a section 5.1): each player takes the chaos shelf
+    on a random turn, EVERY turn's first offer is vetoed once, and a wildcard is drawn after the
+    last pick. Every emitted pair, replacement and wildcard is checked, not merely no exception."""
+    from wixy_server.livechat.cookout_bank import (
+        NON_SEASONING_STAPLES,
+        CookoutExhaustedError,
+        Ingredient,
+        load_cookout_bank,
+    )
+
+    bank = load_cookout_bank(path)
+    rng = random.Random(20261029)
+    problems: list[str] = []
+    for round_no in range(rounds):
+        schedule = bank.shuffle_role_schedule(rng)
+        seen: set[str] = set()
+        offered_families: set[str] = set()
+        picked_families: set[str] = set()
+        picked_categories: set[str] = set()
+        shown: dict[int, list[str]] = {1: [], 2: []}
+        chaos_turn = {1: rng.randrange(1, 6), 2: rng.randrange(1, 6)}
+        for turn in range(1, 11):
+            player = 1 if turn % 2 else 2
+            role = schedule[(turn - 1) // 2]
+            where = f"simulated twist round {round_no} turn {turn}"
+            exotic_pair = (turn + 1) // 2 == chaos_turn[player]
+            before_seen = set(seen)
+            kwargs = dict(
+                role=role,
+                seen_ids=seen,
+                picked_families=picked_families,
+                offered_families=offered_families,
+                player_offered_categories=shown[player],
+                rng=rng,
+            )
+            try:
+                pair = bank.draw_pair(**kwargs, rarity_mode="exotic" if exotic_pair else "normal")  # type: ignore[arg-type]
+                emitted: list[tuple[str, tuple[Ingredient, ...]]] = [("pair", pair)]
+                seen.update(o.id for o in pair)
+                offered_families.update(o.family for o in pair)
+                shown[player].extend(o.category for o in pair)
+                # veto the first option of this offer
+                kept = pair[1]
+                kwargs.update(
+                    seen_ids=seen,
+                    offered_families=offered_families,
+                    player_offered_categories=shown[player],
+                )
+                extra = bank.draw_replacement(
+                    keep_id=kept.id,
+                    rarity_mode="exotic" if exotic_pair else "normal",
+                    **kwargs,  # type: ignore[arg-type]
+                )
+                emitted.append(("replacement", (kept, extra)))
+                seen.add(extra.id)
+                offered_families.add(extra.family)
+                shown[player].append(extra.category)
+            except CookoutExhaustedError as exc:
+                problems.append(f"{where}: exhausted ({exc})")
+                return problems
+            for label, group in emitted:
+                one, two = group
+                if one.role != role or two.role != role:
+                    problems.append(f"{where}: {label} option outside role {role}")
+                if one.category == two.category:
+                    problems.append(f"{where}: {label} same category {one.category}")
+                if one.family == two.family:
+                    problems.append(f"{where}: {label} same family {one.family}")
+                if exotic_pair:
+                    if one.rarity != "exotic" or two.rarity != "exotic":
+                        problems.append(f"{where}: {label} not both exotic")
+                elif "everyday" not in (one.rarity, two.rarity):
+                    problems.append(f"{where}: {label} no everyday option")
+            for option in (*pair, extra):
+                if option.id in before_seen:
+                    problems.append(f"{where}: repeated id {option.id}")
+                if option.family in picked_families:
+                    problems.append(f"{where}: picked family {option.family} offered again")
+            if extra.id in {o.id for o in pair}:
+                problems.append(f"{where}: replacement repeats an option of the pair")
+            if extra.family in picked_families:
+                problems.append(f"{where}: replacement repeats picked family {extra.family}")
+            chosen = kept
+            picked_families.add(chosen.family)
+            picked_categories.add(chosen.category)
+            if len(problems) > 20:
+                return problems
+        try:
+            wildcard = bank.draw_wildcard(
+                seen_ids=seen,
+                picked_families=picked_families,
+                offered_families=offered_families,
+                basket_categories=picked_categories,
+                rng=rng,
+            )
+        except CookoutExhaustedError as exc:
+            problems.append(f"simulated twist round {round_no}: wildcard exhausted ({exc})")
+            return problems
+        where = f"simulated twist round {round_no} wildcard {wildcard.id}"
+        if wildcard.rarity == "everyday":
+            problems.append(f"{where}: is everyday")
+        if wildcard.id in NON_SEASONING_STAPLES:
+            problems.append(f"{where}: is a pickable staple")
+        if wildcard.id in seen:
+            problems.append(f"{where}: already seen")
+        if wildcard.family in picked_families:
+            problems.append(f"{where}: family already picked")
     return problems
 
 
