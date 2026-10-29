@@ -1923,7 +1923,7 @@ class TestParseConceptsWithTwists:
         assert "concept b dishType may not be traybake, pie or bake" in text
         assert "concept c technique may not be roast or bake" in text
 
-    @pytest.mark.parametrize("field", ["title", "vibe", "description", "challengeNote"])
+    @pytest.mark.parametrize("field", ["title", "vibe", "description"])
     @pytest.mark.parametrize("word", ["oven", "preheat", "roasted", "baking"])
     def test_no_oven_rejects_an_oven_word_in_prose(self, field: str, word: str) -> None:
         twists = ConceptTwists(challenge="no-oven")
@@ -2795,3 +2795,12 @@ class TestRemovedPickableStaplesRealBank:
             assert "removed and may not appear anywhere" in _violations(
                 parse_recipe(json.dumps(text_recipe), bank=real_bank, concept=concept, twists=rt)
             ), (staple, spelling)
+
+
+def test_the_concepts_schema_lists_challenge_note_only_for_a_challenge() -> None:
+    plain = _twist_prompt(ConceptTwists())
+    assert '"challengeNote": string' not in plain
+    for challenge in ("no-oven", "thirty-minutes"):
+        prompt = _twist_prompt(ConceptTwists(challenge=challenge))
+        assert '\n   "challengeNote": string (1-140 chars),' in prompt
+        assert ('"totalMinutes": integer (5-30),' in prompt) is (challenge == "thirty-minutes")

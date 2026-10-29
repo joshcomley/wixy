@@ -1209,3 +1209,19 @@ def test_a_dab_of_and_wafer_thin_are_not_read_as_foods() -> None:
     assert bank.find_contraband_ingredients(
         "grilled dab with a wafer", allowed_ingredient_ids=set(), allowed_staple_ids=set()
     )
+
+
+def test_crisps_as_a_verb_passes_but_crisps_as_a_food_does_not() -> None:
+    bank = load_cookout_bank()
+    for prose in ("until the skin crisps", "it crisps up in the pan"):
+        assert not bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        ), prose
+
+
+def test_a_tea_towel_and_a_crisping_salami_are_not_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("keep a tea towel nearby", "dice it small so the skin crisps quickly"):
+        assert not bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        ), prose

@@ -354,6 +354,11 @@ def _pickable_staples_phrase(basket: Mapping[str, Any]) -> str:
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
+def _challenge_id(twists: object) -> str | None:
+    value = twists.get("challenge") if isinstance(twists, Mapping) else None
+    return value if isinstance(value, str) and challenge_by_id(value) is not None else None
+
+
 def build_concepts_prompt(basket: Mapping[str, Any], *, forbidden_names: Sequence[str] = ()) -> str:
     """The Stage-1 prompt. Without a `twists` object in `basket` the text is exactly the core's;
     otherwise the count words follow the basket size and the twist lines are added before the
@@ -362,6 +367,12 @@ def build_concepts_prompt(basket: Mapping[str, Any], *, forbidden_names: Sequenc
     pickable_staples = _pickable_staples_phrase(basket)
     twist_lines = _concept_twist_lines(basket, forbidden_names)
     twist_block = ("\n" + "\n".join(twist_lines) + "\n") if twist_lines else ""
+    challenge_id = _challenge_id(basket.get("twists"))
+    note_field = ""
+    if challenge_id is not None:
+        note_field = f'\n   "challengeNote": string (1-{MAX_CHALLENGE_NOTE} chars),'
+        if challenge_id == "thirty-minutes":
+            note_field += '\n   "totalMinutes": integer (5-30),'
     return f"""You are a creative, practical home-cooking chef. Two friends have picked {count} \
 ingredients between them. Invent THREE distinct recipe concepts for two people that try hard to \
 use ALL {count} picked ingredients, then reply with a single JSON object.
@@ -401,7 +412,7 @@ no markdown fences):
    "vibe": string (1-40 chars),
    "dishType": one of {", ".join(DISH_TYPES)},
    "technique": one of {", ".join(TECHNIQUES)},
-   "description": string (20-500 chars),
+   "description": string (20-500 chars),{note_field}
    "pickedIngredientIds": [picked ingredient ids used],
    "stapleIds": [staple ids used, excluding any id already in pickedIngredientIds],
    "omitted": [ {{"id": picked id not used, "reason": string (1-140 chars)}} ]}} ]}}  \
@@ -712,8 +723,8 @@ def parse_concepts(
                     ("title", title),
                     ("vibe", vibe),
                     ("description", description),
-                    ("challengeNote", challenge_note),
                 ):
+                    # (the challengeNote may say "no oven needed": it explains the rule)
                     oven = sorted(set(bank.food_free_tokens(value)) & NO_OVEN_WORDS)
                     if oven:
                         problems.append(

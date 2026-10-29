@@ -115,6 +115,12 @@ IGNORED_PHRASES: tuple[tuple[str, ...], ...] = (
     ("a", "dab"),
     ("wafer", "thin"),
     ("grit",),
+    ("skin", "crisps"),
+    ("crisps", "up"),
+    ("crisps", "until"),
+    ("crisps", "quickly"),
+    ("crisps", "well"),
+    ("tea", "towel"),
 )
 """Fixed phrases the scan never reads as a food: "date night" is an evening out, not the fruit;
 "a dab of", "wafer-thin" and a bare "grit" are a measure, an adjective and a speck, not the
