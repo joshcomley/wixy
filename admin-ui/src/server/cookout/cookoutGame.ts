@@ -79,7 +79,7 @@ export interface TableMove {
 
 export interface CookoutGameApi {
   join(seq: number): Promise<CookoutOutcome>;
-  skip(seq: number, input: TableMove): Promise<CookoutOutcome>;
+  skip(seq: number, input: TableMove & { readonly optionIds: readonly [string, string] }): Promise<CookoutOutcome>;
   pick(seq: number, input: TableMove & { readonly ingredientId: string }): Promise<CookoutOutcome>;
   abandon(seq: number): Promise<CookoutOutcome>;
   retryConcepts(seq: number, generation: number): Promise<CookoutOutcome>;
@@ -631,7 +631,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         case "veto":
           return deps.api.veto(seq, { ...base, ingredientId: ingredientId ?? "" });
         default:
-          return deps.api.skip(seq, base);
+          return deps.api.skip(seq, { ...base, optionIds });
       }
     };
     let outcome: CookoutOutcome = { ok: false, kind: "unavailable" };

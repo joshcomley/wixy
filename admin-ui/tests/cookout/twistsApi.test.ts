@@ -28,6 +28,7 @@ import {
   retryCookoutConcepts,
   retryCookoutPictures,
   retryCookoutRecipe,
+  skipCookout,
   searchIngredients,
   starCookout,
   vetoCookout,
@@ -707,6 +708,7 @@ describe("the twist calls: path and body", () => {
   }
 
   const table: ReadonlyArray<[string, () => Promise<unknown>, string, unknown]> = [
+    ["skip (with the pair it saw)", () => skipCookout(SESSION, 41, { sender: "Josh", moveId: "m0", turn: 3, offer: 1, optionIds: ["ribeye-steak", "salmon-fillet"] }), "/cookout/41/skip", { sender: "Josh", moveId: "m0", turn: 3, offer: 1, optionIds: ["ribeye-steak", "salmon-fillet"] }],
     ["lucky", () => luckyCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 3, offer: 1, optionIds: ["ribeye-steak", "salmon-fillet"] }), "/cookout/41/lucky", { sender: "Josh", moveId: "m1", turn: 3, offer: 1, optionIds: ["ribeye-steak", "salmon-fillet"] }],
     ["chaos", () => chaosCookout(SESSION, 41, { sender: "Josh", moveId: "m2", turn: 3, offer: 0, optionIds: ["a-b", "c-d"] }), "/cookout/41/chaos", { sender: "Josh", moveId: "m2", turn: 3, offer: 0, optionIds: ["a-b", "c-d"] }],
     ["veto", () => vetoCookout(SESSION, 41, { sender: "Cupcake", moveId: "m3", turn: 3, offer: 2, ingredientId: "salmon-fillet" }), "/cookout/41/veto", { sender: "Cupcake", moveId: "m3", turn: 3, offer: 2, ingredientId: "salmon-fillet" }],

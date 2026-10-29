@@ -260,10 +260,10 @@ describe("the calls", () => {
   it("maps the server's conflicts to their own kinds", async () => {
     for (const error of ["not_your_turn", "not_player", "skip_exhausted", "exhausted", "bad_state"]) {
       serverFetch.mockResolvedValueOnce(json({ error }, 409));
-      expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0 })).toEqual({ ok: false, kind: error });
+      expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0, optionIds: ["a-b", "c-d"] })).toEqual({ ok: false, kind: error });
     }
     serverFetch.mockResolvedValueOnce(json({ error: "mystery" }, 409));
-    expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0 })).toEqual({ ok: false, kind: "bad_state" });
+    expect(await skipCookout(SESSION, 41, { sender: "Josh", moveId: "m1", turn: 1, offer: 0, optionIds: ["a-b", "c-d"] })).toEqual({ ok: false, kind: "bad_state" });
     serverFetch.mockResolvedValueOnce(json({}, 404));
     expect((await getCookout(SESSION, 41, "Josh")).ok).toBe(false);
     serverFetch.mockResolvedValueOnce(json({}, 422));

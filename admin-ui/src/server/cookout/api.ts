@@ -1191,8 +1191,13 @@ export interface MoveInput {
   readonly offer: number;
 }
 
-/** `POST /cookout/{seq}/skip` — deal a fresh pair (at most twice a turn). */
-export function skipCookout(session: ServerSession, seq: number, input: MoveInput): Promise<CookoutOutcome> {
+/** A skip names the pair it saw: a veto or the chaos shelf changes the pair without changing `offer`. */
+export interface SkipInput extends MoveInput {
+  readonly optionIds: readonly [string, string];
+}
+
+/** `POST /cookout/{seq}/skip` — deal a fresh pair (at most twice a turn); a pair that changed first is `409 bad_state`. */
+export function skipCookout(session: ServerSession, seq: number, input: SkipInput): Promise<CookoutOutcome> {
   return call(session, seqPath(seq, "/skip"), postInit(input));
 }
 

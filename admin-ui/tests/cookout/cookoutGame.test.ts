@@ -378,15 +378,25 @@ describe("the draft: two cards, two skips", () => {
     expect(q(h.pane, ".wx-srv-ck-final").textContent).toBe("Final pair — pick one of the two above");
   });
 
-  it("a skip sends the turn and the offer on screen with a fresh move id", async () => {
+  it("a skip sends the turn, the offer and the pair on screen with a fresh move id", async () => {
     const h = make();
     h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, SALMON] }));
     h.api.skip.mockResolvedValue(ok(pickingView({ turn: 3, offerIndex: 2, options: [RIBEYE, SALMON], rev: 9 })));
     q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").click();
-    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1 });
+    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, optionIds: [LENTILS.id, SALMON.id] });
     expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").disabled).toBe(true);
     await flush();
     expect(h.pane.querySelector(".wx-srv-ck-final")).not.toBeNull();
+  });
+
+  it("a skip after the pair changed in place (a veto, same offer) names the NEW pair, not the one it replaced", async () => {
+    const h = make();
+    h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, SALMON] }));
+    h.show(pickingView({ turn: 3, offerIndex: 1, options: [LENTILS, RIBEYE], rev: 9 }));
+    h.api.skip.mockResolvedValue(ok(pickingView({ turn: 3, offerIndex: 2, options: [RIBEYE, SALMON], rev: 10 })));
+    q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").click();
+    expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, optionIds: [LENTILS.id, RIBEYE.id] });
+    await flush();
   });
 
   it("a pick resends the SAME move id after a lost answer, and says it is in the basket", async () => {

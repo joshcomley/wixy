@@ -6231,8 +6231,9 @@ video.wx-srv-gallery-media {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  min-height: 36px;
-  min-width: 36px;
+  /* A phone touch target: 44 px both ways. */
+  min-height: 44px;
+  min-width: 44px;
   justify-content: center;
   padding: 0 10px;
   border: 1px solid rgba(255, 255, 255, 0.45);
