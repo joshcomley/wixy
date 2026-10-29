@@ -20,6 +20,7 @@ import base64
 import contextlib
 import hashlib
 import json
+import logging
 import os
 import re
 import secrets
@@ -32,6 +33,8 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import IO, Any
+
+_LOGGER = logging.getLogger(__name__)
 
 MANIFEST_PATH = Path(__file__).with_name("cookout_ingredient_images.json")
 
@@ -51,12 +54,16 @@ ADMISSION_MARGIN_BYTES = 64 * 1024 * 1024
 DOWNLOAD_CONNECT_TIMEOUT_S = 30.0
 DOWNLOAD_DEADLINE_S = 15 * 60.0
 
-_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
-_MEMBER_RE = re.compile(r"^objects/([0-9a-f]{2})/([0-9a-f]{64})\.webp$")
-_PIN_ID_RE = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+_SHA_RE = re.compile(r"[0-9a-f]{64}")
+_MEMBER_RE = re.compile(r"objects/([0-9a-f]{2})/([0-9a-f]{64})\.webp")
+_PIN_ID_RE = re.compile(r"[A-Za-z0-9._-]{1,128}")
 
 # A valid 1x1 WebP, used by `placeholders` (e2e fixtures only check presence).
 _PLACEHOLDER_WEBP = base64.b64decode("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+
+
+class _Unreadable(Exception):
+    """GC could not establish what is in use; it deletes nothing."""
 
 
 class PackError(ValueError):
@@ -106,7 +113,7 @@ class PackManifest:
 
 def object_relpath(sha: str) -> PurePosixPath:
     """`ab/ab…ef.webp` for a sha256 hex."""
-    if not _SHA_RE.match(sha):
+    if not _SHA_RE.fullmatch(sha):
         raise PackError(f"not a sha256 hex: {sha!r}")
     return PurePosixPath(sha[:2]) / f"{sha}.webp"
 
@@ -145,9 +152,9 @@ def parse_manifest(data: bytes) -> PackManifest:
         if not isinstance(entry, dict):
             raise PackError(f"item {item_id!r} must be an object")
         card, thumb = entry.get("card"), entry.get("thumb")
-        if not (isinstance(card, str) and _SHA_RE.match(card)):
+        if not (isinstance(card, str) and _SHA_RE.fullmatch(card)):
             raise PackError(f"item {item_id!r}: card is not a sha256 hex")
-        if not (isinstance(thumb, str) and _SHA_RE.match(thumb)):
+        if not (isinstance(thumb, str) and _SHA_RE.fullmatch(thumb)):
             raise PackError(f"item {item_id!r}: thumb is not a sha256 hex")
         items[item_id] = ImageRef(card=card, thumb=thumb)
 
@@ -164,7 +171,7 @@ def parse_manifest(data: bytes) -> PackManifest:
         sha = raw_pack.get("sha256")
         if not (isinstance(url, str) and url.startswith(("https://", "http://"))):
             raise PackError("pack.url is mandatory and must be an http(s) URL")
-        if not (isinstance(sha, str) and _SHA_RE.match(sha)):
+        if not (isinstance(sha, str) and _SHA_RE.fullmatch(sha)):
             raise PackError("pack.sha256 is mandatory and must be a sha256 hex")
         size = _int_field(raw_pack, "bytes", maximum=MAX_PACK_BYTES, what="pack")
         objects = _int_field(raw_pack, "objects", maximum=MAX_OBJECTS, what="pack")
@@ -233,6 +240,24 @@ def _read_json(path: Path) -> dict[str, Any] | None:
     return raw if isinstance(raw, dict) else None
 
 
+def _registry_shas(path: Path, digest: str) -> frozenset[str] | None:
+    """The object shas in a registry copy, or None if it is absent, unreadable or malformed
+    (including a copy whose recorded digest is not `digest`)."""
+    raw = _read_json(path)
+    if raw is None or raw.get("digest") != digest or not isinstance(raw.get("items"), dict):
+        return None
+    shas: set[str] = set()
+    for ref in raw["items"].values():
+        if not isinstance(ref, dict):
+            return None
+        for key in ("card", "thumb"):
+            sha = ref.get(key)
+            if not (isinstance(sha, str) and _SHA_RE.fullmatch(sha)):
+                return None
+            shas.add(sha)
+    return frozenset(shas)
+
+
 @contextlib.contextmanager
 def _file_lock(path: Path, timeout_s: float) -> Iterator[None]:
     """Exclusive OS file lock with a bounded blocking acquire. Never proceeds unlocked."""
@@ -275,9 +300,9 @@ def _file_lock(path: Path, timeout_s: float) -> Iterator[None]:
 
 def _check_member_header(member: tarfile.TarInfo) -> str:
     """Validate a tar member's name/type/size; return its sha (the file name stem)."""
-    if not member.isreg():
+    if member.type not in (tarfile.REGTYPE, tarfile.AREGTYPE):
         raise PackError(f"member {member.name!r} is not a regular file")
-    match = _MEMBER_RE.match(member.name)
+    match = _MEMBER_RE.fullmatch(member.name)
     if match is None or match.group(1) != match.group(2)[:2]:
         raise PackError(f"member name {member.name!r} is not objects/<2 hex>/<sha256>.webp")
     if member.size > MAX_OBJECT_BYTES:
@@ -312,6 +337,8 @@ def _scan_tar(tar_path: Path, manifest: PackManifest) -> list[tuple[str, int]]:
     missing = want - seen.keys()
     if missing:
         raise PackError(f"{len(missing)} manifest objects are missing from the tar")
+    if total != pack.installed_bytes:
+        raise PackError(f"members total {total} bytes, installedBytes says {pack.installed_bytes}")
     return list(seen.items())
 
 
@@ -345,7 +372,10 @@ def _extract_objects(
                         remaining -= len(chunk)
                 if remaining or h.hexdigest() != sha:
                     raise PackError(f"member {member.name!r} does not match its sha256")
-                os.replace(tmp, target)
+                try:
+                    os.replace(tmp, target)
+                except OSError as exc:
+                    raise PackError(f"cannot install object {sha}: {exc}") from exc
             finally:
                 with contextlib.suppress(OSError):
                     tmp.unlink()
@@ -367,6 +397,9 @@ def _download(
         urllib.request.urlopen(request, timeout=DOWNLOAD_CONNECT_TIMEOUT_S) as response,  # noqa: S310
         part.open("wb") as out,
     ):
+        declared = response.headers.get("Content-Length")
+        if declared is not None and declared.isdigit() and int(declared) > max_bytes:
+            raise PackError(f"server declares {declared} bytes, over the {max_bytes} pinned")
         while True:
             if time.monotonic() - started > deadline_s:
                 raise PackError("download exceeded its total deadline")
@@ -430,14 +463,14 @@ class PackStore:
 
     def _register_manifest(self, manifest: PackManifest) -> None:
         path = self._manifests / f"{manifest.digest}.json"
-        if not path.exists():
-            _atomic_write_text(path, _canonical_registry_json(manifest))
+        if _registry_shas(path, manifest.digest) is None:
+            _atomic_write_text(path, _canonical_registry_json(manifest))  # absent or corrupt
 
     def _write_pin(self, pin_id: str, body: dict[str, Any]) -> None:
         _atomic_write_text(self._pins / f"{pin_id}.json", json.dumps(body, sort_keys=True) + "\n")
 
     def _read_pin(self, pin_id: str) -> dict[str, Any]:
-        if not _PIN_ID_RE.match(pin_id):
+        if not _PIN_ID_RE.fullmatch(pin_id):
             raise PackError(f"bad pin id {pin_id!r}")
         pin = _read_json(self._pins / f"{pin_id}.json")
         if pin is None:
@@ -474,6 +507,8 @@ class PackStore:
             return pin_id
 
     def refresh_slot(self, pin_id: str) -> None:
+        """Extend a slot pin's lease. Raises `PackError` for an unknown pin (e.g. GC'd after a long
+        stall): the caller should log it and `register_slot` again."""
         with self._locked():
             pin = self._read_pin(pin_id)
             if pin.get("retiredAt") is None:
@@ -487,6 +522,8 @@ class PackStore:
             self._write_pin(pin_id, pin)
 
     def cancel_pending(self, digest: str) -> bool:
+        if not _SHA_RE.fullmatch(digest):
+            raise PackError(f"not a manifest digest: {digest!r}")
         with self._locked():
             path = self._pins / f"pending-{digest}.json"
             if not path.exists():
@@ -496,15 +533,19 @@ class PackStore:
 
     # -- install / fetch --
 
-    def _install_locked(self, tar_path: Path, manifest: PackManifest) -> int:
-        pack = manifest.pack
-        if pack is None:
-            raise PackError("the empty manifest has no pack to install")
-        _verify_tar_identity(tar_path, pack)
-        scanned = _scan_tar(tar_path, manifest)
+    def _install_locked(
+        self,
+        tar_path: Path,
+        manifest: PackManifest,
+        scanned: list[tuple[str, int]],
+        *,
+        pending: bool,
+    ) -> int:
+        """Registry, optional pending pin, object writes, GC: the only work done under the lock
+        (the tar's identity and header scan are checked by the caller beforehand)."""
         self._register_manifest(manifest)
-        pending = self._pins / f"pending-{manifest.digest}.json"
-        if not pending.exists():
+        pending_path = self._pins / f"pending-{manifest.digest}.json"
+        if pending and not pending_path.exists():
             self._write_pin(
                 f"pending-{manifest.digest}",
                 {
@@ -522,8 +563,12 @@ class PackStore:
 
     def install(self, tar_path: Path, manifest: PackManifest) -> int:
         """Tooling install before the manifest PR merges: a pending pin first, then objects."""
+        if manifest.pack is None:
+            raise PackError("the empty manifest has no pack to install")
+        _verify_tar_identity(tar_path, manifest.pack)
+        scanned = _scan_tar(tar_path, manifest)
         with self._locked():
-            return self._install_locked(tar_path, manifest)
+            return self._install_locked(tar_path, manifest, scanned, pending=True)
 
     def _present_bytes(self, manifest: PackManifest) -> int:
         total = 0
@@ -560,8 +605,11 @@ class PackStore:
                 expected_bytes=pack.bytes,
                 deadline_s=DOWNLOAD_DEADLINE_S,
             )
+            _verify_tar_identity(part, pack)
+            scanned = _scan_tar(part, manifest)
             with self._locked():
-                return self._install_locked(part, manifest)
+                # self-heal relies on the server's slot pin: no pending pin that never expires
+                return self._install_locked(part, manifest, scanned, pending=False)
         finally:
             for leftover in (part, reserve):
                 with contextlib.suppress(OSError):
@@ -569,33 +617,36 @@ class PackStore:
 
     # -- GC --
 
-    def _keep_digests(self) -> set[str]:
-        now = self._clock()
-        keep: set[str] = set()
-        for path in self._pins.glob("*.json"):
+    def _load_pins(self) -> list[tuple[Path, dict[str, Any]]]:
+        """Every pin file, strictly: one unreadable or malformed pin raises `_Unreadable`, because
+        GC must never decide from an incomplete picture of what is in use."""
+        pins: list[tuple[Path, dict[str, Any]]] = []
+        for path in sorted(self._pins.glob("*.json")):
             pin = _read_json(path)
-            if pin is None or not isinstance(pin.get("digest"), str):
-                continue
-            kind, retired, lease = pin.get("kind"), pin.get("retiredAt"), pin.get("leaseUntil")
-            if kind == "pending":
-                keep.add(pin["digest"])
-            elif kind == "slot":
-                if retired is None and isinstance(lease, int | float) and lease > now:
-                    keep.add(pin["digest"])
-                elif isinstance(retired, int | float) and now - retired < RETIRED_KEEP_S:
-                    keep.add(pin["digest"])
-                elif (
-                    retired is None
-                    and isinstance(lease, int | float)
-                    and now - lease < RETIRED_KEEP_S
-                ):
-                    keep.add(pin["digest"])  # a crashed process counts as retired at leaseUntil
-        return keep
+            if (
+                pin is None
+                or not isinstance(pin.get("digest"), str)
+                or not _SHA_RE.fullmatch(pin["digest"])
+                or pin.get("kind") not in ("slot", "pending")
+            ):
+                raise _Unreadable(f"pin {path.name} cannot be read or is malformed")
+            pins.append((path, pin))
+        return pins
+
+    def _keeps(self, pin: dict[str, Any], now: float) -> bool:
+        if pin["kind"] == "pending":
+            return True
+        retired = self._retired_at(pin)  # slot: retiredAt, else the lease end
+        if retired is None:
+            return False
+        lease = pin.get("leaseUntil")
+        live = pin.get("retiredAt") is None and isinstance(lease, int | float) and lease > now
+        return live or now - retired < RETIRED_KEEP_S
 
     @staticmethod
     def _retired_at(pin: dict[str, Any]) -> float | None:
         """When a slot pin stopped holding its objects: its `retiredAt`, else (a crashed process)
-        its `leaseUntil` once that has lapsed. Pending pins never retire."""
+        its `leaseUntil`. Pending pins never retire."""
         if pin.get("kind") != "slot":
             return None
         retired = pin.get("retiredAt")
@@ -604,19 +655,30 @@ class PackStore:
         lease = pin.get("leaseUntil")
         return float(lease) if isinstance(lease, int | float) else None
 
+    def _sweep_temp(self, now: float) -> None:
+        for root in (self.objects_dir, self._pins, self._manifests):
+            for path in root.glob("**/.*.tmp"):
+                with contextlib.suppress(OSError):
+                    if now - path.stat().st_mtime >= YOUNG_OBJECT_S:
+                        path.unlink()
+
     def _gc_locked(self) -> int:
+        """Delete what no pin holds. Fails CLOSED: if any pin or any kept digest's registry copy
+        cannot be read and validated, nothing at all is deleted (and it is logged)."""
         now = self._clock()
-        keep_digests = self._keep_digests()
-        keep_shas: set[str] = set()
-        for digest in keep_digests:
-            reg = _read_json(self._manifests / f"{digest}.json")
-            if reg is None:
-                continue
-            items = reg.get("items")
-            if isinstance(items, dict):
-                for ref in items.values():
-                    if isinstance(ref, dict):
-                        keep_shas.update(s for s in (ref.get("card"), ref.get("thumb")) if s)
+        try:
+            pins = self._load_pins()
+            keep_shas: set[str] = set()
+            for _path, pin in pins:
+                if self._keeps(pin, now):
+                    shas = _registry_shas(self._manifests / f"{pin['digest']}.json", pin["digest"])
+                    if shas is None:
+                        raise _Unreadable(f"registry copy of manifest {pin['digest']} is unusable")
+                    keep_shas |= shas
+        except _Unreadable as exc:
+            _LOGGER.warning("cookout pack GC skipped: %s", exc)
+            return 0
+        self._sweep_temp(now)
         deleted = 0
         for path in self.objects_dir.glob("*/*.webp"):
             if path.stem in keep_shas:
@@ -633,17 +695,11 @@ class PackStore:
                 if sub.is_dir():
                     sub.rmdir()  # only succeeds when empty
         referenced: set[str] = set()
-        for path in self._pins.glob("*.json"):
-            pin = _read_json(path)
-            retired = None if pin is None else self._retired_at(pin)
-            if (
-                pin is not None
-                and isinstance(retired, int | float)
-                and now - retired >= RETIRED_KEEP_S
-            ):
+        for path, pin in pins:
+            retired = self._retired_at(pin)
+            if retired is not None and now - retired >= RETIRED_KEEP_S:
                 path.unlink(missing_ok=True)
-                continue
-            if pin is not None and isinstance(pin.get("digest"), str):
+            else:
                 referenced.add(pin["digest"])
         for path in self._manifests.glob("*.json"):
             if path.stem not in referenced:

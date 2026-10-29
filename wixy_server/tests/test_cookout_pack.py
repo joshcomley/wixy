@@ -560,3 +560,144 @@ def test_cli_roundtrip(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> No
     assert cp.main(["placeholders", "--manifest", str(mp), "--dest", str(tmp_path / "p")]) == 0
     assert cp.main(["verify", "--manifest", str(mp), "--dest", str(tmp_path / "nope")]) == 1
     assert "installed 2 objects" in capsys.readouterr().out
+
+
+# --- review fixes: fail-closed GC, pins, strict regexes, lock scope ---------------------------
+
+
+def _aged_install(tmp_path: Path, clock: Clock) -> tuple[cp.PackStore, cp.PackManifest, str]:
+    tar, m, _ = _build(tmp_path, ["a"])
+    store = _store(tmp_path, clock)
+    store.install(tar, m)
+    pin = store.register_slot(m)
+    _age(store, 7200)
+    return store, m, pin
+
+
+def test_gc_fails_closed_on_corrupt_pin(tmp_path: Path) -> None:
+    store, m, pin = _aged_install(tmp_path, Clock())
+    # a second, unrelated pack's objects would be garbage, but a corrupt pin means "unknown"
+    other_tar, other, _ = _build(tmp_path, ["z"], name="other")
+    store.install(other_tar, other)
+    store.cancel_pending(other.digest)
+    _age(store, 7200)
+    (store.root / "registry" / "pins" / f"{pin}.json").write_text("{not json", encoding="utf-8")
+    assert store.gc() == 0
+    assert all(_has(store, s) for s in m.shas() | other.shas())
+
+
+def test_gc_fails_closed_on_missing_or_corrupt_registry_copy(tmp_path: Path) -> None:
+    store, m, _ = _aged_install(tmp_path, Clock())
+    reg = store.root / "registry" / "manifests" / f"{m.digest}.json"
+    reg.write_text("[]", encoding="utf-8")
+    assert store.gc() == 0
+    reg.unlink()
+    assert store.gc() == 0
+    assert all(_has(store, s) for s in m.shas())
+
+
+def test_register_rewrites_a_corrupt_registry_copy(tmp_path: Path) -> None:
+    store, m, _ = _aged_install(tmp_path, Clock())
+    reg = store.root / "registry" / "manifests" / f"{m.digest}.json"
+    reg.write_text("garbage", encoding="utf-8")
+    store.register_slot(m)
+    assert json.loads(reg.read_text("utf-8"))["digest"] == m.digest
+    assert store.gc() == 0
+
+
+def test_fetch_leaves_no_pending_pin(tmp_path: Path) -> None:
+    tar, m, _ = _build(tmp_path, ["a"])
+    store = _store(tmp_path)
+    with _serve(tar.read_bytes()) as url:
+        store.fetch(m, url=url)
+    assert not list((store.root / "registry" / "pins").glob("pending-*"))
+
+
+def test_trailing_newline_is_not_a_sha(tmp_path: Path) -> None:
+    sha = "ab" + "c" * 62
+    with pytest.raises(cp.PackError):
+        cp.object_relpath(sha + "\n")
+    d = _manifest_dict(tmp_path)
+    d["items"]["a"]["card"] += "\n"  # type: ignore[index]
+    with pytest.raises(cp.PackError):
+        cp.parse_manifest(json.dumps(d).encode())
+    with pytest.raises(cp.PackError):
+        _store(tmp_path).cancel_pending(sha + "\n")
+
+
+def test_cancel_rejects_non_digest(tmp_path: Path) -> None:
+    with pytest.raises(cp.PackError):
+        _store(tmp_path).cancel_pending("../../x")
+    assert cp.main(["cancel", "--digest", "nope", "--storage", str(tmp_path / "s")]) == 1
+
+
+def test_tar_checked_before_the_lock_is_taken(tmp_path: Path) -> None:
+    tar, m, _ = _build(tmp_path, ["a"])
+    tar.write_bytes(tar.read_bytes() + b"\0" * 512)
+    store = _store(tmp_path, lock_timeout_s=0.2)
+    with store._locked(), pytest.raises(cp.PackError, match="tar"):
+        store.install(tar, m)  # a bad tar fails on its own merits, not on lock contention
+
+
+def test_replace_failure_is_a_pack_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    tar, m, _ = _build(tmp_path, ["a"])
+
+    real_replace = os.replace
+
+    def boom(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        if str(dst).endswith(".webp"):
+            raise PermissionError("antivirus")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(os, "replace", boom)
+    with pytest.raises(cp.PackError, match="antivirus"):
+        _store(tmp_path).install(tar, m)
+    assert not list(tmp_path.rglob("objects/**/.*.tmp"))
+
+
+def test_gc_sweeps_old_temp_files(tmp_path: Path) -> None:
+    store, _, _ = _aged_install(tmp_path, Clock())
+    old = store.objects_dir / "ab" / ".x.tmp"
+    old.parent.mkdir(exist_ok=True)
+    old.write_bytes(b"1")
+    t = old.stat().st_mtime - 7200
+    os.utime(old, (t, t))
+    young = store.objects_dir / "ab" / ".y.tmp"
+    young.write_bytes(b"1")
+    store.gc()
+    assert not old.exists() and young.exists()
+
+
+def test_declared_content_length_over_pin_refused(tmp_path: Path) -> None:
+    tar, m, _ = _build(tmp_path, ["a"])
+    store = _store(tmp_path)
+    with _serve(tar.read_bytes(), claim=len(tar.read_bytes()) + 1) as url:
+        with pytest.raises(cp.PackError, match="declares"):
+            store.fetch(m, url=url)
+
+
+def test_installed_bytes_must_equal_member_sum(tmp_path: Path) -> None:
+    tar, m, _ = _build(tmp_path, ["a"], name="slack", installed_slack=5)
+    with pytest.raises(cp.PackError, match="installedBytes"):
+        _store(tmp_path).install(tar, m)
+
+
+def test_only_regular_file_types_accepted(tmp_path: Path) -> None:
+    tar_path, m, _ = _build(tmp_path, ["a"], name="reg")
+    sha = _sha(_blob("a"))
+    bad = tmp_path / "cont.tar"
+    with tarfile.open(bad, "w") as tar:
+        info = tarfile.TarInfo(f"objects/{sha[:2]}/{sha}.webp")
+        info.type = tarfile.CONTTYPE
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+    pack = m.pack
+    assert pack is not None
+    forged = cp.PackManifest(
+        m.pack_version,
+        cp.PackRef(pack.url, _sha(bad.read_bytes()), bad.stat().st_size, 2, 1),
+        m.items,
+        m.digest,
+    )
+    with pytest.raises(cp.PackError, match="regular"):
+        _store(tmp_path).install(bad, forged)
