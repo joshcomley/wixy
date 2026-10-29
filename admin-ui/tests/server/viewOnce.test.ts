@@ -40,7 +40,7 @@ function createMockHooks(): {
       lockCauses.push(cause);
     },
     adoptBoundSession: vi.fn(),
-    getBoundGrantId: vi.fn(() => null),
+    getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
   };
 
   return { hooks, suspended, releases, lockCauses };

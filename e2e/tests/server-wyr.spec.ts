@@ -235,7 +235,7 @@ test.describe("Would you rather", () => {
     await closeAll(contextA, contextB);
   });
 
-  test("the card's chat: mini chat, pop-up with the same composer, also in the main chat (tagged)", async ({ browser }) => {
+  test("the card's chat: FAB pop-up, floating message, quick reply, also in the main chat (tagged)", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
@@ -249,60 +249,90 @@ test.describe("Would you rather", () => {
       await page.locator(".wx-chat-send-button").click();
       await humanPause(page);
     }
+    const fab = (page: Page) => page.locator(".wx-srv-game .wx-srv-float-fab");
+    const floating = (page: Page) => page.locator(".wx-srv-game .wx-srv-float-bubble");
 
     const seq = await startRound(pageA);
     await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bob sees the round");
     await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).getByRole("button", { name: "Play", exact: true }).click();
     await expect(game(pageB)).toBeVisible();
 
-    // A message sent in the WYR tab lands in the OTHER person's mini chat for this card.
+    // The game runs FULL SCREEN: no chat header, no composer — until the FAB's pop-up borrows it.
+    await expect(pageA.locator(".wx-srv-thread-header")).toBeHidden();
+    await expect(pageA.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
+    await expect(fab(pageA)).toHaveAttribute("aria-label", "Open this card's chat");
+
+    // Alice writes in the card's pop-up (the FAB opens it). The message FLOATS on Bob's screen and dots his FAB.
+    await fab(pageA).click();
+    await expect(pageA.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
     await say(pageA, "I love the first one");
-    await eventually([pageA, pageB], async () => (await pageB.locator(".wx-srv-game-mini").innerText()).includes("I love the first one"), "Bob's mini chat");
-    await expect(pageA.locator(".wx-srv-game-mini")).toContainText("I love the first one");
-    await expect(pageB.locator(".wx-srv-game-mini")).toContainText("Alice:");
+    await expect(pageA.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(1);
+    await pageA.locator(".wx-srv-gamepop-close").click();
+    await expect(pageA.locator(".wx-srv-gamepop")).toBeHidden();
+    await expect(floating(pageB)).toContainText("I love the first one", { timeout: 20_000 });
+    await expect(floating(pageB)).toContainText("Alice:");
+    await expect(fab(pageB)).toHaveAttribute("aria-label", /new message/);
+    await expect(pageB.locator(".wx-srv-game .wx-srv-float-dot")).toBeVisible();
+    await pageB.screenshot({ path: test.info().outputPath("b-floating.png") });
 
-    // Only the last two messages show in the mini chat.
-    await say(pageA, "second thought");
-    await say(pageA, "third thought");
-    await eventually([pageA, pageB], async () => (await pageB.locator(".wx-srv-game-mini-msg").count()) === 2, "two mini rows");
-    await expect(pageB.locator(".wx-srv-game-mini")).not.toContainText("I love the first one");
-
-    // Tapping a mini-chat message opens the pop-up: the card's whole history, with the composer.
-    await pageB.locator(".wx-srv-game-mini-msg").first().click();
-    await expect(pageB.locator(".wx-srv-gamepop")).toBeVisible();
-    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(3);
-    await expect(pageB.locator(".wx-srv-gamepop")).toContainText("I love the first one");
-    await expect(pageB.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
-    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble-wyrtag").first()).toBeHidden(); // the pop-up is already the game chat
-    await pageB.screenshot({ path: test.info().outputPath("b-popup.png") });
-
-    // A reply typed in the pop-up goes to the same card chat.
+    // Tapping it opens the quick reply (the same composer, the mic, Send); the answer goes to THIS card's
+    // chat, the box closes, and the dot is gone. It floats on Alice's screen.
+    await humanPause(pageB);
+    await pageB.locator(".wx-srv-game .wx-srv-float-open").click();
+    await expect(pageB.locator(".wx-srv-quick")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-quick .wx-chat-composer-input")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-quick .wx-srv-record-button, .wx-srv-quick [aria-label*='oice']").first()).toBeVisible();
+    await expect(pageB.locator(".wx-srv-game .wx-srv-float-dot")).toBeHidden();
+    await pageB.screenshot({ path: test.info().outputPath("b-quick-reply.png") });
     await say(pageB, "me too, but the second is closer");
-    await expect(pageB.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(4);
-    await eventually([pageA, pageB], async () => (await pageA.locator(".wx-srv-game-mini").innerText()).includes("me too"), "Alice sees the reply");
-    await pageB.locator(".wx-srv-gamepop-close").click();
-    await expect(pageB.locator(".wx-srv-gamepop")).toBeHidden();
-    // The composer is back in the chat, where it always is.
-    await expect(pageB.locator(".wx-srv-thread-view > .wx-chat-composer, .wx-srv-thread-view .wx-chat-composer-input").first()).toBeVisible();
+    await expect(pageB.locator(".wx-srv-quick")).toBeHidden();
+    await expect(floating(pageA)).toContainText("me too", { timeout: 20_000 });
 
-    // The Chat tab shows the same messages in the main chat, each tagged WYR; ordinary chat is not tagged
-    // and does not appear in the card's mini chat.
+    // The pop-up (the FAB) is the card's whole history, with the composer; it is already the game chat, so no tag.
+    await humanPause(pageA);
+    await fab(pageA).click();
+    await expect(pageA.locator(".wx-srv-gamepop .wx-srv-bubble")).toHaveCount(2);
+    await expect(pageA.locator(".wx-srv-gamepop")).toContainText("I love the first one");
+    await expect(pageA.locator(".wx-srv-gamepop")).toContainText("me too");
+    await expect(pageA.locator(".wx-srv-gamepop .wx-srv-bubble-wyrtag").first()).toBeHidden();
+    await expect(fab(pageA)).toHaveAttribute("aria-label", "Open this card's chat"); // seen: no dot
+    await pageA.locator(".wx-srv-gamepop-close").click();
+    await expect(pageA.locator(".wx-srv-gamepop")).toBeHidden();
+
+    // The Chat tab brings the header and the composer back, and shows the same messages in the main chat,
+    // each tagged WYR; ordinary chat is not tagged and does not appear in the card's pop-up.
     await pageB.locator(".wx-srv-tab-chat").click();
     await expect(pageB.locator(".wx-srv-thread-wrap")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-thread-header")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeVisible();
     const tagged = pageB.locator(".wx-srv-thread .wx-srv-bubble:has(.wx-srv-bubble-wyrtag)");
-    await expect(tagged).toHaveCount(4);
+    await expect(tagged).toHaveCount(2);
     await say(pageB, "just ordinary chat");
     await expect(pageB.locator(".wx-srv-thread .wx-srv-bubble:has-text('just ordinary chat') .wx-srv-bubble-wyrtag")).toHaveCount(0);
+
+    // Alice is in the WYR tab: Chat gets its dot AND the main-chat message floats, labelled "Chat". A quick
+    // reply to it goes to the MAIN chat (not the card's).
     await eventually([pageA, pageB], async () => (await pageA.locator(".wx-srv-tab-chat .wx-srv-tab-dot").isVisible()), "Alice's Chat tab gets a dot");
-    await expect(pageA.locator(".wx-srv-game-mini")).not.toContainText("just ordinary chat");
+    await expect(floating(pageA)).toContainText("just ordinary chat");
+    await expect(floating(pageA).locator(".wx-srv-float-tag")).toBeVisible();
+    await expect(fab(pageA)).toHaveAttribute("aria-label", "Open this card's chat"); // the dot is for the card's own chat
+    await humanPause(pageA);
+    await pageA.locator(".wx-srv-game .wx-srv-float-open").click();
+    await expect(pageA.locator(".wx-srv-quick")).toBeVisible();
+    await say(pageA, "heard you in the main chat");
+    await expect(pageA.locator(".wx-srv-quick")).toBeHidden();
+    await expect(pageB.locator(".wx-srv-thread .wx-srv-bubble:has-text('heard you in the main chat')")).toBeVisible({ timeout: 20_000 });
+    await expect(pageB.locator(".wx-srv-thread .wx-srv-bubble:has-text('heard you in the main chat') .wx-srv-bubble-wyrtag")).toHaveCount(0);
 
     // It all survives a reload: the card's chat is stored with the card.
     await pageA.reload();
     await unlockServer(pageA, "Alice");
     await eventually([pageA], async () => await pageA.locator(".wx-srv-tabs").isVisible(), "the round's tab is offered again");
     await pageA.locator(".wx-srv-tab-wyr").click();
-    await expect(pageA.locator(".wx-srv-game-mini")).toContainText("me too");
-    await expect(pageA.locator(".wx-srv-game-mini")).not.toContainText("just ordinary chat");
+    await humanPause(pageA);
+    await fab(pageA).click();
+    await expect(pageA.locator(".wx-srv-gamepop")).toContainText("me too");
+    await expect(pageA.locator(".wx-srv-gamepop")).not.toContainText("just ordinary chat");
 
     for (const e of errors) expect(e.filter((m) => !/favicon/i.test(m))).toEqual([]);
     await closeAll(contextA, contextB);
@@ -326,13 +356,14 @@ test.describe("Would you rather", () => {
     const paneFit = await game(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(paneFit.scroll).toBeLessThanOrEqual(paneFit.client + 1);
 
-    // The picture area keeps real room even with the controls, the mini chat, the composer and the
-    // tab bar all on screen; each of those is inside the viewport and a proper tap target.
+    // The game is full screen (no chat header, no composer). The picture area keeps real room even with the
+    // controls, the chat FAB and the tab bar all on screen; each of those is inside the viewport.
+    await expect(page.locator(".wx-srv-thread-header")).toBeHidden();
     const stage = (await page.locator(".wx-srv-game-stage").boundingBox())!;
     expect(stage.height).toBeGreaterThanOrEqual(140);
     expect(stage.x).toBeGreaterThanOrEqual(0);
     expect(stage.x + stage.width).toBeLessThanOrEqual(360.5);
-    for (const selector of [".wx-srv-game-mini", ".wx-chat-composer-input", ".wx-srv-tab-chat", ".wx-srv-tab-wyr"]) {
+    for (const selector of [".wx-srv-game-head", ".wx-srv-game .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-wyr"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box, selector).not.toBeNull();
       expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(780.5);
@@ -359,9 +390,10 @@ test.describe("Would you rather", () => {
     await context.close();
   });
 
-  test("a finished round with chat stays tidy on a phone: nothing overlaps, the mini chat is a neat strip", async ({ browser }) => {
-    // Operator report (2026-10-20): after a reveal, with two chat messages and the composer
-    // focused, the mini chat rows overlapped the composer and its expand button floated loose.
+  test("a finished round with chat stays tidy on a phone: nothing overlaps, the floating message and FAB sit in their own row", async ({ browser }) => {
+    // Operator report (2026-10-20): after a reveal, with two chat messages, the chat rows overlapped the
+    // composer and its expand button floated loose. The strip and the composer are gone from a game tab now
+    // (decisions/00193): the same guarantee is that the floating message and the FAB never overlap the game.
     const phone = { viewport: { width: 362, height: 740 }, hasTouch: true, isMobile: true };
     const contextA = await browser.newContext(phone);
     const contextB = await browser.newContext(phone);
@@ -393,26 +425,21 @@ test.describe("Would you rather", () => {
     await humanPause(pageB);
     await eventually([pageA, pageB], async () => (await controls(pageA).locator(".wx-srv-wyr-result").count()) === 2, "result shown");
 
+    // Cupcake writes two messages (the second one long) through the card's pop-up; they float on Bubble's phone.
+    await pageA.locator(".wx-srv-game .wx-srv-float-fab").click();
     for (const text of ["Yay!", "Forttttttt — and a much longer second message that has to wrap or be cut neatly"]) {
       await pageA.locator(".wx-chat-composer-input").fill(text);
       await pageA.locator(".wx-chat-send-button").click();
       await humanPause(pageA);
     }
-    await eventually([pageA], async () => (await pageA.locator(".wx-srv-game-mini-msg").count()) === 2, "two mini rows");
-    // The composer focused (it jumps to its own full-width line), exactly as in the report.
-    await pageA.locator(".wx-chat-composer-input").focus();
-    await pageA.waitForTimeout(300);
-    await pageA.screenshot({ path: test.info().outputPath("phone-revealed-chat.png") });
+    await pageA.locator(".wx-srv-gamepop-close").click();
+    const floating = pageB.locator(".wx-srv-game .wx-srv-float-bubble");
+    await expect(floating).toContainText("Forttttttt", { timeout: 20_000 });
+    await expect(floating.locator(".wx-srv-float-more")).toHaveText("+1");
+    await pageB.screenshot({ path: test.info().outputPath("phone-revealed-chat.png") });
 
-    const boxOf = async (selector: string) => (await pageA.locator(selector).first().boundingBox())!;
-    const order = [
-      ".wx-srv-game-head",
-      ".wx-srv-game-stage",
-      ".wx-srv-game-controls",
-      ".wx-srv-game-mini",
-      ".wx-chat-composer",
-      ".wx-srv-tabs",
-    ];
+    const boxOf = async (selector: string) => (await pageB.locator(selector).first().boundingBox())!;
+    const order = [".wx-srv-game-head", ".wx-srv-game-stage", ".wx-srv-game-controls", ".wx-srv-game-chatrow", ".wx-srv-tabs"];
     const boxes = [];
     for (const selector of order) {
       const box = await boxOf(selector);
@@ -429,23 +456,18 @@ test.describe("Would you rather", () => {
     }
     // The picture keeps real room.
     expect((await boxOf(".wx-srv-game-stage")).height).toBeGreaterThanOrEqual(120);
-    // Every mini-chat row sits inside the strip, and the rows are one height each.
-    const strip = await boxOf(".wx-srv-game-mini");
-    const rows = await pageA.locator(".wx-srv-game-mini-msg").evaluateAll((els) => els.map((el) => {
-      const r = el.getBoundingClientRect();
-      return { top: r.top, bottom: r.bottom, height: r.height };
-    }));
-    expect(rows).toHaveLength(2);
-    for (const row of rows) {
-      expect(row.top).toBeGreaterThanOrEqual(strip.y - 0.5);
-      expect(row.bottom).toBeLessThanOrEqual(strip.y + strip.height + 0.5);
+    // The floating message and the FAB sit inside the reserved chat row, side by side, the message clamped.
+    const row = await boxOf(".wx-srv-game-chatrow");
+    const bubble = await boxOf(".wx-srv-game .wx-srv-float-bubble");
+    const fabBox = await boxOf(".wx-srv-game .wx-srv-float-fab");
+    for (const [name, box] of [["bubble", bubble], ["fab", fabBox]] as const) {
+      expect(box.y, `${name} top`).toBeGreaterThanOrEqual(row.y - 0.5);
+      expect(box.y + box.height, `${name} bottom`).toBeLessThanOrEqual(row.y + row.height + 0.5);
     }
-    expect(Math.abs(rows[0]!.height - rows[1]!.height)).toBeLessThanOrEqual(1);
-    // The way into the full game chat is a real tap target inside the strip.
-    const open = await boxOf(".wx-srv-game-mini-expand");
-    expect(open.height).toBeGreaterThanOrEqual(43.5);
-    expect(open.y).toBeGreaterThanOrEqual(strip.y - 0.5);
-    expect(open.y + open.height).toBeLessThanOrEqual(strip.y + strip.height + 0.5);
+    expect(bubble.x + bubble.width).toBeLessThanOrEqual(fabBox.x + 0.5);
+    expect(bubble.height).toBeLessThanOrEqual(64.5);
+    expect(fabBox.width).toBeGreaterThanOrEqual(43.5);
+    expect(fabBox.height).toBeGreaterThanOrEqual(43.5);
     await closeAll(contextA, contextB);
   });
 

@@ -2,7 +2,7 @@
 
 Read `common.md` first. Builder: Sonnet 5.5. You own `e2e/tests/server-cookout.spec.ts` (and any e2e
 helper you add for it), `docs/ai/{livechat.md, contracts.md, invariants.md, glossary.md, testing.md,
-runbook.md}`, the `CLAUDE.md` store table row, and `decisions/00193-server-chat-cookout/{title,decision}.md`
+runbook.md}`, the `CLAUDE.md` store table row, and `decisions/00199-server-chat-cookout/{title,decision}.md`
 (check the next free number first: max+1 across `decisions/`).
 
 ## Phase A — docs (start now)
@@ -28,7 +28,7 @@ server (`store.py` v21, `cookout_game.py`, `routes_livechat_cookout.py`), AI + p
   v20 DB fixture, the bank validator), `runbook.md` if any operational note (e.g. ComfyUI shared with WYR).
 - `CLAUDE.md` store-table row: add the `cookout_rounds` / `cookout_turns` / `cookout_recipes` tables
   (schema v21) in the same style as the `adv_*` text.
-- `decisions/00193-server-chat-cookout/`: the design record — panel (Argon, Kimi, Astra), the ruling's
+- `decisions/00199-server-chat-cookout/`: the design record — panel (Argon, Kimi, Astra), the ruling's
   decisions and minority positions taken (WYR seat rule over a cookie; no second LLM checker; three
   tables), staples list and why, longest-span scan, and what to watch for. Link `triad/cookout/ruling.md`
   and `spec/server-chat/09-cookout.md`.

@@ -67,6 +67,7 @@ export const createServerChatView: CreateServerChatView = (deps) => {
   });
   const calls = createCallController({
     win, hooks, isMicBusy: () => thread.isMicBusy(), onBusy: (busy) => thread.setCallBusy(busy),
+    onLive: (live) => thread.setCallLive(live),
   });
   thread.mountCallControls(calls.element);
   thread.element.hidden = true; // shown once a name exists and attach() runs

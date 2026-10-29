@@ -91,6 +91,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
   const b = await browser.newContext({ permissions: ["microphone"] });
   const c = await browser.newContext({ permissions: ["microphone"] });
   let observerActivity: ReturnType<typeof setInterval> | null = null;
+  let keepAlive: { start(): void; stop(): void }[] = [];
   let stage = "unlock devices";
   try {
     const pa = await a.newPage();
@@ -113,8 +114,25 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
         }
       });
     });
+    // Every device auto-locks after 10 s without activity, and a RINGING call does not pause that
+    // countdown (only a connected one does, Inv 55). Setup (three unlocks, the dialog, Answer)
+    // takes longer than 10 s on a loaded machine, so a device nobody touches in the meantime locks
+    // and drops out of the call presence list. Keep the two call devices live until both are muted.
+    keepAlive = [pa, pb].map((page) => {
+      let timer: ReturnType<typeof setInterval> | null = null;
+      return {
+        start(): void {
+          timer = setInterval(() => {
+            void page.mouse.move(150 + Math.random() * 3, 300).catch(() => undefined);
+          }, 1000);
+        },
+        stop(): void { if (timer !== null) clearInterval(timer); timer = null; },
+      };
+    });
     await unlock(pa, "Caller");
+    keepAlive[0]!.start();
     await unlock(pb, "Receiver");
+    keepAlive[1]!.start();
     await unlock(pc, "Observer");
     await pa.setViewportSize({ width: 390, height: 844 });
     await expect(pa.locator(".wx-srv-call select")).toHaveCount(0);
@@ -185,6 +203,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     for (const page of [pa, pb]) await expect(page.locator(".wx-srv-call")).toContainText("On a voice call");
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
     await pb.locator(".wx-srv-call").getByRole("button", { name: "Mute", exact: true }).click();
+    for (const live of keepAlive) live.stop(); // From here only the call itself holds the devices open.
     stage = "muted idle and third-device isolation";
     await pa.waitForTimeout(11_000); // Beyond default idle, without fake clock/network interference.
     for (const page of [pa, pb]) {
@@ -213,6 +232,7 @@ test("duplex sound, muted idle pause, panic stop and fresh idle countdown", asyn
     throw error;
   } finally {
     if (observerActivity !== null) clearInterval(observerActivity);
+    for (const live of keepAlive) live.stop();
     await Promise.all([a.close(), b.close(), c.close()]);
   }
 });
@@ -280,4 +300,79 @@ test("microphone rejection explains setup failure on both devices with safe copy
     await b.getByRole("button", { name: "Dismiss call details" }).click();
     await expect(b.locator(".wx-srv-call-notice")).toBeHidden();
   } finally { await Promise.all([caller.close(), callee.close()]); }
+});
+
+test("a ringing call keeps both chats unlocked, then the idle countdown restarts when the ring ends", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pa.locator(".wx-srv-call")).toContainText("Calling");
+    // No activity on either device for longer than the 10 s idle lock: the ring pauses it.
+    await pa.waitForTimeout(12_000);
+    for (const page of [pa, pb]) await expect(page.locator(".wx-srv-thread")).toBeVisible();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pb.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true })).toBeVisible();
+    await pb.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true }).click();
+    await expect(pa.locator(".wx-srv-call")).toContainText("Call ended");
+    await expect(pa.locator(".wx-srv-thread")).toBeVisible(); // a FRESH countdown, not an instant lock
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0, { timeout: 14_000 }); // the untouched device idle-locks
+  } finally { await Promise.all([a.close(), b.close()]); }
+});
+
+test("Escape during a ring still locks at once and ends the call", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await pb.keyboard.press("Escape");
+    await expect(pb.locator(".wx-srv-thread")).toHaveCount(0);
+    await expect(pa.locator(".wx-srv-call")).toContainText(/ended|disconnected|unavailable/i);
+    await pa.keyboard.press("Escape");
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0);
+  } finally { await Promise.all([a.close(), b.close()]); }
+});
+
+test("a page frozen mid-ring locks the moment it returns, and gets no fresh idle window", async ({ browser }) => {
+  const a = await browser.newContext({ permissions: ["microphone"] });
+  const b = await browser.newContext({ permissions: ["microphone"] });
+  try {
+    const pa = await a.newPage();
+    const pb = await b.newPage();
+    await pa.clock.install();
+    await unlock(pa, "Caller");
+    await unlock(pb, "Receiver");
+    // The exposed setting: neither "lock when I leave" box ticked, so only the idle lock guards the chat.
+    await pa.evaluate(() => {
+      localStorage.setItem("wx-srv-lock-on-tab", "0");
+      localStorage.setItem("wx-srv-lock-on-screen", "0");
+      window.dispatchEvent(new Event("wx-srv-lock-prefs-changed"));
+    });
+    await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
+    await pa.getByRole("radio", { name: /Receiver/ }).check();
+    await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
+    await expect(pb.locator(".wx-srv-call")).toContainText("Incoming call");
+    await expect(pa.locator(".wx-srv-call")).toContainText("Calling");
+    // A frozen page's defining feature: wall time jumps while no timer runs in between. Playwright's
+    // fast-forward does exactly that (each due timer fires once, afterwards), unlike a headless page
+    // that Chromium will not really freeze. The fake clock was installed before the page loaded.
+    await pa.clock.fastForward(12_000);
+    // Back after more than the idle period: locked at once, not visible for a fresh window.
+    await expect(pa.locator(".wx-srv-thread")).toHaveCount(0, { timeout: 2000 });
+    await expect(pb.locator(".wx-srv-call")).toContainText("Call ended"); // locking the caller ended the call
+  } finally { await Promise.all([a.close(), b.close()]); }
 });
