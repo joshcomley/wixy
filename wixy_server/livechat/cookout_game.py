@@ -629,8 +629,8 @@ def _pick_kind(
 ) -> str | None:
     """The kind a pick served: the turn's kind for a drafted pick (a swap serves the kind it
     replaced), the mode's classification for a starter or the wildcard."""
-    if mode is None:
-        return None
+    if mode is None or mode.plan_type == "classic":
+        return None  # Classic's kind is the bank role it already sends as `current.role`
     if turn is None or via in ("seed", "wildcard"):
         return mode.kind_of(ingredient_id)
     return mode.kind_for_turn(round_.role_schedule, turn)
@@ -1289,9 +1289,24 @@ def bank_entry_json(
     by_id = {a.id: a for a in attachments}
     resolve = _resolver(round_, turns, bank)
     mode = round_mode(round_)
-    used = [r for i in concept.get("pickedIngredientIds", []) if (r := resolve(str(i))) is not None]
+
+    def with_kind(snap: JsonObject) -> JsonObject:
+        """Spec 09c: each snap carries the pick kind it served (`null` for Classic), the same value
+        as `PickSnap.kind`, so a client can constrain a Remix seed to one bread and one filling."""
+        kind = (
+            mode.kind_of(str(snap["id"]))
+            if mode is not None and mode.plan_type != "classic"
+            else None
+        )
+        return {**snap, "kind": kind}
+
+    used = [
+        with_kind(r)
+        for i in concept.get("pickedIngredientIds", [])
+        if (r := resolve(str(i))) is not None
+    ]
     left = [
-        r
+        with_kind(r)
         for e in concept.get("omitted", [])
         if isinstance(e, dict) and (r := resolve(str(e.get("id")))) is not None
     ]

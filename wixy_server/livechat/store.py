@@ -1798,7 +1798,10 @@ class LiveChatStore:
             yield conn
             conn.execute("COMMIT")
         except BaseException:
-            conn.execute("ROLLBACK")
+            # A failed BEGIN (the lock wait timed out) leaves no transaction: rolling back then
+            # would raise "cannot rollback" and REPLACE the real "database is locked".
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             raise
         finally:
             conn.close()
@@ -1811,7 +1814,8 @@ class LiveChatStore:
             yield conn
             conn.execute("COMMIT")
         except BaseException:
-            conn.execute("ROLLBACK")
+            if conn.in_transaction:
+                conn.execute("ROLLBACK")
             raise
         finally:
             conn.close()
@@ -3956,7 +3960,9 @@ class LiveChatStore:
                         raise CookoutInvalidError("that ingredient is not part of this game")
                     turn_of_seed = 1 if kind_id == mode.chef.anchor_kind else 2
                     if turn_of_seed in seed_turns:
-                        raise CookoutInvalidError("too many starter ingredients")
+                        raise CookoutInvalidError(
+                            f"pick one {mode.chef.anchor_kind} and one filling to start with"
+                        )
                     seed_turns[turn_of_seed] = entry
 
             for old in conn.execute(
@@ -6185,6 +6191,15 @@ class LiveChatStore:
                     return False
                 busy_timeout_ms = max(1, min(250, int(remaining * 1000)))
                 conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+                # TRUNCATE takes the WAL writer lock BEFORE it waits for readers, so with a stale
+                # reader pinning the WAL it would hold off every writer for the whole busy slice,
+                # slice after slice. PASSIVE never blocks a writer; TRUNCATE is only worth trying
+                # once PASSIVE has copied every frame (no reader pins an older snapshot).
+                passive = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
+                assert passive is not None
+                if int(passive[0]) != 0 or int(passive[1]) != int(passive[2]):
+                    time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                    continue
                 result_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                 assert result_row is not None
                 busy = int(result_row[0])

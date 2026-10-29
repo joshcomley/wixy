@@ -1117,3 +1117,135 @@ class TestRoutes:
             assert v["mode"]["anchorKind"] is None
             msgs = client.get("/api/admin/server/messages", headers=h).json()["messages"]
             assert msgs[-1]["cookout"]["mode"] == "classic"
+
+
+def _banked_remix_source(store: LiveChatStore, bank: CookoutBank, cid: str, seed: int) -> int:
+    source = _finished_with_concepts(store, bank, cid=cid, seed=seed)
+    store.bank_cookout_concept(
+        anchor_seq=source,
+        sender=ROSE,
+        email=None,
+        concept_id="a",
+        move_id=mid(),
+        generation=1,
+        runner_available=True,
+    )
+    assert store.set_cookout_recipe_run(source, "a", "run-r", expected_generation=1)
+    assert store.finish_cookout_recipe(
+        source,
+        "a",
+        "run-r",
+        "banked",
+        expected_generation=1,
+        recipe_json=json.dumps({"serves": 2, "prepMinutes": 5, "cookMinutes": 5}),
+    )
+    return source
+
+
+class TestBankKindsAndSeedErrors:
+    def test_recipe_book_snaps_carry_the_pick_kind_and_classic_is_null(
+        self, store: LiveChatStore, bank: CookoutBank
+    ) -> None:
+        from wixy_server.livechat.cookout_game import bank_entry_json
+
+        source = _banked_remix_source(store, bank, "modes-bank-0001", 11)
+        data = store.list_cookout_bank()
+        entry = next(
+            bank_entry_json(
+                d.round,
+                d.recipe,
+                d.attachments,
+                None,
+                turns=d.turns,
+                generation_row=d.generation_row,
+                bank=bank,
+            )
+            for d in data
+            if d.round.anchor_message_seq == source
+        )
+        assert entry is not None
+        snaps: Any = entry["ingredients"]
+        kinds = [i["kind"] for i in snaps]
+        assert kinds[0] == "bread" and kinds.count("bread") == 1
+        assert all(k in {"bread", "cheese", "main", "produce", "finish"} for k in kinds)
+        mode_ref: Any = entry["mode"]
+        assert mode_ref["id"] == "toastie"
+
+    def test_a_classic_entry_has_null_kinds(self, store: LiveChatStore, bank: CookoutBank) -> None:
+        from wixy_server.livechat.cookout_game import bank_entry_json
+
+        seq = start(store, bank, mode="classic", cid="modes-bank-0002")
+        join(store, bank, seq)
+        for _ in range(10):
+            pick_live(store, bank, seq)
+        row = store.get_cookout_round(seq)
+        assert row is not None
+        concepts = [
+            {
+                "id": c,
+                "title": "t",
+                "vibe": "v",
+                "dishType": "bake",
+                "technique": "bake",
+                "description": "d",
+                "pickedIngredientIds": row["basket_ids"],
+                "stapleIds": [],
+                "omitted": [],
+            }
+            for c in ("a", "b", "c")
+        ]
+        assert store.set_cookout_concepts_run(seq, "run-c", expected_generation=1)
+        assert store.finish_cookout_concepts(
+            seq, "run-c", "ready", expected_generation=1, concepts_json=json.dumps(concepts)
+        )
+        store.bank_cookout_concept(
+            anchor_seq=seq,
+            sender=ROSE,
+            email=None,
+            concept_id="a",
+            move_id=mid(),
+            generation=1,
+            runner_available=True,
+        )
+        store.set_cookout_recipe_run(seq, "a", "run-r", expected_generation=1)
+        store.finish_cookout_recipe(
+            seq,
+            "a",
+            "run-r",
+            "banked",
+            expected_generation=1,
+            recipe_json=json.dumps({"serves": 2, "prepMinutes": 5, "cookMinutes": 5}),
+        )
+        d = next(x for x in store.list_cookout_bank() if x.round.anchor_message_seq == seq)
+        entry = bank_entry_json(
+            d.round, d.recipe, d.attachments, None, turns=d.turns, generation_row=d.generation_row
+        )
+        assert entry is not None
+        snaps: Any = entry["ingredients"]
+        assert {i["kind"] for i in snaps} == {None}
+
+    def test_two_fillings_in_a_remix_get_a_distinct_pick_one_bread_and_one_filling_error(
+        self, store: LiveChatStore, bank: CookoutBank
+    ) -> None:
+        source = _banked_remix_source(store, bank, "modes-bank-0003", 12)
+        picked = store.get_cookout_round(source)["picked_ids"]  # type: ignore[index]
+        fillings = [i for i in picked if toastie().kind_of(i) != "bread"]
+        fams: dict[str, str] = {}
+        for i in fillings:
+            fams.setdefault(bank.ingredient(i).family, i)  # type: ignore[union-attr]
+        two = tuple(list(fams.values())[:2])
+        with pytest.raises(CookoutInvalidError, match="one bread and one filling"):
+            start(
+                store,
+                bank,
+                cid="modes-bank-0004",
+                setup=CookoutSetup(
+                    encore=EncoreSpec(
+                        from_seq=source,
+                        generation=1,
+                        concept_id="a",
+                        kind="remix",
+                        seed_ids=two,
+                    )
+                ),
+            )

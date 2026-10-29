@@ -44,6 +44,7 @@ BANK_VERSION = 1
 RoleKey = Literal["base", "protein", "produce", "accent"]
 RarityKey = Literal["everyday", "uncommon", "exotic"]
 RarityMode = Literal["normal", "exotic"]
+FacetKey = Literal["category", "family"]
 
 ROLES: tuple[RoleKey, ...] = ("base", "protein", "produce", "accent")
 RARITIES: tuple[RarityKey, ...] = ("everyday", "uncommon", "exotic")
@@ -314,6 +315,8 @@ class CookoutBank:
         player_offered_categories: Sequence[str],
         rng: random.Random | None = None,
         rarity_mode: RarityMode = "normal",
+        candidates: Sequence[Ingredient] | None = None,
+        facet: FacetKey = "category",
     ) -> tuple[Ingredient, Ingredient]:
         """Draw the two options of one offer for `role`.
 
@@ -334,7 +337,7 @@ class CookoutBank:
         exotic = rarity_mode == "exotic"
         eligible = [
             i
-            for i in self.by_role(role)
+            for i in (self.by_role(role) if candidates is None else candidates)
             if i.id not in seen_ids
             and i.family not in picked_families
             and (not exotic or i.rarity == "exotic")
@@ -343,7 +346,7 @@ class CookoutBank:
             [i for i in eligible if i.family not in offered_families],
             eligible,
         ):
-            grouped = _group(pool)
+            grouped = _group(pool, facet)
             feasible = _feasible_first_options(grouped, need_everyday=not exotic)
             if feasible:
                 break
@@ -387,6 +390,8 @@ class CookoutBank:
         player_offered_categories: Sequence[str],
         rarity_mode: RarityMode = "normal",
         rng: random.Random | None = None,
+        candidates: Sequence[Ingredient] | None = None,
+        facet: FacetKey = "category",
     ) -> Ingredient:
         """One fresh option for `role` that keeps the pair with `keep_id` legal (partner veto, T8).
 
@@ -405,10 +410,10 @@ class CookoutBank:
         must_be_everyday = not exotic and keep.rarity != "everyday"
         eligible = [
             i
-            for i in self.by_role(role)
+            for i in (self.by_role(role) if candidates is None else candidates)
             if i.id not in seen_ids
             and i.family not in picked_families
-            and i.category != keep.category
+            and (facet == "family" or i.category != keep.category)
             and i.family != keep.family
             and (
                 i.rarity == "exotic" if exotic else (i.rarity == "everyday" or not must_be_everyday)
@@ -424,10 +429,10 @@ class CookoutBank:
         weights = [RARITY_WEIGHTS[t] for t in tiers]
         tier = generator.choices(tiers, weights=weights)[0]
         counts = Counter(player_offered_categories)
-        categories = {e.category for e in by_tier[tier]}
+        categories = {_facet_of(e, facet) for e in by_tier[tier]}
         lowest = min(counts[c] for c in categories)
         category = generator.choice(sorted(c for c in categories if counts[c] == lowest))
-        in_category = [e for e in by_tier[tier] if e.category == category]
+        in_category = [e for e in by_tier[tier] if _facet_of(e, facet) == category]
         family = generator.choice(sorted({e.family for e in in_category}))
         return generator.choice(
             sorted((e for e in in_category if e.family == family), key=lambda e: e.id)
@@ -441,6 +446,7 @@ class CookoutBank:
         offered_families: AbstractSet[str],
         basket_categories: AbstractSet[str],
         rng: random.Random | None = None,
+        candidates: Sequence[Ingredient] | None = None,
     ) -> Ingredient:
         """The surprise eleventh ingredient behind the cloche (T5): any role, never `everyday` (it
         is a dare), never one of the five pickable staples, never seen, never from a picked family.
@@ -450,7 +456,7 @@ class CookoutBank:
         generator = rng or _SYSTEM_RNG
         eligible = [
             i
-            for i in self.ingredients
+            for i in (self.ingredients if candidates is None else candidates)
             if i.rarity != "everyday"
             and i.id not in seen_ids
             and i.id not in NON_SEASONING_STAPLES
@@ -478,7 +484,9 @@ class CookoutBank:
 
     # -- bank search and food-word helpers (twists) ---------------------------------------------
 
-    def search(self, query: str, *, limit: int = 20) -> tuple[Ingredient, ...]:
+    def search(
+        self, query: str, *, limit: int = 20, candidates: Sequence[Ingredient] | None = None
+    ) -> tuple[Ingredient, ...]:
         """Fridge-raid search: an ingredient matches when every query token is a prefix of some
         token of its name, or of one of its aliases. Ranked exact name, name prefix, other name
         match, alias match, then rarity (`everyday` first), then name."""
@@ -487,7 +495,7 @@ class CookoutBank:
             return ()
         phrase = " ".join(wanted)
         ranked: list[tuple[int, int, str, str, Ingredient]] = []
-        for ingredient in self.ingredients:
+        for ingredient in self.ingredients if candidates is None else candidates:
             name_tokens = tokenise(ingredient.name)
             if _all_prefixes(wanted, name_tokens):
                 joined = " ".join(name_tokens)
@@ -619,10 +627,16 @@ def _spans(
     return hits
 
 
-def _group(pool: Sequence[Ingredient]) -> dict[str, dict[str, list[Ingredient]]]:
+def _facet_of(entry: Ingredient, facet: FacetKey) -> str:
+    return entry.family if facet == "family" else entry.category
+
+
+def _group(
+    pool: Sequence[Ingredient], facet: FacetKey = "category"
+) -> dict[str, dict[str, list[Ingredient]]]:
     grouped: dict[str, dict[str, list[Ingredient]]] = {}
     for entry in pool:
-        grouped.setdefault(entry.category, {}).setdefault(entry.family, []).append(entry)
+        grouped.setdefault(_facet_of(entry, facet), {}).setdefault(entry.family, []).append(entry)
     return grouped
 
 
