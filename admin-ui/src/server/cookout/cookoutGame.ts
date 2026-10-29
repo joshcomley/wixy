@@ -6,8 +6,13 @@
 //   [ the basket progress: 5 pills each, and whose turn it is ("Your turn — Pick 2 of 5 (Go 1 of 3)") ]
 //   [ the stage: two tactile ingredient cards + the skip button — or the Blind cloche — or the chef ]
 //   [ the basket tray: what is in the basket so far, and the cupboard staples ]
-//   [ mini chat: this round's last two messages ]      <- the shared itemChat strip
-//   [ the chat composer — the ordinary one, now sending into this round ]
+//   [ the chat row: a floating message (left) and the chat FAB (right) ]   <- reserved, never over a control
+//
+// The games run FULL SCREEN (decisions/00194): the chat header and the composer are hidden while this tab
+// shows, so everything that must stay reachable lives in the pane's own title row. The conversation is the
+// shared chat FAB, floating message and quick reply (`gameFloat.ts`), whose overlay sits in a reserved chat
+// row under the scrolling column (as WYR's), so it never covers a pick, a skip or a Bank at any scroll
+// position; and the round's pop-up chat.
 //
 // When all ten are picked the progress and the tray give way to the chef stage: the revealed basket
 // (in a Blind round the ten flip open together), "Chef is inventing…", then three dish cards whose
@@ -18,8 +23,8 @@
 // out of the view (spec §1.3), so the cloche and the "🔒 Secret pick" cards are drawn from counts alone and
 // no ingredient string of the partner's can be in the DOM.
 //
-// Like the other games it registers with the shared frame (`gameTabs.ts`) as "cookout" and embeds a strip
-// of the shared per-item chat (`itemChat.ts`). It holds NO idle-lock suspension — not even through the
+// Like the other games it registers with the shared frame (`gameTabs.ts`) as "cookout" and opens the shared
+// per-item pop-up chat (`itemChat.ts`). It holds NO idle-lock suspension — not even through the
 // minutes the chef and the pictures take (Inv 43/55: the lock is a privacy feature) — and Escape stays the
 // chat's panic key: nothing here listens for it. Its only long-lived resources are a one-second timer for
 // the chef's elapsed clock (only while that is on screen) and a toast timer, both released in `onHide` and
@@ -44,6 +49,7 @@
 import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
 import type { GameTabs } from "../gameTabs";
+import type { GameFloat } from "../gameFloat";
 import type { ItemChat } from "../itemChat";
 import type { LockHooks } from "../types";
 import {
@@ -113,8 +119,10 @@ export interface CookoutGameDeps {
   readonly model: CookoutModel;
   /** The shared tab bar: this pane registers itself as the game "cookout". */
   readonly tabs: GameTabs;
-  /** The shared item chat: this pane embeds one mini chat strip. */
-  readonly itemChat: ItemChat;
+  /** The shared item chat: the round's pop-up chat ("Send a new photo to this game's chat"). */
+  readonly itemChat: Pick<ItemChat, "openPopup">;
+  /** The shared chat FAB / floating message / quick reply: this pane embeds one overlay. */
+  readonly float: Pick<GameFloat, "createOverlay">;
   readonly hooks: Pick<LockHooks, "lockNow">;
   readonly api: CookoutGameApi;
   /** The round's anchor message, or undefined once it is gone (deleted, wiped). */
@@ -424,7 +432,6 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   fx.setAttribute("aria-hidden", "true");
   fx.hidden = true;
 
-  const strip = deps.itemChat.createStrip({ popupTitle: "Cookout chat" });
   const cooked = createCookedControls({
     document: doc,
     api: {
@@ -450,7 +457,17 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     openLightbox: (src, alt) => deps.openLightbox(src, alt),
     afterChange: () => deps.afterChange(),
   });
-  pane.append(bar, confirmEnd, scroll, toast, fx, cooked.chooser, strip.element);
+  // The chat row: reserved space under the scrolling column for the FAB (right) and a floating message
+  // (left), as WYR's — the play controls scroll above it, so neither can ever cover one (decisions/00194).
+  const chatRow = el("div", "wx-srv-game-chatrow");
+  chatRow.append(
+    deps.float.createOverlay({
+      fabLabel: "Open this round's chat",
+      popupTitle: "Cookout chat",
+      item: () => deps.tabs.seqOf("cookout"),
+    }),
+  );
+  pane.append(bar, confirmEnd, scroll, chatRow, toast, fx, cooked.chooser);
 
   // -- Per-round view state ------------------------------------------------------------------------------
 
@@ -2202,7 +2219,6 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (drawnSeq !== seq) {
       forgetRound();
       drawnSeq = seq;
-      strip.draw(seq);
       scroll.scrollTop = 0;
     }
     const view = deps.model.view(seq);
@@ -2231,7 +2247,6 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     forgetRound();
     focusConcept = null;
     drawnSeq = null;
-    strip.draw(null);
   }
 
   function close(): void {

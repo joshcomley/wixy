@@ -1125,13 +1125,21 @@ button.wx-srv-wyr-countdown {
 
 .wx-srv-tabs {
   display: flex;
-  margin: 0 0 4px;
+  /* DOCKED: bleeds through `.wx-main`'s gutter to the left, right and bottom screen edges (the
+     thread does the same); the home-indicator inset is padding INSIDE the bar. */
+  margin: 0 calc(-1 * var(--wx-srv-gutter)) calc(-1 * var(--wx-srv-gutter));
+  padding-bottom: env(safe-area-inset-bottom);
   border-top: 1px solid var(--wx-border);
   background: var(--wx-surface);
 }
 
 .wx-srv-tabs[hidden] {
   display: none;
+}
+
+/* The bar carries the bottom inset itself, so the view adds none below it. */
+.wx-srv-thread-view:has(> .wx-srv-tabs:not([hidden])) {
+  padding-bottom: 0;
 }
 
 .wx-srv-tab {
@@ -1169,6 +1177,20 @@ button.wx-srv-wyr-countdown {
 
 .wx-srv-tab-dot[hidden] {
   display: none;
+}
+
+/* FULL-SCREEN GAME MODE (decisions/00194): a game tab hides the chat header and the composer so the game
+   runs from the very top of the chat view to the tab bar. The composer is hidden only where it is at
+   home (a direct child); in the pop-up or the quick reply it is a descendant and shows. EXCEPT: while a
+   call is not idle the header stays, because Accept / Mute / End live in it (Inv 55). */
+.wx-srv-in-game > .wx-srv-thread-header,
+.wx-srv-in-game > .wx-srv-reply-bar,
+.wx-srv-in-game > .wx-chat-composer {
+  display: none;
+}
+
+.wx-srv-in-game.wx-srv-call-live > .wx-srv-thread-header {
+  display: flex;
 }
 
 /* The pen draws on the thread; in the game tab there is no thread to draw on. */
@@ -1464,129 +1486,265 @@ dialog.wx-srv-game-pictures[open] {
   display: none;
 }
 
-/* The mini chat: this card's last two messages as a fixed-height strip — one line each (cut
-   with an ellipsis), the "Chat" button on the right. It never changes height, whatever was said
-   or how many messages there are, so nothing above it shifts and nothing spills onto the
-   composer below. Tap a line, a thumbnail or the button for the full pop-up. */
-.wx-srv-game-mini {
-  flex: none;
+/* -- Games: the chat FAB, the floating message and the quick reply (gameFloat.ts) ---------------
+   The overlay fills a positioned slot of the game pane (the Adventure body, WYR's reserved chat row) and
+   lets taps through everywhere but its own buttons. The FAB is bottom-right; the floating message
+   sits to its left, at most two lines of text. */
+.wx-srv-float {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+}
+
+.wx-srv-float > * {
+  pointer-events: auto;
+}
+
+.wx-srv-float-fab {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 48px;
+  height: 48px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  height: 60px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--wx-brand-blue-text);
+  border-radius: 50%;
+  background: var(--wx-brand-blue);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.wx-srv-float-fab svg {
+  width: 24px;
+  height: 24px;
+}
+
+.wx-srv-float-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 14px;
+  height: 14px;
   box-sizing: border-box;
-  padding: 6px 6px 6px 4px;
+  border-radius: 50%;
+  border: 2px solid var(--wx-canvas);
+  background: #ff4d6a;
+}
+
+.wx-srv-float-dot[hidden] {
+  display: none;
+}
+
+.wx-srv-float-bubble {
+  position: absolute;
+  left: 10px;
+  right: 68px;
+  bottom: 10px;
+  min-height: 48px;
+  max-height: 64px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: stretch;
   border: 1px solid var(--wx-border);
-  border-radius: var(--wx-radius);
+  border-radius: 16px;
   background: var(--wx-surface);
+  color: var(--wx-ink);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
   overflow: hidden;
+  touch-action: none;
 }
 
-.wx-srv-game-mini-lines {
+.wx-srv-float-bubble[hidden] {
+  display: none;
+}
+
+.wx-srv-float-open {
+  flex: 1 1 auto;
   min-width: 0;
-  display: grid;
-  grid-template-rows: repeat(2, 22px);
-  align-content: center;
-  gap: 2px;
-}
-
-/* A lone line (or the invitation) sits centred in the same space. */
-.wx-srv-game-mini-lines:has(> :only-child) {
-  grid-template-rows: 22px;
-}
-
-.wx-srv-game-mini-msg {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 0;
-  height: 22px;
-  min-height: 0;
   margin: 0;
-  padding: 0 6px;
+  padding: 6px 4px 6px 12px;
   border: 0;
-  border-radius: 6px;
   background: transparent;
-  color: var(--wx-ink);
+  color: inherit;
   font: inherit;
   font-size: 0.875rem;
-  line-height: 22px;
+  line-height: 1.25;
   text-align: left;
-  white-space: nowrap;
   cursor: pointer;
-  overflow: hidden;
+  touch-action: none;
 }
 
-.wx-srv-game-mini-msg:hover,
-.wx-srv-game-mini-msg:focus-visible {
-  background: var(--wx-canvas);
-}
-
-.wx-srv-game-mini-mine .wx-srv-game-mini-text {
-  color: var(--wx-brand-blue-text);
-}
-
-.wx-srv-game-mini-empty {
-  color: var(--wx-muted);
-  font-style: italic;
-}
-
-.wx-srv-game-mini-sender {
+.wx-srv-float-tag {
   flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  font-size: 0.6875rem;
   font-weight: 700;
 }
 
-.wx-srv-game-mini-text {
+.wx-srv-float-tag[hidden],
+.wx-srv-float-thumb[hidden],
+.wx-srv-float-more[hidden] {
+  display: none;
+}
+
+.wx-srv-float-who {
+  flex: none;
+  max-width: 35%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.wx-srv-float-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-float-thumb {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.wx-srv-float-more {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--wx-brand-blue);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.wx-srv-float-dismiss {
+  flex: none;
+  width: 40px;
+  border: 0;
+  background: transparent;
+  color: var(--wx-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* WYR's chat row: reserved space under the controls, so the FAB never covers a pick / guess / reveal. */
+.wx-srv-game-chatrow {
+  position: relative;
+  flex: none;
+  height: 64px;
+}
+
+/* The quick reply: a compact box above the tab bar (gameFloat.ts sets `bottom` from the tab bar and the
+   on-screen keyboard). The composer lives in it exactly as it does in the pop-up. */
+.wx-srv-quick {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.wx-srv-quick[hidden] {
+  display: none;
+}
+
+.wx-srv-quick-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.3);
+  cursor: pointer;
+}
+
+.wx-srv-quick-box {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 4px 4px;
+  padding: 8px;
+  border: 1px solid var(--wx-border);
+  border-radius: 16px;
+  background: var(--wx-canvas);
+  box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.wx-srv-quick-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wx-srv-quick-tag {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.wx-srv-quick-tag[hidden] {
+  display: none;
+}
+
+.wx-srv-quick-text {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--wx-muted);
+  font-size: 0.875rem;
 }
 
-.wx-srv-game-mini-thumb {
+.wx-srv-quick-close {
   flex: none;
-  width: 20px;
-  height: 20px;
-  object-fit: cover;
-  border-radius: 4px;
-}
-
-.wx-srv-game-mini-icon {
-  flex: none;
-  font-size: 0.8125rem;
-}
-
-.wx-srv-game-mini-expand {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  min-width: 72px;
-  height: 46px;
+  min-height: 36px;
   padding: 0 12px;
-  border: 1px solid var(--wx-brand-blue-text);
-  border-radius: 999px;
-  background: var(--wx-brand-blue-tint);
-  color: var(--wx-brand-blue-text);
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
   font: inherit;
-  font-weight: 600;
   cursor: pointer;
 }
 
-.wx-srv-game-mini-count {
-  min-width: 20px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--wx-brand-blue);
-  color: #fff;
-  font-size: 0.75rem;
-  line-height: 18px;
-  text-align: center;
+.wx-srv-quick-composer {
+  flex: none;
 }
 
-/* -- Games: the pop-up item chat (itemChat.ts; the mini strip's rules are above) -------- */
+/* A compact box: no paperclip (a voice note and text are what a quick reply is for). */
+.wx-srv-quick .wx-chat-attach-button {
+  display: none;
+}
+
+/* -- Games: the pop-up item chat (itemChat.ts) -------- */
 
 .wx-srv-gamepop {
   position: absolute;
@@ -4599,30 +4757,51 @@ video.wx-srv-gallery-media {
   padding: 8px 10px 8px 12px;
 }
 
-.wx-srv-adv-title {
+/* Yay / Nay: the decision, on the LEFT of the title row (there is no title text), only while a place can be
+   decided. Yay is the positive choice: white on a DARK green (6.6:1, WCAG AA) — the old white-on-light-green
+   "Bank this" could not be read. Nay is the neutral glass chip (the card is always dark, in both themes). */
+.wx-srv-adv-bar-decide {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
+  flex: 0 1 auto;
+  gap: 6px;
+}
+
+.wx-srv-adv-bar-decide[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-yay,
+.wx-srv-adv-nay {
+  min-width: 52px;
   font-weight: 800;
-  font-size: 17px;
-  letter-spacing: 0.01em;
-  white-space: nowrap;
 }
 
-.wx-srv-adv-title-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
+.wx-srv-adv-chip.wx-srv-adv-yay {
+  background: #0b6b43;
+  border-color: #52dcae;
+  color: #fff;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
-.wx-srv-adv-title-globe {
-  font-size: 20px;
+.wx-srv-adv-yay:disabled,
+.wx-srv-adv-nay:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 
 .wx-srv-adv-bar-actions {
   display: flex;
   flex: 0 0 auto;
   gap: 6px;
+  margin-left: auto;
+}
+
+/* Options is a word on a wide screen and a gear on a phone, so the whole row fits one line at 360 px. */
+.wx-srv-adv-options-gear {
+  display: none;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .wx-srv-adv-chip {
@@ -4650,6 +4829,23 @@ video.wx-srv-gallery-media {
   min-height: 0;
   overflow: hidden;
   transition: flex-basis 0.45s cubic-bezier(0.3, 0.7, 0.2, 1);
+}
+
+/* The body: the scrolling column (map + pack) with the chat overlay floating over its bottom corners. */
+.wx-srv-adv-body {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wx-srv-adv-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .wx-srv-adv-globe {
@@ -4914,21 +5110,41 @@ video.wx-srv-gallery-media {
   display: block;
 }
 
+/* The place is chosen and the pack is read: the map and the pack are ONE column that scrolls (the title
+   row above and the dock below stay put), so the map scrolls up and away as you read down the pack. */
+.wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-stage {
-  flex: 0 0 38%;
+  flex: 0 0 auto;
+  height: clamp(220px, 42vh, 460px);
+  height: clamp(220px, 42dvh, 460px);
+}
+
+/* A finger that starts on the map scrolls the column; only a horizontal drag reaches the map's own pan. */
+.wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-globe {
+  touch-action: pan-y;
 }
 
 .wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-pack {
-  flex: 1 1 0;
+  flex: 0 0 auto;
 }
 
 .wx-srv-adv-card[data-pack="panel"][data-explore="0"] .wx-srv-adv-pk-host {
-  flex: 1 1 0;
-  min-height: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  padding: 0 12px 14px;
+  flex: none;
+  /* The bottom padding keeps the last card clear of the chat FAB. */
+  padding: 0 12px 76px;
 }
+
+/* Explore mode: the map fills the column and the bar under it is the bottom row — keep the toggle clear
+   of the chat FAB. */
+.wx-srv-adv-card[data-explore="1"] .wx-srv-adv-pk-bar {
+  padding-right: 72px;
+}
+
 
 .wx-srv-adv-card[data-pack="panel"][data-explore="1"] .wx-srv-adv-pk-host {
   display: none;
@@ -5353,14 +5569,8 @@ video.wx-srv-gallery-media {
   justify-content: center;
 }
 
-.wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide,
 .wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-decide {
   display: block;
-}
-
-.wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide-row {
-  display: flex;
-  gap: 10px;
 }
 
 .wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-ask-row {
@@ -5684,27 +5894,32 @@ video.wx-srv-gallery-media {
     padding-left: 10px;
     padding-right: 6px;
   }
-  .wx-srv-adv-title {
-    font-size: 14.5px;
-    gap: 5px;
-  }
-  .wx-srv-adv-title-globe {
-    font-size: 16px;
-  }
-  .wx-srv-adv-bar-actions {
+  .wx-srv-adv-bar-actions,
+  .wx-srv-adv-bar-decide {
     gap: 3px;
   }
   .wx-srv-adv-chip {
     padding: 6px 8px;
     font-size: 12.5px;
-    min-height: 34px;
+    min-height: 44px;
+  }
+  .wx-srv-adv-options-text {
+    display: none;
+  }
+  .wx-srv-adv-options-gear {
+    display: inline;
+  }
+  .wx-srv-adv-options,
+  .wx-srv-adv-close {
+    min-width: 44px;
+  }
+  .wx-srv-adv-yay,
+  .wx-srv-adv-nay {
+    min-width: 46px;
   }
 }
 
 @media (max-width: 380px) {
-  .wx-srv-adv-title-globe {
-    display: none;
-  }
   .wx-srv-adv-bar-actions {
     gap: 3px;
   }
@@ -5719,7 +5934,6 @@ video.wx-srv-gallery-media {
     font-size: 15.5px;
     padding: 8px 10px;
   }
-  .wx-srv-adv-card[data-action="decide"] .wx-srv-adv-dock-decide-row,
   .wx-srv-adv-card[data-action="ask"] .wx-srv-adv-dock-ask-row {
     flex-wrap: wrap;
   }
@@ -6343,7 +6557,8 @@ video.wx-srv-gallery-media {
 .wx-srv-ck-toast {
   position: absolute;
   left: 50%;
-  bottom: 72px;
+  /* Above the reserved chat row (64 px: the FAB and a floating message). */
+  bottom: 84px;
   transform: translateX(-50%);
   z-index: 3;
   max-width: calc(100% - 32px);

@@ -99,7 +99,7 @@ function identity(): ServerIdentity {
 }
 
 function hooks(): LockHooks & { suspend: ReturnType<typeof vi.fn> } {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn(), getBoundGrantId: vi.fn(() => null) };
+  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn(), getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0) };
 }
 
 function win(): Window {
@@ -389,6 +389,58 @@ describe("cookout: lock, wipe and delete", () => {
     const { thread, hooks: h } = await mount();
     await startCookout(thread);
     expect(h.suspend).not.toHaveBeenCalled();
+    thread.teardown();
+  });
+});
+
+describe("cookout: game mode — full screen, the chat FAB, floating message and quick reply (decisions/00194)", () => {
+  const fab = (thread: ServerThreadView) => thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck .wx-srv-float-fab")!;
+  const bubble = (thread: ServerThreadView) => thread.element.querySelector<HTMLElement>(".wx-srv-ck .wx-srv-float-bubble")!;
+  const quick = (thread: ServerThreadView) => thread.element.querySelector<HTMLElement>(".wx-srv-quick")!;
+  function type(thread: ServerThreadView, text: string): void {
+    const textarea = thread.element.querySelector<HTMLTextAreaElement>(".wx-srv-quick-composer textarea")!;
+    textarea.value = text;
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-quick-composer .wx-chat-send-button")!.click();
+  }
+
+  it("the Cookout tab puts the thread in game mode; the overlay sits in a reserved chat row under the scrolling column", async () => {
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    const { thread } = await mount();
+    await startCookout(thread);
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(true);
+    expect(thread.element.querySelector(".wx-srv-ck > .wx-srv-ck-scroll + .wx-srv-game-chatrow > .wx-srv-float")).not.toBeNull();
+    expect(fab(thread).getAttribute("aria-label")).toBe("Open this round's chat");
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-tab-chat")!.click();
+    expect(thread.element.classList.contains("wx-srv-in-game")).toBe(false);
+    thread.teardown();
+  });
+
+  it("the partner's message in the round's chat floats and dots the FAB; its quick reply sends into the round", async () => {
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    sendMessage.mockResolvedValue({ ok: true, message: chatMessage(31, 9, "on it", "cookout", "Josh") } satisfies SendMessageResult);
+    const { thread } = await mount();
+    await startCookout(thread);
+    thread.handleStreamEvent({ type: "message", message: chatMessage(30, 9, "more chilli?", "cookout", "Rose") });
+    expect(bubble(thread).hidden).toBe(false);
+    expect(bubble(thread).textContent).toContain("more chilli?");
+    expect(fab(thread).getAttribute("aria-label")).toContain("new message");
+    bubble(thread).querySelector<HTMLButtonElement>(".wx-srv-float-open")!.click();
+    expect(quick(thread).hidden).toBe(false);
+    type(thread, "on it");
+    await flush();
+    expect(sendMessage.mock.calls[0]![1]).toMatchObject({ text: "on it", wyrSeq: 9 });
+    expect(quick(thread).hidden).toBe(true);
+    thread.teardown();
+  });
+
+  it("the FAB opens the round's pop-up chat titled Cookout chat", async () => {
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    const { thread } = await mount();
+    await startCookout(thread);
+    fab(thread).click();
+    const popup = thread.element.querySelector<HTMLElement>(".wx-srv-gamepop")!;
+    expect(popup.hidden).toBe(false);
+    expect(popup.textContent).toContain("Cookout chat");
     thread.teardown();
   });
 });

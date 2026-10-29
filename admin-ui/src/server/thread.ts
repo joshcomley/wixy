@@ -46,6 +46,7 @@ import { createGallery, type GalleryView } from "./gallery";
 import { createLinksView, type LinksView } from "./linksView";
 import { createDownloadMarkStore } from "./galleryMark";
 import { createGameTabs, type GameKey, type GameTabs } from "./gameTabs";
+import { createGameFloat, type GameFloat } from "./gameFloat";
 import { createItemChat, type ItemChat } from "./itemChat";
 import { createWyrGame, type WyrGame } from "./wyrGame";
 import { createWyrModel, type WyrModel } from "./wyrModel";
@@ -164,6 +165,9 @@ export interface ServerThreadView {
   mountCallControls(controls: HTMLElement): void;
   isMicBusy(): boolean;
   setCallBusy(busy: boolean): void;
+  /** A call needs the screen (ringing, connecting, connected, or a failure to read): the header, where
+   * its controls live, stays visible in a game tab while true (Inv 55). */
+  setCallLive(live: boolean): void;
   /** Loads the newest history page, and on reattach refreshes every loaded
    * page so signed media URLs use the new session's expiry. Returns the
    * newest cursor. Throws `ServerLockedError` on a 401, letting the caller
@@ -590,7 +594,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // and the WYR pane that plugs into it (`wyrGame.ts`) are created once the composer exists
   // (the pop-up item chat re-parents it). Earlier code only calls into the tabs after that.
   let gameTabs: GameTabs;
+  let gameFloat: GameFloat;
   let gameMounted = false;
+  /** The chat a message sent right now belongs to: the quick reply's while it is open, else the frame's
+   * (the open game's item, the pop-up's item, or null for the main chat). */
+  function chatTargetNow(): number | null {
+    const quick = gameFloat.quickTarget();
+    return quick !== undefined ? quick : gameTabs.chatTarget();
+  }
   const wyrControls: WyrControls = createWyrControls({
     model: wyrModel,
     document: documentRef,
@@ -844,7 +855,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * (the card's chat would show a caption with no picture), so it is not offered while the game
    * chat is the target — and `send()` refuses a view-once draft there (see below). */
   function viewOnceAllowed(): boolean {
-    return !gameMounted || gameTabs.chatTarget() === null;
+    return !gameMounted || chatTargetNow() === null;
   }
 
   function openViewOncePicker(): void {
@@ -1129,7 +1140,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           clientId: cryptoRandomId(win),
           attachmentId: null,
           replyTo: capturedReplyTo,
-          wyrSeq: gameTabs.chatTarget(),
+          wyrSeq: chatTargetNow(),
         };
         void sendVoiceNote();
         updateRecorderUi();
@@ -1324,6 +1335,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
     element.classList.toggle("wx-srv-in-game", inGame);
+    gameFloat.sync();
     if (inGame && !threadHiddenForGame) {
       if (drawingLayer.isPenOn()) drawingLayer.abandon();
       savedThreadScrollTop = thread.scrollTop;
@@ -1337,9 +1349,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       drawingLayer.relayout();
     }
   }
+  /** Puts the ONE ordinary composer into `host` (the pop-up or the quick reply), or home (`null`). */
+  function mountComposerAt(host: HTMLElement | null): void {
+    if (host !== null) host.appendChild(composer.element);
+    else element.insertBefore(composer.element, gameTabs.tabBar);
+  }
   const itemChat: ItemChat = createItemChat({
     document: documentRef,
-    isMine: (sender) => identity.isMine(sender),
     gameMessages: (seq) =>
       Array.from(confirmedBySeq.values())
         .filter((m) => m.wyrRef === seq)
@@ -1350,20 +1366,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         .map((e) => ({ clientId: e.clientId, text: e.text })),
     renderBubble: (message) => renderBubble(message, identity.isMine(message.sender), true),
     disposeBubble: (bubble) => disposeAttachmentMedia(bubble),
-    mountComposer: (host) => {
-      if (host !== null) host.appendChild(composer.element);
-      else element.insertBefore(composer.element, gameTabs.tabBar);
-    },
+    mountComposer: mountComposerAt,
     onLayoutChange: applyGameLayout,
     afterChange: () => threadScroll.afterContentChange(false),
   });
-  gameTabs = createGameTabs({ document: documentRef, itemChat, onLayoutChange: applyGameLayout });
+  gameTabs = createGameTabs({
+    document: documentRef,
+    itemChat,
+    onLayoutChange: applyGameLayout,
+    onRefresh: () => gameFloat.sync(),
+  });
+  gameFloat = createGameFloat({
+    document: documentRef,
+    win,
+    itemChat,
+    tabs: gameTabs,
+    mountComposer: mountComposerAt,
+    isRecording: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
+    tabBar: gameTabs.tabBar,
+    host: element,
+  });
   const game: WyrGame = createWyrGame({
     document: documentRef,
     model: wyrModel,
     controls: wyrControls,
     tabs: gameTabs,
-    itemChat,
+    float: gameFloat,
     roundMessage: (seq) => confirmedBySeq.get(seq),
     startNextRound: () => void addWyrRound(),
     openTopics: () => wyrTopics.open(header.offsetHeight),
@@ -1379,7 +1407,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     win,
     model: adventureModel,
     tabs: gameTabs,
-    itemChat,
+    float: gameFloat,
     hooks,
     api: {
       spin: (seq, input) => spinAdventure(adventureSession(), seq, { sender: identity.getName() ?? "", ...input }),
@@ -1416,6 +1444,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     model: cookoutModel,
     tabs: gameTabs,
     itemChat,
+    float: gameFloat,
     hooks,
     api: {
       join: (seq) => joinCookout(cookoutSession(), seq, { sender: identity.getName() ?? "" }),
@@ -1494,11 +1523,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   threadWrap.after(game.pane);
   element.appendChild(gameTabs.tabBar);
   element.appendChild(itemChat.popup);
+  element.appendChild(gameFloat.quick);
 
   /** Lock / wipe / teardown: forget every game and close the pop-up chat. The pop-up goes first
    * (the composer is back in the thread); the tabs go last because their reset tells the thread
    * to give itself back — a hidden thread must return (decisions/00184, audit round 3 F3). */
   function resetGames(): void {
+    gameFloat.reset();
     itemChat.reset();
     gameTabs.reset();
     cookoutGame.forgetAll();
@@ -1518,7 +1549,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
-    const target = gameTabs.chatTarget();
+    const target = chatTargetNow();
     return target === null ? {} : { wyrSeq: target };
   }
 
@@ -2029,6 +2060,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       pendingVoiceNote = null;
       addConfirmed(result.message);
       renderThreadList();
+      gameFloat.noteSent(result.message.wyrRef ?? null);
     } catch (error) {
       if (error instanceof ServerLockedError) {
         hooks.lockNow("unauthorized");
@@ -2889,6 +2921,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     adventureModel.observe(messages);
     cookoutModel.observe(messages);
     syncGames(messages);
+    gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     threadScroll.afterContentChange(revealPillIfNotStuck);
     updateUnheard();
   }
@@ -3395,6 +3428,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
             addConfirmed(ordResult.message);
             pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
             renderThreadList();
+            gameFloat.noteSent(ordResult.message.wyrRef ?? null);
             pendingVoCompanionClientId = null;
           } else {
             pendingEchoes = pendingEchoes.filter((e) => e.clientId !== ordClientId);
@@ -3592,6 +3626,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           discardServerDraft(draft);
           addConfirmed(result.message);
           renderThreadList();
+          gameFloat.noteSent(result.message.wyrRef ?? null);
           // Her own good night plays the scene on her screen as she sends it.
           goodnight.noteMessage({
             sender: result.message.sender,
@@ -3717,8 +3752,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     element,
     isMicBusy: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
     setCallBusy(busy: boolean): void { callBusy = busy; updateRecorderUi(); },
+    setCallLive(live: boolean): void { element.classList.toggle("wx-srv-call-live", live); },
     attach,
     detach(): void {
+      element.classList.remove("wx-srv-call-live");
       stopTranscriptionProbe();
       // First, while this unlock's token is still in hand: the pen turns off, a stroke in
       // progress is withdrawn with a live cancel, and the surface, live previews and every
@@ -3777,6 +3814,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           );
           if (isArrival && !identity.isMine(event.message.sender) && event.message.wyrRef == null) {
             gameTabs.noteChatActivity();
+          }
+          if (isArrival && event.message.sender !== "" && !identity.isMine(event.message.sender)) {
+            gameFloat.note(event.message);
           }
           // A live good night (never a history load, an update or a system row): the pixel-art
           // night scene. The controller decides whose good night counts, freshness and cool-down.

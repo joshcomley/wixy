@@ -2,24 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "../src/server/api/messages";
 import { createItemChat, type ItemChat, type ItemChatEcho } from "../src/server/itemChat";
 
-// The per-item chat every game shares (itemChat.ts): the mini strip and the one pop-up chat.
-
-function photo(i: number, status: "ready" | "processing" = "ready"): Message["attachments"][number] {
-  return {
-    id: `att${i}`,
-    kind: "photo",
-    status,
-    width: 100,
-    height: 100,
-    durationS: null,
-    peaks: null,
-    urls: { full: `https://example.invalid/full${i}.jpg`, thumb: `https://example.invalid/thumb${i}.jpg` },
-  };
-}
-
-function attachment(kind: "voice" | "video"): Message["attachments"][number] {
-  return { id: kind, kind, status: "ready", width: null, height: null, durationS: 2, peaks: null, urls: {} };
-}
+// The per-item chat every game shares (itemChat.ts): the one pop-up chat.
 
 function msg(seq: number, ref: number, text: string | null, sender = "Rose", extra: Partial<Message> = {}): Message {
   return {
@@ -67,7 +50,6 @@ function make(): Harness {
   const after = vi.fn();
   const itemChat = createItemChat({
     document,
-    isMine: (sender) => sender === "Josh",
     gameMessages: (seq) => state.messages.filter((m) => m.wyrRef === seq).sort((a, b) => a.seq - b.seq),
     gameEchoes: () => state.echoes,
     renderBubble,
@@ -84,121 +66,7 @@ function make(): Harness {
   return { itemChat, state, composer, home, mounts, renderBubble, disposeBubble, layout, after };
 }
 
-/** A strip in the document (as a game's pane would hold it), drawn for `seq`. */
-function strip(h: Harness, seq: number | null, options?: Parameters<ItemChat["createStrip"]>[0]) {
-  const s = h.itemChat.createStrip(options);
-  document.body.appendChild(s.element);
-  s.draw(seq);
-  return s;
-}
-
-const rows = (element: HTMLElement) =>
-  [...element.querySelectorAll(".wx-srv-game-mini-msg")].map((r) => r.textContent);
-
 afterEach(() => document.body.replaceChildren());
-
-describe("item chat: the mini strip", () => {
-  it("invites a first message when the item has no chat", () => {
-    const h = make();
-    const s = strip(h, 7);
-    expect(s.element.classList.contains("wx-srv-game-mini")).toBe(true);
-    expect(rows(s.element)).toEqual(["Chat about this one…"]);
-    expect(s.element.querySelector(".wx-srv-game-mini-count")).toBeNull();
-    expect(s.element.querySelector(".wx-srv-game-mini-expand-label")!.textContent).toBe("Chat");
-  });
-
-  it("shows only this item's last two messages, my own without a name, never other chat", () => {
-    const h = make();
-    h.state.messages = [
-      msg(10, 0, "main chat, not this item"),
-      msg(11, 7, "first about the item"),
-      msg(12, 7, "second about the item", "Josh"),
-      msg(13, 7, "third about the item"),
-      msg(14, 9, "a different item"),
-    ];
-    const s = strip(h, 7);
-    const lines = rows(s.element);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("second about the item");
-    expect(lines[0]).not.toContain("Josh:");
-    expect(lines[1]).toContain("Rose: third about the item");
-    expect(s.element.textContent).not.toContain("main chat, not this item");
-    expect(s.element.textContent).not.toContain("a different item");
-    expect(s.element.querySelectorAll(".wx-srv-game-mini-mine")).toHaveLength(1);
-    // The button counts every message of the item, not just the two shown.
-    expect(s.element.querySelector(".wx-srv-game-mini-count")!.textContent).toBe("3");
-  });
-
-  it("puts messages still being sent (echoes) after the confirmed ones, still two lines at most", () => {
-    const h = make();
-    h.state.messages = [msg(11, 7, "one"), msg(12, 7, "two")];
-    const s = strip(h, 7);
-    h.state.echoes = [{ clientId: "e1", text: "sending this" }];
-    s.draw(7);
-    const lines = rows(s.element);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toContain("two");
-    expect(lines[1]).toContain("sending this");
-    expect(s.element.querySelector(".wx-srv-game-mini-count")!.textContent).toBe("3");
-    h.state.echoes = [
-      { clientId: "e1", text: "sending this" },
-      { clientId: "e2", text: "and this" },
-      { clientId: "e3", text: "and that" },
-    ];
-    s.draw(7);
-    expect(rows(s.element)).toHaveLength(2);
-    expect(rows(s.element)[1]).toContain("and that");
-  });
-
-  it("shows photo attachments as 20 px thumbnails and other kinds as icons", () => {
-    const h = make();
-    h.state.messages = [
-      msg(11, 7, "look", "Rose", { attachments: [photo(0)] }),
-      msg(12, 7, null, "Rose", { attachments: [attachment("voice"), attachment("video"), photo(1, "processing")] }),
-    ];
-    const s = strip(h, 7);
-    const thumb = s.element.querySelector<HTMLImageElement>(".wx-srv-game-mini-thumb")!;
-    expect(thumb.getAttribute("src")).toBe("https://example.invalid/thumb0.jpg");
-    expect(s.element.querySelectorAll(".wx-srv-game-mini-thumb")).toHaveLength(1);
-    const icons = [...s.element.querySelectorAll(".wx-srv-game-mini-icon")].map((i) => i.textContent);
-    expect(icons).toEqual(["🎤", "🎞", "🖼"]); // a photo that is not ready yet is an icon, not a broken image
-  });
-
-  it("is empty when bound to nothing, and a tap then opens nothing", () => {
-    const h = make();
-    const s = strip(h, null);
-    expect(s.element.children).toHaveLength(0);
-    s.element.click();
-    expect(h.itemChat.isPopupOpen()).toBe(false);
-  });
-
-  it("every line, thumbnail and the Chat button open the pop-up for the strip's item", () => {
-    const h = make();
-    h.state.messages = [msg(11, 7, "look", "Rose", { attachments: [photo(0)] })];
-    const s = strip(h, 7);
-    s.element.querySelector<HTMLElement>(".wx-srv-game-mini-thumb")!.parentElement!.click();
-    expect(h.itemChat.popupSeq()).toBe(7);
-    h.itemChat.closePopup();
-    s.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
-    expect(h.itemChat.popupSeq()).toBe(7);
-    h.itemChat.closePopup();
-    h.state.messages = [];
-    s.draw(7);
-    s.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-empty")!.click();
-    expect(h.itemChat.popupSeq()).toBe(7);
-  });
-
-  it("opens the pop-up under the heading its game chose (default 'Game chat')", () => {
-    const h = make();
-    const plain = strip(h, 7);
-    plain.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
-    expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-title")!.textContent).toBe("Game chat");
-    h.itemChat.closePopup();
-    const named = strip(h, 9, { popupTitle: "Trip chat" });
-    named.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
-    expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-title")!.textContent).toBe("Trip chat");
-  });
-});
 
 describe("item chat: the pop-up", () => {
   it("borrows the one composer, shows the item's whole history and gives the composer back", () => {
@@ -307,22 +175,18 @@ describe("item chat: the pop-up", () => {
 });
 
 describe("item chat: several games share it", () => {
-  it("two strips draw their own items but open the one pop-up, which is re-aimed between them", () => {
+  it("the one pop-up is re-aimed between items: the composer stays, the content moves", () => {
     const h = make();
     h.state.messages = [msg(11, 7, "about seven"), msg(21, 30, "about thirty")];
-    const wyr = strip(h, 7);
-    const adventure = strip(h, 30, { popupTitle: "Trip chat" });
-    expect(rows(wyr.element)[0]).toContain("about seven");
-    expect(rows(adventure.element)[0]).toContain("about thirty");
     expect(document.querySelectorAll(".wx-srv-gamepop")).toHaveLength(1);
 
-    adventure.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
+    h.itemChat.openPopup(30, "Trip chat");
     expect(h.itemChat.popupSeq()).toBe(30);
     expect([...h.itemChat.popup.querySelectorAll(".wx-srv-bubble")].map((b) => b.textContent)).toEqual(["about thirty"]);
     expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-title")!.textContent).toBe("Trip chat");
 
     // Opened for the other item while still open: the composer stays where it is, the content moves.
-    wyr.element.querySelector<HTMLButtonElement>(".wx-srv-game-mini-expand")!.click();
+    h.itemChat.openPopup(7, "Game chat");
     expect(h.itemChat.popupSeq()).toBe(7);
     expect([...h.itemChat.popup.querySelectorAll(".wx-srv-bubble")].map((b) => b.textContent)).toEqual(["about seven"]);
     expect(h.itemChat.popup.querySelector(".wx-srv-gamepop-title")!.textContent).toBe("Game chat");
@@ -330,33 +194,25 @@ describe("item chat: several games share it", () => {
     expect(h.disposeBubble).toHaveBeenCalledTimes(1); // the other item's bubble was released
   });
 
-  it("refresh redraws every strip and the pop-up, then reports the height may have changed", () => {
+  it("refresh redraws the pop-up, then reports the height may have changed", () => {
     const h = make();
-    const a = strip(h, 7);
-    const b = strip(h, 30);
     h.itemChat.openPopup(7, "Game chat");
     h.state.messages = [msg(11, 7, "about seven"), msg(21, 30, "about thirty")];
     h.after.mockClear();
     h.itemChat.refresh();
-    expect(rows(a.element)[0]).toContain("about seven");
-    expect(rows(b.element)[0]).toContain("about thirty");
     expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(1);
     expect(h.after).toHaveBeenCalledTimes(1);
   });
 
-  it("reset (lock or wipe) closes the pop-up, returns the composer and empties every strip", () => {
+  it("reset (lock or wipe) closes the pop-up and returns the composer", () => {
     const h = make();
     h.state.messages = [msg(11, 7, "about seven")];
-    const a = strip(h, 7);
-    const b = strip(h, 30);
     h.itemChat.openPopup(7, "Game chat");
     h.itemChat.reset();
     expect(h.itemChat.isPopupOpen()).toBe(false);
     expect(h.home.contains(h.composer)).toBe(true);
     expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(0);
-    expect(a.element.children).toHaveLength(0);
-    expect(b.element.children).toHaveLength(0);
     h.itemChat.refresh(); // nothing bound any more: nothing comes back
-    expect(a.element.children).toHaveLength(0);
+    expect(h.itemChat.popup.querySelectorAll(".wx-srv-bubble")).toHaveLength(0);
   });
 });

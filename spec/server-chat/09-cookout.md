@@ -2,7 +2,7 @@
 
 Workspace 00058. Decided brief (Triad Round 2 + orchestrator ruling, `triad/cookout/ruling.md`):
 implement faithfully. Where reality contradicts a cited fact, prefer reality and record it in the
-decision entry (`decisions/00193-server-chat-cookout/`).
+decision entry (`decisions/00199-server-chat-cookout/`).
 
 ## 0. The ask (operator, verbatim summary)
 
@@ -930,7 +930,7 @@ generated concepts/full recipes, omission reasons, and repair feedback — with 
 message body, device id, or other chat content sent, and this server cannot erase `cmd`'s copy;
 ComfyUI `wyr_` cleanup under Inv 54), `docs/ai/glossary.md` (Cookout states), `docs/ai/testing.md`,
 `CLAUDE.md` store table (`cookout_rounds`, `cookout_turns`, `cookout_recipes` at schema v21), and
-`decisions/00193-server-chat-cookout/`.
+`decisions/00199-server-chat-cookout/`.
 Commits carry `Release-note: General bug fixes and improvements.` (R14a: Server chat stays discreet).
 
 ---
@@ -945,7 +945,7 @@ To prevent merge conflicts across parallel builders, every shared file has a **s
 | **P2 — Store v21, Game State, Routes & App Wiring** | **Sonnet 5.5** | **Sole owner** of `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, `wixy_server/app.py`, `wixy_server/tests/test_livechat_cookout.py` | Frozen `CookoutBank` & `CookoutRunner` protocols (uses lightweight fakes in unit tests so P2 and P3 build in parallel) |
 | **P3 — AI Concept/Recipe Runner & ComfyUI Pictures** | **Sonnet 5.5** | **Sole owner** of `wixy_server/livechat/cookout_ai.py`, `wixy_server/livechat/cookout_images.py`, `wixy_server/livechat/wyr_images.py` (`generate_many`), `wixy_server/tests/fake_cmd.py`, `wixy_server/tests/test_livechat_cookout_ai.py`, `wixy_server/tests/test_livechat_cookout_images.py` | Frozen `CookoutBank` & P2 store methods below (never edits `store.py`, `models.py`, or `app.py`) |
 | **P4 — Admin UI (Pane, Card, Recipe Book & Frame)** | **Opus 5.5** | **Sole owner** of `admin-ui/src/server/cookout/{api.ts, model.ts, cookoutGame.ts, cookoutCard.ts, recipeBook.ts}`, `admin-ui/src/server/{gameTabs.ts, thread.ts, chat.css, api/messages.ts}`, `admin-ui/tests/cookout/*.test.ts`, `admin-ui/tests/serverGameTabs.test.ts`, and rebuilt `wixy_server/static/admin/*` bundles | §4.2 wire contract & §5.1 TS interfaces (builds in parallel against JSON fixtures) |
-| **P5 — Docs, Invariant 57 & Playwright E2E** | **Sonnet 5.5** | `e2e/tests/server-cookout.spec.ts`, `docs/ai/{livechat.md, contracts.md, invariants.md, glossary.md, testing.md}`, `CLAUDE.md` store table, `decisions/00193-server-chat-cookout/` | Drafts docs in parallel; runs full-stack E2E once P1–P4 integrate |
+| **P5 — Docs, Invariant 57 & Playwright E2E** | **Sonnet 5.5** | `e2e/tests/server-cookout.spec.ts`, `docs/ai/{livechat.md, contracts.md, invariants.md, glossary.md, testing.md}`, `CLAUDE.md` store table, `decisions/00199-server-chat-cookout/` | Drafts docs in parallel; runs full-stack E2E once P1–P4 integrate |
 
 ### A.1 Frozen Python interface — P1 (`wixy_server/livechat/cookout_bank.py`)
 

@@ -23,7 +23,33 @@
 
 import { expect, test } from "../fixtures";
 import type { Locator, Page } from "@playwright/test";
-import { publishAndWait, trackConsoleErrors, waitForNextDraftPatchAccepted } from "./helpers";
+import {
+  MEDIA_PIPELINE_TIMEOUT_MS,
+  publishAndWait,
+  trackConsoleErrors,
+  waitForMediaUpload,
+  waitForNextDraftPatchAccepted,
+} from "./helpers";
+
+/** Uploads `file` through the open media dialog's file input and waits for the upload to be DONE:
+ * the `POST /api/admin/media` answered 200, then the dialog's grid refreshed to show one more
+ * thumbnail than `thumbCountBefore`. Waiting on the thumbnail alone leaves the whole upload (the
+ * browser's multipart send, the server's decode, resize and re-encode, the grid's refetch) inside
+ * Playwright's default 5 s `expect` timeout, which a loaded machine can overrun (the Alignment test's
+ * oversized-exif-rotated.jpg is the heaviest). */
+async function uploadThroughMediaDialog(
+  page: Page,
+  mediaDialog: Locator,
+  file: string,
+  thumbCountBefore: number,
+): Promise<void> {
+  const uploaded = waitForMediaUpload(page);
+  await mediaDialog.locator('input[type="file"]').setInputFiles(file);
+  await uploaded;
+  await expect(mediaDialog.locator(".wx-media-thumb")).toHaveCount(thumbCountBefore + 1, {
+    timeout: MEDIA_PIPELINE_TIMEOUT_MS,
+  });
+}
 
 /** Finds the `.wx-section-card` whose title input's current VALUE is `title`.
  * `Locator.filter({ hasText })` matches textContent (or a form control's
@@ -93,6 +119,9 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
   test("add a photo pair (uploading two images), add a second (picking existing media), retitle, reorder via buttons, Save, publish, and the output reflects it", async ({
     page,
   }) => {
+    // Two uploads, each waiting up to MEDIA_PIPELINE_TIMEOUT_MS for its own completion (see the
+    // align test below for why the default 30 s test budget is too short to sit over that).
+    test.setTimeout(MEDIA_PIPELINE_TIMEOUT_MS * 3);
     const consoleErrors = trackConsoleErrors(page);
 
     await gotoSectionAndWaitReady(page, "before-after", "gallery");
@@ -136,8 +165,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Choose Before photo" }).click();
     await expect(mediaDialog).toBeVisible();
     let thumbCountBefore = await waitForStableThumbCount();
-    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/oversized-exif-rotated.jpg");
-    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await uploadThroughMediaDialog(page, mediaDialog, "fixtures/oversized-exif-rotated.jpg", thumbCountBefore);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
@@ -154,8 +182,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // second, distinct fixture image is required to exercise two real
     // uploads.
     thumbCountBefore = await waitForStableThumbCount();
-    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
-    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await uploadThroughMediaDialog(page, mediaDialog, "fixtures/tiny-second-image.jpg", thumbCountBefore);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
@@ -280,6 +307,11 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // The journey Purdi asked for (decisions/00111): she added a pair whose
     // two photos don't line up; she must be able to fix that herself. Real
     // canvas, real bake, real upload pipeline, real publish — no mocks.
+    //
+    // Three image writes (two uploads, one bake+upload) each wait up to MEDIA_PIPELINE_TIMEOUT_MS
+    // for their own completion, so the default 30 s test budget would fire before the wait that
+    // is actually stuck and hide which one it was.
+    test.setTimeout(MEDIA_PIPELINE_TIMEOUT_MS * 3);
     const consoleErrors = trackConsoleErrors(page);
 
     await gotoSectionAndWaitReady(page, "before-after", "gallery");
@@ -312,8 +344,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Choose Before photo" }).click();
     await expect(mediaDialog).toBeVisible();
     let thumbCountBefore = await waitForStableThumbCount();
-    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/oversized-exif-rotated.jpg");
-    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await uploadThroughMediaDialog(page, mediaDialog, "fixtures/oversized-exif-rotated.jpg", thumbCountBefore);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
@@ -322,8 +353,7 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     await addDialog.getByRole("button", { name: "Choose After photo" }).click();
     await expect(mediaDialog).toBeVisible();
     thumbCountBefore = await waitForStableThumbCount();
-    await mediaDialog.locator('input[type="file"]').setInputFiles("fixtures/tiny-second-image.jpg");
-    await expect(mediaThumbs).toHaveCount(thumbCountBefore + 1);
+    await uploadThroughMediaDialog(page, mediaDialog, "fixtures/tiny-second-image.jpg", thumbCountBefore);
     await mediaThumbs.last().click();
     await mediaDialog.getByRole("button", { name: "Use this image" }).click();
     await expect(mediaDialog).toBeHidden();
@@ -369,8 +399,19 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     // here: on localhost the whole bake→upload→stage chain can complete
     // within one Playwright tick, closing the dialog before any post-click
     // read — the dialog's close IS the completion signal.)
+    //
+    // The save has no spinner a test can rely on and its pace is the machine's: the canvas bake
+    // and JPEG encode run in the page (0.07 s normally, 1.2-2.6 s with the page's CPU throttled
+    // 6-20x, 4-8 s at 25x, measured), then the real upload. So the completion is waited on at its source, not
+    // inside Playwright's default 5 s `expect` timeout (an accidental "must finish in under 5 s"
+    // that a loaded CI runner broke: the dialog was still open at 5.0 s): the upload's own
+    // `POST /api/admin/media` coming back 200 (armed BEFORE the click, so it cannot miss the
+    // response), then the dialog closing, bounded by the media pipeline's own limit
+    // (helpers.ts's MEDIA_PIPELINE_TIMEOUT_MS).
+    const alignedUpload = waitForMediaUpload(page);
     await alignSaveButton.click();
-    await expect(alignDialog).toBeHidden();
+    await alignedUpload;
+    await expect(alignDialog).toBeHidden({ timeout: MEDIA_PIPELINE_TIMEOUT_MS });
 
     // The card's after photo is now a NEW staged upload (the original stays
     // in the media library, unused but hers) — a local DOM read, no save
@@ -378,7 +419,8 @@ test.describe("E2E: registry-configured section editor (Before & After)", () => 
     const alignedSrc = await afterThumb.getAttribute("src");
     expect(alignedSrc).not.toBe(originalAfterSrc);
     expect(alignedSrc).toMatch(/^\/admin\/draft-media\/[0-9a-f]{8}-.*-aligned\.jpg$/);
-    await expect(afterThumb).toHaveJSProperty("complete", true);
+    // The browser fetching and decoding the baked photo is the last leg of the same save.
+    await expect(afterThumb).toHaveJSProperty("complete", true, { timeout: MEDIA_PIPELINE_TIMEOUT_MS });
     expect(await afterThumb.evaluate((el: HTMLImageElement) => el.naturalWidth)).toBeGreaterThan(0);
 
     // -- Save, then publish: the live page serves the baked, aligned photo --

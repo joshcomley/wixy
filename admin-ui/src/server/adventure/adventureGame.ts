@@ -1,12 +1,18 @@
 // The Adventure Time GAME PANE (workspace 00056; spec/server-chat/08-adventure-time.md §5.3): when a
-// round is opened its tab shows the globe full-height:
+// round is opened its tab shows the globe FULL SCREEN (decisions/00194) — the chat header and composer
+// are hidden while a game tab shows, so this title row is the only way to Options / Bank / New / close:
 //
-//   [ 🌍 Adventure Time        Options  Bank  New  ✕ ]
-//   [ the stage: the globe, the pin, the hint pill, the big lit name, "Nearest land: …" ]
-//   [ the holiday pack — the stage shrinks to ~38 % — or "Preparing holiday pack…" ]
-//   [ the action dock: Stop · Bank this ✓ / No thanks ✕ · Play again ]
-//   [ mini chat: this destination's last two messages ]      <- the shared itemChat strip
-//   [ the chat composer — the ordinary one, now sending into this destination ]
+//   [ Yay  Nay                 Options  Bank  New  ✕ ]      <- pinned (no title text; Yay / Nay only while a place can be decided)
+//   [ the scrolling column:                                   <- scrolls ONLY once the place is chosen
+//       the stage: the globe, the pin, the hint pill, the big lit name, "Nearest land: …"
+//       the holiday pack, or "Preparing holiday pack…" ]
+//   [ the action dock: Stop · ("Never show again?" after Nay) · Play again ]      <- pinned
+//   (over the column's bottom corners: the chat FAB right, a floating message left — `gameFloat.ts`)
+//
+// While the globe spins or a roulette runs nothing scrolls and the globe has the whole column. Once the
+// place is chosen the map and the pack are ONE column: the map is a fixed-height block at the top that
+// scrolls up and away as the pack is read (a finger on the map scrolls too; "Explore map" is the mode
+// that fills the column with the map and hands drags to it).
 //
 // This module is the PANE: the DOM, the frame loop, the pointer input and the calls. What the screen
 // SHOWS comes from `scene.ts` (the round's view + the server's clock -> a globe frame and some words);
@@ -14,8 +20,8 @@
 // approved preview's (`dev/adventureHarness.ts`): a deep-blue space card with a glass hint pill, a big
 // coral Stop, a mint "Bank this" and a pack that slides in under a shrunken globe.
 //
-// Like WYR's pane it registers with the shared frame (`gameTabs.ts`) as "adventure" and embeds a strip of
-// the shared per-item chat (`itemChat.ts`). It owns three kinds of long-lived resource, and releases all
+// Like WYR's pane it registers with the shared frame (`gameTabs.ts`) as "adventure" and embeds an overlay of
+// the shared chat FAB / floating message / quick reply (`gameFloat.ts`). It owns three kinds of long-lived resource, and releases all
 // of them in `reset()` (the game closing, a lock, a wipe) and the first two in `onHide()` (another tab):
 //   - the requestAnimationFrame loop,
 //   - the idle-lock suspension (`hooks.suspend("adventureAnimating")`, held ONLY while something is moving
@@ -28,7 +34,7 @@ import type { Message } from "../api/messages";
 import { ServerLockedError } from "../api/http";
 import type { LivePostResult } from "../api/drawings";
 import type { GameTabs } from "../gameTabs";
-import type { ItemChat } from "../itemChat";
+import type { GameFloat } from "../gameFloat";
 import type { LockHooks } from "../types";
 import {
   type AdventureLiveFrame,
@@ -64,8 +70,8 @@ export interface AdventureGameDeps {
   readonly model: AdventureModel;
   /** The shared tab bar: this pane registers itself as the game "adventure". */
   readonly tabs: GameTabs;
-  /** The shared item chat: this pane embeds one mini chat strip. */
-  readonly itemChat: ItemChat;
+  /** The shared chat FAB / floating message / quick reply: this pane embeds one overlay of it. */
+  readonly float: GameFloat;
   readonly hooks: Pick<LockHooks, "suspend" | "lockNow">;
   readonly api: AdventureGameApi;
   /** The world map (loaded once, lazily); rejects when it cannot be fetched. */
@@ -153,19 +159,25 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   card.dataset["action"] = "none";
 
   // Header.
-  const optionsButton = button("wx-srv-adv-chip wx-srv-adv-options", "Options", "Options", () => void openOptions());
+  const optionsButton = button("wx-srv-adv-chip wx-srv-adv-options", "Options", "", () => void openOptions());
+  // A word on a wide screen, a gear on a narrow one (CSS): the whole title row must fit a 360 px phone on one line.
+  optionsButton.append(el("span", "wx-srv-adv-options-text", "Options"), el("span", "wx-srv-adv-options-gear", "⚙"));
+  optionsButton.querySelector(".wx-srv-adv-options-gear")?.setAttribute("aria-hidden", "true");
   optionsButton.setAttribute("aria-haspopup", "dialog");
   const bankButton = button("wx-srv-adv-chip wx-srv-adv-bank", "Open the Holiday bank", "Bank", () => deps.openBank());
   const newButton = button("wx-srv-adv-chip wx-srv-adv-new", "Start a new adventure", "New", () => deps.startNextRound());
   const closeButton = button("wx-srv-adv-chip wx-srv-adv-close", "Close the game", "✕", () => close());
   const bar = el("header", "wx-srv-adv-bar");
-  const title = el("div", "wx-srv-adv-title");
-  const titleGlobe = el("span", "wx-srv-adv-title-globe", "🌍");
-  titleGlobe.setAttribute("aria-hidden", "true");
-  title.append(titleGlobe, el("span", "wx-srv-adv-title-text", "Adventure Time"));
+  // Yay / Nay (the decision: bank this place / not this one) sit on the LEFT of the row, only while a
+  // decision is possible; there is no title text. The row is then just the right-hand buttons.
+  const yay = button("wx-srv-adv-chip wx-srv-adv-yay wx-srv-adv-bank-this", "Yay: bank this trip", "Yay", () => void decide("bank"));
+  const nay = button("wx-srv-adv-chip wx-srv-adv-nay wx-srv-adv-pass", "Nay: not this one", "Nay", () => askReject());
+  const barDecide = el("div", "wx-srv-adv-bar-decide");
+  barDecide.hidden = true;
+  barDecide.append(yay, nay);
   const barActions = el("div", "wx-srv-adv-bar-actions");
   barActions.append(optionsButton, bankButton, newButton, closeButton);
-  bar.append(title, barActions);
+  bar.append(barDecide, barActions);
 
   // The stage: the globe and its overlays.
   const canvas = doc.createElement("canvas");
@@ -226,17 +238,13 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   stopButton.setAttribute("aria-label", "Stop the roulette");
   const dockStop = el("div", "wx-srv-adv-dock-row wx-srv-adv-dock-stop");
   dockStop.append(stopButton);
-  const bankThis = button("wx-srv-adv-big wx-srv-adv-big-yes wx-srv-adv-bank-this", "Bank this destination", "Bank this ✓", () => void decide("bank"));
-  const passOn = button("wx-srv-adv-big wx-srv-adv-big-no wx-srv-adv-pass", "No thanks", "No thanks ✕", () => askReject());
-  const decideRow = el("div", "wx-srv-adv-dock-row wx-srv-adv-dock-decide-row");
-  decideRow.append(bankThis, passOn);
   const askText = el("div", "wx-srv-adv-ask");
   const neverYes = button("wx-srv-adv-big wx-srv-adv-big-no wx-srv-adv-never", "Never show this place again", "Never show again", () => void decide("reject"));
   const neverNo = button("wx-srv-adv-big wx-srv-adv-big-keep wx-srv-adv-keep", "Keep it", "Keep it", () => cancelReject());
   const askRow = el("div", "wx-srv-adv-dock-row wx-srv-adv-dock-ask-row");
   askRow.append(neverYes, neverNo);
   const dockDecide = el("div", "wx-srv-adv-dock-block wx-srv-adv-dock-decide");
-  dockDecide.append(askText, decideRow, askRow);
+  dockDecide.append(askText, askRow);
   const outcomeText = el("div", "wx-srv-adv-outcome");
   const againButton = button("wx-srv-adv-big wx-srv-adv-big-again wx-srv-adv-again", "Play again", "Play again", () => deps.startNextRound());
   const dockAgain = el("div", "wx-srv-adv-dock-block wx-srv-adv-dock-again");
@@ -306,9 +314,21 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     if (event.target === optionsSheet) closeOptions();
   });
 
-  card.append(bar, stage, packSection, dock);
-  const strip = deps.itemChat.createStrip({ popupTitle: "Adventure chat" });
-  pane.append(card, strip.element, packPanel.viewer, optionsSheet);
+  // The column the map and the pack share: it scrolls once the place is chosen (see the CSS), and the
+  // chat overlay floats over its bottom corners.
+  const column = el("div", "wx-srv-adv-scroll");
+  column.append(stage, packSection);
+  const body = el("div", "wx-srv-adv-body");
+  body.append(
+    column,
+    deps.float.createOverlay({
+      fabLabel: "Open this destination's chat",
+      popupTitle: "Adventure chat",
+      item: () => deps.tabs.seqOf("adventure"),
+    }),
+  );
+  card.append(bar, body, dock);
+  pane.append(card, packPanel.viewer, optionsSheet);
 
   // -- State ------------------------------------------------------------------------------------------------
 
@@ -572,6 +592,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     // The dock: Stop while a roulette runs, Bank/No thanks once the place is chosen, Play again at the end.
     const action = hud.action === "decide" && rejectPending ? "ask" : hud.action;
     setAttr("action", card, "data-action", action);
+    barDecide.hidden = action !== "decide";
     if (hud.action !== "decide" && rejectPending) rejectPending = false;
     if (hud.action === "stop") {
       setText("stopLabel", stopButton, hud.stopLive ? "Stop" : "Get ready…");
@@ -844,7 +865,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   }
 
   function applyDecideBusy(): void {
-    for (const b of [bankThis, passOn, neverYes, neverNo]) b.disabled = busy.decide;
+    for (const b of [yay, nay, neverYes, neverNo]) b.disabled = busy.decide;
   }
 
   async function retryPack(): Promise<void> {
@@ -1003,7 +1024,6 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       // A different round starts from nothing.
       forgetRound();
       drawnSeq = seq;
-      strip.draw(seq);
     }
     if (world !== null) buildStage();
     else ensureWorld();
@@ -1026,7 +1046,6 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     stopLoop();
     forgetRound();
     drawnSeq = null;
-    strip.draw(null);
     packPanel.closeViewer();
     setNote(null);
     destroyStage();

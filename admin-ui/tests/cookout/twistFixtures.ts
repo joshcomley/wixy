@@ -8,6 +8,7 @@ import { vi } from "vitest";
 import type { Message } from "../../src/server/api/messages";
 import { createGameTabs, type GameTabs } from "../../src/server/gameTabs";
 import type { ItemChat } from "../../src/server/itemChat";
+import { createGameFloat } from "../../src/server/gameFloat";
 import { parseCookoutView, type CookoutOutcome, type CookoutView } from "../../src/server/cookout/api";
 import { createCookoutGame, type CookoutGame, type CookoutGameApi } from "../../src/server/cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "../../src/server/cookout/model";
@@ -244,6 +245,16 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
     model,
     tabs,
     itemChat,
+    float: createGameFloat({
+      document,
+      win: window,
+      itemChat,
+      tabs,
+      mountComposer: () => {},
+      isRecording: () => false,
+      tabBar: tabs.tabBar,
+      host: document.body,
+    }),
     hooks: { lockNow },
     api: api as unknown as CookoutGameApi,
     roundMessage: (seq) => ({ seq }) as Message,

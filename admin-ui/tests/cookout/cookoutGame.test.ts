@@ -3,6 +3,7 @@ import type { Message } from "../../src/server/api/messages";
 import { ServerLockedError } from "../../src/server/api/http";
 import { createGameTabs, type GameTabs } from "../../src/server/gameTabs";
 import type { ItemChat } from "../../src/server/itemChat";
+import { createGameFloat } from "../../src/server/gameFloat";
 import { parseCookoutView, type CookoutOutcome, type CookoutView } from "../../src/server/cookout/api";
 import {
   categoryName,
@@ -111,6 +112,16 @@ function make(): Harness {
     model,
     tabs,
     itemChat,
+    float: createGameFloat({
+      document,
+      win: window,
+      itemChat,
+      tabs,
+      mountComposer: () => {},
+      isRecording: () => false,
+      tabBar: tabs.tabBar,
+      host: document.body,
+    }),
     hooks: { lockNow },
     api: api as unknown as CookoutGameApi,
     roundMessage: (seq) => ({ seq }) as Message,

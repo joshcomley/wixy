@@ -440,7 +440,7 @@ test.describe("Cookout", () => {
     await closeAll(contextA, contextB);
   });
 
-  test("Cookout replaces an open Adventure or Would-you-rather tab (only ever two tabs); the card has the shared mini chat", async ({ browser }) => {
+  test("Cookout replaces an open Adventure or Would-you-rather tab (only ever two tabs); the round has the shared chat FAB, floating message and quick reply", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
@@ -478,18 +478,37 @@ test.describe("Cookout", () => {
     await expect(pageB.locator(".wx-srv-tab-cookout")).toBeVisible();
     await expect(pageB.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
 
-    // The card's mini chat is shared: a line typed in the Cookout tab reaches the other player's strip.
+    // The round's chat (decisions/00194): the game runs full screen (no chat header, no composer at home);
+    // Alice writes in the chat FAB's pop-up, Bob sees it FLOAT (the FAB gets a dot) and answers in the quick
+    // reply, which sends into the round and closes; the pop-up holds the round's whole chat.
     await pageA.locator(".wx-srv-tab-chat").click();
     await humanPause(pageA);
     await pageA.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"] .wx-srv-ck-mcard-open`).click();
     await expect(game(pageA)).toBeVisible();
-    const line = "salt or butter?";
-    await pageA.locator(".wx-chat-composer-input").fill(line);
-    await pageA.locator(".wx-chat-send-button").click();
-    await humanPause(pageA);
-    await eventually([pageA, pageB], async () => (await game(pageB).locator(".wx-srv-game-mini").innerText()).includes(line), "Bob's mini chat");
-    await expect(game(pageA).locator(".wx-srv-game-mini")).toContainText(line);
-    await expect(game(pageB).locator(".wx-srv-game-mini")).toContainText("Alice:");
+    await expect(pageA.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
+    async function say(page: Page, text: string): Promise<void> {
+      await page.locator(".wx-chat-composer-input").fill(text);
+      await page.locator(".wx-chat-send-button").click();
+      await humanPause(page);
+    }
+    await game(pageA).locator(".wx-srv-float-fab").click();
+    await expect(pageA.locator(".wx-srv-gamepop .wx-chat-composer-input")).toBeVisible();
+    await say(pageA, "salt or butter?");
+    await pageA.locator(".wx-srv-gamepop-close").click();
+    await expect(pageA.locator(".wx-srv-gamepop")).toBeHidden();
+    await expect(game(pageB).locator(".wx-srv-float-bubble")).toContainText("salt or butter?", { timeout: 20_000 });
+    await expect(game(pageB).locator(".wx-srv-float-bubble")).toContainText("Alice:");
+    await expect(game(pageB).locator(".wx-srv-float-fab")).toHaveAttribute("aria-label", /new message/);
+    await humanPause(pageB);
+    await game(pageB).locator(".wx-srv-float-open").click();
+    await expect(pageB.locator(".wx-srv-quick .wx-chat-composer-input")).toBeVisible();
+    await say(pageB, "butter, always");
+    await expect(pageB.locator(".wx-srv-quick")).toBeHidden();
+    await expect(game(pageA).locator(".wx-srv-float-bubble")).toContainText("butter, always", { timeout: 20_000 });
+    await game(pageB).locator(".wx-srv-float-fab").click();
+    await expect(pageB.locator(".wx-srv-gamepop")).toContainText("salt or butter?");
+    await expect(pageB.locator(".wx-srv-gamepop")).toContainText("butter, always");
+    await pageB.locator(".wx-srv-gamepop-close").click();
 
     stopAwake();
     for (const e of errors) expect(e.filter((m) => !/favicon/i.test(m))).toEqual([]);
@@ -514,25 +533,36 @@ test.describe("Cookout", () => {
     const paneFit = await game(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(paneFit.scroll).toBeLessThanOrEqual(paneFit.client + 1);
 
-    // Both ingredient cards, the Skip button, the mini chat, the composer and the tab bar are inside the
-    // viewport, and the things a thumb has to hit are proper targets.
-    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-ck .wx-srv-game-mini", ".wx-chat-composer-input", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
+    // Both ingredient cards, the Skip button, the chat FAB and the tab bar are inside the viewport, and the
+    // things a thumb has to hit are proper targets. Full screen: the composer is not at home.
+    await expect(page.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
+    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box, selector).not.toBeNull();
       expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(780.5);
       expect(box.x, `${selector} left`).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(360.5);
     }
-    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
+    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box.height, `${selector} height`).toBeGreaterThanOrEqual(43.5);
+    }
+    // The FAB never covers a play control: scrolled to the bottom, the last control ends above it.
+    await game(page).locator(".wx-srv-ck-scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
+    const fab = (await page.locator(".wx-srv-ck .wx-srv-float-fab").boundingBox())!;
+    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip"]) {
+      for (const box of await Promise.all((await page.locator(selector).all()).map((l) => l.boundingBox()))) {
+        if (box === null) continue;
+        const overlaps = box.x < fab.x + fab.width && fab.x < box.x + box.width && box.y < fab.y + fab.height && fab.y < box.y + box.height;
+        expect(overlaps, `${selector} under the FAB`).toBe(false);
+      }
     }
     // The header (title, Recipe book, End, New, close) stays inside the phone.
     for (const selector of [".wx-srv-ck-book", ".wx-srv-ck-end", ".wx-srv-ck-close"]) {
       const box = (await page.locator(selector).boundingBox())!;
       expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(360.5);
-      // The header chips are designed at 36 px (chat.css `.wx-srv-ck-chip`); the play controls are 44.
-      expect(box.height, `${selector} height`).toBeGreaterThanOrEqual(35.5);
+      // The header chips are phone touch targets (chat.css `.wx-srv-ck-chip`, 44 px).
+      expect(box.height, `${selector} height`).toBeGreaterThanOrEqual(43.5);
     }
     const hit = await page.locator(".wx-srv-tab-chat").evaluate((el) => {
       const r = el.getBoundingClientRect();
