@@ -41,6 +41,9 @@ export interface CookoutModel {
   observe(messages: readonly Message[]): void;
   /** Read the round again now (a 409 said somebody else moved). */
   refetch(seq: number): void;
+  /** Read the round now, apply it, and answer with the newest view held — for a caller that must see the
+   * round as it is before deciding (null: no session, a failed read, or a reset meanwhile). */
+  read(seq: number): Promise<CookoutView | null>;
   /** Drop one round (its message is gone). */
   forget(seq: number): void;
   /** Drop everything (lock, wipe, teardown). */
@@ -289,6 +292,21 @@ export function createCookoutModel(deps: CookoutModelDeps): CookoutModel {
     refetch(seq) {
       forced.add(seq);
       void fetchIfStale(seq);
+    },
+    async read(seq) {
+      const session = deps.session();
+      const viewer = deps.viewer();
+      if (session === null || viewer === null) return null;
+      const startedIn = generation;
+      let outcome: CookoutOutcome;
+      try {
+        outcome = await deps.fetchRound(session, seq, viewer);
+      } catch {
+        return null;
+      }
+      if (startedIn !== generation || !outcome.ok) return null;
+      apply(outcome.view);
+      return views.get(seq) ?? null;
     },
     forget,
     reset,

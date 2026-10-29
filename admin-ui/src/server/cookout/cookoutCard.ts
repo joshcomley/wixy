@@ -26,7 +26,8 @@ export interface CookoutCards {
   render(container: HTMLElement, message: Message): void;
 }
 
-/** One line of status for the card (spec §5.4). */
+/** One line of status for the card (spec §5.4; the twists' lines 09a §9). The summary carries counts and
+ * flags only, so none of these lines can name an ingredient, a star, a vote or a dish. */
 export function cookoutStatusLine(summary: CookoutSummary | null): string {
   if (summary === null) return "Cookout";
   switch (summary.state) {
@@ -34,20 +35,30 @@ export function cookoutStatusLine(summary: CookoutSummary | null): string {
       return "Ended";
     case "picking":
       return `Picking ingredients (${summary.pickedCount}/10)…`;
-    case "finished":
+    case "finished": {
+      // The chef gate first: the round is waiting on a player.
+      if (summary.concepts === "none" && summary.waiting.includes("wildcard")) return "All 10 picked — Lift the cloche?";
+      if (summary.concepts === "none" && summary.waiting.includes("stars")) return "All 10 picked — Waiting for secret stars";
+      if (summary.swap === "proposed") return "Swapping an ingredient…";
+      const extras: string[] = [];
+      if (summary.dinnerDecided) extras.push("🎯 Dinner decided");
+      if (summary.cookedCount > 0) extras.push("✓ Cooked");
+      const tail = extras.length === 0 ? "" : ` · ${extras.join(" · ")}`;
       if (summary.bankedCount > 0) {
-        return summary.bankedCount === 1 ? "1 recipe banked ✓" : `${summary.bankedCount} recipes banked ✓`;
+        return `${summary.bankedCount === 1 ? "1 recipe banked ✓" : `${summary.bankedCount} recipes banked ✓`}${tail}`;
       }
+      const fresh = summary.generation > 1 ? "3 new dish ideas" : "3 dish ideas";
       switch (summary.concepts) {
         case "ready":
-          return "3 dish ideas ready";
+          return `${fresh} ready${tail}`;
         case "failed":
           return "All 10 picked — the chef didn't finish";
         case "unavailable":
           return "All 10 picked";
         default:
-          return "All 10 picked — chef is thinking…";
+          return summary.generation > 1 ? "Ingredient swapped — chef is thinking…" : "All 10 picked — chef is thinking…";
       }
+    }
   }
 }
 
