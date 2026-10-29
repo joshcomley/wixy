@@ -135,6 +135,15 @@ jobs:
       - name: playwright test
         working-directory: e2e
         run: npx playwright test
+      # A failure leaves screenshots + error-context.md (the page's accessibility snapshot) here;
+      # without this step CI kept nothing and a flake could only be guessed at.
+      - name: upload e2e failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: e2e/test-results/
+          retention-days: 7
 
   # spec/independence/03 §5: the same image boots both editions — this is the
   # ONLY place that's ever proven (the hub has no Docker; Slots deploys the
