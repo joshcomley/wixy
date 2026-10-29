@@ -10,9 +10,12 @@ import { availableParallelism } from "node:os";
 //
 // Workers are capped, never "auto": each one is a Chromium plus a Python server (plus ffmpeg and
 // image work in some specs), so they must leave real headroom. Default = 3/4 of the cores,
-// capped at 4: 3 on a 4-vCPU CI runner, 4 on a big box. At 4 workers on 4 vCPUs the server-side
-// photo bake behind section-panel's "align a photo pair" save ran past its 5 s wait (measured on
-// CI). WIXY_E2E_WORKERS overrides; `1` reproduces the old fully serial run for debugging.
+// capped at 4: 3 on a 4-vCPU CI runner, 4 on a big box. At 4 workers on 4 vCPUs the photo bake
+// behind section-panel's "align a photo pair" save (an in-browser canvas draw plus JPEG encode,
+// then the upload; the server's share is ~20 ms) ran past its 5 s wait (measured on CI). That
+// wait now watches the upload itself with an explicit bound (helpers.ts's MEDIA_PIPELINE_TIMEOUT_MS),
+// so the cap is headroom, not what the test depends on. WIXY_E2E_WORKERS overrides; `1`
+// reproduces the old fully serial run for debugging.
 const DEFAULT_WORKERS = Math.min(4, Math.max(1, Math.floor(availableParallelism() * 0.75)));
 const WORKERS = Number(process.env["WIXY_E2E_WORKERS"] ?? DEFAULT_WORKERS);
 
@@ -23,4 +26,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: WORKERS,
   reporter: "list",
+  // Failure screenshots + the page snapshot reach CI's artifact upload. `trace` stays off:
+  // retain-on-failure cost +31 % wall clock on the full suite (248 s -> 325 s, 4 workers) and
+  // once hung `context.close()` for 27 s (decisions/00198).
+  use: { screenshot: "only-on-failure" },
 });

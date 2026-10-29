@@ -104,6 +104,11 @@ test.describe("server-reply.spec.ts (round 2 ruling item 10)", () => {
     // a bare text filter — the reply bubble also CONTAINS the original text
     // via its own quote, and would otherwise strict-mode-match too.
     const originalBubbleA = pageA.locator(".wx-srv-bubble-mine").filter({ hasText: originalText });
+    // The quote is a gesture boundary, and a boundary tap closes a run opened by ANY earlier tap
+    // within MULTI_TAP_INTERVAL_MS (the double-tap lock). Page A's last tap was Send, and the
+    // reply can land a few hundred ms later, so clear the window or the chat locks and the
+    // original vanishes with it.
+    await pageA.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
     await quote.click();
     await expect(originalBubbleA).toHaveClass(/wx-srv-bubble-highlighted/);
     await expect(originalBubbleA).toBeInViewport();
