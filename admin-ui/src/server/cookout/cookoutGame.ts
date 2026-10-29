@@ -445,6 +445,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   const pane = el("div", "wx-srv-game wx-srv-ck");
   pane.setAttribute("data-game", "cookout");
+  // British English (the catalogue's): lets ingredient names hyphenate at a syllable instead of breaking
+  // anywhere in a narrow tile ("Caramel-ised", never "Caramelis/ed").
+  pane.lang = "en-GB";
   pane.hidden = true;
 
   const bar = el("header", "wx-srv-ck-bar");
@@ -1389,8 +1392,11 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       what.id = id;
       inner.append(what);
     } else if (snap.blurb !== "") {
-      const hidden = el("span", "wx-srv-ck-sr", snap.blurb);
+      // `hidden`, not visually-clipped: aria-describedby still reads a hidden element, and a clipped box would
+      // be overflow on a table that must have none.
+      const hidden = el("span", "wx-srv-ck-card-desc", snap.blurb);
       hidden.id = id;
+      hidden.hidden = true;
       inner.append(hidden);
     }
     card.append(inner);

@@ -7009,7 +7009,8 @@ button.wx-srv-ck-card:disabled {
   font-size: 0.875rem;
   line-height: 17px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-card-what {
@@ -7017,7 +7018,8 @@ button.wx-srv-ck-card:disabled {
   font-size: 0.75rem;
   line-height: 15px;
   color: var(--ck-muted);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-card-chosen {
@@ -7449,13 +7451,15 @@ button.wx-srv-ck-card:disabled {
 .wx-srv-ck-bline-name {
   font-weight: 700;
   font-size: 0.9375rem;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-bline-what {
   font-size: 0.8125rem;
   color: var(--ck-muted);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-bline-secret .wx-srv-ck-bline-pic {
@@ -7628,7 +7632,7 @@ button.wx-srv-ck-card:disabled {
 .wx-srv-ck-reveal-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
+  gap: 6px 3px;
 }
 
 .wx-srv-ck-rtile {
@@ -7692,7 +7696,8 @@ button.wx-srv-ck-rtile {
   font-size: 0.6875rem;
   line-height: 13px;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-rtile-via,
@@ -7792,7 +7797,8 @@ button.wx-srv-ck-rtile {
   margin: 0;
   font-size: 1.0625rem;
   font-weight: 800;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .wx-srv-ck-car-what {

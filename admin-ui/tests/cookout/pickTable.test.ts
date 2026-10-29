@@ -112,7 +112,7 @@ describe("one tap picks", () => {
     expect(other!.querySelector(".wx-srv-ck-card-what")).toBeNull();
     const id = other!.getAttribute("aria-describedby") ?? "";
     expect(h.pane.querySelector(`#${id}`)?.textContent).toBe("x".repeat(80));
-    expect(h.pane.querySelector(`#${id}`)?.classList.contains("wx-srv-ck-sr")).toBe(true);
+    expect(h.pane.querySelector<HTMLElement>(`#${id}`)?.hidden).toBe(true);
   });
 
   it("the watcher's cards are pictures, not buttons, and say who is choosing", () => {
