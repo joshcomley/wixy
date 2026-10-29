@@ -72,11 +72,11 @@ staples footer can show pictures too: **3,494 entries**. Per entry:
 
 | Field | Rule | Purpose |
 |---|---|---|
-| `what` | 10–72 chars, plain British English, one sentence, no ingredient name repeated at the start ("A …"/"Small …" style), no HTML/URL/emoji | the "what it is" line under the picture |
+| `what` | 10–60 chars (**round-2 review: was 72**; 60 is what fits three lines of the narrowest phone card, §D.3), plain British English, one sentence, no ingredient name repeated at the start ("A …"/"Small …" style), no HTML/URL/emoji | the "what it is" line under the picture |
 | `visual` | 30–260 chars | the subject description inserted into the fixed image prompt (§B.2) |
 | `presentation` | enum `whole \| cut \| heap \| bunch \| bowl \| jar \| bottle \| glass \| plate \| portion` | how it is normally seen raw / as bought; drives the checker's expectations |
 | `facts` | 2–3 strings, each 25–150 chars, distinct, no HTML/URL/emoji | the chef-thinking carousel |
-| `nameKey` | first 16 hex of sha256 of `name + "\x1f" + aliases joined by "\x1f" + "\x1f" + category` | staleness check: if the bank entry is renamed or recategorised, the entry is stale and the validator fails |
+| `nameKey` | first 16 hex of sha256 of the UTF-8 bytes of `subject.name + "\x1f" + subject.category` (**round-2 review: aliases removed** — the chef-fix parcel may add aliases, which do not change what the ingredient is and must not make the catalogue stale) | staleness check: if the subject is renamed or recategorised, the entry is stale and the validator fails |
 | `source` | `{author, factCheck, at}`: model ids and an epoch-seconds number | provenance (never parsed back as a date) |
 
 The `what` line is new and deliberately separate from the bank's existing `blurb` (which is a culinary
@@ -84,6 +84,30 @@ note such as "Smoky, coarse sausage with Cajun heat"). The operator asked that t
 are": `what` is written for someone who has never heard of the ingredient ("A large tropical sea
 crustacean with sweet, lobster-like meat."). The UI shows `what`, falling back to `blurb` when an entry
 is missing.
+
+**Catalogue subjects — one adapter for every consumer (round-2 review, frozen).** The three seasonings
+exist in the bank only as `{id, name, pickable}` staples, with no aliases, category, role or blurb. So
+authoring, the validator, `nameKey` and the loader all read entries through one read-only
+`CatalogueSubject` (in `cookout_catalogue.py`, parcel 1): `{id, name, aliases, category, categoryName,
+role, blurb}`.
+- **Bank ingredient:** every field from the `Ingredient` record; `categoryName` from the bank's
+  `categories`.
+- **Seasoning (exactly these three, frozen constants in `cookout_catalogue.py`, never added to the
+  bank):**
+
+  | id | name (from the bank staple) | aliases | category | categoryName | role | blurb |
+  |---|---|---|---|---|---|---|
+  | `water` | Water | `[]` | `drinks-alcohol` | Splash, Brews & Infusions | `accent` | `""` |
+  | `salt` | Salt | `[]` | `spices-seasonings` | Spices & Chilis | `accent` | `""` |
+  | `black-pepper` | Black pepper | `[]` | `spices-seasonings` | Spices & Chilis | `accent` | `""` |
+
+  `nameKey` uses the same formula over these values (the name is read from the bank staple, so a rename
+  there still makes the entry stale). The `drinks-alcohol` vessel rule applies to `water` (a clear
+  glass of water). The author prompt prints an empty blurb as "(none)".
+- `subjects(bank) -> list[CatalogueSubject]` returns the 3,491 ingredients then the three seasonings;
+  it is the only way any parcel enumerates catalogue entries. Nothing in `cookout_bank.py`,
+  `cookout_ingredients.json`, `cookout_ai.py` or `fake_cmd.py` changes for this. Tests cover an ordinary
+  ingredient, each seasoning, and a renamed staple turning stale.
 
 **Presentation rules Haiku must follow in `visual`** (in the author prompt, checked by the validator
 where mechanical):
@@ -140,8 +164,8 @@ result goes in the catalogue report (`triad/cookout/r2/catalogue-report.md`).
   sends byte-identical requests (tested). Pacing: at most **3 runs in flight per provider**, at least
   **5 s between spawns** (the existing Cookout gap), poll every 10 s, cancel on deadline.
 - **Author pass:** Haiku, `effort: "medium"`, `tool_profile: "judge"` (no tools: everything it needs is
-  inline), **20 entries per run**, `timeout_secs: 900`. The prompt carries, per entry, the bank `id`,
-  `name`, `aliases`, `category` name, `role` and `blurb`; nothing else.
+  inline), **20 entries per run**, `timeout_secs: 900`. The prompt carries, per entry, the
+  `CatalogueSubject`'s `id`, `name`, `aliases`, `categoryName`, `role` and `blurb`; nothing else.
 - **Fact-check pass:** Haiku, `effort: "high"`, no `tool_profile`, `disallowed_tools` =
   `["Bash","PowerShell","Edit","Write","MultiEdit","NotebookEdit","Agent","Task"]` (leaves
   WebSearch/WebFetch/Read), **20 entries (≤60 facts) per run**, `timeout_secs: 1200`.
@@ -337,7 +361,9 @@ of the public upstream repo, pinned in the manifest by its own sha256.
   "pack": {
     "url": "https://github.com/joshcomley/wixy/releases/download/cookout-images-v1/cookout-images-v1.tar",
     "sha256": "<64 hex>",
-    "bytes": 154000000
+    "bytes": 154000000,
+    "objects": 6988,
+    "installedBytes": 153000000
   },
   "renditions": { "card": 512, "thumb": 160 },
   "items": {
@@ -348,6 +374,15 @@ of the public upstream repo, pinned in the manifest by its own sha256.
 
 The first commit of the manifest (before any pictures) is `{"packVersion": 0, "pack": null, "renditions":
 {"card": 512, "thumb": 160}, "items": {}}` — valid, and every ingredient falls back to emoji.
+
+**Hard bounds (validated by `load_manifest`; a violation is a `PackError`, never a clamp).** For a
+non-null `pack`, `url`, `sha256`, `bytes`, `objects` and `installedBytes` are all **mandatory**;
+`bytes ≤ MAX_PACK_BYTES = 400 MiB`; `installedBytes ≤ MAX_INSTALLED_BYTES = 400 MiB`;
+`objects ≤ MAX_OBJECTS = 10,000` and `objects == |cards ∪ thumbs|`; `len(items) ≤ 5,000`; every single
+object ≤ 2 MiB. `installedBytes` is the exact sum of the member sizes (the tar's header overhead is the
+difference to `bytes`). The **manifest digest** — sha256 of the manifest file's bytes — identifies a
+manifest everywhere below (two manifests with the same `packVersion` but different content are
+different manifests).
 
 **Pack format:** an uncompressed POSIX tar (WebP is already compressed) whose members are exactly
 `objects/<first 2 hex>/<sha256>.webp`, regular files only — no directories needed, no links, no
@@ -361,32 +396,105 @@ download installs a version.
 3. `WIXY_COOKOUT_IMAGES_BAKED_DIR` if set — the Docker image sets it to `/app/cookout-pack/objects`
    (this is an image layout fact, not an edition setting, so baking it with `ENV` respects decisions/00051 #6).
 
+**The storage registry, pins and the one lock (frozen protocol; all in `cookout_pack.py`).** Under
+`<storage>/cookout-images/`:
+
+```text
+objects/<2 hex>/<sha256>.webp      the shared object store (both slots, tooling installs)
+registry/manifests/<digest>.json   a copy of every manifest ever registered here
+registry/pins/<pin-id>.json        {digest, kind: "slot" | "pending", holder, createdAt, leaseUntil | null, retiredAt | null}
+incoming/                          in-flight downloads only (§ admission below)
+.lock                              the single cross-process lock
+```
+
+- **One lock.** Every registration, pin change, install, self-heal extraction and GC holds an exclusive
+  OS file lock on `.lock` (stdlib: `msvcrt.locking` on Windows, `fcntl.flock` elsewhere; a blocking
+  acquire with a 120 s timeout, after which the caller gives up and retries later — it never proceeds
+  unlocked). Downloads happen **outside** the lock (they are slow); only their final install takes it.
+- **Slot pins (in service).** At startup, before anything else touches the store, a server takes the
+  lock, registers its packaged manifest (`registry/manifests/<digest>.json`) and writes a `slot` pin
+  `slot-<random 16 hex>` with `leaseUntil = now + 900`. A supervised task refreshes the lease every
+  300 s for as long as the process serves, so a server up for months stays pinned. Clean shutdown sets
+  `retiredAt = now`; a crashed process's pin is treated as retired at `leaseUntil`. Epoch seconds only.
+- **Pending pins (in flight).** `install` (tooling, before the manifest PR merges) takes the lock and
+  registers the incoming manifest **and** writes a `pending-<digest>` pin with no lease **before** writing
+  any of its objects, all in the same locked section as the object writes. A pending pin is removed
+  only when (a) a `slot` pin for the same digest is written (activation — the server removes it in the
+  same locked section), or (b) someone runs `cookout_pack.py cancel --digest <d>` explicitly. It never
+  expires on a clock; `status` lists pending pins older than 30 days so a forgotten one is visible.
+- **GC (under the lock).** Keep set = the objects of every manifest that has (a) a slot pin whose
+  `leaseUntil` is in the future and no `retiredAt`, (b) a pending pin, or (c) a slot pin retired within
+  the last **72 hours** (a rollback window). Plus a safety margin: no object whose mtime is younger
+  than 1 hour is deleted. Everything else in `objects/` is deleted, then pin files retired more than
+  72 hours ago and manifests no pin references are deleted. GC runs after a successful install or
+  self-heal and once a day from the server's supervised sweep. There is no other deletion path.
+- **Tests (in `test_cookout_pack.py`):** install-before-merge then GC keeps the pending objects; a slot
+  whose pin is 15+ days old but refreshed keeps its objects; old and new slots overlapping both keep
+  theirs; an expired lease is kept for 72 h then collected; two processes running install and GC
+  concurrently serialise on the lock (the GC never sees a half-registered manifest); a manifest pinned
+  by digest is distinct from another with the same `packVersion`.
+
+**Download admission and byte ceiling (frozen).** Applies to `PackStore.fetch` (self-heal) and to
+`fetch_to_dir` (the Docker build: same steps, a floor of 0, no registry or pins):
+1. **Admission first.** Compute `need = bytes + (installedBytes − bytes of manifest objects already
+   present) + 64 MiB` and require `free_space(storage) − need ≥ settings.server_min_free_bytes` (the
+   same free-space floor chat uploads use, read from `Settings`; the Docker build uses a floor of 0).
+   This catalogue budget is **separate** from the chat-media quota and is never counted in it. Refused
+   → logged, existing objects untouched, pictures keep their fallback, retried at the next 6-hour tick.
+   The check and a reservation file `incoming/<digest>.reserve` (holding `need`) are made under the
+   lock, and a second fetch, in any process, refuses while a live reservation exists for any digest
+   (one pack download at a time per store).
+2. **Bounded stream.** Download to `incoming/<digest>.<random>.part` with connect/read timeouts of 30 s
+   and a total deadline of 15 minutes; abort on the first byte beyond `bytes`; require exactly `bytes`
+   at the end (a short or chunked-without-length response is checked the same way); then the tar's
+   sha256.
+3. **Bounded extraction.** Iterate members without extracting first: reject more than `objects`
+   members, any member over 2 MiB, any running total over `installedBytes`, and any name/type rule
+   breach (§ pack format); write each object to a temp name in its target directory, verify its sha256,
+   rename into place. Objects already present are skipped (content-addressed).
+4. **Cleanup on every exit** (`try/finally`): the `.part` file and the reservation are deleted on
+   success, failure, timeout and cancellation; at startup (under the lock) any `incoming/` file older
+   than 1 hour is deleted as a crash leftover.
+5. **Tests:** oversized response (aborted at `bytes + 1`, nothing installed), short response, chunked
+   response without a length, low free space (refused before downloading a byte), interrupted fetch
+   (partial file reclaimed at next startup), two servers starting together (one downloads, the other
+   refuses on the reservation and finds the objects at its next tick), and refusal leaving existing
+   objects served.
+
 **How each deployment gets the pictures:**
-- **Fleet (hub, blue/green Slots).** Objects are content-addressed in `Storage\`, shared by both slots,
-  so the old and new slot each find exactly the files their own manifest names during an overlap. The
-  image tooling's `install` command writes the accepted objects straight into
-  `Storage\cookout-images\objects` **before** the manifest PR merges, so the new slot has every picture
-  the moment it starts.
-- **Self-heal (any non-Docker server):** at startup a background task (never blocking startup) checks
-  that every manifest object exists in the search path; if any is missing and `pack.url` is set, it
-  downloads the pack once to `<storage>/cookout-images/incoming/`, verifies the tar's sha256 and every
-  member, extracts into the storage objects dir with temp-file + rename per object, and deletes the
-  tar. Failure is logged and retried every 6 hours; meanwhile missing pictures fall back to emoji.
-- **Standalone Docker image.** `deploy/standalone/Dockerfile` copies the manifest and runs
-  `python wixy_server/livechat/cookout_pack.py fetch --dest /app/cookout-pack` (the module is
-  stdlib-only so it runs before `pip install`), placed **before** `COPY wixy_server/` so the ~150 MB
-  layer stays cached until the manifest changes. A build arg `COOKOUT_PACK_URL` may override the URL
-  (the sha256 still pins the content) for a mirror if the upstream ever goes private. The fetch fails
-  the build on any mismatch; an empty manifest (`pack: null`) makes it a no-op.
-- **Garbage collection.** Each server records its manifest at startup as
-  `<storage>/cookout-images/manifests/<packVersion>.json` with an epoch-seconds `seenAt`. After a
-  successful self-heal or `install`, objects referenced by no manifest seen in the last 14 days are
-  deleted. Releases: the tooling deletes GitHub releases older than the newest two `cookout-images-v*`
-  (rollback needs the previous one).
+- **Fleet (hub, blue/green Slots).** Objects are content-addressed in `Storage\`, shared by both slots;
+  each slot's own pin keeps exactly the files its manifest names during an overlap. The image tooling's
+  `install` command writes the accepted objects straight into `Storage\cookout-images\objects` under a
+  pending pin **before** the manifest PR merges, so the new slot has every picture the moment it starts.
+- **Self-heal (any non-Docker server):** after registering its slot pin, a background task (never
+  blocking startup) checks that every manifest object exists in the search path; if any is missing and
+  `pack.url` is set, it runs the admitted, bounded `PackStore.fetch` above into the storage objects dir.
+  Failure is logged and retried every 6 hours; meanwhile missing pictures fall back to emoji.
+- **Standalone Docker image.** `deploy/standalone/Dockerfile` explicitly `COPY`s **both**
+  `wixy_server/livechat/cookout_pack.py` and `wixy_server/livechat/cookout_ingredient_images.json`
+  (and nothing else from `wixy_server/`) and then runs
+  `python /app/pack-tools/cookout_pack.py fetch --manifest /app/pack-tools/cookout_ingredient_images.json --dest /app/cookout-pack`
+  (stdlib-only, so it runs before `pip install`), placed **before** `COPY wixy_server/` so the ~150 MB
+  layer stays cached until either file changes. A build arg `COOKOUT_PACK_URL` may override the URL
+  (the sha256 still pins the content) for a mirror. The fetch fails the build on any mismatch; an empty
+  manifest (`pack: null`) makes it a no-op. The baked directory is read-only at runtime and is never
+  GC'd (GC touches only the storage `objects/`).
+- **Releases are never deleted automatically (decided).** Every `cookout-images-v<N>` release asset is
+  retained indefinitely: a fork, an older revision, or a bare server's self-heal may pin any manifest
+  ever shipped, and content addressing cannot recover bytes from a deleted URL. Only the local object
+  cache is garbage-collected. (Cost: ~150 MB per version on GitHub's free release storage; versions are
+  expected to be few.) Should a pack ever have to move, it is first copied to a durable archive whose
+  stable URL every shipped manifest can reach through `COOKOUT_PACK_URL`/a documented mirror, proven by
+  the history check below, before the original is touched — and that is an operator decision, not a
+  tooling step.
 - **Publishing a version** (`images.py publish`, parcel 2): build the tar from accepted objects, compute
-  its sha256, create release `cookout-images-v<N>` (title "Cookout ingredient pictures v<N>") with the
-  tar attached — every `gh` call via PowerShell with the full `gh.exe` path (fleet rule) — download it
-  back and verify the sha256 before writing the new manifest. Then `install`, then the manifest PR.
+  its sha256 and the bounded fields, create release `cookout-images-v<N>` (title "Cookout ingredient
+  pictures v<N>") with the tar attached — every `gh` call via PowerShell with the full `gh.exe` path
+  (fleet rule) — download it back and verify the sha256 before writing the new manifest. Then `install`
+  (pending pin), then the manifest PR. **History check (same command, every publish):** for every
+  version of the manifest ever committed (`git log --follow -p` on the manifest file), confirm its URL
+  answers with exactly its `bytes`; and from v2 onward run a **clean-environment fetch** of the v1
+  manifest (fresh temp storage, no cache) to a full install. Any failure stops the publish.
 
 ### B.7 Serving, caching and privacy
 
@@ -479,34 +587,50 @@ this proof runs; this is the guard.)
    are not anchored by it).
 4. **Judges — stage 2, review.** Each judge is then shown, per image, the checker's verdict, problems
    and reason alongside its own stage-1 verdict, looks at the image again, and answers
-   `{"image": "07", "checkerRight": true|false, "finalVerdict": "correct|wrong|unclear", "reason": "…"}`.
+   `{"image": "07", "checkerRight": true|false, "finalVerdict": "correct|wrong|unclear", "finalProblems": [...], "reason": "…"}`
+   (`finalProblems` uses the §C.1 problem list and rules: empty for `correct`, at least one for `wrong`).
    This is the operator's "check each one and see if they got them right".
-5. **Truth and scoring.** An image's *agreed truth* is the two judges' stage-2 `finalVerdict` when they
-   agree; otherwise it is **contested** and listed. Scoring is on accept-vs-reject (`correct` vs
-   `wrong`/`unclear`), with the three-way table shown as well. Per checker: accuracy against agreed
-   truth; "checker right" rate per judge; **false accepts** (said correct, truth not) — the costly
-   error, because a wrong picture would reach the game; **false rejects** (said not correct, truth
-   correct) — cheap, it only costs a regeneration; decoys caught. Also judge-vs-judge agreement, so the
-   reader can see how firm the "truth" is.
-6. **Recommendation rule (stated before the run, applied mechanically):** Haiku checks the full run if,
-   on its 50: **at most 2 errors against agreed truth**, **no false accept of a `wrong_food` picture**,
-   and **every decoy caught**. Otherwise Luna checks the full run if Luna meets the same bar. If neither
-   does, the full-run checking pauses and the operator is asked (via the `op-ask-question` skill, with
-   the report linked) — the one place this spec stops for him. Picture generation continues meanwhile.
-7. **Report for the operator, plain English** — `triad/cookout/r2/image-calibration.md` plus
+5. **Judges — stage 3, reconcile (only where they still disagree; round-2 review).** For every image
+   whose two stage-2 `finalVerdict`s differ, each judge is shown the other judge's stage-2 answer
+   (verdict, problems, reason) and its own, looks again, and gives a last `{finalVerdict,
+   finalProblems, reason}`. No third model is added: the operator named Sol and Opus as the judges.
+6. **Truth and scoring (total over all 50 of each checker; no empty denominator).** An image is
+   **resolved** when the two judges' latest `finalVerdict`s agree; its truth is that verdict, and its
+   truth problems are the union of both judges' latest `finalProblems`. Otherwise it is **unresolved**.
+   Every one of a checker's 50 images is scored, with this table (checker verdict down, truth across):
+
+   | checker \ truth | `correct` | `wrong` | `unclear` | unresolved |
+   |---|---|---|---|---|
+   | `correct` | right | **false accept** | **false accept** | **error** |
+   | `wrong` | false reject (error) | right | right | **error** |
+   | `unclear` | false reject (error) | right | right | **error** |
+
+   So: `unclear` from the checker is never a false accept (in the full run it goes to the Sol tie-break,
+   §C.1), but it is an error when the picture was plainly fine; an unresolved image always counts
+   **against** the checker. A checker's `wrong_food` false-accept count is the number of its `correct`
+   verdicts on images where **either** judge's latest `finalProblems` contains `wrong_food` (resolved or
+   not). The report also shows the three-way table, "checker right" per judge, decoys caught, and
+   judge-vs-judge agreement at each stage so the reader can see how firm the truth is.
+7. **Recommendation rule (stated before the run, applied mechanically):** a checker qualifies if, over
+   all 50 of its images: **errors (including every unresolved image) ≤ 2**, **`wrong_food` false
+   accepts = 0**, and **every decoy caught**. (Hence at least 48 of its 50 must be resolved.) Haiku
+   checks the full run if Haiku qualifies; otherwise Luna if Luna qualifies. If neither does, the
+   full-run checking pauses and the operator is asked (via the `op-ask-question` skill, with the report
+   linked) — the one place this spec stops for him. Picture generation continues meanwhile.
+8. **Report for the operator, plain English** — `triad/cookout/r2/image-calibration.md` plus
    `image-calibration.html` (the 100 pictures inlined as 160 px thumbnails, ~0.6 MB, each with every
    verdict and reason; disagreements first). The Markdown opens with the answer in 2–3 sentences
    ("Haiku got 49 of 50 right, Luna 48 of 50; neither let a wrong food through; we are using Haiku for
    the rest"), then a small table, then each disagreement in one line with what each model said. No
    unexplained abbreviations. Recorded in cmd's Answers log against his message, and linked to him with
    the deployment's public file link.
-8. **Files:** `<work>/calibration/{sample.json, checks-luna.jsonl, checks-haiku.jsonl,
+9. **Files:** `<work>/calibration/{sample.json, checks-luna.jsonl, checks-haiku.jsonl,
    judge-sol-blind.jsonl, judge-opus-blind.jsonl, judge-sol-review.jsonl, judge-opus-review.jsonl,
-   scores.json}`; the two report files above are committed.
+   judge-sol-reconcile.jsonl, judge-opus-reconcile.jsonl, scores.json}`; the two report files above are committed.
 
 ### C.4 The full run
 
-The chosen checker (§C.3.6) checks every image as it is rendered, 10 + 1 decoy per run, ~400 runs over
+The chosen checker (§C.3.7) checks every image as it is rendered, 10 + 1 decoy per run, ~400 runs over
 the whole run, in parallel with generation (checking never waits for the GPU and vice versa).
 
 ---
@@ -517,8 +641,10 @@ the whole run, in parallel with generation (checking never waits for the GPU and
 
 - **Picture-first.** Wherever an ingredient appears, its picture is the main thing; the name is under it;
   emoji only as the fallback.
-- **Fits the phone while picking.** During `state == "picking"` the pane never scrolls, at 360×640 and
-  390×844 CSS px (and any portrait height ≥ 560 px). The page itself never scrolls in game mode (as now).
+- **Fits the phone while picking.** During `state == "picking"` nothing scrolls whenever the game
+  pane's own available height is at least **411 px** — which covers 360×640 and 390×844 with a 34 px
+  home-indicator inset and a live call header, and 360×560 likewise (the budget is §D.3). The page
+  itself never scrolls in game mode (as now).
 - **Obvious whose turn and what to do.** One sentence, big, at the top of the table.
 - **Unchanged rules.** Blind redaction, moves, skips, twists and their server rules are untouched; this
   is presentation plus the read-only fields of §E.
@@ -544,25 +670,60 @@ an in-memory set for the page's life). Also reopenable from a `?` button in the 
 
 ### D.3 The picking screen (phone first)
 
-A CSS grid filling the pane's height; rows top to bottom:
+**The height budget (round-2 review: re-derived against the real frame).** Everything is budgeted
+against **P, the game pane's own available height**, never the viewport: the viewport minus the
+`.wx-main` top gutter (12 px on phones), minus the shared tab bar (44 px control + 1 px border + the
+bottom safe-area inset — **the tab bar is the sole owner of `safe-area-inset-bottom`**; the pane adds
+none), minus the chat header when a call is not idle (it stays visible in game mode for Accept / Mute /
+End, Inv 55; ≈ 52 px: 44 px controls + 8 px padding). The compact switch is a **container query on the
+pane's height**, so a call header appearing mid-turn re-fits the table without a viewport change. The
+baseline P values below assume no other chrome above the chat view; parcel 4 measures the pane in the
+current build first and, if the numbers differ, corrects this table (the thresholds are on P, so the
+guarantees stand).
 
-| Row | Height (phone) | Content |
+| Viewport | no inset, no call | 34 px inset | 34 px inset + call header |
+|---|---|---|---|
+| 360×640 | P = 583 (normal) | 549 (normal) | 497 (compact) |
+| 390×844 | 787 (normal) | 753 (normal) | 701 (normal) |
+| 360×560 | 503 (compact) | 469 (compact) | 417 (compact) |
+| 360×480 | 423 (compact) | 389 (stage scrolls) | 337 (stage scrolls) |
+
+**Normal mode (P ≥ 508)** — a CSS grid, rows top to bottom, 6 px row gap:
+
+| Row | Height | Content |
 |---|---|---|
-| Title | 44 px (existing) | 🍳 · Blind badge · `?` · Recipe book · End/New · gear (existing items) |
-| Rules strip | 0 or 28 px | the existing twist chips, **one line**, horizontally scrollable, never wrapping |
-| Turn banner | 52 px | **"Your turn — tap the one you want"** (20 px semibold) + subline "Pick 2 of 5 · 2 new pairs left"; or **"Cupcake is choosing…"**; or **"Waiting for Cupcake to join"** with the Join button for the joiner |
-| Progress | 64 px | two rows, one per player: name (or "You") + 5 slots of 28 px — filled = the pick's `thumb` picture (round-cornered), Blind partner's = a 🔒 tile, empty = dashed ring, the next slot gently pulsing. Starters carry a tiny badge. Tap a filled thumb → a small popover with the name (and, for your own picks with secret stars on, "⭐ Star this") |
-| **Stage (1fr)** | the rest | **two big picture cards side by side** with a small "or" between |
-| Actions | 52 px | the skip button ("Deal two new ones (2 left)" / "Final pair") + a **🎲 Twists** button only when a drafting twist is available, which opens a small bottom sheet holding Lucky dip / Chaos shelf (and, for the watcher in Open mode, Sweep one) |
-| Chat row | 64 px (existing reserved row, decisions/00194) | the floating message and chat button — never over a control |
+| Title | 44 (existing) | 🍳 · Blind badge · `?` · Recipe book · End/New · gear (existing items; `?` is new and must still fit one line at 360 px, using the existing gear pattern) |
+| Twists strip | 0 or 24 | only when start-sheet twists are on: their emoji icons (at most 6 × 24 px) after the word "Twists"; **not scrollable, not a target** (the `?` sheet explains them) |
+| Turn banner | 44 | line 1: 16 px/20 px semibold, e.g. **"Your turn — tap the one you want"**, **"Cupcake is choosing…"**, **"Waiting for Cupcake to join"** (Join button for the joiner instead of line 2); line 2: 12 px/16 px, "Pick 2 of 5 · 2 new pairs left" or a note ("Cupcake swept one off your table", "Straight from the chaos shelf"). Copy rule, not truncation: a partner name longer than 12 characters is written "your partner" in the banner; every banner string is ≤ 34 characters so it fits 336 px at 16 px |
+| Progress | 44 | **one 44 px button for the whole row** ("Basket so far"): two groups of 5 **passive** 22 px thumbnails — yours left, theirs right, each led by a 20 px initial chip, a 12 px divider between (total ≈ 304 px ≤ 336). Filled = the pick's `thumb`, the partner's in Blind = a 🔒 tile, empty = dashed ring, the next slot pulsing, starters with a dot. Tapping opens the **basket sheet** (both players' picks large with names; ⭐ Star this on your own picks when secret stars are on). No individual thumb is a target |
+| **Stage (1fr)** | ≥ 208 | **two picture cards side by side**, a 16 px "or" between them, 6 px gaps |
+| Actions | 44 | the skip button (≥ 180 px: "Deal two new ones (2 left)" / "Final pair") + a **🎲 Twists** button (≥ 96 px) only when a drafting twist is available, opening a small bottom sheet with Lucky dip / Chaos shelf (and, for the watcher in Open mode, Sweep one) |
+| Chat row | 64 (existing reserved row, decisions/00194, unchanged) | the floating message and chat button — never over a control |
 
-Bottom safe area (`env(safe-area-inset-bottom)`) is added under the chat row.
+Fixed rows with twists: 44 + 24 + 44 + 44 + 44 + 64 + 6 gaps × 6 = **300 px**, so the stage gets
+`P − 300` and its minimum 208 gives the **508 px** threshold.
 
-**The card** (`button`, the whole card is the target): a square picture on the `#F5F2EC` tile, sized
-`min(card width, stage height − 72 px)`; under it the **name** (15 px semibold, 2-line clamp) and the
-**what** line (12.5 px, 2-line clamp, falls back to `blurb`). No category badge or emoji (the picture
-says it). On phones each card is ~150–190 px wide; on desktop the pair is centred in at most 720 px and
-pictures grow to at most 300 px.
+**Compact mode (411 ≤ P < 508):** title 44; no twists strip (a dot on `?` instead); banner 36 (line 1
+only, 15 px); progress 44 (same single button); actions 44; chat row 64; 4 px gaps × 5 = **252 px
+fixed**; cards show the picture and the name only (the what-line stays in the card's accessible
+description and in the basket sheet). Stage minimum = 96 + 51 + 12 = 159, so **P ≥ 411**.
+
+**Below P = 411:** only the stage scrolls, vertically; title, banner, progress, actions, chat row and
+any call controls stay fixed, unclipped and tappable. This is the stated limit (it is reached only on
+very short screens with an inset, e.g. 360×480 with a home indicator).
+
+**The card** (`button`; the whole card is the target): padding 6 px; a square picture on the
+`#F5F2EC` tile in a grid row `minmax(96px, 1fr)` (the flexible part: the picture shrinks, the text never
+does); under it the **name** (14 px/17 px semibold, up to 3 lines — the bank's longest name is 36
+characters, about 2 lines at the narrowest card — never clamped or ellipsised) and, in normal mode, the
+**what** line (12 px/15 px, up to 3 lines for the 60-character maximum of §A.1). When an entry has no
+catalogue `what`, the card shows the bank `blurb` instead only if it is ≤ 60 characters; a longer blurb
+is left off the card (never clipped) and kept in the card's accessible description and the basket
+sheet. Worst-case card text = 51 + 45 + 4 = 100 px; card
+minimum = 96 + 100 + 12 = 208. No category badge or emoji (the picture says it). Widths: 360 px viewport
+→ content 336 px → card 154 px → picture ≤ 142 px (≥ 102 px at the 360×640 inset-plus-call case);
+390 px → card 169 px → picture ≤ 157 px. Desktop: the pair is centred in at most 720 px and pictures
+grow to at most 300 px.
 
 **One tap picks (decided).** Tapping a card sends the pick immediately (no separate "Pick this" button
 and no confirm step): it is the cleanest flow and there is no scrolling left to cause a stray tap. The
@@ -580,11 +741,9 @@ data exists in the view, so none can be in the DOM).
 **Notes that used to stack above the cards** (role line, "swept off your table", chaos note) become
 the banner's subline, so they never push the cards.
 
-**Fitting rules:** the stage uses `container-type: size`; the picture's side is computed in CSS from the
-container size; minimum picture 96 px. At portrait heights below 560 px (short phones, landscape) a
-**compact mode** merges banner and progress into one 44 px row (10 thumbs of 24 px) and shrinks the
-actions row to 44 px; the no-scroll guarantee holds down to 480 px tall. Below 480 px tall the stage
-alone may scroll (stated limit, not tested as no-scroll).
+**Shared frame:** none of this changes the shared frame (tab bar, its inset, the 64 px chat row, the
+call header). If parcel 4 finds a shared-frame change unavoidable, parcel 4 is its sole owner and makes
+it only with the coordinator's approval, re-running the WYR and Adventure e2e suites.
 
 **Removed while picking:** the basket tray (the progress thumbnails replace it) and the staples footer
 (moved to the reveal, §D.5).
@@ -608,8 +767,8 @@ fun facts (as a short list).
 ### D.5 Basket, reveal, dishes, recipe book, fridge search
 
 - **Reveal / basket (finished):** the existing banner becomes a **5×2 grid of picture thumbnails**
-  (thumbs at ~56 px on a 360 px phone, larger on desktop) with the name under each (11 px, 2-line
-  clamp), grouped by player; Blind's "all ten flip open together" animation flips picture tiles. Under
+  (thumbs at ~56 px on a 360 px phone, larger on desktop) with the name under each (11 px, wrapping to as many lines as it needs —
+  never clamped; the finished stage may scroll), grouped by player; Blind's "all ten flip open together" animation flips picture tiles. Under
   it, one line: "Plus cupboard staples:" with the seasoning/staple thumbs. Stars, starters and via
   badges keep their meaning as small corner badges.
 - **Dish cards:** the "uses" chips become 28 px thumbnails with the name in a tooltip/`title` and
@@ -677,11 +836,14 @@ IngredientSnap = {id, name, category, emoji, blurb, what: string | null, image: 
 
 - `cookout_catalogue.py` (loader, parcel 1): `load_cookout_catalogue()` / `_or_empty()`; strict schema
   shared with the validator.
-- `cookout_pack.py` (manifest + pack, parcel 2): stdlib-only; manifest loader, object paths, tar
-  verification/install, fetch, gc, and a CLI.
+- `cookout_pack.py` (manifest + pack, parcel 2): stdlib-only; manifest loader with the hard bounds,
+  object paths, the storage lock, registry and pins, admitted bounded fetch, tar verification/install,
+  gc, and a CLI.
 - `cookout_visuals.py` (parcel 3): `IngredientVisuals` joining catalogue + manifest + object search path
   into `snap_extras(id)` and `facts(id)`; `default_visuals()` lazily built once per process like
-  `default_bank()`; the startup self-heal task; the `/admin/cookout-img/` route (registered in
+  `default_bank()`; at startup, the slot pin (registered before anything else touches the store) and
+its 300 s lease refresh on the supervised sweep, the self-heal task, the daily GC, and the clean-shutdown
+retire; the `/admin/cookout-img/` route (registered in
   `app.py` before the `/admin/static` mount, in the same group).
 - `settings.py`: `cookout_images_dir` (`WIXY_COOKOUT_IMAGES_DIR`) and `cookout_images_baked_dir`
   (`WIXY_COOKOUT_IMAGES_BAKED_DIR`), both optional paths.
@@ -712,10 +874,12 @@ manifest with `pack: null` simply has emoji fallbacks.
   well-formed). Imports the tooling validator the way `test_cookout_bank.py` imports `validate_bank.py`.
 - `test_cookout_catalogue.py` — loader strictness on fixtures (bad lengths, unknown presentation,
   forbidden words, stale `nameKey`, facts waivers).
-- `test_cookout_pack.py` — empty manifest valid; manifest strictness; tar install rejects a bad member
-  sha, an extra member, a missing member, a directory/symlink/hardlink member, `..`/absolute names;
-  install is atomic per object; fetch via a fake transport verifies the tar sha; gc keeps objects of
-  manifests seen within 14 days and removes older.
+- `test_cookout_pack.py` — empty manifest valid; manifest strictness including the hard bounds
+  (missing `bytes`/`objects`/`installedBytes`, over-limit values, `objects` not equal to the sha set);
+  tar install rejects a bad member sha, an extra member, a missing member, a directory/symlink/hardlink
+  member, `..`/absolute names, an over-size member, a running total over `installedBytes`; install is
+  atomic per object; every pin/lock/GC case listed in §B.6; every admission/byte-ceiling case listed in
+  §B.6.
 - `test_cookout_visuals.py` — every snapshot in a view carries `what`/`image`; `image` is `null` when
   the object file is missing or the id is not in the manifest; facts only on picks when not `picking`;
   staples enriched; fridge search enriched; **Blind regression:** across every picking state of a Blind
@@ -723,14 +887,18 @@ manifest with `pack: null` simply has emoji fallbacks.
   JSON.
 - `test_cookout_image_route.py` — known sha → 200 `image/webp`, immutable cache headers, nosniff, ETag,
   304 on `If-None-Match`; unknown/malformed sha → 404; known sha with missing file → 404; works without
-  an unlock token; search-path precedence (env dir, storage dir, baked dir).
+  an unlock token; search-path precedence (env dir, storage dir, baked dir); the server writes and
+  refreshes its slot pin and retires it on shutdown.
 - `test_cookout_visual_tooling.py` — with fakes, no network or GPU: author/fact-check/verdict parsers
   accept the schemas and reject every violation; batch journal resumes a persisted `run_id` instead of
   spawning; decoy placement and the discard-on-miss rule; the empty-queue gate submits only after three
   empty polls and never while `/queue` is busy (fake ComfyUI); attempt ladder 1–4 then review; the
-  calibration sampler is deterministic for a seed and splits 50/50; scoring computes agreed truth,
-  contested items, false accepts/rejects and applies the §C.3.6 rule; image file names in a check
-  directory never contain the ingredient name.
+  calibration sampler is deterministic for a seed and splits 50/50; scoring follows the §C.3.6 table
+  and the §C.3.7 rule, including: all 50 unresolved → not qualified; 47 resolved and right + 3
+  unresolved → not qualified; a `correct` on an unresolved image where one judge tagged `wrong_food` →
+  not qualified; a judge changing its problems between stages → the latest `finalProblems` are used;
+  `unclear` on a truth-`wrong` image is not an error; image file names in a check directory never
+  contain the ingredient name.
 
 ### F.2 vitest (`admin-ui/tests/cookout/`)
 
@@ -749,20 +917,67 @@ manifest with `pack: null` simply has emoji fallbacks.
 The fixture server sets `WIXY_COOKOUT_IMAGES_DIR` to a temp dir filled by
 `cookout_pack.py placeholders --dest <dir>` (one tiny valid WebP per manifest sha; the runtime check is
 presence, the sha check belongs to install/fetch), and a fixture manifest/catalogue covering the fixture
-bank ids. At **360×640, 390×844 and 1280×800**, for Open and Blind, with no twists and with every
-twist on:
+bank ids.
+
+**Matrix:** viewports **360×640, 390×844, 360×560, 360×480 and 1280×800**; each phone viewport also
+with a **34 px bottom inset** (injected as `.wx-srv-tabs { padding-bottom: 34px !important }`, which is
+exactly how the frame applies the real inset, so no production test hook is needed) and with a
+**non-idle call** (a ringing incoming call from the second e2e device, using the existing call e2e
+fixtures, so the chat header is really shown); Open and Blind; no twists and every twist on; and a
+**long-text fixture** (the bank's longest name, 36 characters, plus a 60-character `what`).
+
 - the intro shows, dismisses, and does not show again on reload;
-- **no-scroll assertion** in every picking state (my turn; watching; Blind cloche; waiting for Join;
-  veto note; chaos pair; final pair): `document.scrollingElement.scrollHeight <= innerHeight`, and for
-  every element inside the pane `scrollHeight <= clientHeight + 1` where its computed `overflow-y` can
-  scroll; both cards' bounding boxes lie fully inside the viewport, above the chat row, and do not
-  overlap the actions row; the skip button is visible;
+- **fit assertion** in every picking state (my turn; watching; Blind cloche; waiting for Join; veto
+  note; chaos pair; final pair; the Twists sheet closed), for every combination whose P (measured from
+  the pane) is ≥ 411:
+  - `document.scrollingElement.scrollHeight <= innerHeight`, and **for every element in the pane,
+    whatever its `overflow`**, `scrollHeight <= clientHeight + 1` and `scrollWidth <= clientWidth + 1`
+    (hidden overflow is a failure, not a pass), except the two picture `img`s' own boxes;
+  - every required element — both cards, each card's picture and name (and what-line in normal
+    mode), the banner text, the progress button, the skip button, the Twists button when present, the
+    title row's controls, the chat button, and the call's Accept/Mute/End when a call is live — has its
+    bounding box fully inside the viewport and inside every ancestor's clip box, and
+    `document.elementFromPoint` at its centre returns it or a descendant (hit-testable, nothing on
+    top);
+  - every interactive target is at least 44×44 px and no two targets' boxes overlap;
+  - each rendered picture is at least 96×96 px; name elements are not clamped
+    (`scrollHeight <= clientHeight + 1`, no `text-overflow: ellipsis`);
+- for combinations with P < 411 (360×480 with the inset or a call): the page does not scroll, the
+  title, banner, progress, actions, chat row and call controls pass the same visibility/hit tests, and
+  only the stage scrolls;
 - a tap on a card picks it; the progress thumb appears; pictures actually load (natural width > 0);
 - the chef carousel shows during a delayed fake concepts job and advances;
 - the reveal grid shows ten pictures; a missing picture shows the emoji tile;
 - Blind: the partner's names and image URLs are absent from the DOM until reveal.
 
-### F.4 Docs to update in the same change (each parcel updates the ones for its files)
+### F.4 The image-boot proof actually serves a baked picture (round-2 review; parcel 3 owns it)
+
+The existing CI image-boot steps (`.github/workflows/ci.yml`) only poll `/healthz` and `/api/version`.
+Parcel 3 adds `deploy/standalone/ci/cookout_image_proof.sh` and the steps that call it:
+
+1. **Test pack, every CI run.** `deploy/standalone/ci/cookout-test-pack/` holds a deterministic
+   2-ingredient pack (two real bank ids, four tiny WebPs, a tar and a manifest naming them with exact
+   digests, `bytes`, `objects` and `installedBytes`; generated once by `cookout_pack.py`, committed,
+   a few KB). The CI job builds a **second** image (`wixy:ci-pack`) from a copy of the workspace in which
+   the committed manifest is replaced by the test manifest, with `COOKOUT_PACK_URL` pointing at a
+   throwaway local HTTP server on the runner serving the test tar (`docker build --network host`). This
+   runs the identical Dockerfile path: explicit copy of `cookout_pack.py` + manifest, build-time fetch,
+   bounds and sha checks, baked directory, and the packaged manifest in the installed package.
+2. **Boot with nothing to lean on:** `docker run --network none`, a fresh empty `/data` (no volume),
+   **no** `WIXY_COOKOUT_IMAGES_DIR`, so the only possible source is `WIXY_COOKOUT_IMAGES_BAKED_DIR`.
+3. **Assert from inside the container** (`docker exec … curl` to `127.0.0.1`, since the network is
+   none): for one card sha and one thumb sha from the test manifest, `GET /admin/cookout-img/<sha>.webp`
+   → `200`, `Content-Type: image/webp`, and the sha256 of the body equals the sha; an unknown sha →
+   `404`. Then `docker exec … python -c` loads `default_visuals()` and asserts `snap_extras(id)["image"]`
+   is non-null for both test ids, and loads `load_cookout_catalogue()` and asserts its entry count equals
+   the committed catalogue's (the catalogue is packaged).
+4. **Real pack.** When the committed manifest is non-empty, the same script runs against the real
+   image (`wixy:ci`, real manifest, real release URL) in `publish-image.yml` on every main build and in
+   `ci.yml` on PRs that change the manifest (a path filter, so ordinary PRs do not download ~150 MB),
+   checking one card and one thumb chosen by a seeded draw from the manifest.
+5. These fixtures are separate from `wixy_server/tests/fake_cmd.py` (owned by the chef-fix parcel).
+
+### F.5 Docs to update in the same change (each parcel updates the ones for its files)
 
 - `docs/ai/livechat.md` — new §24.2 "Cookout pictures, catalogue and the picture-first table".
 - `docs/ai/contracts.md` — snapshot fields, `facts`, staples `image`, `/admin/cookout-img/{sha}.webp`.
@@ -770,7 +985,8 @@ twist on:
   text are engine catalogue data: generated from ingredient names only, never from chat content; not
   erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots
   already in the viewer's redacted view."
-- `docs/ai/runbook.md` — object store path, pack install/fetch/gc, the two env vars, how to regenerate
+- `docs/ai/runbook.md` — object store path, the registry/pins/lock and `cancel`/`status`, pack
+  install/fetch/gc and the download admission, that releases are never deleted, the two env vars, how to regenerate
   pictures and publish a new pack, how a missing pack self-heals, the PAUSE file.
 - `docs/ai/testing.md`, `docs/ai/architecture.md` (module map), `tooling/README.md`,
   `deploy/standalone/README.md` (the baked pack).
@@ -792,9 +1008,9 @@ file is fully typed and each parcel runs `mypy --strict` on its own tooling file
 |---|---|---|---|
 | 1 | Catalogue tooling + data | Sonnet 5.5 | `wixy_server/cmdchat.py` (the additive `spawn_run` kwargs only), `tooling/cookout/visual/{__init__,cmdruns,catalogue,validate_catalogue}.py`, `tooling/cookout/visual/facts_waivers.json`, `wixy_server/livechat/cookout_catalogue.py`, `wixy_server/livechat/cookout_catalogue.json`, `triad/cookout/r2/catalogue-report.md`, tests `test_cmdchat_spawn_run_provider.py`, `test_cookout_catalogue.py`, `test_cookout_catalogue_data.py` |
 | 2 | Image generation, checking, calibration | Sonnet 5.5 | `tooling/cookout/visual/{prompts,images,check,calibrate,review}.py`, `tooling/cookout/visual/image_review.json`, `wixy_server/livechat/cookout_pack.py`, `wixy_server/livechat/cookout_ingredient_images.json`, `triad/cookout/r2/image-calibration.{md,html}`, `triad/cookout/r2/images-report.md`, tests `test_cookout_pack.py`, `test_cookout_visual_tooling.py`; edits the `visual` field of `cookout_catalogue.json` only through `catalogue.py`'s API (attempt-3 rewrites) after parcel 1 has merged |
-| 3 | Server serving + wire | Sonnet 5.5 | `wixy_server/livechat/cookout_visuals.py`, `_snap_json`/view enrichment in `wixy_server/livechat/cookout_game.py`, the enrichment calls in `wixy_server/routes_livechat_cookout.py`, the route registration in `wixy_server/app.py`, `wixy_server/settings.py` (two fields), `deploy/standalone/Dockerfile`, tests `test_cookout_visuals.py`, `test_cookout_image_route.py` |
-| 4 | UI | **Opus 5.5** | `admin-ui/src/server/cookout/**` (incl. new `intro.ts`, `carousel.ts`, `pictures.ts`), the Cookout rules in `admin-ui/src/server/chat.css`, `admin-ui/tests/cookout/**`, the rebuilt `wixy_server/static/admin/` bundle |
-| 5 | Docs + e2e | Sonnet 5.5 | everything in §F.4, `e2e/tests/server-cookout-visual.spec.ts`, the e2e fixture server/fixtures additions |
+| 3 | Server serving + wire | Sonnet 5.5 | `wixy_server/livechat/cookout_visuals.py`, `_snap_json`/view enrichment in `wixy_server/livechat/cookout_game.py`, the enrichment calls in `wixy_server/routes_livechat_cookout.py`, the route registration in `wixy_server/app.py`, `wixy_server/settings.py` (two fields), `deploy/standalone/Dockerfile`, the Cookout image-proof steps in `.github/workflows/ci.yml` and `.github/workflows/publish-image.yml`, `deploy/standalone/ci/cookout_image_proof.sh`, `deploy/standalone/ci/cookout-test-pack/**`, tests `test_cookout_visuals.py`, `test_cookout_image_route.py` |
+| 4 | UI | **Opus 5.5** | `admin-ui/src/server/cookout/**` (incl. new `intro.ts`, `carousel.ts`, `pictures.ts`), the Cookout rules in `admin-ui/src/server/chat.css` (and, only with the coordinator's approval, any shared-frame rule there — §D.3), `admin-ui/tests/cookout/**`, the rebuilt `wixy_server/static/admin/` bundle |
+| 5 | Docs + e2e | Sonnet 5.5 | everything in §F.5, `e2e/tests/server-cookout-visual.spec.ts`, the e2e fixture server/fixtures additions |
 
 ### G.2 Order and parallelism
 
@@ -835,6 +1051,28 @@ CATALOGUE_PATH: Path  # Path(__file__).with_name("cookout_catalogue.json")
 
 
 @dataclass(frozen=True, slots=True)
+class CatalogueSubject:
+    id: str
+    name: str
+    aliases: tuple[str, ...]
+    category: str
+    category_name: str
+    role: str
+    blurb: str
+
+
+SEASONING_SUBJECT_IDS = ("water", "salt", "black-pepper")
+
+
+def subjects(
+    bank: CookoutBank,
+) -> list[CatalogueSubject]: ...  # ingredients, then the 3 seasonings (§A.1)
+def name_key(
+    subject: CatalogueSubject,
+) -> str: ...  # sha256(name + US + category)[:16], US = the 0x1F unit separator (§A.1)
+
+
+@dataclass(frozen=True, slots=True)
 class CatalogueEntry:
     id: str
     what: str
@@ -870,13 +1108,30 @@ class ImageRef:
     thumb: str  # sha256 hex
 
 
+MAX_PACK_BYTES = 400 * 1024 * 1024
+MAX_INSTALLED_BYTES = 400 * 1024 * 1024
+MAX_OBJECTS = 10_000
+MAX_OBJECT_BYTES = 2 * 1024 * 1024
+RETIRED_KEEP_S = 72 * 3600
+SLOT_LEASE_S = 900
+SLOT_REFRESH_S = 300
+
+
+@dataclass(frozen=True, slots=True)
+class PackRef:
+    url: str
+    sha256: str
+    bytes: int
+    objects: int
+    installed_bytes: int
+
+
 @dataclass(frozen=True, slots=True)
 class PackManifest:
     pack_version: int
-    url: str | None
-    sha256: str | None
-    bytes: int | None
+    pack: PackRef | None  # None only for the empty manifest
     items: Mapping[str, ImageRef]
+    digest: str  # sha256 of the manifest file's bytes
 
     def shas(self) -> frozenset[str]: ...
 
@@ -884,19 +1139,44 @@ class PackManifest:
 class PackError(ValueError): ...
 
 
-def load_manifest(path: Path | None = None) -> PackManifest: ...
+class StoreBusy(Exception): ...  # lock not acquired within 120 s, or a live download reservation
+
+
+class FetchRefused(Exception): ...  # admission (disk floor) refused; nothing changed
+
+
+def load_manifest(path: Path | None = None) -> PackManifest: ...  # enforces every hard bound
 def object_relpath(sha: str) -> PurePosixPath: ...  # "ab/ab…ef.webp"
-def install_pack(
-    tar_path: Path, objects_dir: Path, manifest: PackManifest
-) -> int: ...  # objects written
-def fetch_pack(
-    manifest: PackManifest, dest_root: Path, *, url: str | None = None, timeout_s: float = 600.0
-) -> int: ...  # downloads, verifies, installs
-def gc_objects(objects_dir: Path, manifests_dir: Path, *, keep_days: float = 14.0) -> int: ...
 
 
-# CLI: cookout_pack.py fetch --dest DIR [--url URL] | install --tar T --dest DIR | verify --dest DIR
-#      | gc --dest DIR --manifests DIR | placeholders --dest DIR
+class PackStore:
+    """`<storage>/cookout-images/`: objects, registry, pins, incoming, the one lock."""
+
+    def __init__(self, root: Path, *, min_free_bytes: int) -> None: ...
+    def register_slot(
+        self, manifest: PackManifest
+    ) -> str: ...  # -> pin id; removes a pending pin of that digest
+    def refresh_slot(self, pin_id: str) -> None: ...
+    def retire_slot(self, pin_id: str) -> None: ...
+    def install(
+        self, tar_path: Path, manifest: PackManifest
+    ) -> int: ...  # pending pin first; -> objects written
+    def cancel_pending(self, digest: str) -> bool: ...
+    def fetch(
+        self, manifest: PackManifest, *, url: str | None = None
+    ) -> int: ...  # admitted, bounded
+    def gc(self) -> int: ...  # under the lock; -> objects deleted
+    def missing(self, manifest: PackManifest, search: Sequence[Path]) -> frozenset[str]: ...
+
+
+def fetch_to_dir(
+    manifest: PackManifest, dest: Path, *, url: str | None = None
+) -> int: ...  # Docker build: bounded, floor 0, no registry
+
+
+# CLI: cookout_pack.py fetch --manifest M --dest DIR [--url URL]   (Docker build; uses fetch_to_dir)
+#      | install --tar T --storage ROOT | cancel --digest D --storage ROOT
+#      | gc --storage ROOT | status --storage ROOT | verify --dest DIR | placeholders --dest DIR
 
 
 # wixy_server/livechat/cookout_visuals.py (parcel 3)
@@ -933,7 +1213,10 @@ export interface Staple { readonly id: string; readonly name: string; readonly i
    stated rule (or the operator's answer).
 3. Every entry has an accepted picture except a listed picture-less set (expected < 1 %), with the
    decoy catch rate and attempt counts in `images-report.md`.
-4. Pack v1 released, sha-pinned in the manifest, installed on hub, baked into the standalone image
-   (CI image-boot proof green).
-5. All §F tests green; the no-scroll e2e passes at 360×640 and 390×844; the operator's next game shows
+4. Pack v1 released, sha-pinned in the manifest, installed on hub under a slot pin, baked into the
+   standalone image, and the §F.4 proof green for both the test pack and the real pack (a baked card
+   and thumb served with matching sha256 from a container with no network and empty storage); the
+   publish history check green.
+5. All §F tests green; the fit e2e passes across the whole §F.3 matrix (including the 34 px inset, a
+   live call, every twist and the long-text fixture); the operator's next game shows
    pictures on the cards, the progress, the reveal, the carousel and the dishes.
