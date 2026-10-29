@@ -419,8 +419,8 @@ class TestSpinValidation:
         [
             ("delta", 719.9),
             ("delta", -719.9),
-            ("delta", 3600.1),
-            ("delta", -3600.1),
+            ("delta", 3960.1),
+            ("delta", -3960.1),
             ("delta", 0),
             ("durationMs", 3499),
             ("durationMs", 7001),
@@ -449,7 +449,8 @@ class TestSpinValidation:
         ("field", "value"),
         [
             ("delta", 720),
-            ("delta", -3600),
+            ("delta", -3960),
+            ("delta", 3700),
             ("durationMs", 3500),
             ("durationMs", 7000),
             ("from", 1e6),

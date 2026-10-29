@@ -2193,7 +2193,7 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   mutation is idempotent**: the SAME move replayed (same axis+from+delta, same stage+choice, same decision) answers
   200 with the unchanged view and appends nothing; a DIFFERENT move after the state advanced is 409 `bad_state`; of two
   racing writers the first wins.
-- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3600`,
+- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3960` (the flick's own `clamp(1.5·speed, 720, 3600)` plus a client-drawn extra of under one turn),
   `3500 <= durationMs <= 7000`, all finite; the `lat` spin REQUIRES `result` (`point`, `land`, `centre` as `[lng, lat]`
   in degrees, `sea`, `landUnit`, 1-10 unique `candidates`), the `lng` spin REFUSES it; `landUnit` and every candidate
   must be playable bank units (a whole-country-advised unit only while the preference is on). The `lat` spin stores the
