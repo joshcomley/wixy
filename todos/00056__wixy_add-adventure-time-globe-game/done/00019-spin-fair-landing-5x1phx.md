@@ -19,3 +19,5 @@ Latitude: `sin(lat) = -sin(phi)` for every lambda (checked against d3 geoRotatio
 so area-fair means phi mod 360 has density |cos phi| / 4. Server bound `|delta|` becomes 720..3960.
 
 Work: Sonnet builder (cmd delegate) on branch adv/spin-fair-landing; driver reviews and ships.
+
+**2026-10-29, done:** builder relation 396471a0 (Sonnet), red 8/64 -> green 64/64; driver added a scene test on the posted landing point and an independent 200k-spin simulation (30 deg of a pole 0.1346 vs 0.1340, 20 deg 0.0607 vs 0.0603, longitude bands 8.25-8.40 %, 0 whole-turn spins). PR #373 merged as ac266b8; Wixy restarted on it at 18:12:46Z. Answers entry 3413 updated.
