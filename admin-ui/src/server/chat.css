@@ -8922,6 +8922,215 @@ button.wx-srv-ck-rtile {
   padding: 0 4px 2px;
 }
 
+/* -- Game modes (spec/server-chat/09c-cookout-modes.md §6) ----------------------------------------------------
+   The start sheet's "What are we making?" tiles, the bread slot's corner mark, the dish card's "On <bread>"
+   line and build pill, the chef stage's mode header, the card's mode badge and the book's mode badge. A
+   Classic round carries none of these classes, so it looks exactly as before. */
+
+.wx-srv-ck-start-section {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-start-what {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Two tiles fill a 360 px phone side by side, each ≥ 150 px wide: the sheet's column there is 304 px, so the
+   gap is 4 px (150 + 4 + 150). A third tile wraps to a new row. */
+.wx-srv-ck-mtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+  gap: 4px;
+}
+
+.wx-srv-ck-mtile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 6px 8px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.wx-srv-ck-mtile-on {
+  border-color: var(--ck-tomato);
+  box-shadow: 0 0 0 3px rgba(217, 71, 43, 0.18);
+}
+
+.wx-srv-ck-mtile:disabled {
+  cursor: default;
+}
+
+.wx-srv-ck-mtile:disabled:not(.wx-srv-ck-mtile-on) {
+  opacity: 0.5;
+}
+
+/* The picture: 1:1, at most 96 px; on a short screen it shrinks so the sheet still fits. */
+.wx-srv-ck-mtile-art {
+  display: grid;
+  place-items: center;
+  width: min(96px, 11vh);
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-mtile-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-ck-mtile-emoji {
+  font-size: min(3rem, 7vh);
+  line-height: 1;
+}
+
+.wx-srv-ck-mtile-label {
+  font-weight: 800;
+  font-size: 0.9375rem;
+  line-height: 1.2;
+}
+
+.wx-srv-ck-mtile-blurb {
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: var(--ck-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-mtile-tick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--ck-line-strong);
+  background: var(--ck-paper);
+  color: transparent;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.wx-srv-ck-mtile-on .wx-srv-ck-mtile-tick {
+  border-color: var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+/* While the tiles show, "How do we play?" sits close to its two options, and those are slimmer (still ≥ 44 px
+   targets). The Classic-only sheet never has this class and is exactly as before. */
+.wx-srv-ck-start-with-modes .wx-srv-ck-start-section + .wx-srv-ck-start-modes {
+  margin-top: -6px;
+}
+
+.wx-srv-ck-start-with-modes .wx-srv-ck-mode {
+  min-height: 52px;
+  padding: 6px 12px;
+}
+
+.wx-srv-ck-start-with-modes .wx-srv-ck-mode-icon {
+  font-size: 1.375rem;
+}
+
+.wx-srv-ck-mtiles-note {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+/* The bread slot: a small 🍞 in its top-left corner, inside the 22 px tile (overflow there would be clipped). */
+.wx-srv-ck-prog-anchor {
+  box-shadow: 0 0 0 1.5px var(--ck-saffron);
+}
+
+.wx-srv-ck-prog-mark {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  font-size: 0.5rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.wx-srv-ck-bline-who {
+  font-size: 0.6875rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-staple-free-tag {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+/* The chef stage's mode header ("🥪 Toasted sandwich"). */
+.wx-srv-ck-stagehead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+/* "On Sourdough loaf" under a dish's title, with the bread's thumbnail. */
+.wx-srv-ck-dish-anchor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.wx-srv-ck-dish-anchor-pic {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 0.875rem;
+}
+
+.wx-srv-ck-tag-build {
+  border-color: var(--ck-tomato);
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-recipe-build {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-mcard-mode {
+  background: var(--ck-chip);
+  color: var(--wx-ink);
+}
+
 .wx-srv-ck-encore {
   display: flex;
   flex-direction: column;

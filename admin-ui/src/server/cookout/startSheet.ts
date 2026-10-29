@@ -511,6 +511,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     const shown = listed.length > 1;
     what.hidden = !shown;
     howHead.hidden = !shown;
+    // The sheet tightens its rows while the tiles show, so it still fits a phone (09c §6.1).
+    sheet.classList.toggle("wx-srv-ck-start-with-modes", shown);
     playStyles.setAttribute("aria-labelledby", shown ? howHead.id : "");
     if (!shown) {
       playStyles.removeAttribute("aria-labelledby");
@@ -549,6 +551,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   function refresh(): void {
     const mode = chosenMode();
     drawModes();
+    // With the mode tiles showing, their blurbs say what each game is: the one-line intro steps aside.
+    intro.hidden = !what.hidden;
     intro.textContent =
       mode.id === CLASSIC_MODE_ID
         ? "Take turns picking 10 ingredients, then see what the chef invents."
