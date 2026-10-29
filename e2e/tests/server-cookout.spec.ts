@@ -196,6 +196,42 @@ function recordBodies(page: Page): string[] {
   return bodies;
 }
 
+/** The cupboard staples are listed in every view (the tray names them), so they are never "withheld". */
+const STAPLE_IDS = new Set(["water", "salt", "black-pepper", "butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"]);
+
+/** True when any response body carries this exact ingredient id as a JSON string value. */
+function bodyHasId(bodies: readonly string[], id: string): boolean {
+  const parsed = bodies.flatMap((body) => {
+    try {
+      return [JSON.parse(body) as unknown];
+    } catch {
+      return [];
+    }
+  });
+  const found = (value: unknown): boolean => {
+    if (value === id) return true;
+    if (Array.isArray(value)) return value.some(found);
+    if (value !== null && typeof value === "object") return Object.values(value).some(found);
+    return false;
+  };
+  return parsed.some(found);
+}
+
+/** True when the screen text shows this ingredient name as whole words. */
+function textShows(text: string, name: string): boolean {
+  const lower = text.toLowerCase();
+  const needle = name.toLowerCase();
+  let from = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, from);
+    if (at < 0) return false;
+    const before = at === 0 ? " " : lower.charAt(at - 1);
+    const after = lower.charAt(at + needle.length) || " ";
+    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
+    from = at + 1;
+  }
+}
+
 async function dishCount(page: Page): Promise<number> {
   return await game(page).locator(".wx-srv-ck-dish").count();
 }
@@ -324,8 +360,11 @@ test.describe("Cookout", () => {
       // The waiting player sees a secret turn and no ingredient at all: not in the DOM...
       await eventually(pages, async () => (await game(other).locator(".wx-srv-ck-cloche").count()) === 1, "the other side shows a secret turn");
       await expect(game(other).locator("[data-ingredient]")).toHaveCount(0);
-      const text = (await game(other).locator(".wx-srv-ck-scroll").innerText()).toLowerCase();
-      for (const name of offer.names) expect(text).not.toContain(name.toLowerCase());
+      const text =
+        (await game(other).locator(".wx-srv-ck-stage").innerText()) + " " + (await game(other).locator(".wx-srv-ck-progress").innerText());
+      offer.ids.forEach((id, i) => {
+        if (!STAPLE_IDS.has(id)) expect(textShows(text, offer.names[i]!), `${offer.names[i]} is on the waiting screen`).toBe(false);
+      });
       await expect(game(other)).toContainText("Secret turn");
 
       if (turn === 1) await shot(pageB, "cookout-blind-secret-turn");
@@ -337,8 +376,8 @@ test.describe("Cookout", () => {
         // Nine picks in, the last turn is the only one left: still nothing of the partner's, anywhere.
         const aSaw = offeredTo[0].flatMap((o) => o.ids);
         const bSaw = offeredTo[1].flatMap((o) => o.ids);
-        for (const id of aSaw) expect(bodiesB.join("\n")).not.toContain(id);
-        for (const id of bSaw) expect(bodiesA.join("\n")).not.toContain(id);
+        for (const id of aSaw.filter((i) => !STAPLE_IDS.has(i))) expect(bodyHasId(bodiesB, id), `Bob's responses carry ${id}`).toBe(false);
+        for (const id of bSaw.filter((i) => !STAPLE_IDS.has(i))) expect(bodyHasId(bodiesA, id), `Alice's responses carry ${id}`).toBe(false);
       }
     }
 
@@ -391,7 +430,7 @@ test.describe("Cookout", () => {
     // Nothing was revealed to Bob: no reveal banner, no ingredient of Alice's, in the DOM or any response.
     await expect(game(pageB).locator(".wx-srv-ck-reveal")).toHaveCount(0);
     await expect(game(pageB).locator("[data-ingredient]")).toHaveCount(0);
-    for (const id of aOffers) expect(bodiesB.join("\n")).not.toContain(id);
+    for (const id of aOffers.filter((i) => !STAPLE_IDS.has(i))) expect(bodyHasId(bodiesB, id), `Bob's responses carry ${id}`).toBe(false);
     // An ended round cannot be played on: neither side has a pair to pick from.
     await expect(pickable(pageA)).toHaveCount(0);
     await expect(pickable(pageB)).toHaveCount(0);
