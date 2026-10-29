@@ -108,6 +108,27 @@ CF_* from `D:\Servers\Loom\.env`), clones the **site repo** to `Storage\projects
 It prints — but does not perform — the Devfleet/Slots/Cloudflare registration follow-ups. Flags
 `--wixy-repo-url`, `--skip-venv`.
 
+## Cookout game modes: switching a mode on, and the rollback rule
+
+A v21 server process accepts a database at a higher schema version and ignores `cookout_rounds.mode`;
+handed a Toasted sandwich round it commits wrong writes (spec 09c §5.6). So a non-Classic round must
+never exist while an older process can reach the database.
+
+- **Setting:** `WIXY_COOKOUT_MODES` in `Storage\.env` (comma-separated non-Classic mode ids that may
+  be *created*; absent/empty = Classic only; an unknown id is ignored with a warning; Classic can
+  never be switched off; rounds of a loaded mode that already exist keep working if it is cleared).
+  Standalone edition: set it in the container environment.
+- **Release with it absent**, let Slots deploy, and wait until no process runs from the previous slot.
+- **Then, on the hub**, from a checkout of the deployed commit, the delivery coordinator runs
+  `python tooling/cookout/activate_modes.py --enable toastie --token <server token>`. It refuses
+  (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
+  schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot and
+  `GET /cookout/options` answers; it prints every check, writes the setting (other `.env` lines kept
+  byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies the options now list
+  the mode. `--disable toastie` removes it the same way (no checks needed).
+- **Rollback:** run `python tooling/cookout/activate_modes.py --check-rollback <commit>` FIRST. Never
+  roll back to a schema-21 commit while a non-Classic round exists; targets must be v22-or-later.
+
 ## Rollback
 
 - **Site content**: use **Restore** in the admin History panel (or `POST /api/admin/restore
