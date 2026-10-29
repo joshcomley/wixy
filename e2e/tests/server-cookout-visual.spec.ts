@@ -54,6 +54,9 @@ interface Variant {
   readonly call: boolean;
 }
 
+/** 44 px, no exception (09b F.3). Local debugging of the later states may lower it while the call header is 36 px. */
+const CALL_FLOOR = Number(process.env["WIXY_E2E_CALL_FLOOR"] ?? 44);
+
 const PHONES: ReadonlyArray<readonly [number, number]> = [
   [360, 640],
   [390, 844],
@@ -74,7 +77,7 @@ const VARIANTS: readonly Variant[] = [
   ]),
 ];
 
-type Expect = "cards" | "cloche";
+type Expect = "cards" | "cloche" | "none";
 
 interface AuditArgs {
   readonly expect: Expect;
@@ -82,6 +85,8 @@ interface AuditArgs {
   /** The Skip button / Twists button are expected (the viewer is the one picking / a twist is usable). */
   readonly skip: boolean;
   readonly twists: boolean;
+  /** Minimum side of a call control, px (44 per 09b F.3; WIXY_E2E_CALL_FLOOR lowers it for local work only). */
+  readonly callFloor?: number;
 }
 
 interface AuditResult {
@@ -136,10 +141,10 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     };
 
     /** An interactive target: seen, at least 44x44, and (later) not overlapping another. */
-    const target = (el: Element | null, name: string): void => {
+    const target = (el: Element | null, name: string, floor = 43.5): void => {
       const r = visible(el, name);
       if (r === null) return;
-      if (r.width < 43.5 || r.height < 43.5) failures.push(`${name}: target is ${Math.round(r.width)}x${Math.round(r.height)}, under 44x44`);
+      if (r.width < floor || r.height < floor) failures.push(`${name}: target is ${Math.round(r.width)}x${Math.round(r.height)}, under the ${Math.round(floor + 0.5)}px floor`);
       boxes.push({ name, r });
     };
 
@@ -151,8 +156,9 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     // -- Every element in the pane, whatever its overflow --------------------------------------------------------
     const stage = pane.querySelector<HTMLElement>(".wx-srv-ck-table-stage");
     for (const node of pane.querySelectorAll<HTMLElement>("*")) {
-      // The pictures' own boxes are exempt (an image cropped to fill its tile is how a picture fits).
-      if (node.tagName === "IMG" || node.matches(".wx-srv-ck-pic, .wx-srv-ck-pic *") || node.getClientRects().length === 0) continue;
+      // Exempt by design: a picture's own box (an image cropped to fill its tile) and the style wheel's reel
+      // (a slot-machine window that shows one face of a longer strip).
+      if (node.tagName === "IMG" || node.matches(".wx-srv-ck-pic, .wx-srv-ck-pic *, .wx-srv-ck-wheel, .wx-srv-ck-wheel *") || node.getClientRects().length === 0) continue;
       if (node.clientHeight === 0 && node.clientWidth === 0) continue; // inline boxes have no scroll box
       if (STAGE_SCROLLS && node === stage) continue; // the one thing that may scroll, below 411
       if (STAGE_SCROLLS && stage !== null && stage.contains(node)) continue;
@@ -182,7 +188,8 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     if (a.call) {
       const live = [...document.querySelectorAll<HTMLElement>(".wx-srv-call button")].filter((b) => b.getClientRects().length > 0);
       if (live.length === 0) failures.push("a call is live but its controls are not shown");
-      for (const control of live) target(control, `call control ${label(control)}`);
+      // 44x44 with no exception (09b F.3): red until the call header's own fix merges into the feature branch.
+      for (const control of live) target(control, `call control ${label(control)}`, a.callFloor);
     }
 
     // -- The two cards (or the cloche) ---------------------------------------------------------------------------
@@ -190,9 +197,14 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     if (a.expect === "cards") {
       if (cards.length !== 2) failures.push(`expected 2 cards, found ${cards.length}`);
       if (pane.querySelector(".wx-srv-ck-cloche") !== null) failures.push("a cloche stands where the pair should be");
+    } else if (a.expect === "none") {
+      if (cards.length !== 0) failures.push(`no pair is due yet but ${cards.length} cards are in the DOM`);
     } else {
       if (cards.length !== 0) failures.push(`the cloche is up but ${cards.length} cards are in the DOM`);
-      visible(pane.querySelector(".wx-srv-ck-cloche"), "cloche");
+      // Below P=411 the cloche stands in the scrolling stage, which may clip it: it only has to exist there.
+      if (STAGE_SCROLLS) {
+        if (pane.querySelector(".wx-srv-ck-cloche") === null) failures.push("cloche: missing");
+      } else visible(pane.querySelector(".wx-srv-ck-cloche"), "cloche");
     }
     for (const [i, card] of cards.entries()) {
       const name = `card ${i + 1}`;
@@ -264,25 +276,50 @@ async function useLongText(page: Page): Promise<void> {
   });
 }
 
-/** Rings `measured` from `other` (the second device calls the first) and returns a hang-up. */
+/** Rings `measured` from `other` (the second device calls the first) and returns a hang-up. One retry:
+ * a call started in the instant after the previous one ended can be dropped by the call broker. */
 async function ring(measured: Page, other: Page, measuredName: string): Promise<() => Promise<void>> {
   const chatTab = other.locator(".wx-srv-tab-chat");
-  if (await chatTab.isVisible()) await chatTab.click();
+  const wasInGame = await game(other).isVisible();
+  if (await chatTab.isVisible()) {
+    await chatTab.click();
+    await humanPause(other);
+  }
   const callPanel = other.locator(".wx-srv-call");
-  const callButton = callPanel.getByRole("button", { name: "Call", exact: true });
-  await expect(callButton, "the second device can start a call").toBeEnabled({ timeout: 15_000 });
-  await callButton.click({ timeout: 10_000 });
-  await other.getByRole("radio", { name: new RegExp(measuredName) }).check({ timeout: 10_000 });
-  await other.getByRole("button", { name: "Confirm call", exact: true }).click({ timeout: 10_000 });
-  await other.waitForTimeout(1500);
-  console.log(`[ring] other ${await other.locator(".wx-srv-call").getAttribute("data-state")}: ${(await other.locator(".wx-srv-call").innerText()).replace(/\s+/g, " ")} | notice ${(await other.locator(".wx-srv-call-notice").allInnerTexts()).join("/")}`);
-  await expect(measured.locator(".wx-srv-call")).toContainText("Incoming call");
+  const attempt = async (): Promise<boolean> => {
+    const callButton = callPanel.getByRole("button", { name: "Call", exact: true });
+    await expect(callButton, "the second device can start a call").toBeEnabled({ timeout: 15_000 });
+    await humanPause(other); // two taps under 400 ms apart lock the chat (R3)
+    await callButton.click({ timeout: 10_000 });
+    await humanPause(other);
+    await other.getByRole("radio", { name: new RegExp(measuredName) }).check({ timeout: 10_000 });
+    await humanPause(other);
+    await other.getByRole("button", { name: "Confirm call", exact: true }).click({ timeout: 10_000 });
+    try {
+      await expect(measured.locator(".wx-srv-call")).toContainText("Incoming call", { timeout: 5_000 });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!(await attempt())) {
+    const cancel = callPanel.getByRole("button", { name: "Cancel call" });
+    if (await cancel.isVisible()) await cancel.click();
+    await humanPause(other);
+    expect(await attempt(), "the measured device is ringing").toBe(true);
+  }
   return async () => {
     await measured.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true }).click();
-    await expect(other.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true })).toBeVisible();
-    // Back to the game on the second device, as a player would.
-    const open = other.locator(".wx-srv-bubble-ck .wx-srv-ck-mcard-open").last();
-    if (await open.isVisible()) await open.click();
+    await expect(measured.locator(".wx-srv-call")).toHaveAttribute("data-state", "idle");
+    await expect(callPanel).toHaveAttribute("data-state", "idle");
+    await expect(callPanel.getByRole("button", { name: "Call", exact: true })).toBeEnabled();
+    // Back to where the second device was: its game tab.
+    const gameTab = other.locator(".wx-srv-tab-cookout");
+    if (wasInGame && (await gameTab.isVisible())) {
+      await humanPause(other);
+      await gameTab.click();
+      await expect(game(other)).toBeVisible();
+    }
   };
 }
 
@@ -320,7 +357,7 @@ async function sweep(measured: Page, other: Page, measuredName: string, state: s
     await applyLayout(measured, v);
     const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? " + ringing call" : ""}`;
     await expect
-      .poll(async () => (await auditTable(measured, { ...args, call: v.call })).failures, { message: where, timeout: 4_000 })
+      .poll(async () => (await auditTable(measured, { ...args, call: v.call, callFloor: CALL_FLOOR - 0.5 })).failures, { message: where, timeout: 4_000 })
       .toEqual([]);
     audits += 1;
   };
@@ -344,11 +381,10 @@ async function playMatrix(browser: import("@playwright/test").Browser, blind: bo
       ? await startCookoutWithTwists(pageA, blind, { style: "spin", challenge: "one-pan", cloche: true, stars: true, fridge: "rice" })
       : (await startCookout(pageA, blind), await pageA.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq"))!;
 
-    // A spun style plays its wheel first; the table is audited once the cards are really there.
-    await expect(game(pageA).locator(".wx-srv-ck-wheel")).toHaveCount(0, { timeout: 30_000 });
-    await expect(game(pageA).locator(".wx-srv-ck-pair .wx-srv-ck-card")).toHaveCount(2);
+    if (!withTwists) await expect(game(pageA).locator(".wx-srv-ck-pair .wx-srv-ck-card")).toHaveCount(2);
     // State: the starter, before the partner has joined ("waiting for Join").
-    audited += await sweep(pageA, pageB, "Alice", "before the partner joins", { expect: "cards", skip: true, twists: false });
+    // With the fridge raid on, turn 1 is the starter's own pick, so no pair is due until the partner joins.
+    audited += await sweep(pageA, pageB, "Alice", "before the partner joins", { expect: withTwists ? "none" : "cards", skip: !withTwists, twists: false });
     await joinCookout(pageB, seq);
 
     // The fridge-raid twist makes the starter's first turn a starter pick; find whose pair is up.
