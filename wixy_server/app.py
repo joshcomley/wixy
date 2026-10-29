@@ -188,6 +188,7 @@ def create_app(
     cookout_timing: CookoutTiming | None = None,
     cookout_bank: CookoutBankLike | None = None,
     cookout_runner: CookoutRunner | None = None,
+    cookout_cmd_client: CmdChatClient | None = None,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -236,6 +237,9 @@ def create_app(
     `adventure_bank` (workspace 00056): the Adventure Time destination bank. Defaults to the
     shipped `adventure_destinations.json`, validated strictly at start (a broken file is logged
     and the game then answers 503 `game_unavailable`); tests pass a small fixture bank.
+    `cookout_cmd_client`: the cmd client the default Cookout runner uses instead of
+    `cmdchat_client` (the e2e fixture points it at its second, never-stopped fake cmd, as it does
+    the Adventure researcher).
     `adventure_researcher`: what researches a chosen destination's holiday pack. Defaults to a
     `CmdAdventureResearcher` over `chat_client` on the fleet edition when the AI backend is cmd,
     and `None` otherwise (standalone: every pack is `unavailable` at once; Bank/Reject still
@@ -438,7 +442,7 @@ def create_app(
         resolved_cookout_runner = build_cookout_runner(
             store=livechat_store,
             bank=cast(AiBank, resolved_cookout_bank),
-            client=chat_client,
+            client=cookout_cmd_client if cookout_cmd_client is not None else chat_client,
             notifier=livechat_notifier,
             paths=paths,
             generator=resolved_image_generator if livechat_media_available else None,
