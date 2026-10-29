@@ -215,3 +215,48 @@ jobs:
           curl -fsS http://127.0.0.1:18002/api/version | tee /tmp/version-fleet.json
           grep -q '"edition":"fleet"' /tmp/version-fleet.json
           docker rm -f wixy-fleet
+      # spec/server-chat/09b F.4: prove the image actually SERVES a baked Cookout picture. The
+      # test pack is a deterministic two-ingredient pack (four tiny WebPs, committed) built into a
+      # SECOND image through the identical Dockerfile path (fetch, bounds, sha checks, baked dir,
+      # packaged manifest), from a copy of the workspace in which the committed manifest is replaced
+      # by the test manifest and COOKOUT_PACK_URL points at a throwaway local HTTP server.
+      - name: Cookout picture proof - test pack
+        run: |
+          pack_dir=deploy/standalone/ci/cookout-test-pack
+          work="$RUNNER_TEMP/wixy-pack-workspace"
+          mkdir -p "$RUNNER_TEMP/pack-serve" && rm -rf "$work"
+          cp -r . "$work"
+          cp "$pack_dir/manifest.json" "$work/wixy_server/livechat/cookout_ingredient_images.json"
+          cp "$pack_dir/pack.tar" "$RUNNER_TEMP/pack-serve/cookout-test-pack.tar"
+          (cd "$RUNNER_TEMP/pack-serve" && nohup python -m http.server 8099 --bind 127.0.0.1 \
+            > "$RUNNER_TEMP/pack-serve.log" 2>&1 &)
+          for _ in $(seq 1 20); do
+            curl -fsS -o /dev/null http://127.0.0.1:8099/cookout-test-pack.tar && break
+            sleep 0.5
+          done
+          base_image=public.ecr.aws/docker/library/python:3.14-slim
+          docker pull "$base_image" || { base_image=python:3.14-slim; docker pull "$base_image"; }
+          docker build --network host -f deploy/standalone/Dockerfile \
+            --build-arg PYTHON_IMAGE="$base_image" \
+            --build-arg COOKOUT_PACK_URL=http://127.0.0.1:8099/cookout-test-pack.tar \
+            -t wixy:ci-pack "$work"
+          bash deploy/standalone/ci/cookout_image_proof.sh wixy:ci-pack "$pack_dir/manifest.json" \
+            wixy-cookout-test-pack
+      # The real pack runs on every main build (publish-image.yml) and, here, only on PRs that
+      # change the manifest (a path filter, so ordinary PRs never download ~150 MB).
+      - name: Did this PR change the Cookout picture manifest?
+        id: cookout-manifest
+        run: |
+          changed=0
+          manifest=wixy_server/livechat/cookout_ingredient_images.json
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            git diff --quiet FETCH_HEAD HEAD -- "$manifest" || changed=1
+          fi
+          has_pack=$(python -c "import json,sys; print(int(json.load(open(sys.argv[1]))['pack'] is not None))" "$manifest")
+          echo "run=$([ "$changed" = 1 ] && [ "$has_pack" = 1 ] && echo 1 || echo 0)" >> "$GITHUB_OUTPUT"
+      - name: Cookout picture proof - real pack
+        if: steps.cookout-manifest.outputs.run == '1'
+        run: |
+          bash deploy/standalone/ci/cookout_image_proof.sh wixy:ci \
+            wixy_server/livechat/cookout_ingredient_images.json wixy-cookout-real-pack

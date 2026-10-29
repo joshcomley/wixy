@@ -43,6 +43,7 @@ from wixy_server.livechat.cookout_game import (
     CookoutSetup,
     EncoreSpec,
     bank_entry_json,
+    bank_ingredient_json,
     cookout_view_json,
     picture_json,
 )
@@ -358,18 +359,7 @@ async def search_cookout_ingredients(request: Request) -> JSONResponse:
     found = await anyio.to_thread.run_sync(lambda: bank.search(query, limit=20))
     return JSONResponse(
         status_code=200,
-        content={
-            "ingredients": [
-                {
-                    "id": i.id,
-                    "name": i.name,
-                    "category": i.category,
-                    "emoji": i.emoji,
-                    "blurb": i.blurb,
-                }
-                for i in found
-            ]
-        },
+        content={"ingredients": [bank_ingredient_json(i) for i in found]},
         headers=_NO_STORE,
     )
 

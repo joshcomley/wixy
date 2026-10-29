@@ -87,6 +87,7 @@ def cookout_client(
     no_runner: bool = False,
     bank: FakeBank | None = None,
     email: str = "a@example.com",
+    **app_kwargs: Any,
 ) -> Iterator[tuple[TestClient, dict[str, str], FakeRunner | None]]:
     """An app with the small fake bank and a recording runner (or none, as the standalone edition
     has) and an unlocked token, closed on exit."""
@@ -99,6 +100,7 @@ def cookout_client(
         cookout_bank=bank if bank is not None else FakeBank(),
         # The edition without a runner: `create_app` would otherwise build the real, cmd-backed one.
         cookout_runner=resolved if resolved is not None else NullCookoutRunner(),
+        **app_kwargs,
     )
     client = TestClient(app, cookies={"CF_Authorization": "dummy"})
     client.__enter__()
@@ -1154,7 +1156,7 @@ class TestTwistCatalogueRoutes:
             assert found.status_code == 200 and found.headers["cache-control"] == "no-store"
             items = found.json()["ingredients"]
             assert items and len(items) <= 20 and all(i["id"].startswith("base-0") for i in items)
-            assert set(items[0]) == {"id", "name", "category", "emoji", "blurb"}
+            assert set(items[0]) == {"id", "name", "category", "emoji", "blurb", "what", "image"}
             assert client.get(f"{BASE}/cookout/ingredients?q=z", headers=h).status_code == 422
             long_q = "x" * 41
             assert (
