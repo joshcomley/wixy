@@ -458,11 +458,30 @@ describe("an encore locks the mode", () => {
     expect(m.starts()[0]).toMatchObject({ mode: "classic", encore: null });
   });
 
-  it("a locked mode the server no longer lists still names itself (the server's own answer says why)", async () => {
+  it("a locked mode the options do not describe waits: Start is off, it says so, and its starters are not seated by Classic's rules", async () => {
     const m = make(CLASSIC_ONLY);
-    await openWith(m, { encore: ENCORE });
+    await openWith(m, { encore: { ...ENCORE, candidates: [withKind(SOURDOUGH, "bread"), withKind(HAM, "main"), withKind(PICKLES, "finish")] } });
+    expect(visible(m.sheet.element, ".wx-srv-ck-mode-missing")).toBe(true);
+    expect(q(m.sheet.element, ".wx-srv-ck-mode-missing-text").textContent).toBe("Couldn't load this game — try again.");
+    expect(go(m).disabled).toBe(true);
     go(m).click();
-    expect(m.starts()[0]).toMatchObject({ mode: "toastie" });
+    expect(m.starts()).toHaveLength(0);
+    // Classic's rules would let a second starter be ticked beside the first: here nothing is re-seated.
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+  });
+
+  it("a failed options read on a mode encore can be tried again, and then the mode's seats apply", async () => {
+    const reads: Array<CookoutOptions | null> = [null, BOTH];
+    const m = make(BOTH, async () => {}, async () => ({ ok: true, ingredients: [] }), async () => reads.shift() ?? null);
+    await openWith(m, { encore: remix([withKind(PARSLEY, null), withKind(SOURDOUGH, "bread"), withKind(HAM, "main")]) });
+    expect(visible(m.sheet.element, ".wx-srv-ck-mode-missing")).toBe(true);
+    expect(go(m).disabled).toBe(true);
+    q<HTMLButtonElement>(m.sheet.element, ".wx-srv-ck-mode-missing-retry").click();
+    await flush();
+    expect(visible(m.sheet.element, ".wx-srv-ck-mode-missing")).toBe(false);
+    // Seated by the toasted sandwich's rules: the kind-less starter cannot be one, the bread can.
+    expect(seedsOf(m)).toEqual(["sourdough-loaf"]);
+    expect(go(m).disabled).toBe(false);
   });
 });
 
@@ -604,6 +623,24 @@ describe("a toasted sandwich remix's starters", () => {
     expect(q(m.sheet.element, ".wx-srv-ck-encore-hint").textContent).toBe("Choose 1 filling to begin the basket with (your fridge bread is the bread).");
     go(m).click();
     expect(m.starts()[0]).toMatchObject({ fridgeSeedId: "sourdough-loaf", encore: { seedIds: ["smoked-ham"] } });
+  });
+
+  it("clearing the fridge bread gives back the bread starter it pushed out", async () => {
+    const m = make(BOTH, async () => {}, async () => ({ ok: true, ingredients: [ingredient(SOURDOUGH)] }));
+    await openWith(m, { encore: remix(candidates) });
+    q<HTMLButtonElement>(m.sheet.element, '.wx-srv-ck-encore-seed[data-ingredient="smoked-ham"]').click();
+    expect(seedsOf(m)).toEqual(["sourdough-loaf", "smoked-ham"]);
+    expandTwists(m);
+    m.type("sour");
+    m.fire();
+    await flush();
+    q<HTMLButtonElement>(m.sheet.element, '.wx-srv-ck-fridge-option[data-ingredient="sourdough-loaf"]').click();
+    expect(seedsOf(m)).toEqual(["smoked-ham"]);
+    q<HTMLButtonElement>(m.sheet.element, ".wx-srv-ck-fridge-clear").click();
+    expect(seedsOf(m)).toEqual(["sourdough-loaf", "smoked-ham"]);
+    expect(seed(m, "sourdough-loaf").disabled).toBe(false);
+    go(m).click();
+    expect(m.starts()[0]).toMatchObject({ fridgeSeedId: null, encore: { seedIds: ["sourdough-loaf", "smoked-ham"] } });
   });
 
   it("a start refused as invalid says to pick one bread and one filling", async () => {

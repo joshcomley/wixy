@@ -73,8 +73,10 @@ describe("the game-mode styles (layout guards)", () => {
     expect(rule(".wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title")).toMatch(/white-space:\s*nowrap/);
   });
 
-  it("the reveal grid fits as many 68px columns as the width allows", () => {
-    expect(rule(".wx-srv-ck-reveal-grid")).toContain("minmax(68px");
+  it("the reveal grid's columns are at least 68px and never more than one player's picks", () => {
+    const grid = rule(".wx-srv-ck-reveal-grid");
+    expect(grid).toContain("minmax(max(68px, calc((100% - (var(--ck-reveal-cols) - 1) * 3px) / var(--ck-reveal-cols))), 1fr)");
+    expect(grid).toContain("--ck-reveal-cols: 5;");
   });
 
   it("a reveal tile's name wraps at word breaks only, never mid-word", () => {

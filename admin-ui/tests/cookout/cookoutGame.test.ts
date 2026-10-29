@@ -1019,6 +1019,19 @@ describe("Toasted sandwich mode", () => {
       expect(q(h.pane, ".wx-srv-ck-reveal-title").textContent).toBe("🧺Your 8 ingredients");
     });
 
+    it("caps the reveal's columns at one player's picks: four in a toasted sandwich, five in Classic", () => {
+      const h = makeHarness();
+      h.show(toastieFinished({ concepts: "pending", images: "none" }));
+      const grids = [...h.pane.querySelectorAll<HTMLElement>(".wx-srv-ck-reveal-grid")];
+      expect(grids.length).toBeGreaterThan(0);
+      expect(grids.every((g) => g.style.getPropertyValue("--ck-reveal-cols") === "4")).toBe(true);
+      const c = makeHarness();
+      c.show(finishedView({ concepts: "pending", images: "none" }));
+      const classic = [...c.pane.querySelectorAll<HTMLElement>(".wx-srv-ck-reveal-grid")];
+      expect(classic.length).toBeGreaterThan(0);
+      expect(classic.every((g) => g.style.getPropertyValue("--ck-reveal-cols") === "5")).toBe(true);
+    });
+
     it("a Blind reveal says all eight, and a Classic reveal has no anchor group", () => {
       const h = makeHarness();
       h.show(toastieFinished({ concepts: "pending", images: "none", blind: true }));

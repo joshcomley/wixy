@@ -1825,6 +1825,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       box.dataset["group"] = group.key;
       box.append(el("p", "wx-srv-ck-rgroup-who", group.label));
       const grid = el("div", "wx-srv-ck-reveal-grid");
+      // At most one player's picks to a row (5 Classic, 4 toasted sandwich): wide panes keep their rows full.
+      grid.style.setProperty("--ck-reveal-cols", String(view.mode.picksPerPlayer));
       for (const snap of group.items) {
         const tile = revealTile(view, snap, mineIds.has(snap.id));
         if (animate) {

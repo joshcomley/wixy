@@ -7637,10 +7637,13 @@ button.wx-srv-ck-card:disabled {
 
 /* Tiles at least 68 px wide, so a bank name breaks between its words: a word only splits when it is longer
    than the whole tile (desktop Chromium has no hyphenation dictionary, so `hyphens: auto` alone cannot help).
-   Four a row on a 360 px phone; more where the pane is wider. */
+   And never more columns than one player's picks (`--ck-reveal-cols`, set by the pane: 5 Classic, 4 toasted
+   sandwich), so a wide pane's rows stay full: each column is at least 1/N of the row. On a 360 px phone a
+   Classic group of five is 4 + 1, the price of never splitting a word; a toasted sandwich's four fit. */
 .wx-srv-ck-reveal-grid {
+  --ck-reveal-cols: 5;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(max(68px, calc((100% - (var(--ck-reveal-cols) - 1) * 3px) / var(--ck-reveal-cols))), 1fr));
   gap: 6px 3px;
 }
 
@@ -9053,6 +9056,33 @@ button.wx-srv-ck-rtile {
 
 .wx-srv-ck-start-with-modes .wx-srv-ck-mode-icon {
   font-size: 1.375rem;
+}
+
+/* A mode encore whose game could not be loaded: the words and a "Try again". */
+.wx-srv-ck-mode-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-ck-mode-missing-text {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--wx-danger-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.wx-srv-ck-mode-missing-retry {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 700;
 }
 
 /* Why an encore starter cannot be seated in this game ("Your fridge bread is the bread"). */

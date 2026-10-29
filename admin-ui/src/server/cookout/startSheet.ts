@@ -336,9 +336,18 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     document: doc,
     search: (q) => deps.search(q, modeChosen),
     onChange: (snap) => {
+      const before = encoreSeeds;
       fridgeChosen = snap;
       // The fridge raid takes one of the two starter places.
       trimEncore();
+      if (snap !== null) {
+        // What the fridge pick pushed out comes back if it is cleared again (a bread starter, 09c §2.5).
+        fridgeDisplaced = [...fridgeDisplaced, ...before.filter((id) => !encoreSeeds.includes(id) && !fridgeDisplaced.includes(id))];
+      } else if (fridgeDisplaced.length > 0) {
+        encoreSeeds = [...fridgeDisplaced, ...encoreSeeds];
+        fridgeDisplaced = [];
+        trimEncore();
+      }
       refresh();
     },
     ...(deps.setTimeout === undefined ? {} : { setTimeout: deps.setTimeout }),
@@ -352,12 +361,19 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   const error = el("p", "wx-srv-ck-start-error");
   error.setAttribute("role", "alert");
   error.hidden = true;
+  /** A mode encore whose game the options did not describe (the read failed, or it is not listed): Start
+   * waits, and the read can be tried again (09c §2.5 — its starters are never seated by Classic's rules). */
+  const modeMissing = el("div", "wx-srv-ck-mode-missing");
+  modeMissing.setAttribute("role", "alert");
+  modeMissing.hidden = true;
+  const modeMissingRetry = plainButton("wx-srv-ck-mode-missing-retry", "Try again");
+  modeMissing.append(el("p", "wx-srv-ck-mode-missing-text", "Couldn't load this game — try again."), modeMissingRetry);
   const actions = el("div", "wx-srv-ck-start-actions");
   const cancel = plainButton("wx-srv-ck-start-cancel", "Cancel");
   const go = plainButton("wx-srv-ck-start-go", "Start Cookout");
   actions.append(cancel, go);
   const body = el("div", "wx-srv-ck-start-body");
-  body.append(intro, what, encoreBox, howHead, playStyles, twists, error);
+  body.append(intro, what, encoreBox, modeMissing, howHead, playStyles, twists, error);
   sheet.append(heading, body, actions);
   root.append(backdrop, sheet);
 
@@ -375,6 +391,10 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   let fridgeChosen: IngredientSnap | null = null;
   let encore: EncorePreset | null = null;
   let encoreSeeds: string[] = [];
+  /** Starters a fridge pick pushed out, given back when it is cleared. */
+  let fridgeDisplaced: string[] = [];
+  /** The options are being read again from "Try again". */
+  let retryingOptions = false;
   let twistsOpen = false;
   let options: CookoutOptions | null = null;
   let optionsLoaded = false;
@@ -397,6 +417,11 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   }
 
   /** The chosen mode's entry; a locked encore mode the server no longer lists still names itself. */
+  /** The chosen mode is described by the options (Classic always is). */
+  function modeKnown(): boolean {
+    return modeChosen === CLASSIC_MODE_ID || listedModes().some((m) => m.id === modeChosen);
+  }
+
   function chosenMode(): ModeOption {
     return listedModes().find((m) => m.id === modeChosen) ?? (modeChosen === CLASSIC_MODE_ID ? CLASSIC_OPTION : { ...CLASSIC_OPTION, id: modeChosen, label: modeChosen });
   }
@@ -438,6 +463,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
    * left, the first starter that can be seated is ticked so the encore can still start at once. */
   function trimEncore(): void {
     if (encore === null) return;
+    // Until the mode is known its seats are not: leave the starters as they are (Start waits).
+    if (!modeKnown()) return;
     if (!seatsByKind(chosenMode())) {
       const limit = encoreSeedLimit(fridgeChosen !== null);
       if (encoreSeeds.length > limit) encoreSeeds = encoreSeeds.slice(0, limit);
@@ -700,7 +727,11 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     }
     fridge.setDisabled(busy);
     drawEncore();
-    go.disabled = busy || !optionsLoaded || (encore !== null && encoreSeeds.length === 0);
+    const missing = optionsLoaded && !modeKnown();
+    modeMissing.hidden = !missing;
+    modeMissingRetry.disabled = busy || retryingOptions;
+    modeMissingRetry.textContent = retryingOptions ? "Trying…" : "Try again";
+    go.disabled = busy || !optionsLoaded || missing || (encore !== null && encoreSeeds.length === 0);
     cancel.disabled = busy;
     go.textContent = busy ? "Starting…" : encore !== null ? "Start encore" : "Start Cookout";
   }
@@ -845,6 +876,15 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     refresh();
   }
 
+  modeMissingRetry.addEventListener("click", () => {
+    if (busy || retryingOptions) return;
+    retryingOptions = true;
+    refresh();
+    void loadOptions(true).finally(() => {
+      retryingOptions = false;
+      if (opened) refresh();
+    });
+  });
   cancel.addEventListener("click", () => close());
   backdrop.addEventListener("click", () => {
     if (!busy) close();
@@ -872,6 +912,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       encore = preset.encore !== undefined && preset.encore !== null && preset.encore.candidates.length > 0 ? preset.encore : null;
       // The first starter is ticked so an encore can start at once; the players can change it.
       encoreSeeds = encore === null ? [] : encore.candidates.slice(0, 1).map((s) => s.id);
+      fridgeDisplaced = [];
+      retryingOptions = false;
       trimEncore();
       // The twists show when the round already uses some (a "New" of a twisty round), else stay folded.
       twistsOpen = style !== null || challenge !== null || wildcard || starsOn || fridgeChosen !== null;
