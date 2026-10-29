@@ -1,13 +1,16 @@
-"""Image generation driver (spec/server-chat/09b §B): gate, journal, ladder, renditions, pack.
+"""Image generation driver (spec/server-chat/09b §B): plan, render, check, review, pack, publish.
 
-Run as a Grid task on a hub worker (never session 0). The ComfyUI client is
-`wixy_server.livechat.wyr_images.ComfyImageGenerator`, unchanged. Everything that matters for
-correctness (the empty-queue gate, the attempt ladder, resumability, the deterministic pack and
-the manifest) is a small pure function so it is unit-tested with no GPU or network.
+Commands (`python images.py --help`): `plan` (draw the pilot once), `run` (render and check; add
+`--render-only` for the pilot, before calibration has picked a checker), `status`, `publish`
+(build the pack, release it, download it back, write the manifest, install it under a pending pin,
+history check) and `apply-overrides`. Calibration is `calibrate.py`.
 
-This module holds the library pieces only. The long-running render/check driver and the
-`gh` release step need the live fleet and the catalogue (parcel 1), so they are wired in a
-later change; nothing here claims a CLI.
+Where it runs: on hub, because ComfyUI answers on hub's loopback. Hub's Grid workers only claim CI
+task classes, so the long runs go as an interactive Windows scheduled task (never session 0), not
+as a Grid task. The ComfyUI client is `wixy_server.livechat.wyr_images.ComfyImageGenerator`,
+unchanged. Everything that matters for correctness (the empty-queue gate, the attempt ladder,
+resumability, the deterministic pack, the history checks) is a small function that the unit tests
+exercise without a GPU or the network; the live commands themselves need the fleet.
 """
 
 from __future__ import annotations
@@ -794,10 +797,45 @@ def publish(
     loaded = cookout_pack.load_manifest(manifest_path)
     store = cookout_pack.PackStore(storage / "cookout-images", min_free_bytes=0)
     store.install(tar_path, loaded)
-    problems = history_check([*manifest_history(manifest_path), manifest], head_bytes)
+    history = [*manifest_history(manifest_path), manifest]
+    problems = history_check(history, head_bytes) + clean_install_check(history, version)
     if problems:
         raise RuntimeError("history check failed: " + "; ".join(problems))
     return manifest
+
+
+def clean_install_check(
+    history: Sequence[Mapping[str, Any]],
+    version: int,
+    fetch: Callable[[Any, Any], int] | None = None,
+) -> list[str]:
+    """From v2 onward (spec B.6): a clean-environment fetch of the OLDEST manifest that names a
+    pack (v1) into fresh temporary storage with no cache, all the way to a full install, so a
+    fork or an old revision that still pins v1 can always get its pictures. Returns the problems
+    (empty = fine). `fetch(manifest, store)` is injectable for tests."""
+    if version < 2:
+        return []
+    import tempfile
+
+    from wixy_server.livechat import cookout_pack
+
+    with_pack = [m for m in history if isinstance(m.get("pack"), dict)]
+    if not with_pack:
+        return ["no earlier manifest with a pack to prove a clean install against"]
+    oldest = min(with_pack, key=lambda m: int(m.get("packVersion", 0)))
+    label = f"v{oldest.get('packVersion')}"
+    try:
+        manifest = cookout_pack.parse_manifest(json.dumps(oldest).encode("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="cookout-clean-") as tmp:
+            store = cookout_pack.PackStore(Path(tmp) / "cookout-images", min_free_bytes=0)
+            run_fetch = fetch or (lambda m, st: int(st.fetch(m)))
+            run_fetch(manifest, store)
+            missing = store.missing(manifest, [store.objects_dir])
+            if missing:
+                return [f"clean install of {label}: {len(missing)} objects missing afterwards"]
+    except Exception as exc:  # noqa: BLE001 - any failure here must stop the publish
+        return [f"clean install of {label} failed: {exc}"]
+    return []
 
 
 def build_status(work: WorkDir, total: int) -> dict[str, Any]:
