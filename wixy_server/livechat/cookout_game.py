@@ -326,10 +326,12 @@ def current_turn(round_: CookoutRoundRow, turns: Sequence[CookoutTurnRow]) -> Cu
     not `picking`, or every turn is picked."""
     if round_.state != "picking":
         return None
-    if turns and turns[-1].choice_id is None:
-        last = turns[-1]
-        return CurrentTurn(last.turn, player_of_turn(last.turn), last)
-    next_turn = len(turns) + 1
+    # The first drawn turn without a choice is the live one. Normally that is the last row; a
+    # sequence mode with a turn-2 starter holds the seeded turn 2 beside the still-open turn 1.
+    unpicked = next((t for t in turns if t.choice_id is None), None)
+    if unpicked is not None:
+        return CurrentTurn(unpicked.turn, player_of_turn(unpicked.turn), unpicked)
+    next_turn = (turns[-1].turn if turns else 0) + 1
     if next_turn > turns_of(round_):
         return None
     return CurrentTurn(next_turn, player_of_turn(next_turn), None)

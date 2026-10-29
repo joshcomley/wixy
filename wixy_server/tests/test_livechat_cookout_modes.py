@@ -1,9 +1,9 @@
 # ruff: noqa: F811  (fixtures re-used from test_livechat_view_once are rebound as parameters)
-"""Cookout game modes on the server (workspace 00058, spec/server-chat/09c-cookout-modes.md §5/§8.2):
-the v21 -> v22 migration from a REAL v21 database, the Toasted sandwich draft through the store (turn
-plan, kinds, skips, Open/Blind redaction, starters by kind, twist adjustments), the Classic
-regression golden, and the unknown-mode guards. The HTTP gate is `TestRoutes` at the bottom; the
-overlap with a still-running v21 process is `test_cookout_modes_overlap.py`."""
+"""Cookout game modes on the server (workspace 00058, spec 09c §5 and §8.2): the v21 -> v22
+migration from a REAL v21 database, the Toasted sandwich draft through the store (turn plan, kinds,
+skips, Open/Blind redaction, starters by kind, twist adjustments), the Classic regression golden,
+the unknown-mode guards, and the HTTP gate (`TestRoutes`). The overlap with a still-running v21
+process is `test_cookout_modes_overlap.py`."""
 
 from __future__ import annotations
 
