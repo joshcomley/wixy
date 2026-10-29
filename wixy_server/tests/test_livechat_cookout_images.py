@@ -6,6 +6,7 @@ test_livechat_cookout_ai.py) and a fake ComfyUI over `httpx.MockTransport`."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import threading
@@ -20,13 +21,16 @@ import pytest
 
 from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.livechat.cookout_images import (
+    DEFAULT_PRESENTATION,
     IMAGE_PROMPT_TEMPLATE,
     CookoutPictureJob,
     PictureTiming,
     build_image_prompt,
     clear_cookout_scratch,
+    concept_prompts,
     scratch_dir,
 )
+from wixy_server.livechat.cookout_twists import STYLE_IDS, style_by_id
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.wyr_game import WyrDemand
 from wixy_server.livechat.wyr_images import (
@@ -653,3 +657,112 @@ class TestFoldIns:
         anyio.run(h.job().run, 1)
         assert h.generator.calls == [] and h.demand.count == 0
         assert h.row()["images"] == "pending"  # left for the sweep
+
+
+# -- Cookout twists (spec/server-chat/09a-cookout-twists.md §5.4): the chef's style on the picture
+# prompt, and pictures across a rescue swap ------------------------------------------------------
+
+GOLDEN_IMAGE_PROMPT_SHA256 = "a050935fe1cd76800e5bcfb2b7a4b5d07134ce52c01b51e7474811034fc29f80"
+"""sha256 of the style-free picture prompt exactly as the shipped core builds it."""
+
+
+class TestStylePrompts:
+    def test_a_style_free_prompt_is_byte_identical_to_the_core(self) -> None:
+        text = build_image_prompt("Smoky Steak Plate", ["Ribeye steak", "Butter"])
+        assert hashlib.sha256(text.encode()).hexdigest() == GOLDEN_IMAGE_PROMPT_SHA256
+        assert text == build_image_prompt(
+            "Smoky Steak Plate", ["Ribeye steak", "Butter"], style=None
+        )
+
+    @pytest.mark.parametrize("style_id", STYLE_IDS)
+    def test_each_style_replaces_only_the_presentation_phrase(self, style_id: str) -> None:
+        style = style_by_id(style_id)
+        assert style is not None
+        plain = build_image_prompt("Smoky Steak Plate", ["Ribeye steak", "Butter"])
+        styled = build_image_prompt("Smoky Steak Plate", ["Ribeye steak", "Butter"], style=style_id)
+        phrase = style.picture_phrase[:1].upper() + style.picture_phrase[1:]
+        assert phrase in styled
+        assert DEFAULT_PRESENTATION not in styled
+        assert styled == plain.replace(DEFAULT_PRESENTATION, phrase)
+        for clause in (
+            "no people, no hands, no raw-ingredient collage, no unlisted side dishes",
+            "no text, labels, logos, or watermark.",
+            'Photorealistic appetising food photograph of "Smoky Steak Plate"',
+        ):
+            assert clause in styled
+
+    def test_an_unknown_style_id_falls_back_to_the_core_prompt(self) -> None:
+        plain = build_image_prompt("Smoky Steak Plate", ["Ribeye steak"])
+        assert build_image_prompt("Smoky Steak Plate", ["Ribeye steak"], style="nonsense") == plain
+
+    def test_a_title_with_braces_is_not_reformatted(self) -> None:
+        text = build_image_prompt("Brace {x} Plate", ["Ribeye {steak}"], style="picnic")
+        assert 'photograph of "Brace {x} Plate"' in text and "Ribeye {steak}" in text
+
+    def test_the_round_style_reaches_every_dish_prompt(self) -> None:
+        row = {"concepts_json": canned_concepts_text(), "style": "campfire"}
+        prompts = concept_prompts(row, _Namer())
+        assert prompts is not None and set(prompts) == {"a", "b", "c"}
+        style = style_by_id("campfire")
+        assert style is not None
+        for prompt in prompts.values():
+            assert style.picture_phrase[1:] in prompt and DEFAULT_PRESENTATION not in prompt
+        plain = concept_prompts({"concepts_json": canned_concepts_text()}, _Namer())
+        assert plain is not None
+        for slot, prompt in plain.items():
+            assert DEFAULT_PRESENTATION in prompt
+            assert prompt == prompts[slot].replace(
+                style.picture_phrase[:1].upper() + style.picture_phrase[1:], DEFAULT_PRESENTATION
+            )
+
+    def test_a_lifted_wildcard_or_swapped_in_item_is_named_when_the_dish_uses_it(self) -> None:
+        concepts = json.loads(canned_concepts_text())
+        used = concepts["concepts"][0]["pickedIngredientIds"]
+        used.append("mango")
+        concepts["concepts"][0]["omitted"] = [
+            o for o in concepts["concepts"][0]["omitted"] if o["id"] != "mango"
+        ]
+        prompts = concept_prompts({"concepts_json": json.dumps(concepts)}, _Namer())
+        assert prompts is not None
+        assert "Mango" in prompts["a"] and "Mango" not in prompts["b"]
+
+
+class TestPicturesAcrossASwap:
+    def test_the_job_paints_in_the_round_style(self, tmp_path: Path) -> None:
+        h = Harness(tmp_path, StubGenerator())
+        h.ready_round(style="street-food")
+        anyio.run(h.job().run, 1)
+        style = style_by_id("street-food")
+        assert style is not None
+        assert all(style.picture_phrase[1:] in p for p in h.generator.calls[0])
+        assert h.row()["images"] == "done"
+
+    def test_a_swap_during_a_render_fences_the_old_generations_pictures(
+        self, tmp_path: Path
+    ) -> None:
+        h = Harness(tmp_path, StubGenerator())
+        row = h.ready_round()
+
+        def swap_lands_mid_render() -> None:
+            h.store.complete_swap(1)
+
+        h.generator.hook = swap_lands_mid_render
+        anyio.run(h.job().run, 1)
+        assert h.store.stored_pictures == [], "generation 1's late pictures must not be attached"
+        assert row["generation"] == 2 and row["images"] == "none" and not row["pictures"]
+        assert h.scratch_entries() == [] and h.staged_upload_dirs() == []
+        assert h.demand.count == 0
+        # the late failure write named generation 1's attempt and was refused as well
+        assert h.store.failed_pictures and row["images"] == "none"
+
+    def test_generation_2_gets_a_fresh_wait_and_its_own_pictures(self, tmp_path: Path) -> None:
+        h = Harness(tmp_path, StubGenerator())
+        row = h.ready_round()
+        h.store.complete_swap(1)
+        row["concepts"] = "ready"
+        row["concepts_json"] = canned_concepts_text()
+        row.update(images="pending", images_started_at=time.time(), images_tries=1)
+        row["images_generation"] += 1
+        anyio.run(h.job().run, 1)
+        assert row["images"] == "done" and set(row["pictures"]) == {"a", "b", "c"}
+        assert len(h.generator.calls) == 1 and len(h.generator.calls[0]) == 3
