@@ -42,6 +42,7 @@ import anyio.to_thread
 from anyio import CapacityLimiter
 
 from wixy_server.background import ContainedTaskGroup
+from wixy_server.livechat.cookout_twists import style_by_id
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.wyr_game import WyrDemand
 from wixy_server.livechat.wyr_images import ComfyImageGenerator
@@ -58,12 +59,18 @@ PICTURE_BUDGET_S: Final = 600.0
 run before the sweep counts it abandoned)."""
 STALE_MARGIN_S: Final = 60.0
 
+DEFAULT_PRESENTATION: Final = (
+    "Rustic home-cooked presentation, natural kitchen light, simple ceramic plate"
+)
+"""The presentation phrase of a round with no chef's style; a style replaces it (spec 09a §5.4)."""
 IMAGE_PROMPT_TEMPLATE: Final = (
     'Photorealistic appetising food photograph of "{title}", one finished cooked serving made '
     "with {ingredients}. Rustic home-cooked presentation, natural kitchen light, simple ceramic "
     "plate, shallow depth of field, no people, no hands, no raw-ingredient collage, no unlisted "
     "side dishes, no text, labels, logos, or watermark."
 )
+_STYLED_TEMPLATE: Final = IMAGE_PROMPT_TEMPLATE.replace(DEFAULT_PRESENTATION, "{presentation}")
+assert _STYLED_TEMPLATE != IMAGE_PROMPT_TEMPLATE
 
 
 def scratch_dir(paths: ProjectPaths) -> Path:
@@ -97,11 +104,21 @@ def clear_cookout_scratch(
     return removed
 
 
-def build_image_prompt(title: str, ingredient_names: Sequence[str]) -> str:
+def build_image_prompt(
+    title: str, ingredient_names: Sequence[str], *, style: str | None = None
+) -> str:
     """The deterministic, server-built dish prompt (spec §3.3): the concept title plus the
-    resolved names of its picked ingredients and declared staples."""
+    resolved names of its picked ingredients and declared staples. A known chef's `style` swaps
+    the core presentation phrase for that style's fixed picture phrase (spec 09a §5.4); every
+    "no people / no text" clause is unchanged."""
     names = ", ".join(ingredient_names)
-    return IMAGE_PROMPT_TEMPLATE.format(title=title, ingredients=names)
+    chosen = style_by_id(style) if style is not None else None
+    if chosen is None:
+        return IMAGE_PROMPT_TEMPLATE.format(title=title, ingredients=names)
+    phrase = chosen.picture_phrase
+    return _STYLED_TEMPLATE.format(
+        title=title, ingredients=names, presentation=phrase[:1].upper() + phrase[1:]
+    )
 
 
 class PictureStore(Protocol):
@@ -160,6 +177,7 @@ def concept_prompts(round_row: Mapping[str, Any], namer: DishNamer) -> dict[str,
     concepts = data.get("concepts") if isinstance(data, dict) else None
     if not isinstance(concepts, list):
         return None
+    style = round_row.get("style")
     prompts: dict[str, str] = {}
     for concept in concepts:
         if not isinstance(concept, dict):
@@ -180,7 +198,9 @@ def concept_prompts(round_row: Mapping[str, Any], namer: DishNamer) -> dict[str,
                 name = lookup(item) if isinstance(item, str) else None
                 if name is not None and name not in names:
                     names.append(name)
-        prompts[str(slot)] = build_image_prompt(title, names)
+        prompts[str(slot)] = build_image_prompt(
+            title, names, style=style if isinstance(style, str) else None
+        )
     return prompts if set(prompts) == set(SLOTS) else None
 
 
