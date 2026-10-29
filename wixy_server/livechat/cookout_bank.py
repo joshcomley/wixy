@@ -43,6 +43,7 @@ BANK_VERSION = 1
 
 RoleKey = Literal["base", "protein", "produce", "accent"]
 RarityKey = Literal["everyday", "uncommon", "exotic"]
+RarityMode = Literal["normal", "exotic"]
 
 ROLES: tuple[RoleKey, ...] = ("base", "protein", "produce", "accent")
 RARITIES: tuple[RarityKey, ...] = ("everyday", "uncommon", "exotic")
@@ -288,14 +289,18 @@ class CookoutBank:
     # -- the pair draw (spec §2.3) --------------------------------------------------------------
 
     def shuffle_role_schedule(
-        self, rng: random.Random | None = None
+        self, rng: random.Random | None = None, *, first_role: RoleKey | None = None
     ) -> tuple[RoleKey, RoleKey, RoleKey, RoleKey, RoleKey]:
         """The round's culinary-role schedule: one base, one protein, two produce, one accent in a
         shuffled order. Role `schedule[(turn - 1) // 2]` serves turns 2k+1 and 2k+2 alike, so both
-        players get the same five opportunities."""
+        players get the same five opportunities. `first_role` (fridge raid, twist T6) swaps the
+        first occurrence of that role into index 0 after the ordinary shuffle."""
         generator = rng or _SYSTEM_RNG
         roles = list(ROLE_SCHEDULE)
         generator.shuffle(roles)
+        if first_role is not None:
+            at = roles.index(first_role)
+            roles[0], roles[at] = roles[at], roles[0]
         a, b, c, d, e = roles
         return (a, b, c, d, e)
 
@@ -308,6 +313,7 @@ class CookoutBank:
         offered_families: AbstractSet[str],
         player_offered_categories: Sequence[str],
         rng: random.Random | None = None,
+        rarity_mode: RarityMode = "normal",
     ) -> tuple[Ingredient, Ingredient]:
         """Draw the two options of one offer for `role`.
 
@@ -319,19 +325,26 @@ class CookoutBank:
         pair. `player_offered_categories` is the category of every option already shown to the
         active player this round (skips included). No feasible pair at all raises
         `CookoutExhaustedError`.
+
+        `rarity_mode="exotic"` (chaos shelf, twist T12) restricts the candidates to `exotic`
+        entries and replaces "at least one everyday" with "both exotic"; every other rule and
+        preference is unchanged.
         """
         generator = rng or _SYSTEM_RNG
+        exotic = rarity_mode == "exotic"
         eligible = [
             i
             for i in self.by_role(role)
-            if i.id not in seen_ids and i.family not in picked_families
+            if i.id not in seen_ids
+            and i.family not in picked_families
+            and (not exotic or i.rarity == "exotic")
         ]
         for pool in (
             [i for i in eligible if i.family not in offered_families],
             eligible,
         ):
             grouped = _group(pool)
-            feasible = _feasible_first_options(grouped)
+            feasible = _feasible_first_options(grouped, need_everyday=not exotic)
             if feasible:
                 break
         else:
@@ -341,9 +354,8 @@ class CookoutBank:
         lowest = min(counts[c] for c in feasible)
         cat_a = generator.choice(sorted(c for c in feasible if counts[c] == lowest))
         fam_a = generator.choice(sorted(feasible[cat_a]))
-        option_one = generator.choice(
-            sorted((e for e in grouped[cat_a][fam_a] if e.rarity == "everyday"), key=lambda e: e.id)
-        )
+        first_tier = [e for e in grouped[cat_a][fam_a] if exotic or e.rarity == "everyday"]
+        option_one = generator.choice(sorted(first_tier, key=lambda e: e.id))
         counts[cat_a] += 1
         partners = [c for c in grouped if c != cat_a and _has_other_family(grouped[c], fam_a)]
         lowest_partner = min(counts[c] for c in partners)
@@ -363,6 +375,157 @@ class CookoutBank:
         if generator.random() < 0.5:
             return (option_two, option_one)
         return (option_one, option_two)
+
+    def draw_replacement(
+        self,
+        *,
+        role: RoleKey,
+        keep_id: str,
+        seen_ids: AbstractSet[str],
+        picked_families: AbstractSet[str],
+        offered_families: AbstractSet[str],
+        player_offered_categories: Sequence[str],
+        rarity_mode: RarityMode = "normal",
+        rng: random.Random | None = None,
+    ) -> Ingredient:
+        """One fresh option for `role` that keeps the pair with `keep_id` legal (partner veto, T8).
+
+        HARD: unseen, family not picked, and a different category AND family from the kept option.
+        `"normal"`: when the kept option is not `everyday` the replacement must be, otherwise the
+        usual 8:3:1 tiers; `"exotic"` (the live pair is a chaos pair): exotic only. SOFT: families
+        already offered are avoided while any candidate exists without them. The active player's
+        least-shown category wins, then a uniform family, then entry. Nothing feasible raises
+        `CookoutExhaustedError`.
+        """
+        keep = self._by_id.get(keep_id)
+        if keep is None:
+            raise CookoutBankError(f"unknown ingredient {keep_id!r}")
+        generator = rng or _SYSTEM_RNG
+        exotic = rarity_mode == "exotic"
+        must_be_everyday = not exotic and keep.rarity != "everyday"
+        eligible = [
+            i
+            for i in self.by_role(role)
+            if i.id not in seen_ids
+            and i.family not in picked_families
+            and i.category != keep.category
+            and i.family != keep.family
+            and (
+                i.rarity == "exotic" if exotic else (i.rarity == "everyday" or not must_be_everyday)
+            )
+        ]
+        pool = [i for i in eligible if i.family not in offered_families] or eligible
+        if not pool:
+            raise CookoutExhaustedError(f"no feasible {role} replacement remains")
+        by_tier: dict[RarityKey, list[Ingredient]] = {}
+        for entry in pool:
+            by_tier.setdefault(entry.rarity, []).append(entry)
+        tiers = [t for t in RARITIES if t in by_tier]
+        weights = [RARITY_WEIGHTS[t] for t in tiers]
+        tier = generator.choices(tiers, weights=weights)[0]
+        counts = Counter(player_offered_categories)
+        categories = {e.category for e in by_tier[tier]}
+        lowest = min(counts[c] for c in categories)
+        category = generator.choice(sorted(c for c in categories if counts[c] == lowest))
+        in_category = [e for e in by_tier[tier] if e.category == category]
+        family = generator.choice(sorted({e.family for e in in_category}))
+        return generator.choice(
+            sorted((e for e in in_category if e.family == family), key=lambda e: e.id)
+        )
+
+    def draw_wildcard(
+        self,
+        *,
+        seen_ids: AbstractSet[str],
+        picked_families: AbstractSet[str],
+        offered_families: AbstractSet[str],
+        basket_categories: AbstractSet[str],
+        rng: random.Random | None = None,
+    ) -> Ingredient:
+        """The surprise eleventh ingredient behind the cloche (T5): any role, never `everyday` (it
+        is a dare), never one of the five pickable staples, never seen, never from a picked family.
+        Tiers `uncommon : exotic = 1 : 1` among those available. SOFT preferences, relaxed in
+        order: a category the basket does not hold yet, then a family not yet offered. Nothing
+        feasible raises `CookoutExhaustedError`."""
+        generator = rng or _SYSTEM_RNG
+        eligible = [
+            i
+            for i in self.ingredients
+            if i.rarity != "everyday"
+            and i.id not in seen_ids
+            and i.id not in NON_SEASONING_STAPLES
+            and i.family not in picked_families
+        ]
+        pool: list[Ingredient] = []
+        for fresh_category, fresh_family in ((True, True), (False, True), (False, False)):
+            pool = [
+                i
+                for i in eligible
+                if (not fresh_category or i.category not in basket_categories)
+                and (not fresh_family or i.family not in offered_families)
+            ]
+            if pool:
+                break
+        if not pool:
+            raise CookoutExhaustedError("no feasible wildcard remains")
+        tiers = [t for t in ("uncommon", "exotic") if any(e.rarity == t for e in pool)]
+        tier = generator.choice(tiers)
+        in_tier = [e for e in pool if e.rarity == tier]
+        family = generator.choice(sorted({e.family for e in in_tier}))
+        return generator.choice(
+            sorted((e for e in in_tier if e.family == family), key=lambda e: e.id)
+        )
+
+    # -- bank search and food-word helpers (twists) ---------------------------------------------
+
+    def search(self, query: str, *, limit: int = 20) -> tuple[Ingredient, ...]:
+        """Fridge-raid search: an ingredient matches when every query token is a prefix of some
+        token of its name, or of one of its aliases. Ranked exact name, name prefix, other name
+        match, alias match, then rarity (`everyday` first), then name."""
+        wanted = tokenise(query)
+        if not wanted or limit <= 0:
+            return ()
+        phrase = " ".join(wanted)
+        ranked: list[tuple[int, int, str, str, Ingredient]] = []
+        for ingredient in self.ingredients:
+            name_tokens = tokenise(ingredient.name)
+            if _all_prefixes(wanted, name_tokens):
+                joined = " ".join(name_tokens)
+                rank = 0 if joined == phrase else 1 if joined.startswith(phrase) else 2
+            elif any(_all_prefixes(wanted, tokenise(a)) for a in ingredient.aliases):
+                rank = 3
+            else:
+                continue
+            rarity = RARITIES.index(ingredient.rarity)
+            ranked.append((rank, rarity, fold(ingredient.name), ingredient.id, ingredient))
+        ranked.sort(key=lambda r: r[:4])
+        return tuple(r[4] for r in ranked[:limit])
+
+    def mentions(self, text: str, ingredient_id: str) -> bool:
+        """True when `text` names that ingredient by name, alias or plural, its bare family word or
+        (for a pickable staple) the staple's bare short form. Longest-first span recognition; no
+        stop word, family exemption or declared-staple allowance applies."""
+        ingredient = self._by_id.get(ingredient_id)
+        for (kind, key), _span in _spans(tokenise(text), self._dictionary):
+            if key == ingredient_id and kind in ("ingredient", "staple"):
+                return True
+            if kind == "family" and ingredient is not None and key == ingredient.family:
+                return True
+        return False
+
+    def food_free_tokens(self, text: str) -> tuple[str, ...]:
+        """The folded tokens of `text` left after removing every recognised food span, so a food
+        such as "baking powder" is never read as a technique or vessel word."""
+        tokens = tokenise(text)
+        kept: list[str] = []
+        i = 0
+        for _entity, span in _spans(tokens, self._dictionary):
+            while tokens[i : i + len(span)] != span:
+                kept.append(tokens[i])
+                i += 1
+            i += len(span)
+        kept.extend(tokens[i:])
+        return tuple(kept)
 
     # -- the contraband scan (spec §3.2) --------------------------------------------------------
 
@@ -467,17 +630,24 @@ def _has_other_family(families: Mapping[str, list[Ingredient]], family: str) -> 
     return any(f != family for f in families)
 
 
+def _all_prefixes(wanted: tuple[str, ...], tokens: tuple[str, ...]) -> bool:
+    return all(any(t.startswith(w) for t in tokens) for w in wanted)
+
+
 def _feasible_first_options(
     grouped: Mapping[str, Mapping[str, list[Ingredient]]],
+    *,
+    need_everyday: bool = True,
 ) -> dict[str, list[str]]:
-    """For each category that can supply the guaranteed-everyday option: the families that have an
-    `everyday` entry AND leave a valid partner (another category with a different family)."""
+    """For each category that can supply the guaranteed-everyday option (any entry when
+    `need_everyday` is False, i.e. an all-exotic pool): the families that have such an entry AND
+    leave a valid partner (another category with a different family)."""
     feasible: dict[str, list[str]] = {}
     for category, families in grouped.items():
         usable = [
             family
             for family, entries in families.items()
-            if any(e.rarity == "everyday" for e in entries)
+            if (not need_everyday or any(e.rarity == "everyday" for e in entries))
             and any(c != category and _has_other_family(grouped[c], family) for c in grouped)
         ]
         if usable:
