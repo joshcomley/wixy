@@ -405,10 +405,10 @@ describe("mountChatComposer", () => {
   // the DEFAULTS (i.e. what the AI composer still gets); these exercise the
   // new overrides themselves.
   describe("sec.10 P5a generalisation", () => {
-    it("accept defaults to image/*, and is overridable", () => {
+    it("allows browsing all files by default, and supports an explicit filter", () => {
       const defaultComposer = mountChatComposer(makeOptions());
       expect(defaultComposer.element.querySelector("input[type=file]")?.getAttribute("accept")).toBe(
-        "image/*",
+        null,
       );
       defaultComposer.teardown();
 
@@ -417,6 +417,18 @@ describe("mountChatComposer", () => {
         "audio/*,video/*",
       );
       custom.teardown();
+    });
+
+    it("reports an unsupported file without uploading it", async () => {
+      const upload = vi.fn(async (): Promise<ChatAttachment> => ({ attachmentId: "a", width: 1, height: 1 }));
+      const composer = mountChatComposer(makeOptions({ upload }));
+      const input = composer.element.querySelector<HTMLInputElement>('input[type="file"]')!;
+      Object.defineProperty(input, "files", { value: [new File(["text"], "note.txt", { type: "text/plain" })], configurable: true });
+      input.dispatchEvent(new Event("change"));
+      await flush();
+      expect(upload).not.toHaveBeenCalled();
+      expect(composer.element.querySelector<HTMLElement>(".wx-chat-composer-error")?.textContent).toContain("can't be attached");
+      composer.teardown();
     });
 
     it("acceptFile overrides which picked files are staged", async () => {

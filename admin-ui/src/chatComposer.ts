@@ -76,8 +76,8 @@ export interface ChatComposerOptions {
   /** Extra click handler for the submit button (e.g. the conversation view's
    * optimistic echo) — fired BEFORE `onSubmit`, on the same gated clicks. */
   win?: Window | undefined;
-  /** The file-picker's `accept` filter. Defaults to `"image/*"` — the AI
-   * composer's existing behaviour. */
+  /** The file-picker's `accept` filter. By default allow browsing all files;
+   * acceptFile still decides which files may be attached. */
   accept?: string | undefined;
   /** Gates every file the picker, paste, and drag-drop can stage (replacing
    * this module's own hardcoded image check). Defaults to
@@ -212,7 +212,7 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
 
   const attachInput = document.createElement("input");
   attachInput.type = "file";
-  attachInput.accept = options.accept ?? "image/*";
+  if (options.accept !== undefined) attachInput.accept = options.accept;
   attachInput.multiple = true;
   attachInput.hidden = true;
   let releaseFilePicker: (() => void) | null = null;
@@ -575,7 +575,10 @@ export function mountChatComposer(options: ChatComposerOptions): ChatComposer {
 
   function handleFileList(files: FileList | null): void {
     if (files === null) return;
-    for (const file of Array.from(files)) uploadAndAttach(file);
+    for (const file of Array.from(files)) {
+      if (acceptFile(file)) uploadAndAttach(file);
+      else setError("That file can't be attached here.");
+    }
   }
 
   attachInput.addEventListener("change", () => {
