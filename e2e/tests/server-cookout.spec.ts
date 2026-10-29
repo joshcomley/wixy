@@ -360,8 +360,9 @@ test.describe("Cookout", () => {
       // The waiting player sees a secret turn and no ingredient at all: not in the DOM...
       await eventually(pages, async () => (await game(other).locator(".wx-srv-ck-cloche").count()) === 1, "the other side shows a secret turn");
       await expect(game(other).locator("[data-ingredient]")).toHaveCount(0);
+      // The whole scrolling pane (progress, stage and the basket tray) plus the chat card for this round.
       const text =
-        (await game(other).locator(".wx-srv-ck-stage").innerText()) + " " + (await game(other).locator(".wx-srv-ck-progress").innerText());
+        (await game(other).locator(".wx-srv-ck-scroll").innerText()) + " " + (await other.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`).innerText());
       offer.ids.forEach((id, i) => {
         if (!STAPLE_IDS.has(id)) expect(textShows(text, offer.names[i]!), `${offer.names[i]} is on the waiting screen`).toBe(false);
       });
