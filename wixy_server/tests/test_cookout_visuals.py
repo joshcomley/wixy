@@ -269,7 +269,9 @@ class TestViewEnrichment:
         assert done["state"] == "finished"
         picks = [p for player in done["players"] for p in player["picks"]]
         assert len(picks) == 10 and all(p["facts"] == ["Fact one.", "Fact two."] for p in picks)
-        assert all("facts" in b for b in done["basket"])
+        # facts ride only on players[].picks and the wildcard snap, not on the basket or starters
+        assert all("facts" not in b for b in done["basket"])
+        assert all("facts" not in s for s in done["starters"])
         # options and history snapshots are not picks: no facts
         assert all("facts" not in h_snap for h in done["history"] for h_snap in _history_snaps(h))
 

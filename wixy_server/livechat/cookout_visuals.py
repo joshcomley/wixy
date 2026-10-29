@@ -27,6 +27,7 @@ import threading
 import time
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import cast
 
 import anyio
 
@@ -210,7 +211,7 @@ class CookoutVisualsService:
     def __init__(
         self,
         visuals: IngredientVisuals,
-        store: PackStore,
+        store: PackStore | Callable[[], PackStore],
         *,
         refresh_s: float = SLOT_REFRESH_S,
         self_heal_s: float = SELF_HEAL_RETRY_S,
@@ -218,7 +219,11 @@ class CookoutVisualsService:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.visuals = visuals
-        self.store = store
+        # Built lazily (and guarded) so a bad storage root degrades to emoji tiles instead of
+        # stopping the app from starting.
+        self._store_arg = store
+        self._store: PackStore | None = store if isinstance(store, PackStore) else None
+        self._store_failed = False
         self._refresh_s = refresh_s
         self._self_heal_s = self_heal_s
         self._gc_s = gc_s
@@ -227,20 +232,35 @@ class CookoutVisualsService:
         self._next_heal = 0.0
         self._next_gc: float | None = None
 
+    @property
+    def store(self) -> PackStore | None:
+        if self._store is None and not self._store_failed:
+            try:
+                factory = cast("Callable[[], PackStore]", self._store_arg)
+                self._store = factory()
+            except OSError, PackError:
+                self._store_failed = True
+                _LOGGER.exception("Cookout picture store unavailable; pictures use emoji tiles")
+        return self._store
+
     def register(self) -> None:
         """Register the packaged manifest and write the slot pin. Blocking (file lock); call off the
         event loop. A busy store is logged and retried by the sweep, never fatal."""
+        store = self.store
+        if store is None:
+            return
         try:
-            self.pin_id = self.store.register_slot(self.visuals.manifest)
+            self.pin_id = store.register_slot(self.visuals.manifest)
         except StoreBusy, OSError, PackError:
             _LOGGER.exception("Cookout slot pin not registered; the sweep will retry")
 
     def retire(self) -> None:
         pin = self.pin_id
-        if pin is None:
+        store = self.store
+        if pin is None or store is None:
             return
         try:
-            self.store.retire_slot(pin)
+            store.retire_slot(pin)
         except StoreBusy, OSError, PackError:
             _LOGGER.exception("Cookout slot pin not retired; its lease will lapse")
         self.pin_id = None
@@ -248,11 +268,14 @@ class CookoutVisualsService:
     def tick(self) -> None:
         """One sweep step (blocking): refresh or re-register the pin, self-heal, daily GC."""
         now = self._clock()
+        store = self.store
+        if store is None:
+            return
         if self.pin_id is None:
             self.register()
         else:
             try:
-                self.store.refresh_slot(self.pin_id)
+                store.refresh_slot(self.pin_id)
             except StoreBusy, OSError, PackError:
                 _LOGGER.exception("Cookout slot pin refresh failed")
         if now >= self._next_heal:
@@ -263,18 +286,19 @@ class CookoutVisualsService:
         elif now >= self._next_gc:
             self._next_gc = now + self._gc_s
             try:
-                self.store.gc()
+                store.gc()
             except StoreBusy, OSError, PackError:
                 _LOGGER.exception("Cookout picture GC failed")
 
     def _self_heal(self) -> None:
         manifest = self.visuals.manifest
-        if manifest.pack is None:
+        store = self.store
+        if store is None or manifest.pack is None:
             return
-        if not self.store.missing(manifest, self.visuals.search):
+        if not store.missing(manifest, self.visuals.search):
             return
         try:
-            written = self.store.fetch(manifest)
+            written = store.fetch(manifest)
         except FetchRefused:
             _LOGGER.warning("Cookout picture download refused (low disk or busy); retry later")
             return
@@ -283,13 +307,23 @@ class CookoutVisualsService:
             return
         _LOGGER.info("Cookout picture self-heal wrote %d objects", written)
         self.visuals.reload()
+        if self.pin_id is None:
+            return  # never collect without our own pin protecting what we just fetched
         try:
-            self.store.gc()
+            store.gc()
         except StoreBusy, OSError, PackError:
             _LOGGER.exception("Cookout picture GC failed")
+        self.visuals.reload()
 
     async def run(self) -> None:
-        """The supervised loop: never returns."""
+        """The supervised loop: never returns. The first tick (pin + heal check) runs at once, in
+        the background, so boot never waits on the store lock; a download in flight is abandoned
+        on shutdown instead of holding it up."""
         while True:
+            await anyio.to_thread.run_sync(self.tick, abandon_on_cancel=True)
             await anyio.sleep(self._refresh_s)
-            await anyio.to_thread.run_sync(self.tick)
+
+    async def aretire(self, timeout_s: float = 5.0) -> None:
+        """Retire the pin off the event loop with a short bound; a lapsed lease covers a miss."""
+        with anyio.CancelScope(shield=True), anyio.move_on_after(timeout_s):
+            await anyio.to_thread.run_sync(self.retire, abandon_on_cancel=True)

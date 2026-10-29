@@ -459,9 +459,10 @@ def create_app(
     set_default_visuals(resolved_cookout_visuals)
     cookout_visuals_service = CookoutVisualsService(
         resolved_cookout_visuals,
-        PackStore(
+        lambda: PackStore(
             settings.storage_root / "cookout-images",
             min_free_bytes=settings.server_min_free_bytes,
+            lock_timeout_s=5.0,
         ),
         refresh_s=cookout_visuals_refresh_s,
     )
@@ -511,8 +512,6 @@ def create_app(
         # failure at startup shouldn't prevent the process from coming up; the
         # background watcher keeps retrying, and request-serving routes report
         # 503/CheckoutError until the checkout exists.
-        # The picture store's slot pin is registered before anything else touches it (09b B.6).
-        await anyio.to_thread.run_sync(cookout_visuals_service.register)
         await anyio.to_thread.run_sync(fetch_once, project, paths, watcher_status)
         # The server's own "publish zero" (spec/07 §1: "the server also
         # self-bootstraps this way on first startup") — a no-op once live.json
@@ -637,7 +636,7 @@ def create_app(
                 yield
                 tg.cancel_scope.cancel()
         finally:
-            cookout_visuals_service.retire()
+            await cookout_visuals_service.aretire()
             livechat_call_broker.shutdown()
             await livechat_push_client.aclose()
             await chat_client.aclose()

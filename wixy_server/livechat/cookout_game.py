@@ -850,9 +850,7 @@ def cookout_view_json(
         )
 
     starters: list[JsonValue] = [
-        _pick_json(row.turn, "seed", row.seed, facts=with_facts)
-        for row in turns
-        if row.seed is not None
+        _pick_json(row.turn, "seed", row.seed) for row in turns if row.seed is not None
     ]
 
     current: JsonObject | None = None
@@ -954,10 +952,7 @@ def cookout_view_json(
 
     basket: list[JsonValue] | None = None
     if revealed:
-        basket = [
-            _pick_json(t, via, snap, facts=with_facts)
-            for t, via, snap in basket_snaps(round_, turns)
-        ]
+        basket = [_pick_json(t, via, snap) for t, via, snap in basket_snaps(round_, turns)]
 
     locked = stars_locked(round_)
     partner_slot = None if viewer_slot is None else (2 if viewer_slot == 1 else 1)
