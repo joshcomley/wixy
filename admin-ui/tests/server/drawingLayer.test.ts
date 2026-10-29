@@ -177,7 +177,7 @@ function setup(): Setup {
     suspend: vi.fn(() => () => {}),
     lockNow: vi.fn(),
     adoptBoundSession: vi.fn(),
-    getBoundGrantId: vi.fn(() => null),
+    getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0),
   };
   const identity: ServerIdentity = {
     getName: () => "Alice",

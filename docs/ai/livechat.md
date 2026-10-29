@@ -58,10 +58,18 @@ domain (HTTPS); explicit development loopback origins are permitted only with de
 
 `server/call/controller.ts` owns presence, consent and teardown. `audio.ts` owns tracks,
 context and the self-hosted fingerprinted `call-worklet.js`. Both accept before capture;
-both ready before media. A connected **or muted** call holds exactly one `voiceCall`
-idle suspension. End releases it, restarting a fresh countdown; actual lock, shield
+both ready before media. A call attempt holds exactly one `voiceCall`
+idle suspension from invite sent / incoming call shown (`holdCall()`), through ringing,
+connecting and connected or muted, with no gap. Any end (decline, cancel, ring/setup
+timeout, failure, socket loss) releases it in `teardownCall`, restarting a fresh countdown. The hold
+is taken with `hooks.suspendLive` and the controller's 100 ms `pulse()` calls `touch()` on it (and on
+the setup `micPermission` hold); `panel.ts` treats a hold untouched for `LIVE_HOLD_STALE_MS` (3 s) as
+stranded by a frozen page: `idleRanOutWhileAway` ignores it and counts the silence from its last heartbeat,
+a late `touch`/`release` locks (`idleAway`) when that already passed the idle period, otherwise the
+countdown continues from the last heartbeat (never a fresh window). A callee stops taking the ring hold after
+2 consecutive unanswered incoming rings with no `hooks.activityCount()` change in between; actual lock, shield
 detach, pagehide, disposal, grant failure or connection failure stops audio immediately.
-Ringing does not suspend idle. A renewed unlock token ends the call and reconnects only
+Ringing is bounded server-side (30 s ring, 20 s setup), so the pause cannot outlive an attempt. A renewed unlock token ends the call and reconnects only
 presence; it never resumes audio. Recording a voice note and a call cannot own the mic
 together. Existing tab/screen-lock policies are unchanged. See **Inv 55**.
 

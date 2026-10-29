@@ -106,7 +106,7 @@ function identity(): ServerIdentity {
 }
 
 function hooks(): LockHooks & { suspend: ReturnType<typeof vi.fn> } {
-  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn(), getBoundGrantId: vi.fn(() => null) };
+  return { suspend: vi.fn(() => () => {}), lockNow: vi.fn(), adoptBoundSession: vi.fn(), getBoundGrantId: vi.fn(() => null), suspendLive: vi.fn(() => ({ touch() {}, release() {} })), activityCount: vi.fn(() => 0) };
 }
 
 /** A window stand-in whose animation frames only run when a test says so. */
