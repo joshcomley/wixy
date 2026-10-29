@@ -17,3 +17,5 @@ Opus audit relation 127953d8-ddea-4175-be6d-0215bc4ce44e, clean (C0/H0/M0/L0) af
   unanswered rings with no local activity.
 - F3 (low): doc comment placement.
 Decision 00197 records the design and residuals. PR #357 (audited head 7c95519d).
+
+**Done.** PR #357 merged as 939f251 at 2026-10-29 02:32:23Z (head 2c8bc810 = audited 7c95519d + main merged in, tests/docs/CI only; all six required checks green), live on the green slot at 02:33:02Z; the public `admin.js` contains `suspendLive` and `activityCount` (absent before).
