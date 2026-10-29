@@ -24,6 +24,7 @@ import {
   GRANT_RENEW_LOOP_GUARD_MS,
   GRANT_RENEW_MEDIA_DEFER_MS,
   GRANT_RENEW_RETRY_MS,
+  LIVE_HOLD_STALE_MS,
   MULTI_TAP_INTERVAL_MS,
   PICKER_SUSPEND_MAX_MS,
   SCREEN_LOCK_EVIDENCE_AFTER_MS,
@@ -63,6 +64,7 @@ import { createScreenWatcher } from "./screenWatcher";
 import type {
   CreateServerChatView,
   LockCause,
+  LiveSuspension,
   LockHooks,
   ServerApi,
   ServerChatView,
@@ -678,6 +680,19 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   const suspensionsByReason = new Map<SuspendReason, number>();
   let totalSuspensionCount = 0;
 
+  /** Liveness-stamped holds (see `LiveSuspension`); each is also counted in the totals above. */
+  interface LiveHold { aliveWallMs: number }
+  const liveHolds = new Set<LiveHold>();
+  let activitySeq = 0;
+
+  function isStale(hold: LiveHold): boolean {
+    return Date.now() - hold.aliveWallMs > LIVE_HOLD_STALE_MS;
+  }
+  /** Holds with no heartbeat (recording, a picker, …) — always treated as live. */
+  function plainSuspensionCount(): number {
+    return totalSuspensionCount - liveHolds.size;
+  }
+
   function incrementSuspension(reason: SuspendReason): void {
     suspensionsByReason.set(reason, (suspensionsByReason.get(reason) ?? 0) + 1);
     totalSuspensionCount += 1;
@@ -698,24 +713,29 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   }
 
   const hooks: LockHooks = {
+    suspendLive(reason: SuspendReason): LiveSuspension {
+      const hold: LiveHold = { aliveWallMs: Date.now() };
+      liveHolds.add(hold);
+      let done = false;
+      const release = takeSuspension(reason, hold);
+      return {
+        release: () => { done = true; release(); },
+        touch(): void {
+          if (done) return;
+          // A heartbeat after a long silence means the page was frozen: judge the absence first.
+          if (isStale(hold) && plainSuspensionCount() === 0 && absenceOutlastedIdle(hold)) {
+            dispatch({ type: "lock", cause: "idleAway" });
+            return;
+          }
+          hold.aliveWallMs = Date.now();
+        },
+      };
+    },
+    activityCount(): number {
+      return activitySeq;
+    },
     suspend(reason: SuspendReason): () => void {
-      let released = false;
-      incrementSuspension(reason);
-      if (idleTimer !== null) {
-        win.clearTimeout(idleTimer);
-        idleTimer = null;
-      }
-      const safetyTimer =
-        reason === "filePicker" ? win.setTimeout(() => release(), PICKER_SUSPEND_MAX_MS) : null;
-      function release(): void {
-        if (released) return;
-        released = true;
-        if (safetyTimer !== null) win.clearTimeout(safetyTimer);
-        decrementSuspension(reason);
-        if (totalSuspensionCount === 0 && idleTimerArmed) armIdleTimer();
-        completeCachedHiddenPolicy();
-      }
-      return release;
+      return takeSuspension(reason, null);
     },
     lockNow(cause: LockCause): void {
       if (cause === "unauthorized" && shouldRenewInsteadOfLocking()) {
@@ -736,6 +756,53 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
       return boundGrantId;
     },
   };
+
+  /** Whether the idle period has run out measured from the later of the last real activity and
+   * `hold`'s last heartbeat — i.e. a frozen page's silence counts as idle time. */
+  function absenceOutlastedIdle(hold: LiveHold): boolean {
+    if (state.kind !== "chat" || grantUsable()) return false;
+    const base = Math.max(lastActivityWallMs, hold.aliveWallMs);
+    return Date.now() - base >= chatIdleLockMs(win);
+  }
+
+  function takeSuspension(reason: SuspendReason, live: LiveHold | null): () => void {
+    let released = false;
+    incrementSuspension(reason);
+    if (idleTimer !== null) {
+      win.clearTimeout(idleTimer);
+      idleTimer = null;
+    }
+    const safetyTimer =
+      reason === "filePicker" ? win.setTimeout(() => release(), PICKER_SUSPEND_MAX_MS) : null;
+    function release(): void {
+      if (released) return;
+      released = true;
+      if (safetyTimer !== null) win.clearTimeout(safetyTimer);
+      const wasStale = live !== null && isStale(live);
+      decrementSuspension(reason);
+      if (live !== null) liveHolds.delete(live);
+      if (totalSuspensionCount === 0 && idleTimerArmed) {
+        if (live !== null && wasStale) restartIdleAfterStaleHold(live);
+        else armIdleTimer();
+      }
+      completeCachedHiddenPolicy();
+    }
+    return release;
+  }
+
+  /** The last suspension was a STALE live hold (its page was frozen): do not grant a fresh idle
+   * window. Lock at once if the silence already outlasted the idle period, otherwise count the
+   * idle period from the hold's last heartbeat. */
+  function restartIdleAfterStaleHold(hold: LiveHold): void {
+    if (absenceOutlastedIdle(hold)) {
+      dispatch({ type: "lock", cause: "idleAway" });
+      return;
+    }
+    const base = Math.max(lastActivityWallMs, hold.aliveWallMs);
+    lastActivityWallMs = base;
+    idleStartedAtMs = win.performance.now() - (Date.now() - base);
+    scheduleIdleTimer();
+  }
 
   /** A 401 while a grant is active usually means the token ran out or was dropped: mint a new
    * one silently instead of locking. A 401 right after a renewal is not that — the server is
@@ -811,6 +878,7 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
   const detachSingleTapListener = attachTapListener(root, singleTapDetector, () => win.performance.now());
 
   function onActivity(): void {
+    activitySeq += 1;
     dispatch({ type: "activity" });
   }
   const detachActivityListeners = ACTIVITY_EVENT_TYPES.map((type) => {
@@ -1007,8 +1075,15 @@ export function mountServerPanel(deps: ServerPanelDeps): ServerPanel {
    * active, or while something (a recording, playback, an upload picker) is legitimately
    * holding the idle timer paused — R7 applies to a backgrounded page too. */
   function idleRanOutWhileAway(): boolean {
-    if (grantUsable() || totalSuspensionCount > 0) return false;
-    return Date.now() - lastActivityWallMs >= chatIdleLockMs(win);
+    if (grantUsable() || plainSuspensionCount() > 0) return false;
+    // A live hold only excuses the page while its holder's heartbeat is current; a stale one (the
+    // page was frozen) is ignored and its last heartbeat counts as the end of real activity.
+    let base = lastActivityWallMs;
+    for (const hold of liveHolds) {
+      if (!isStale(hold)) return false;
+      base = Math.max(base, hold.aliveWallMs);
+    }
+    return Date.now() - base >= chatIdleLockMs(win);
   }
 
   /** The page is being unloaded (a reload, a navigation, a closing tab), not sent to the

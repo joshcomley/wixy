@@ -1,4 +1,4 @@
-import type { LockHooks, ServerSession } from "../types";
+import type { LiveSuspension, LockHooks, ServerSession } from "../types";
 import { CallAudio } from "./audio";
 import { type AudioDiagnostic, createCallDiagnostics, safeAudioError } from "./diagnostics";
 import { CALL_PROTOCOL, decodeFrame, encodeFrame, LEASE_MS } from "./protocol";
@@ -14,7 +14,7 @@ export interface CallAudioHandle {
 }
 export interface CallDeps {
   win: Window;
-  hooks: Pick<LockHooks, "suspend" | "lockNow">;
+  hooks: Pick<LockHooks, "suspendLive" | "activityCount" | "lockNow">;
   isMicBusy: () => boolean;
   onBusy: (busy: boolean) => void;
   /** The call controls need the screen: a call is ringing, being set up, connected, or has a failure notice
@@ -25,6 +25,8 @@ export interface CallDeps {
     failed: () => void, leaseReady: (until: number, remainingMs: number) => void,
     diagnostic: (event: AudioDiagnostic) => void) => CallAudioHandle;
 }
+
+const MAX_HELD_UNANSWERED_RINGS = 2;
 
 /** One attachment's presence and one explicit call attempt; never auto-resumes audio. */
 export function createCallController(deps: CallDeps) {
@@ -102,6 +104,7 @@ export function createCallController(deps: CallDeps) {
     dialog.hidden = true;
     if (!activateAudio()) return;
     deps.onBusy(true);
+    holdCall(); // Pause the idle countdown from the moment the invite goes out (Inv 55).
     outgoingRequest = crypto.randomUUID();
     if (!send({ type: "invite", requestId: outgoingRequest, targetConnectionId: selectedTarget })) {
       end("The call couldn't be sent. Please try again.", true);
@@ -122,6 +125,7 @@ export function createCallController(deps: CallDeps) {
     diagnostics.record({ step: "answer" });
     clearFailure();
     if (!activateAudio()) return;
+    holdCall(); // Answering is user activity: pause idle from here even if the ring itself was not held.
     answerPending = true;
     deps.onBusy(true);
     if (!send({ type: "accept", callId })) { end("The call couldn't be answered. Please try again.", true); return; }
@@ -146,8 +150,11 @@ export function createCallController(deps: CallDeps) {
   let callId: string | null = null;
   let state = "idle";
   let audio: CallAudioHandle | null = null;
-  let releaseCall: (() => void) | null = null;
-  let releasePermission: (() => void) | null = null;
+  let releaseCall: LiveSuspension | null = null;
+  let releasePermission: LiveSuspension | null = null;
+  // Consecutive incoming rings that ended unanswered with no activity on this device in between.
+  let unansweredRings = 0;
+  let unansweredAt = 0;
   let timer: number | null = null;
   let lastPulse = win.performance.now();
   let lastMessage = lastPulse;
@@ -164,6 +171,17 @@ export function createCallController(deps: CallDeps) {
   let availablePeers: { id: string; label: string }[] = [];
   let callUntil = 0;
 
+  /** The one `voiceCall` idle pause for this call attempt: taken when an invite is sent or an incoming
+   * call is shown, kept through ringing, connecting and connected, released only by `teardownCall`
+   * (every end, failure, socket loss, detach). The server bounds the attempt (30 s ring, 20 s setup). */
+  function holdCall(): void { releaseCall ??= hooks.suspendLive("voiceCall"); }
+  /** A ring nobody answered (ended by the caller, the server or the ring timeout): remembered so a
+   * peer re-inviting in a loop cannot keep the idle pause alive on an unattended device. */
+  function noteUnansweredRing(): void {
+    if (state !== "incoming") return;
+    unansweredRings++;
+    unansweredAt = hooks.activityCount();
+  }
   function clearFailure(): void {
     noticeEpoch++;
     noticeText.textContent = "";
@@ -180,6 +198,7 @@ export function createCallController(deps: CallDeps) {
   function remoteEnd(reason: unknown): void {
     const wasConnected = state === "connected";
     diagnostics.record({ step: "remote-ended" });
+    noteUnansweredRing();
     teardownCall("Call ended");
     if (reason === "audio_unavailable") showFailure(wasConnected
       ? "The other device couldn't continue the call. Please try again."
@@ -273,9 +292,9 @@ export function createCallController(deps: CallDeps) {
     callEpoch++;
     audio?.stop();
     audio = null;
-    releasePermission?.();
+    releasePermission?.release();
     releasePermission = null;
-    releaseCall?.();
+    releaseCall?.release();
     releaseCall = null;
     callId = null;
     outgoingRequest = null;
@@ -369,6 +388,7 @@ export function createCallController(deps: CallDeps) {
     const stale = now - lastPulse > LEASE_MS;
     lastPulse = now;
     if (callUntil && now >= callUntil) {
+      noteUnansweredRing();
       diagnostics.record({ step: "setup-timeout" });
       end("Call timed out. Please try again.", true);
       return;
@@ -378,6 +398,10 @@ export function createCallController(deps: CallDeps) {
       status.textContent = "Calls disconnected. Reconnect to try again.";
       return;
     }
+    // Heartbeat for the idle-lock pause: a page frozen mid-call stops this tick, which is how the
+    // panel knows the hold is stranded rather than live (Inv 55).
+    releaseCall?.touch();
+    releasePermission?.touch();
     if (state === "connected" && callId && audio) {
       if (stale) {
         diagnostics.record({ step: "main-thread-stalled" });
@@ -397,12 +421,12 @@ export function createCallController(deps: CallDeps) {
     status.textContent = "Connecting audio…";
     deps.onBusy(true);
     for (const media of element.parentElement?.querySelectorAll<HTMLMediaElement>("audio,video") ?? []) media.pause();
-    releasePermission = hooks.suspend("micPermission");
+    releasePermission = hooks.suspendLive("micPermission");
     render();
     try {
       await attempt.prepare();
       if (epoch !== callEpoch || attempt !== audio || callId !== id) return;
-      releasePermission?.();
+      releasePermission?.release();
       releasePermission = null;
       diagnostics.record({ step: "ready" });
       send({ type: "ready", callId: id });
@@ -457,6 +481,11 @@ export function createCallController(deps: CallDeps) {
       } else outgoingRequest = null;
       callId = m["callId"];
       state = m["type"];
+      // A ringing call (either side) keeps the chat unlocked until it is answered or ends. An
+      // unattended device stops holding after MAX_HELD_UNANSWERED_RINGS rings in a row that nobody
+      // touched it for, so a peer re-inviting in a loop cannot hold idle off forever.
+      if (hooks.activityCount() !== unansweredAt) unansweredRings = 0; // someone touched the device since
+      if (state === "outgoing" || unansweredRings < MAX_HELD_UNANSWERED_RINGS) holdCall();
       clearFailure();
       if (state === "incoming") diagnostics.reset();
       diagnostics.record({ step: state === "incoming" ? "incoming" : "outgoing" });
@@ -484,7 +513,7 @@ export function createCallController(deps: CallDeps) {
       lastPulse = win.performance.now();
       callUntil = win.performance.now() + 7_200_000;
       audio.start();
-      releaseCall = hooks.suspend("voiceCall");
+      holdCall(); // Already held since the invite/ring; a no-op here, so there is no gap.
       status.textContent = "On a voice call";
       pulse();
     } else if (m["type"] === "capture" && typeof m["lease"] === "number" && state === "connected") {

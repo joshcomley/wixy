@@ -11,8 +11,15 @@ Unlocked participants can select another available connection, Call, Accept/Decl
 Mute and End. One immutable two-socket pair at a time, including two devices using the
 same Access identity. Hub relays 24 kHz mono int16 PCM over same-origin authenticated
 WebSockets. No recording, transcription, database entries, history or notifications.
-Connected calls, including muted calls, pause the automatic idle countdown. Ending
-releases that pause and restarts a fresh countdown. Every actual lock/detach ends audio.
+A call attempt pauses the automatic idle countdown on a device from the moment it sends an
+invite or shows an incoming call, through ringing and connecting, into connected or muted
+(operator decision #2136). The server bounds it: 30 s ringing, 20 s setup. Any end releases
+that pause and restarts a fresh countdown. Every actual lock/detach ends audio. The pause is
+liveness-stamped: the call controller's 100 ms tick refreshes it, and a pause not refreshed for 3 s
+(the page was frozen, e.g. a phone auto-locking mid-ring) stops excusing the page. On return the
+silence counts as idle time, so a page frozen past the idle period locks at once with no fade and a
+late release never grants a fresh window. After two unanswered incoming rings in a row with no
+activity on the device, further incoming rings take no pause until it is touched again.
 
 ## Protocol
 

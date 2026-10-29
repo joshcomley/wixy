@@ -973,6 +973,113 @@ describe("mountServerPanel", () => {
     panel.teardown();
   });
 
+  // -- Liveness-stamped holds: a page frozen mid-call must not strand the idle lock (Inv 55) ----
+
+  describe("liveness-stamped suspension (frozen page)", () => {
+    async function openChat() {
+      const chatFactory = trackedChatViewFactory();
+      fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
+      const panel = mount({ createServerChatView: chatFactory.createServerChatView });
+      await openPinPad(panel.element);
+      await enterAndSubmitPin(panel.element, "1234");
+      const hooks = chatFactory.hooks;
+      if (hooks === null) throw new Error("hooks not captured");
+      return { panel, hooks, chatHost: panel.element.querySelector(".wx-srv-chat-host") as HTMLElement };
+    }
+    const locked = (panel: { element: HTMLElement }) => panel.element.querySelector(".wx-srv-thread") === null;
+    /** The page is frozen: wall clock moves, no timer runs. */
+    const freeze = (ms: number) => vi.setSystemTime(Date.now() + ms);
+
+    beforeEach(() => {
+      localStorage.setItem("wx-srv-lock-on-tab", "0");
+      localStorage.setItem("wx-srv-lock-on-screen", "0");
+    });
+    afterEach(() => {
+      localStorage.removeItem("wx-srv-lock-on-tab");
+      localStorage.removeItem("wx-srv-lock-on-screen");
+      setHidden(false);
+    });
+
+    it("a frozen page returning after the idle period locks at once, with no fresh window", async () => {
+      const { panel, hooks } = await openChat();
+      hooks.suspendLive("voiceCall");
+      setHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(locked(panel)).toBe(false); // 'ignore' policy: backgrounding alone does not lock
+      freeze(IDLE_LOCK_MS * 6);
+      setHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(locked(panel)).toBe(true);
+      panel.teardown();
+    });
+    it("a LATE release (stale hold, silence past the idle period) locks instead of granting a fresh window", async () => {
+      const { panel, hooks } = await openChat();
+      const hold = hooks.suspendLive("voiceCall");
+      freeze(IDLE_LOCK_MS * 6);
+      hold.release();
+      expect(locked(panel)).toBe(true);
+      panel.teardown();
+    });
+    it("a late heartbeat after a freeze past the idle period locks too", async () => {
+      const { panel, hooks } = await openChat();
+      const hold = hooks.suspendLive("voiceCall");
+      freeze(IDLE_LOCK_MS * 6);
+      hold.touch();
+      expect(locked(panel)).toBe(true);
+      panel.teardown();
+    });
+    it("a stale release inside the idle period counts the idle time from the last heartbeat, not from now", async () => {
+      const { panel, hooks, chatHost } = await openChat();
+      const hold = hooks.suspendLive("voiceCall");
+      await vi.advanceTimersByTimeAsync(5000); // no heartbeats: stale after 3 s
+      hold.release();
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 5000 - 100); // 5 s of silence already counted
+      expect(chatHost.classList.contains("wx-srv-fading")).toBe(false);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(chatHost.classList.contains("wx-srv-fading")).toBe(true);
+      panel.teardown();
+    });
+    it("a LIVE hold keeps the chat across hidden/visible, and a live release restarts a FRESH full period", async () => {
+      const { panel, hooks, chatHost } = await openChat();
+      const hold = hooks.suspendLive("voiceCall");
+      setHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      for (let i = 0; i < IDLE_LOCK_MS * 3 / 100; i++) {
+        await vi.advanceTimersByTimeAsync(100);
+        hold.touch();
+      }
+      setHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(locked(panel)).toBe(false);
+      hold.release();
+      await vi.advanceTimersByTimeAsync(IDLE_LOCK_MS - 1);
+      expect(chatHost.classList.contains("wx-srv-fading")).toBe(false);
+      await vi.advanceTimersByTimeAsync(2);
+      expect(chatHost.classList.contains("wx-srv-fading")).toBe(true);
+      panel.teardown();
+    });
+    it("a plain (heartbeat-less) hold still excuses the page, so other suspensions are unchanged", async () => {
+      const { panel, hooks } = await openChat();
+      hooks.suspend("recording");
+      freeze(IDLE_LOCK_MS * 6);
+      setHidden(true);
+      document.dispatchEvent(new Event("visibilitychange"));
+      setHidden(false);
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(locked(panel)).toBe(false);
+      panel.teardown();
+    });
+    it("activityCount counts real activity only", async () => {
+      const { panel, hooks } = await openChat();
+      const before = hooks.activityCount();
+      hooks.suspendLive("voiceCall").touch();
+      expect(hooks.activityCount()).toBe(before);
+      document.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+      expect(hooks.activityCount()).toBe(before + 1);
+      panel.teardown();
+    });
+  });
+
   it("two concurrent suspensions both must release before the idle timer resumes", async () => {
     const chatFactory = trackedChatViewFactory();
     fetchMock.mockResolvedValueOnce(jsonResponse({ token: "tok", expiresAt: expiresIn(3600) }));
