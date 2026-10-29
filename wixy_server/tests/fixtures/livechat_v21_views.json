@@ -1,0 +1,6900 @@
+{
+ "1:Josh": {
+  "basket": [
+   {
+    "blurb": "Orange-fleshed tuber, sweet when roasted",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "sweet-potato",
+    "image": null,
+    "name": "Sweet potato",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Spiced lentil dal sold ready to heat",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "pot-ready-dal",
+    "image": null,
+    "name": "Pot-ready dal",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Nuts, seeds and dried fruit for munching on the go",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "trail-mix",
+    "image": null,
+    "name": "Trail mix",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "ground-nutmeg",
+    "image": null,
+    "name": "Ground nutmeg",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Tangy fermented cabbage",
+    "category": "sauces-stocks-fermented",
+    "emoji": "\ud83e\uded9",
+    "id": "sauerkraut",
+    "image": null,
+    "name": "Sauerkraut",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+    "category": "herbs-aromatics",
+    "emoji": "\ud83c\udf3f",
+    "id": "lemongrass",
+    "image": null,
+    "name": "Lemongrass",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "lox",
+    "image": null,
+    "name": "Lox",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sliced everyday ham for sandwiches and salads",
+    "category": "meat-poultry",
+    "emoji": "\ud83e\udd69",
+    "id": "cooked-ham",
+    "image": null,
+    "name": "Cooked ham",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": "no chef",
+   "state": "failed"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Orange-fleshed tuber, sweet when roasted",
+     "category": "vegetables",
+     "emoji": "\ud83e\udd66",
+     "id": "sweet-potato",
+     "image": null,
+     "name": "Sweet potato",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Orange-fleshed tuber, sweet when roasted",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "sweet-potato",
+       "image": null,
+       "name": "Sweet potato",
+       "what": null
+      },
+      {
+       "blurb": "Buckwheat ribbons from Valtellina, baked with cabbage and cheese",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "pizzoccheri",
+       "image": null,
+       "name": "Pizzoccheri",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Spiced lentil dal sold ready to heat",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "pot-ready-dal",
+     "image": null,
+     "name": "Pot-ready dal",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Spiced lentil dal sold ready to heat",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "pot-ready-dal",
+       "image": null,
+       "name": "Pot-ready dal",
+       "what": null
+      },
+      {
+       "blurb": "Dense, chewy and boiled, made for cream cheese and salmon",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "bagel",
+       "image": null,
+       "name": "Bagel",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Nuts, seeds and dried fruit for munching on the go",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "trail-mix",
+     "image": null,
+     "name": "Trail mix",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Nuts, seeds and dried fruit for munching on the go",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "trail-mix",
+       "image": null,
+       "name": "Trail mix",
+       "what": null
+      },
+      {
+       "blurb": "Tangy and cooling, ideal for marinades, dressings and curries",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "natural-yoghurt",
+       "image": null,
+       "name": "Natural yoghurt",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+     "category": "spices-seasonings",
+     "emoji": "\ud83c\udf36\ufe0f",
+     "id": "ground-nutmeg",
+     "image": null,
+     "name": "Ground nutmeg",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+       "category": "spices-seasonings",
+       "emoji": "\ud83c\udf36\ufe0f",
+       "id": "ground-nutmeg",
+       "image": null,
+       "name": "Ground nutmeg",
+       "what": null
+      },
+      {
+       "blurb": "Beaten egg brushed on pastry for a glossy golden finish",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-wash",
+       "image": null,
+       "name": "Egg wash",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 4
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Tangy fermented cabbage",
+     "category": "sauces-stocks-fermented",
+     "emoji": "\ud83e\uded9",
+     "id": "sauerkraut",
+     "image": null,
+     "name": "Sauerkraut",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Tangy fermented cabbage",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "sauerkraut",
+       "image": null,
+       "name": "Sauerkraut",
+       "what": null
+      },
+      {
+       "blurb": "Deeply tart and musky; cook into cordial, sauces and sorbet",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "blackcurrant",
+       "image": null,
+       "name": "Blackcurrant",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 5
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+     "category": "fungi",
+     "emoji": "\ud83c\udf44",
+     "id": "dried-shiitake-mushroom",
+     "image": null,
+     "name": "Dried shiitake mushroom",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "dried-shiitake-mushroom",
+       "image": null,
+       "name": "Dried shiitake mushroom",
+       "what": null
+      },
+      {
+       "blurb": "Crisp quick-fermented cucumbers",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "cucumber-kimchi",
+       "image": null,
+       "name": "Cucumber kimchi",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 6
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+     "category": "herbs-aromatics",
+     "emoji": "\ud83c\udf3f",
+     "id": "lemongrass",
+     "image": null,
+     "name": "Lemongrass",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+       "category": "herbs-aromatics",
+       "emoji": "\ud83c\udf3f",
+       "id": "lemongrass",
+       "image": null,
+       "name": "Lemongrass",
+       "what": null
+      },
+      {
+       "blurb": "Dried and soaked; adds snap to hot and sour soup and stir-fries",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "wood-ear-mushroom",
+       "image": null,
+       "name": "Wood ear mushroom",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 7
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Angular Indian beans stir-fried with spices",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "guar-beans",
+     "image": null,
+     "name": "Guar beans",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Angular Indian beans stir-fried with spices",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "guar-beans",
+       "image": null,
+       "name": "Guar beans",
+       "what": null
+      },
+      {
+       "blurb": "Honeyed orange fruit; eat when soft and ripe",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "persimmon",
+       "image": null,
+       "name": "Persimmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 8
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+     "category": "fish-seafood",
+     "emoji": "\ud83d\udc1f",
+     "id": "lox",
+     "image": null,
+     "name": "Lox",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "lox",
+       "image": null,
+       "name": "Lox",
+       "what": null
+      },
+      {
+       "blurb": "For koftas, shepherd's pie and moussaka",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "lamb-mince",
+       "image": null,
+       "name": "Lamb mince",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 9
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sliced everyday ham for sandwiches and salads",
+     "category": "meat-poultry",
+     "emoji": "\ud83e\udd69",
+     "id": "cooked-ham",
+     "image": null,
+     "name": "Cooked ham",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sliced everyday ham for sandwiches and salads",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "cooked-ham",
+       "image": null,
+       "name": "Cooked ham",
+       "what": null
+      },
+      {
+       "blurb": "Leaner and deeper in flavour than farmed, cook gently",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "wild-salmon",
+       "image": null,
+       "name": "Wild salmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 10
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Orange-fleshed tuber, sweet when roasted",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "sweet-potato",
+      "image": null,
+      "name": "Sweet potato",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Nuts, seeds and dried fruit for munching on the go",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "trail-mix",
+      "image": null,
+      "name": "Trail mix",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Tangy fermented cabbage",
+      "category": "sauces-stocks-fermented",
+      "emoji": "\ud83e\uded9",
+      "facts": null,
+      "id": "sauerkraut",
+      "image": null,
+      "name": "Sauerkraut",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+      "category": "herbs-aromatics",
+      "emoji": "\ud83c\udf3f",
+      "facts": null,
+      "id": "lemongrass",
+      "image": null,
+      "name": "Lemongrass",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "lox",
+      "image": null,
+      "name": "Lox",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Spiced lentil dal sold ready to heat",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "pot-ready-dal",
+      "image": null,
+      "name": "Pot-ready dal",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "ground-nutmeg",
+      "image": null,
+      "name": "Ground nutmeg",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sliced everyday ham for sandwiches and salads",
+      "category": "meat-poultry",
+      "emoji": "\ud83e\udd69",
+      "facts": null,
+      "id": "cooked-ham",
+      "image": null,
+      "name": "Cooked ham",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 13,
+  "revealed": true,
+  "seq": 1,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 2,
+   "vetoUsed": false
+  }
+ },
+ "1:None": {
+  "basket": [
+   {
+    "blurb": "Orange-fleshed tuber, sweet when roasted",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "sweet-potato",
+    "image": null,
+    "name": "Sweet potato",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Spiced lentil dal sold ready to heat",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "pot-ready-dal",
+    "image": null,
+    "name": "Pot-ready dal",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Nuts, seeds and dried fruit for munching on the go",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "trail-mix",
+    "image": null,
+    "name": "Trail mix",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "ground-nutmeg",
+    "image": null,
+    "name": "Ground nutmeg",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Tangy fermented cabbage",
+    "category": "sauces-stocks-fermented",
+    "emoji": "\ud83e\uded9",
+    "id": "sauerkraut",
+    "image": null,
+    "name": "Sauerkraut",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+    "category": "herbs-aromatics",
+    "emoji": "\ud83c\udf3f",
+    "id": "lemongrass",
+    "image": null,
+    "name": "Lemongrass",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "lox",
+    "image": null,
+    "name": "Lox",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sliced everyday ham for sandwiches and salads",
+    "category": "meat-poultry",
+    "emoji": "\ud83e\udd69",
+    "id": "cooked-ham",
+    "image": null,
+    "name": "Cooked ham",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": "no chef",
+   "state": "failed"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Orange-fleshed tuber, sweet when roasted",
+     "category": "vegetables",
+     "emoji": "\ud83e\udd66",
+     "id": "sweet-potato",
+     "image": null,
+     "name": "Sweet potato",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Orange-fleshed tuber, sweet when roasted",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "sweet-potato",
+       "image": null,
+       "name": "Sweet potato",
+       "what": null
+      },
+      {
+       "blurb": "Buckwheat ribbons from Valtellina, baked with cabbage and cheese",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "pizzoccheri",
+       "image": null,
+       "name": "Pizzoccheri",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Spiced lentil dal sold ready to heat",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "pot-ready-dal",
+     "image": null,
+     "name": "Pot-ready dal",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Spiced lentil dal sold ready to heat",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "pot-ready-dal",
+       "image": null,
+       "name": "Pot-ready dal",
+       "what": null
+      },
+      {
+       "blurb": "Dense, chewy and boiled, made for cream cheese and salmon",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "bagel",
+       "image": null,
+       "name": "Bagel",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Nuts, seeds and dried fruit for munching on the go",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "trail-mix",
+     "image": null,
+     "name": "Trail mix",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Nuts, seeds and dried fruit for munching on the go",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "trail-mix",
+       "image": null,
+       "name": "Trail mix",
+       "what": null
+      },
+      {
+       "blurb": "Tangy and cooling, ideal for marinades, dressings and curries",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "natural-yoghurt",
+       "image": null,
+       "name": "Natural yoghurt",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+     "category": "spices-seasonings",
+     "emoji": "\ud83c\udf36\ufe0f",
+     "id": "ground-nutmeg",
+     "image": null,
+     "name": "Ground nutmeg",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+       "category": "spices-seasonings",
+       "emoji": "\ud83c\udf36\ufe0f",
+       "id": "ground-nutmeg",
+       "image": null,
+       "name": "Ground nutmeg",
+       "what": null
+      },
+      {
+       "blurb": "Beaten egg brushed on pastry for a glossy golden finish",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-wash",
+       "image": null,
+       "name": "Egg wash",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 4
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Tangy fermented cabbage",
+     "category": "sauces-stocks-fermented",
+     "emoji": "\ud83e\uded9",
+     "id": "sauerkraut",
+     "image": null,
+     "name": "Sauerkraut",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Tangy fermented cabbage",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "sauerkraut",
+       "image": null,
+       "name": "Sauerkraut",
+       "what": null
+      },
+      {
+       "blurb": "Deeply tart and musky; cook into cordial, sauces and sorbet",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "blackcurrant",
+       "image": null,
+       "name": "Blackcurrant",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 5
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+     "category": "fungi",
+     "emoji": "\ud83c\udf44",
+     "id": "dried-shiitake-mushroom",
+     "image": null,
+     "name": "Dried shiitake mushroom",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "dried-shiitake-mushroom",
+       "image": null,
+       "name": "Dried shiitake mushroom",
+       "what": null
+      },
+      {
+       "blurb": "Crisp quick-fermented cucumbers",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "cucumber-kimchi",
+       "image": null,
+       "name": "Cucumber kimchi",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 6
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+     "category": "herbs-aromatics",
+     "emoji": "\ud83c\udf3f",
+     "id": "lemongrass",
+     "image": null,
+     "name": "Lemongrass",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+       "category": "herbs-aromatics",
+       "emoji": "\ud83c\udf3f",
+       "id": "lemongrass",
+       "image": null,
+       "name": "Lemongrass",
+       "what": null
+      },
+      {
+       "blurb": "Dried and soaked; adds snap to hot and sour soup and stir-fries",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "wood-ear-mushroom",
+       "image": null,
+       "name": "Wood ear mushroom",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 7
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Angular Indian beans stir-fried with spices",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "guar-beans",
+     "image": null,
+     "name": "Guar beans",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Angular Indian beans stir-fried with spices",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "guar-beans",
+       "image": null,
+       "name": "Guar beans",
+       "what": null
+      },
+      {
+       "blurb": "Honeyed orange fruit; eat when soft and ripe",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "persimmon",
+       "image": null,
+       "name": "Persimmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 8
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+     "category": "fish-seafood",
+     "emoji": "\ud83d\udc1f",
+     "id": "lox",
+     "image": null,
+     "name": "Lox",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "lox",
+       "image": null,
+       "name": "Lox",
+       "what": null
+      },
+      {
+       "blurb": "For koftas, shepherd's pie and moussaka",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "lamb-mince",
+       "image": null,
+       "name": "Lamb mince",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 9
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sliced everyday ham for sandwiches and salads",
+     "category": "meat-poultry",
+     "emoji": "\ud83e\udd69",
+     "id": "cooked-ham",
+     "image": null,
+     "name": "Cooked ham",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sliced everyday ham for sandwiches and salads",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "cooked-ham",
+       "image": null,
+       "name": "Cooked ham",
+       "what": null
+      },
+      {
+       "blurb": "Leaner and deeper in flavour than farmed, cook gently",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "wild-salmon",
+       "image": null,
+       "name": "Wild salmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 10
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Orange-fleshed tuber, sweet when roasted",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "sweet-potato",
+      "image": null,
+      "name": "Sweet potato",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Nuts, seeds and dried fruit for munching on the go",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "trail-mix",
+      "image": null,
+      "name": "Trail mix",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Tangy fermented cabbage",
+      "category": "sauces-stocks-fermented",
+      "emoji": "\ud83e\uded9",
+      "facts": null,
+      "id": "sauerkraut",
+      "image": null,
+      "name": "Sauerkraut",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+      "category": "herbs-aromatics",
+      "emoji": "\ud83c\udf3f",
+      "facts": null,
+      "id": "lemongrass",
+      "image": null,
+      "name": "Lemongrass",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "lox",
+      "image": null,
+      "name": "Lox",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Spiced lentil dal sold ready to heat",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "pot-ready-dal",
+      "image": null,
+      "name": "Pot-ready dal",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "ground-nutmeg",
+      "image": null,
+      "name": "Ground nutmeg",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sliced everyday ham for sandwiches and salads",
+      "category": "meat-poultry",
+      "emoji": "\ud83e\udd69",
+      "facts": null,
+      "id": "cooked-ham",
+      "image": null,
+      "name": "Cooked ham",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 13,
+  "revealed": true,
+  "seq": 1,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": null
+ },
+ "1:Rose": {
+  "basket": [
+   {
+    "blurb": "Orange-fleshed tuber, sweet when roasted",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "sweet-potato",
+    "image": null,
+    "name": "Sweet potato",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Spiced lentil dal sold ready to heat",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "pot-ready-dal",
+    "image": null,
+    "name": "Pot-ready dal",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Nuts, seeds and dried fruit for munching on the go",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "trail-mix",
+    "image": null,
+    "name": "Trail mix",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "ground-nutmeg",
+    "image": null,
+    "name": "Ground nutmeg",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Tangy fermented cabbage",
+    "category": "sauces-stocks-fermented",
+    "emoji": "\ud83e\uded9",
+    "id": "sauerkraut",
+    "image": null,
+    "name": "Sauerkraut",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+    "category": "herbs-aromatics",
+    "emoji": "\ud83c\udf3f",
+    "id": "lemongrass",
+    "image": null,
+    "name": "Lemongrass",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "lox",
+    "image": null,
+    "name": "Lox",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sliced everyday ham for sandwiches and salads",
+    "category": "meat-poultry",
+    "emoji": "\ud83e\udd69",
+    "id": "cooked-ham",
+    "image": null,
+    "name": "Cooked ham",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": "no chef",
+   "state": "failed"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Orange-fleshed tuber, sweet when roasted",
+     "category": "vegetables",
+     "emoji": "\ud83e\udd66",
+     "id": "sweet-potato",
+     "image": null,
+     "name": "Sweet potato",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Orange-fleshed tuber, sweet when roasted",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "sweet-potato",
+       "image": null,
+       "name": "Sweet potato",
+       "what": null
+      },
+      {
+       "blurb": "Buckwheat ribbons from Valtellina, baked with cabbage and cheese",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "pizzoccheri",
+       "image": null,
+       "name": "Pizzoccheri",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Spiced lentil dal sold ready to heat",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "pot-ready-dal",
+     "image": null,
+     "name": "Pot-ready dal",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Spiced lentil dal sold ready to heat",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "pot-ready-dal",
+       "image": null,
+       "name": "Pot-ready dal",
+       "what": null
+      },
+      {
+       "blurb": "Dense, chewy and boiled, made for cream cheese and salmon",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "bagel",
+       "image": null,
+       "name": "Bagel",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Nuts, seeds and dried fruit for munching on the go",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "trail-mix",
+     "image": null,
+     "name": "Trail mix",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Nuts, seeds and dried fruit for munching on the go",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "trail-mix",
+       "image": null,
+       "name": "Trail mix",
+       "what": null
+      },
+      {
+       "blurb": "Tangy and cooling, ideal for marinades, dressings and curries",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "natural-yoghurt",
+       "image": null,
+       "name": "Natural yoghurt",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+     "category": "spices-seasonings",
+     "emoji": "\ud83c\udf36\ufe0f",
+     "id": "ground-nutmeg",
+     "image": null,
+     "name": "Ground nutmeg",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+       "category": "spices-seasonings",
+       "emoji": "\ud83c\udf36\ufe0f",
+       "id": "ground-nutmeg",
+       "image": null,
+       "name": "Ground nutmeg",
+       "what": null
+      },
+      {
+       "blurb": "Beaten egg brushed on pastry for a glossy golden finish",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-wash",
+       "image": null,
+       "name": "Egg wash",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 4
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Tangy fermented cabbage",
+     "category": "sauces-stocks-fermented",
+     "emoji": "\ud83e\uded9",
+     "id": "sauerkraut",
+     "image": null,
+     "name": "Sauerkraut",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Tangy fermented cabbage",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "sauerkraut",
+       "image": null,
+       "name": "Sauerkraut",
+       "what": null
+      },
+      {
+       "blurb": "Deeply tart and musky; cook into cordial, sauces and sorbet",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "blackcurrant",
+       "image": null,
+       "name": "Blackcurrant",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 5
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+     "category": "fungi",
+     "emoji": "\ud83c\udf44",
+     "id": "dried-shiitake-mushroom",
+     "image": null,
+     "name": "Dried shiitake mushroom",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "dried-shiitake-mushroom",
+       "image": null,
+       "name": "Dried shiitake mushroom",
+       "what": null
+      },
+      {
+       "blurb": "Crisp quick-fermented cucumbers",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "cucumber-kimchi",
+       "image": null,
+       "name": "Cucumber kimchi",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 6
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+     "category": "herbs-aromatics",
+     "emoji": "\ud83c\udf3f",
+     "id": "lemongrass",
+     "image": null,
+     "name": "Lemongrass",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+       "category": "herbs-aromatics",
+       "emoji": "\ud83c\udf3f",
+       "id": "lemongrass",
+       "image": null,
+       "name": "Lemongrass",
+       "what": null
+      },
+      {
+       "blurb": "Dried and soaked; adds snap to hot and sour soup and stir-fries",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "wood-ear-mushroom",
+       "image": null,
+       "name": "Wood ear mushroom",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 7
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Angular Indian beans stir-fried with spices",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "guar-beans",
+     "image": null,
+     "name": "Guar beans",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Angular Indian beans stir-fried with spices",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "guar-beans",
+       "image": null,
+       "name": "Guar beans",
+       "what": null
+      },
+      {
+       "blurb": "Honeyed orange fruit; eat when soft and ripe",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "persimmon",
+       "image": null,
+       "name": "Persimmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 8
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+     "category": "fish-seafood",
+     "emoji": "\ud83d\udc1f",
+     "id": "lox",
+     "image": null,
+     "name": "Lox",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "lox",
+       "image": null,
+       "name": "Lox",
+       "what": null
+      },
+      {
+       "blurb": "For koftas, shepherd's pie and moussaka",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "lamb-mince",
+       "image": null,
+       "name": "Lamb mince",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 9
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sliced everyday ham for sandwiches and salads",
+     "category": "meat-poultry",
+     "emoji": "\ud83e\udd69",
+     "id": "cooked-ham",
+     "image": null,
+     "name": "Cooked ham",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sliced everyday ham for sandwiches and salads",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "cooked-ham",
+       "image": null,
+       "name": "Cooked ham",
+       "what": null
+      },
+      {
+       "blurb": "Leaner and deeper in flavour than farmed, cook gently",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "wild-salmon",
+       "image": null,
+       "name": "Wild salmon",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 10
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Orange-fleshed tuber, sweet when roasted",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "sweet-potato",
+      "image": null,
+      "name": "Sweet potato",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Nuts, seeds and dried fruit for munching on the go",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "trail-mix",
+      "image": null,
+      "name": "Trail mix",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Tangy fermented cabbage",
+      "category": "sauces-stocks-fermented",
+      "emoji": "\ud83e\uded9",
+      "facts": null,
+      "id": "sauerkraut",
+      "image": null,
+      "name": "Sauerkraut",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Citrusy stalks to bruise into soups, curries and marinades",
+      "category": "herbs-aromatics",
+      "emoji": "\ud83c\udf3f",
+      "facts": null,
+      "id": "lemongrass",
+      "image": null,
+      "name": "Lemongrass",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Brine-cured salmon, draped over cream cheese bagels",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "lox",
+      "image": null,
+      "name": "Lox",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Spiced lentil dal sold ready to heat",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "pot-ready-dal",
+      "image": null,
+      "name": "Pot-ready dal",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Warm and nutty; grate into bechamel, custard and spinach",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "ground-nutmeg",
+      "image": null,
+      "name": "Ground nutmeg",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sliced everyday ham for sandwiches and salads",
+      "category": "meat-poultry",
+      "emoji": "\ud83e\udd69",
+      "facts": null,
+      "id": "cooked-ham",
+      "image": null,
+      "name": "Cooked ham",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 13,
+  "revealed": true,
+  "seq": 1,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 1,
+   "vetoUsed": false
+  }
+ },
+ "2:Josh": {
+  "basket": [
+   {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "turn": 1,
+    "via": "swap",
+    "what": null
+   },
+   {
+    "blurb": "Fluffy starchy spud, made for baking and frying",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "russet-potato",
+    "image": null,
+    "name": "Russet potato",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Blitz into smoothies and instant sorbet",
+    "category": "fruit",
+    "emoji": "\ud83c\udf4b",
+    "id": "frozen-mango-chunks",
+    "image": null,
+    "name": "Frozen mango chunks",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "fennel-seeds",
+    "image": null,
+    "name": "Fennel seeds",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Convenient granules to set dough rising",
+    "category": "grains-bakery",
+    "emoji": "\ud83c\udf5e",
+    "id": "dried-yeast",
+    "image": null,
+    "name": "Dried yeast",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "nameko-mushroom",
+    "image": null,
+    "name": "Nameko mushroom",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "red-snapper",
+    "image": null,
+    "name": "Red snapper",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "American crab steamed with Old Bay and picked by hand",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "blue-crab",
+    "image": null,
+    "name": "Blue crab",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "pending"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 2,
+  "generations": [
+   {
+    "basket": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "what": null
+     },
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "what": null
+     }
+    ],
+    "concepts": [
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (a).",
+      "dishType": "bake",
+      "id": "a",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish A",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (b).",
+      "dishType": "bake",
+      "id": "b",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish B",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (c).",
+      "dishType": "bake",
+      "id": "c",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish C",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     }
+    ],
+    "generation": 1,
+    "pictures": {
+     "a": null,
+     "b": null,
+     "c": null
+    },
+    "recipes": {
+     "a": {
+      "bankedAt": 1793310579.13585,
+      "cooked": null,
+      "data": {
+       "cookMinutes": 25,
+       "ingredients": [
+        {
+         "amount": "some",
+         "id": "egg-noodle-dough",
+         "name": "Egg noodle dough"
+        },
+        {
+         "amount": "some",
+         "id": "russet-potato",
+         "name": "Russet potato"
+        },
+        {
+         "amount": "some",
+         "id": "guar-beans",
+         "name": "Guar beans"
+        }
+       ],
+       "prepMinutes": 10,
+       "serves": 2,
+       "steps": [
+        "Mix it.",
+        "Bake it."
+       ],
+       "totalMinutes": 35
+      },
+      "error": null,
+      "generation": 1,
+      "requestedBy": "Rose",
+      "state": "banked"
+     },
+     "b": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     },
+     "c": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     }
+    },
+    "vote": {
+     "match": null,
+     "votes": null
+    }
+   }
+  ],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Fluffy starchy spud, made for baking and frying",
+     "category": "vegetables",
+     "emoji": "\ud83e\udd66",
+     "id": "russet-potato",
+     "image": null,
+     "name": "Russet potato",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Fluffy starchy spud, made for baking and frying",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "russet-potato",
+       "image": null,
+       "name": "Russet potato",
+       "what": null
+      },
+      {
+       "blurb": "Spiced lentil dal sold ready to heat",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "pot-ready-dal",
+       "image": null,
+       "name": "Pot-ready dal",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Blitz into smoothies and instant sorbet",
+     "category": "fruit",
+     "emoji": "\ud83c\udf4b",
+     "id": "frozen-mango-chunks",
+     "image": null,
+     "name": "Frozen mango chunks",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Blitz into smoothies and instant sorbet",
+       "category": "fruit",
+       "emoji": "\ud83c\udf4b",
+       "id": "frozen-mango-chunks",
+       "image": null,
+       "name": "Frozen mango chunks",
+       "what": null
+      },
+      {
+       "blurb": "Tangy fermented cabbage",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "sauerkraut",
+       "image": null,
+       "name": "Sauerkraut",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 4
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Convenient granules to set dough rising",
+     "category": "grains-bakery",
+     "emoji": "\ud83c\udf5e",
+     "id": "dried-yeast",
+     "image": null,
+     "name": "Dried yeast",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Convenient granules to set dough rising",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "dried-yeast",
+       "image": null,
+       "name": "Dried yeast",
+       "what": null
+      },
+      {
+       "blurb": "Light oniony flakes for dips and baked potatoes",
+       "category": "spices-seasonings",
+       "emoji": "\ud83c\udf36\ufe0f",
+       "id": "dried-chives",
+       "image": null,
+       "name": "Dried chives",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 6
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+     "category": "fungi",
+     "emoji": "\ud83c\udf44",
+     "id": "dried-shiitake-mushroom",
+     "image": null,
+     "name": "Dried shiitake mushroom",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "dried-shiitake-mushroom",
+       "image": null,
+       "name": "Dried shiitake mushroom",
+       "what": null
+      },
+      {
+       "blurb": "Zingy, warming root for stir-fries, curries and teas",
+       "category": "herbs-aromatics",
+       "emoji": "\ud83c\udf3f",
+       "id": "fresh-ginger",
+       "image": null,
+       "name": "Fresh ginger",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 8
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "American crab steamed with Old Bay and picked by hand",
+     "category": "fish-seafood",
+     "emoji": "\ud83d\udc1f",
+     "id": "blue-crab",
+     "image": null,
+     "name": "Blue crab",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "American crab steamed with Old Bay and picked by hand",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "blue-crab",
+       "image": null,
+       "name": "Blue crab",
+       "what": null
+      },
+      {
+       "blurb": "Spit-roasted, well-seasoned bird ready to shred",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "rotisserie-chicken",
+       "image": null,
+       "name": "Rotisserie chicken",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 10
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "facts": null,
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "facts": null,
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 17,
+  "revealed": true,
+  "seq": 2,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "what": null
+   },
+   "out": {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "what": null
+   },
+   "pair": null,
+   "state": "done"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 2,
+   "vetoUsed": false
+  }
+ },
+ "2:None": {
+  "basket": [
+   {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "turn": 1,
+    "via": "swap",
+    "what": null
+   },
+   {
+    "blurb": "Fluffy starchy spud, made for baking and frying",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "russet-potato",
+    "image": null,
+    "name": "Russet potato",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Blitz into smoothies and instant sorbet",
+    "category": "fruit",
+    "emoji": "\ud83c\udf4b",
+    "id": "frozen-mango-chunks",
+    "image": null,
+    "name": "Frozen mango chunks",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "fennel-seeds",
+    "image": null,
+    "name": "Fennel seeds",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Convenient granules to set dough rising",
+    "category": "grains-bakery",
+    "emoji": "\ud83c\udf5e",
+    "id": "dried-yeast",
+    "image": null,
+    "name": "Dried yeast",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "nameko-mushroom",
+    "image": null,
+    "name": "Nameko mushroom",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "red-snapper",
+    "image": null,
+    "name": "Red snapper",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "American crab steamed with Old Bay and picked by hand",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "blue-crab",
+    "image": null,
+    "name": "Blue crab",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "pending"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 2,
+  "generations": [
+   {
+    "basket": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "what": null
+     },
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "what": null
+     }
+    ],
+    "concepts": [
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (a).",
+      "dishType": "bake",
+      "id": "a",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish A",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (b).",
+      "dishType": "bake",
+      "id": "b",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish B",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (c).",
+      "dishType": "bake",
+      "id": "c",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish C",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     }
+    ],
+    "generation": 1,
+    "pictures": {
+     "a": null,
+     "b": null,
+     "c": null
+    },
+    "recipes": {
+     "a": {
+      "bankedAt": 1793310579.13585,
+      "cooked": null,
+      "data": {
+       "cookMinutes": 25,
+       "ingredients": [
+        {
+         "amount": "some",
+         "id": "egg-noodle-dough",
+         "name": "Egg noodle dough"
+        },
+        {
+         "amount": "some",
+         "id": "russet-potato",
+         "name": "Russet potato"
+        },
+        {
+         "amount": "some",
+         "id": "guar-beans",
+         "name": "Guar beans"
+        }
+       ],
+       "prepMinutes": 10,
+       "serves": 2,
+       "steps": [
+        "Mix it.",
+        "Bake it."
+       ],
+       "totalMinutes": 35
+      },
+      "error": null,
+      "generation": 1,
+      "requestedBy": "Rose",
+      "state": "banked"
+     },
+     "b": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     },
+     "c": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     }
+    },
+    "vote": {
+     "match": null,
+     "votes": null
+    }
+   }
+  ],
+  "history": [],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "facts": null,
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "facts": null,
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 17,
+  "revealed": true,
+  "seq": 2,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "what": null
+   },
+   "out": {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "what": null
+   },
+   "pair": null,
+   "state": "done"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": null
+ },
+ "2:Rose": {
+  "basket": [
+   {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "turn": 1,
+    "via": "swap",
+    "what": null
+   },
+   {
+    "blurb": "Fluffy starchy spud, made for baking and frying",
+    "category": "vegetables",
+    "emoji": "\ud83e\udd66",
+    "id": "russet-potato",
+    "image": null,
+    "name": "Russet potato",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Angular Indian beans stir-fried with spices",
+    "category": "legumes-nuts-seeds",
+    "emoji": "\ud83e\udd5c",
+    "id": "guar-beans",
+    "image": null,
+    "name": "Guar beans",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Blitz into smoothies and instant sorbet",
+    "category": "fruit",
+    "emoji": "\ud83c\udf4b",
+    "id": "frozen-mango-chunks",
+    "image": null,
+    "name": "Frozen mango chunks",
+    "turn": 4,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+    "category": "spices-seasonings",
+    "emoji": "\ud83c\udf36\ufe0f",
+    "id": "fennel-seeds",
+    "image": null,
+    "name": "Fennel seeds",
+    "turn": 5,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Convenient granules to set dough rising",
+    "category": "grains-bakery",
+    "emoji": "\ud83c\udf5e",
+    "id": "dried-yeast",
+    "image": null,
+    "name": "Dried yeast",
+    "turn": 6,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "nameko-mushroom",
+    "image": null,
+    "name": "Nameko mushroom",
+    "turn": 7,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+    "category": "fungi",
+    "emoji": "\ud83c\udf44",
+    "id": "dried-shiitake-mushroom",
+    "image": null,
+    "name": "Dried shiitake mushroom",
+    "turn": 8,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "red-snapper",
+    "image": null,
+    "name": "Red snapper",
+    "turn": 9,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "American crab steamed with Old Bay and picked by hand",
+    "category": "fish-seafood",
+    "emoji": "\ud83d\udc1f",
+    "id": "blue-crab",
+    "image": null,
+    "name": "Blue crab",
+    "turn": 10,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "pending"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 2,
+  "generations": [
+   {
+    "basket": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "what": null
+     },
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "what": null
+     }
+    ],
+    "concepts": [
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (a).",
+      "dishType": "bake",
+      "id": "a",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish A",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (b).",
+      "dishType": "bake",
+      "id": "b",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish B",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     },
+     {
+      "challengeNote": null,
+      "description": "A fixture dish using everything (c).",
+      "dishType": "bake",
+      "id": "c",
+      "omitted": [],
+      "pickedIngredients": [
+       {
+        "blurb": "Eggy fresh dough rolled for silky noodles",
+        "category": "dairy-eggs",
+        "emoji": "\ud83e\uddc0",
+        "id": "egg-noodle-dough",
+        "image": null,
+        "name": "Egg noodle dough",
+        "what": null
+       },
+       {
+        "blurb": "Fluffy starchy spud, made for baking and frying",
+        "category": "vegetables",
+        "emoji": "\ud83e\udd66",
+        "id": "russet-potato",
+        "image": null,
+        "name": "Russet potato",
+        "what": null
+       },
+       {
+        "blurb": "Angular Indian beans stir-fried with spices",
+        "category": "legumes-nuts-seeds",
+        "emoji": "\ud83e\udd5c",
+        "id": "guar-beans",
+        "image": null,
+        "name": "Guar beans",
+        "what": null
+       },
+       {
+        "blurb": "Blitz into smoothies and instant sorbet",
+        "category": "fruit",
+        "emoji": "\ud83c\udf4b",
+        "id": "frozen-mango-chunks",
+        "image": null,
+        "name": "Frozen mango chunks",
+        "what": null
+       },
+       {
+        "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+        "category": "spices-seasonings",
+        "emoji": "\ud83c\udf36\ufe0f",
+        "id": "fennel-seeds",
+        "image": null,
+        "name": "Fennel seeds",
+        "what": null
+       },
+       {
+        "blurb": "Convenient granules to set dough rising",
+        "category": "grains-bakery",
+        "emoji": "\ud83c\udf5e",
+        "id": "dried-yeast",
+        "image": null,
+        "name": "Dried yeast",
+        "what": null
+       },
+       {
+        "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "nameko-mushroom",
+        "image": null,
+        "name": "Nameko mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+        "category": "fungi",
+        "emoji": "\ud83c\udf44",
+        "id": "dried-shiitake-mushroom",
+        "image": null,
+        "name": "Dried shiitake mushroom",
+        "what": null
+       },
+       {
+        "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "red-snapper",
+        "image": null,
+        "name": "Red snapper",
+        "what": null
+       },
+       {
+        "blurb": "American crab steamed with Old Bay and picked by hand",
+        "category": "fish-seafood",
+        "emoji": "\ud83d\udc1f",
+        "id": "blue-crab",
+        "image": null,
+        "name": "Blue crab",
+        "what": null
+       }
+      ],
+      "staplesUsed": [],
+      "technique": "bake",
+      "title": "Fixture dish C",
+      "totalMinutes": null,
+      "vibe": "cosy"
+     }
+    ],
+    "generation": 1,
+    "pictures": {
+     "a": null,
+     "b": null,
+     "c": null
+    },
+    "recipes": {
+     "a": {
+      "bankedAt": 1793310579.13585,
+      "cooked": null,
+      "data": {
+       "cookMinutes": 25,
+       "ingredients": [
+        {
+         "amount": "some",
+         "id": "egg-noodle-dough",
+         "name": "Egg noodle dough"
+        },
+        {
+         "amount": "some",
+         "id": "russet-potato",
+         "name": "Russet potato"
+        },
+        {
+         "amount": "some",
+         "id": "guar-beans",
+         "name": "Guar beans"
+        }
+       ],
+       "prepMinutes": 10,
+       "serves": 2,
+       "steps": [
+        "Mix it.",
+        "Bake it."
+       ],
+       "totalMinutes": 35
+      },
+      "error": null,
+      "generation": 1,
+      "requestedBy": "Rose",
+      "state": "banked"
+     },
+     "b": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     },
+     "c": {
+      "bankedAt": null,
+      "cooked": null,
+      "data": null,
+      "error": null,
+      "generation": 1,
+      "requestedBy": null,
+      "state": "none"
+     }
+    },
+    "vote": {
+     "match": null,
+     "votes": null
+    }
+   }
+  ],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Eggy fresh dough rolled for silky noodles",
+     "category": "dairy-eggs",
+     "emoji": "\ud83e\uddc0",
+     "id": "egg-noodle-dough",
+     "image": null,
+     "name": "Egg noodle dough",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Eggy fresh dough rolled for silky noodles",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-noodle-dough",
+       "image": null,
+       "name": "Egg noodle dough",
+       "what": null
+      },
+      {
+       "blurb": "Orange-fleshed tuber, sweet when roasted",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "sweet-potato",
+       "image": null,
+       "name": "Sweet potato",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Angular Indian beans stir-fried with spices",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "guar-beans",
+     "image": null,
+     "name": "Guar beans",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Angular Indian beans stir-fried with spices",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "guar-beans",
+       "image": null,
+       "name": "Guar beans",
+       "what": null
+      },
+      {
+       "blurb": "Spicy, fermented Korean cabbage",
+       "category": "sauces-stocks-fermented",
+       "emoji": "\ud83e\uded9",
+       "id": "kimchi",
+       "image": null,
+       "name": "Kimchi",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+     "category": "spices-seasonings",
+     "emoji": "\ud83c\udf36\ufe0f",
+     "id": "fennel-seeds",
+     "image": null,
+     "name": "Fennel seeds",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+       "category": "spices-seasonings",
+       "emoji": "\ud83c\udf36\ufe0f",
+       "id": "fennel-seeds",
+       "image": null,
+       "name": "Fennel seeds",
+       "what": null
+      },
+      {
+       "blurb": "Salty, searingly hot Indian pickle",
+       "category": "oils-fats-condiments",
+       "emoji": "\ud83e\uded2",
+       "id": "lime-pickle",
+       "image": null,
+       "name": "Lime pickle",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 5
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+     "category": "fungi",
+     "emoji": "\ud83c\udf44",
+     "id": "nameko-mushroom",
+     "image": null,
+     "name": "Nameko mushroom",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+       "category": "fungi",
+       "emoji": "\ud83c\udf44",
+       "id": "nameko-mushroom",
+       "image": null,
+       "name": "Nameko mushroom",
+       "what": null
+      },
+      {
+       "blurb": "Battered onion rings, oven baked or fried",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "frozen-onion-rings",
+       "image": null,
+       "name": "Frozen onion rings",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 7
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+     "category": "fish-seafood",
+     "emoji": "\ud83d\udc1f",
+     "id": "red-snapper",
+     "image": null,
+     "name": "Red snapper",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+       "category": "fish-seafood",
+       "emoji": "\ud83d\udc1f",
+       "id": "red-snapper",
+       "image": null,
+       "name": "Red snapper",
+       "what": null
+      },
+      {
+       "blurb": "Smoked, pre-cooked sausage for hot dogs and soups",
+       "category": "meat-poultry",
+       "emoji": "\ud83e\udd69",
+       "id": "frankfurter",
+       "image": null,
+       "name": "Frankfurter",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 9
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Angular Indian beans stir-fried with spices",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "facts": null,
+      "id": "guar-beans",
+      "image": null,
+      "name": "Guar beans",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet aniseed seeds for sausages, breads and after-dinner chewing",
+      "category": "spices-seasonings",
+      "emoji": "\ud83c\udf36\ufe0f",
+      "facts": null,
+      "id": "fennel-seeds",
+      "image": null,
+      "name": "Fennel seeds",
+      "turn": 5,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Naturally glossy and silky; thickens miso soup beautifully",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "nameko-mushroom",
+      "image": null,
+      "name": "Nameko mushroom",
+      "turn": 7,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet, moist flesh, lovely whole with chilli and lime",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "red-snapper",
+      "image": null,
+      "name": "Red snapper",
+      "turn": 9,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 5,
+    "picks": [
+     {
+      "blurb": "Fluffy starchy spud, made for baking and frying",
+      "category": "vegetables",
+      "emoji": "\ud83e\udd66",
+      "facts": null,
+      "id": "russet-potato",
+      "image": null,
+      "name": "Russet potato",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Blitz into smoothies and instant sorbet",
+      "category": "fruit",
+      "emoji": "\ud83c\udf4b",
+      "facts": null,
+      "id": "frozen-mango-chunks",
+      "image": null,
+      "name": "Frozen mango chunks",
+      "turn": 4,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Convenient granules to set dough rising",
+      "category": "grains-bakery",
+      "emoji": "\ud83c\udf5e",
+      "facts": null,
+      "id": "dried-yeast",
+      "image": null,
+      "name": "Dried yeast",
+      "turn": 6,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Soak to a deep savoury liquor; the soaking water is as good as the mushroom",
+      "category": "fungi",
+      "emoji": "\ud83c\udf44",
+      "facts": null,
+      "id": "dried-shiitake-mushroom",
+      "image": null,
+      "name": "Dried shiitake mushroom",
+      "turn": 8,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "American crab steamed with Old Bay and picked by hand",
+      "category": "fish-seafood",
+      "emoji": "\ud83d\udc1f",
+      "facts": null,
+      "id": "blue-crab",
+      "image": null,
+      "name": "Blue crab",
+      "turn": 10,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 2,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 17,
+  "revealed": true,
+  "seq": 2,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "finished",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": {
+    "blurb": "Baked oats, nuts and honey clusters",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "granola",
+    "image": null,
+    "name": "Granola",
+    "what": null
+   },
+   "out": {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "what": null
+   },
+   "pair": null,
+   "state": "done"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 1,
+   "vetoUsed": false
+  }
+ },
+ "3:Josh": {
+  "basket": [
+   {
+    "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "ready-made-pizza-base",
+    "image": null,
+    "name": "Ready-made pizza base",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+    "category": "drinks-alcohol",
+    "emoji": "\u2615",
+    "id": "cream-sherry",
+    "image": null,
+    "name": "Cream sherry",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "ready-made-pizza-base",
+     "image": null,
+     "name": "Ready-made pizza base",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "ready-made-pizza-base",
+       "image": null,
+       "name": "Ready-made pizza base",
+       "what": null
+      },
+      {
+       "blurb": "Golden maize that cooks into creamy Italian comfort",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "coarse-polenta",
+       "image": null,
+       "name": "Coarse polenta",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Eggy fresh dough rolled for silky noodles",
+     "category": "dairy-eggs",
+     "emoji": "\ud83e\uddc0",
+     "id": "egg-noodle-dough",
+     "image": null,
+     "name": "Egg noodle dough",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Eggy fresh dough rolled for silky noodles",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-noodle-dough",
+       "image": null,
+       "name": "Egg noodle dough",
+       "what": null
+      },
+      {
+       "blurb": "Small waxy potato for boiling and dressing warm",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "salad-potato",
+       "image": null,
+       "name": "Salad potato",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+     "category": "drinks-alcohol",
+     "emoji": "\u2615",
+     "id": "cream-sherry",
+     "image": null,
+     "name": "Cream sherry",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+       "category": "drinks-alcohol",
+       "emoji": "\u2615",
+       "id": "cream-sherry",
+       "image": null,
+       "name": "Cream sherry",
+       "what": null
+      },
+      {
+       "blurb": "Light honey with citrus perfume",
+       "category": "sweet-baking",
+       "emoji": "\ud83c\udf6f",
+       "id": "orange-blossom-honey",
+       "image": null,
+       "name": "Orange blossom honey",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 2,
+    "picks": [
+     {
+      "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "ready-made-pizza-base",
+      "image": null,
+      "name": "Ready-made pizza base",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+      "category": "drinks-alcohol",
+      "emoji": "\u2615",
+      "facts": null,
+      "id": "cream-sherry",
+      "image": null,
+      "name": "Cream sherry",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 1,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 6,
+  "revealed": true,
+  "seq": 3,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "abandoned",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 2,
+   "vetoUsed": false
+  }
+ },
+ "3:None": {
+  "basket": [
+   {
+    "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "ready-made-pizza-base",
+    "image": null,
+    "name": "Ready-made pizza base",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+    "category": "drinks-alcohol",
+    "emoji": "\u2615",
+    "id": "cream-sherry",
+    "image": null,
+    "name": "Cream sherry",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "ready-made-pizza-base",
+     "image": null,
+     "name": "Ready-made pizza base",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "ready-made-pizza-base",
+       "image": null,
+       "name": "Ready-made pizza base",
+       "what": null
+      },
+      {
+       "blurb": "Golden maize that cooks into creamy Italian comfort",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "coarse-polenta",
+       "image": null,
+       "name": "Coarse polenta",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Eggy fresh dough rolled for silky noodles",
+     "category": "dairy-eggs",
+     "emoji": "\ud83e\uddc0",
+     "id": "egg-noodle-dough",
+     "image": null,
+     "name": "Egg noodle dough",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Eggy fresh dough rolled for silky noodles",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-noodle-dough",
+       "image": null,
+       "name": "Egg noodle dough",
+       "what": null
+      },
+      {
+       "blurb": "Small waxy potato for boiling and dressing warm",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "salad-potato",
+       "image": null,
+       "name": "Salad potato",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+     "category": "drinks-alcohol",
+     "emoji": "\u2615",
+     "id": "cream-sherry",
+     "image": null,
+     "name": "Cream sherry",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+       "category": "drinks-alcohol",
+       "emoji": "\u2615",
+       "id": "cream-sherry",
+       "image": null,
+       "name": "Cream sherry",
+       "what": null
+      },
+      {
+       "blurb": "Light honey with citrus perfume",
+       "category": "sweet-baking",
+       "emoji": "\ud83c\udf6f",
+       "id": "orange-blossom-honey",
+       "image": null,
+       "name": "Orange blossom honey",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 2,
+    "picks": [
+     {
+      "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "ready-made-pizza-base",
+      "image": null,
+      "name": "Ready-made pizza base",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+      "category": "drinks-alcohol",
+      "emoji": "\u2615",
+      "facts": null,
+      "id": "cream-sherry",
+      "image": null,
+      "name": "Cream sherry",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 1,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 6,
+  "revealed": true,
+  "seq": 3,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "abandoned",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": null
+ },
+ "3:Rose": {
+  "basket": [
+   {
+    "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+    "category": "prepared-pantry",
+    "emoji": "\ud83e\udd6b",
+    "id": "ready-made-pizza-base",
+    "image": null,
+    "name": "Ready-made pizza base",
+    "turn": 1,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Eggy fresh dough rolled for silky noodles",
+    "category": "dairy-eggs",
+    "emoji": "\ud83e\uddc0",
+    "id": "egg-noodle-dough",
+    "image": null,
+    "name": "Egg noodle dough",
+    "turn": 2,
+    "via": "pick",
+    "what": null
+   },
+   {
+    "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+    "category": "drinks-alcohol",
+    "emoji": "\u2615",
+    "id": "cream-sherry",
+    "image": null,
+    "name": "Cream sherry",
+    "turn": 3,
+    "via": "pick",
+    "what": null
+   }
+  ],
+  "blind": false,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": null,
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+     "category": "prepared-pantry",
+     "emoji": "\ud83e\udd6b",
+     "id": "ready-made-pizza-base",
+     "image": null,
+     "name": "Ready-made pizza base",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "ready-made-pizza-base",
+       "image": null,
+       "name": "Ready-made pizza base",
+       "what": null
+      },
+      {
+       "blurb": "Golden maize that cooks into creamy Italian comfort",
+       "category": "grains-bakery",
+       "emoji": "\ud83c\udf5e",
+       "id": "coarse-polenta",
+       "image": null,
+       "name": "Coarse polenta",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Eggy fresh dough rolled for silky noodles",
+     "category": "dairy-eggs",
+     "emoji": "\ud83e\uddc0",
+     "id": "egg-noodle-dough",
+     "image": null,
+     "name": "Egg noodle dough",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Eggy fresh dough rolled for silky noodles",
+       "category": "dairy-eggs",
+       "emoji": "\ud83e\uddc0",
+       "id": "egg-noodle-dough",
+       "image": null,
+       "name": "Egg noodle dough",
+       "what": null
+      },
+      {
+       "blurb": "Small waxy potato for boiling and dressing warm",
+       "category": "vegetables",
+       "emoji": "\ud83e\udd66",
+       "id": "salad-potato",
+       "image": null,
+       "name": "Salad potato",
+       "what": null
+      }
+     ]
+    ],
+    "player": 2,
+    "replaced": [],
+    "seed": null,
+    "turn": 2
+   },
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+     "category": "drinks-alcohol",
+     "emoji": "\u2615",
+     "id": "cream-sherry",
+     "image": null,
+     "name": "Cream sherry",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+       "category": "drinks-alcohol",
+       "emoji": "\u2615",
+       "id": "cream-sherry",
+       "image": null,
+       "name": "Cream sherry",
+       "what": null
+      },
+      {
+       "blurb": "Light honey with citrus perfume",
+       "category": "sweet-baking",
+       "emoji": "\ud83c\udf6f",
+       "id": "orange-blossom-honey",
+       "image": null,
+       "name": "Orange blossom honey",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 3
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 2,
+    "picks": [
+     {
+      "blurb": "A par-baked or fresh base waiting for sauce and cheese",
+      "category": "prepared-pantry",
+      "emoji": "\ud83e\udd6b",
+      "facts": null,
+      "id": "ready-made-pizza-base",
+      "image": null,
+      "name": "Ready-made pizza base",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     },
+     {
+      "blurb": "Sweet raisiny sherry for trifle and Christmas cake",
+      "category": "drinks-alcohol",
+      "emoji": "\u2615",
+      "facts": null,
+      "id": "cream-sherry",
+      "image": null,
+      "name": "Cream sherry",
+      "turn": 3,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": false,
+    "name": "Josh",
+    "pickCount": 1,
+    "picks": [
+     {
+      "blurb": "Eggy fresh dough rolled for silky noodles",
+      "category": "dairy-eggs",
+      "emoji": "\ud83e\uddc0",
+      "facts": null,
+      "id": "egg-noodle-dough",
+      "image": null,
+      "name": "Egg noodle dough",
+      "turn": 2,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 6,
+  "revealed": true,
+  "seq": 3,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "abandoned",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 1,
+   "vetoUsed": false
+  }
+ },
+ "4:Josh": {
+  "basket": null,
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": {
+   "canChaos": null,
+   "canLucky": null,
+   "canVeto": null,
+   "chaosPair": null,
+   "offerIndex": null,
+   "options": null,
+   "player": 2,
+   "role": null,
+   "skipsRemaining": null,
+   "turn": 2,
+   "vetoed": null,
+   "waitingForJoin": true
+  },
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": null,
+    "name": "Rose",
+    "pickCount": 1,
+    "picks": null,
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": null,
+    "name": null,
+    "pickCount": 0,
+    "picks": null,
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 2,
+  "revealed": false,
+  "seq": 4,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "picking",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": null
+ },
+ "4:None": {
+  "basket": null,
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": {
+   "canChaos": null,
+   "canLucky": null,
+   "canVeto": null,
+   "chaosPair": null,
+   "offerIndex": null,
+   "options": null,
+   "player": 2,
+   "role": null,
+   "skipsRemaining": null,
+   "turn": 2,
+   "vetoed": null,
+   "waitingForJoin": true
+  },
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": null,
+    "name": "Rose",
+    "pickCount": 1,
+    "picks": null,
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": null,
+    "name": null,
+    "pickCount": 0,
+    "picks": null,
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 2,
+  "revealed": false,
+  "seq": 4,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "picking",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": null
+ },
+ "4:Rose": {
+  "basket": null,
+  "blind": true,
+  "concepts": {
+   "data": null,
+   "error": null,
+   "state": "none"
+  },
+  "current": {
+   "canChaos": null,
+   "canLucky": null,
+   "canVeto": null,
+   "chaosPair": null,
+   "offerIndex": null,
+   "options": null,
+   "player": 2,
+   "role": null,
+   "skipsRemaining": null,
+   "turn": 2,
+   "vetoed": null,
+   "waitingForJoin": true
+  },
+  "gate": {
+   "waitingFor": []
+  },
+  "generation": 1,
+  "generations": [],
+  "history": [
+   {
+    "chaosOffer": null,
+    "choice": {
+     "blurb": "Large, buttery beans for stews, bakes and creamy mash",
+     "category": "legumes-nuts-seeds",
+     "emoji": "\ud83e\udd5c",
+     "id": "butter-beans",
+     "image": null,
+     "name": "Butter beans",
+     "what": null
+    },
+    "lucky": false,
+    "offers": [
+     [
+      {
+       "blurb": "Large, buttery beans for stews, bakes and creamy mash",
+       "category": "legumes-nuts-seeds",
+       "emoji": "\ud83e\udd5c",
+       "id": "butter-beans",
+       "image": null,
+       "name": "Butter beans",
+       "what": null
+      },
+      {
+       "blurb": "Pressed ham in jelly",
+       "category": "prepared-pantry",
+       "emoji": "\ud83e\udd6b",
+       "id": "tinned-ham",
+       "image": null,
+       "name": "Tinned ham",
+       "what": null
+      }
+     ]
+    ],
+    "player": 1,
+    "replaced": [],
+    "seed": null,
+    "turn": 1
+   }
+  ],
+  "images": {
+   "pictures": {
+    "a": null,
+    "b": null,
+    "c": null
+   },
+   "state": "none"
+  },
+  "players": [
+   {
+    "chaosUsed": false,
+    "name": "Rose",
+    "pickCount": 1,
+    "picks": [
+     {
+      "blurb": "Large, buttery beans for stews, bakes and creamy mash",
+      "category": "legumes-nuts-seeds",
+      "emoji": "\ud83e\udd5c",
+      "id": "butter-beans",
+      "image": null,
+      "name": "Butter beans",
+      "turn": 1,
+      "via": "pick",
+      "what": null
+     }
+    ],
+    "slot": 1,
+    "vetoUsed": false
+   },
+   {
+    "chaosUsed": null,
+    "name": null,
+    "pickCount": 0,
+    "picks": null,
+    "slot": 2,
+    "vetoUsed": false
+   }
+  ],
+  "recipes": {
+   "a": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "b": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   },
+   "c": {
+    "bankedAt": null,
+    "cooked": null,
+    "data": null,
+    "error": null,
+    "generation": 1,
+    "requestedBy": null,
+    "state": "none"
+   }
+  },
+  "rev": 2,
+  "revealed": false,
+  "seq": 4,
+  "setup": {
+   "challenge": null,
+   "encore": null,
+   "fridgeRaid": false,
+   "stars": false,
+   "style": null,
+   "styleSpun": false,
+   "wildcard": false
+  },
+  "staples": [
+   {
+    "id": "water",
+    "image": null,
+    "name": "Water"
+   },
+   {
+    "id": "salt",
+    "image": null,
+    "name": "Salt"
+   },
+   {
+    "id": "black-pepper",
+    "image": null,
+    "name": "Black pepper"
+   },
+   {
+    "id": "butter",
+    "image": null,
+    "name": "Butter"
+   },
+   {
+    "id": "plain-flour",
+    "image": null,
+    "name": "Plain flour"
+   },
+   {
+    "id": "cooking-oil",
+    "image": null,
+    "name": "Cooking oil"
+   },
+   {
+    "id": "granulated-sugar",
+    "image": null,
+    "name": "Granulated sugar"
+   },
+   {
+    "id": "milk",
+    "image": null,
+    "name": "Milk"
+   }
+  ],
+  "stars": {
+   "enabled": false,
+   "mine": null,
+   "partner": null,
+   "partnerChosen": false,
+   "revealed": false
+  },
+  "starters": [],
+  "state": "picking",
+  "swap": {
+   "available": false,
+   "by": null,
+   "in": null,
+   "out": null,
+   "pair": null,
+   "state": "none"
+  },
+  "vote": null,
+  "wildcard": {
+   "ingredient": null,
+   "state": "off"
+  },
+  "you": {
+   "chaosUsed": false,
+   "slot": 1,
+   "vetoUsed": false
+  }
+ }
+}
