@@ -23,7 +23,7 @@ import anyio
 import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException as FastAPIHTTPException
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
@@ -69,6 +69,16 @@ from wixy_server.livechat.cookout_game import (
     CookoutRunner,
     NullCookoutRunner,
     default_bank,
+)
+from wixy_server.livechat.cookout_pack import SLOT_REFRESH_S, PackStore
+from wixy_server.livechat.cookout_visuals import (
+    IMAGE_ROUTE_PREFIX,
+    CookoutVisualsService,
+    IngredientVisuals,
+    is_sha,
+    load_visuals,
+    search_path,
+    set_default_visuals,
 )
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
@@ -189,6 +199,8 @@ def create_app(
     cookout_bank: CookoutBankLike | None = None,
     cookout_runner: CookoutRunner | None = None,
     cookout_cmd_client: CmdChatClient | None = None,
+    cookout_visuals: IngredientVisuals | None = None,
+    cookout_visuals_refresh_s: float = SLOT_REFRESH_S,
 ) -> FastAPI:
     """Build the Wixy FastAPI app for one project.
 
@@ -431,6 +443,29 @@ def create_app(
     resolved_cookout_bank: CookoutBankLike | None = (
         cookout_bank if cookout_bank is not None else default_bank()
     )
+    # Cookout pictures (09b): catalogue + manifest + object search path joined once, installed as
+    # the process default every snapshot is enriched from. A test injects its own.
+    resolved_cookout_visuals = (
+        cookout_visuals
+        if cookout_visuals is not None
+        else load_visuals(
+            search_path(
+                settings.storage_root,
+                settings.cookout_images_dir,
+                settings.cookout_images_baked_dir,
+            )
+        )
+    )
+    set_default_visuals(resolved_cookout_visuals)
+    cookout_visuals_service = CookoutVisualsService(
+        resolved_cookout_visuals,
+        lambda: PackStore(
+            settings.storage_root / "cookout-images",
+            min_free_bytes=settings.server_min_free_bytes,
+            lock_timeout_s=5.0,
+        ),
+        refresh_s=cookout_visuals_refresh_s,
+    )
     resolved_cookout_runner: CookoutRunner
     if cookout_runner is not None:
         resolved_cookout_runner = cookout_runner
@@ -597,9 +632,11 @@ def create_app(
                     await anyio.to_thread.run_sync(resolved_cookout_runner.prepare_directory)
                 await resolved_cookout_runner.resume(background)
                 resolved_cookout_runner.supervise(background)
+                background.supervise("cookout-visuals", cookout_visuals_service.run)
                 yield
                 tg.cancel_scope.cancel()
         finally:
+            await cookout_visuals_service.aretire()
             livechat_call_broker.shutdown()
             await livechat_push_client.aclose()
             await chat_client.aclose()
@@ -750,6 +787,26 @@ def create_app(
         """Serve the push worker before the admin SPA's broad catch-all route."""
 
         return server_sw_response()
+
+    @app.get(IMAGE_ROUTE_PREFIX + "{name}", include_in_schema=False)
+    async def get_cookout_image(name: str, request: Request) -> Response:
+        """A Cookout ingredient picture by content hash (09b B.7). Engine catalogue data, same
+        for everyone, so it sits under `/admin` (behind Access like the admin bundles) and NOT
+        behind the chat unlock token. Only a manifest sha whose file exists is served."""
+        sha, dot, ext = name.partition(".")
+        if ext != "webp" or not dot or not is_sha(sha):
+            raise FastAPIHTTPException(status_code=404)
+        path = await anyio.to_thread.run_sync(resolved_cookout_visuals.resolve_object, sha)
+        if path is None:
+            raise FastAPIHTTPException(status_code=404)
+        headers = {
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "ETag": f'"{sha}"',
+            "X-Content-Type-Options": "nosniff",
+        }
+        if request.headers.get("if-none-match") in (f'"{sha}"', f'W/"{sha}"', sha):
+            return Response(status_code=304, headers=headers)
+        return FileResponse(path, media_type="image/webp", headers=headers)
 
     # Mount BEFORE /admin/static (more specific path first, per Uxer's own
     # doc) so /admin/static/uxer/... resolves here rather than falling

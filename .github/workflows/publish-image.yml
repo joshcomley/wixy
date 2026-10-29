@@ -46,6 +46,42 @@ jobs:
         id: engine-version
         run: echo "count=$(git rev-list --first-parent --count HEAD)" >> "$GITHUB_OUTPUT"
 
+      # spec/server-chat/09b F.4: before anything is pushed, prove the REAL image serves a baked
+      # Cookout picture (a seeded draw from the committed manifest) from a container with no network
+      # and empty storage. An empty manifest (`pack: null`, no pictures yet) has nothing to prove.
+      - name: Does the manifest name a picture pack?
+        id: cookout-pack
+        run: |
+          has_pack=$(python3 -c "import json,sys; print(int(json.load(open(sys.argv[1]))['pack'] is not None))" wixy_server/livechat/cookout_ingredient_images.json)
+          echo "present=$has_pack" >> "$GITHUB_OUTPUT"
+
+      - name: Build the image for the Cookout picture proof
+        if: steps.cookout-pack.outputs.present == '1'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/standalone/Dockerfile
+          push: false
+          load: true
+          tags: wixy:proof
+          build-args: |
+            WIXY_ENGINE_SHA=${{ github.sha }}
+            WIXY_ENGINE_VERSION=${{ steps.engine-version.outputs.count }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - uses: actions/setup-python@v5
+        if: steps.cookout-pack.outputs.present == '1'
+        with:
+          python-version: "3.14"
+
+      - name: Prove the image serves a baked Cookout picture
+        if: steps.cookout-pack.outputs.present == '1'
+        run: |
+          pip install -e ".[server]"
+          bash deploy/standalone/ci/cookout_image_proof.sh wixy:proof \
+            wixy_server/livechat/cookout_ingredient_images.json wixy-cookout-publish-proof
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -55,6 +91,7 @@ jobs:
           build-args: |
             WIXY_ENGINE_SHA=${{ github.sha }}
             WIXY_ENGINE_VERSION=${{ steps.engine-version.outputs.count }}
+          cache-from: type=gha
           # WIXY_SYNC_BASE is left unbaked here — upstream (joshcomley/wixy) is
           # not itself a fork and has no sync base. Milestone 4's sync workflow
           # is what gives a FORK's own copy of this workflow a real value to
