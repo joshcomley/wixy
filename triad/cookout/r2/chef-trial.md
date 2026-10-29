@@ -1,177 +1,196 @@
 # Cookout chef trial - final report (round 2)
 
-Real cmd runs (claude-sonnet-5-5, production prompts and validators, up to 3 repairs). Four runs were made while tuning; the table below is the LAST run (seed 3).
+Real cmd runs (claude-sonnet-5-5, production prompts and validators, up to 3 repairs). The tables below the summary are the LAST full run (seed 5).
 
-| run | code | concepts accepted | on attempt 1/2/3/4 | recipes accepted |
+| run | what it tested | concepts accepted | on attempt 1/2/3/4 | recipes accepted |
 |---|---|---|---|---|
-| 1 (seed 1, partial, 19 baskets) | first cut | 19/19 | 7 first | - |
-| 2 (seed 1) | + bun/date/challengeNote fixes | 40/40 | 27/9/3/1 | 8/10 |
-| 3 (seed 2) | + self-check prompts | 39/40 | 26/8/4/1 | 10/10 (9 first) |
-| 4 (seed 3) | + challengeNote schema field, oven-note and crisps fixes | 39/40 | 30/7/1/1 | 9/10 (8 first) |
+| 2 (seed 1) | first fixes | 40/40 | 27/9/3/1 | 8/10 |
+| 3 (seed 2) | + self-check prompts | 39/40 | 26/8/4/1 | 10/10 |
+| 4 (seed 3) | + challengeNote schema field | 39/40 | 30/7/1/1 | 9/10 |
+| 5 (seed 4) | + review fixes H1,H2,H8,M3,M4 | 39/40 | 26/7/4/2 | 18/20 (11 first) |
+| **6 (seed 5)** | + dip/tart/pastry fixes, prompt count rules | **40/40** | **32/7/1/0** | **20/20 (16 first)** |
+| re-run (seed 5, baskets 5, 9, 36) | final code incl. bacon fat / omelette / "catches and crisps" fixes | 3/3 (all first) | - | 3/3 (2 first) |
+| re-run (seed 3, baskets 2, 23) | the earlier failures | 2/2 | basket 2 on attempt 1, basket 23 on attempt 2 | - |
 
-Bar for concepts (>=38/40, >=30 first attempt) met by run 4. Every remaining violation was read: basket 2 (diced pork, tomato, pork mince), diced beef, custard, potato farl, relish, chilli, crisps, pastry were genuine unpicked foods; the 8+/7+ coverage rejections are structural and honest. The one failed recipe (basket 4) was rejected for the verb "crisps quickly" and "tea towel" (false positives, fixed after the run: ignored phrases) plus an undeclared "cooking oil" (genuine). The post-run scan fixes are covered by offline tests only.
+Bar met: concepts 40/40 (>= 38) and 32 first-attempt (>= 30); recipes 20/20 (>= 19).
+
+## Correction to the earlier report
+
+Basket 2 of seed 3 was NOT a genuine smuggling failure: "Pan-fry diced pork loin chop" with the pork loin chop picked was read as the unpicked food "Diced pork" (review finding H2, prep word before a picked name). Fixed and tested; the basket is now accepted first time. The `bun` alias on "Bun noodles" (folded to "bun", so choux "buns" read as noodles) was removed from the bank.
+
+## Every rejection in the last full run (seed 5), labelled
+
+Genuine (the chef named an unpicked food): fried egg, custard, raspberry coulis, chilli oil, garlic butter (x2), relish, honey (title), real ale (tip, twice), double cream (a thickness simile), diced lamb; "answer is not JSON" (basket 9 attempt 1) and "uses only 5 picks / no concept uses 8" (basket 9 attempt 2) are honest structural rejections.
+
+Defects found while reading them, fixed afterwards and re-run (above): "bacon fat" from a picked bacon (basket 9 recipe), "Omelette" as a dish name with eggs picked (basket 36), "so it catches and crisps." read as the food crisps (basket 5 recipe). Earlier runs also exposed: "date night", "a dab of", "wafer-thin", "grit", "tea towel", "dip", "tart", "sweet", "pastry" for a picked pie/pasty - all fixed with tests.
+
+## Design notes for the reviewer
+
+- A multi-word phrase is shorthand only when ONE pick's name supplies all its food words (H1). "cheese sauce" built from a cheese-and-onion loaf plus a pasta sauce jar still passes by design: "sauce" is a stop word and cannot be told apart from the production "mushroom sauce" case.
+- A food head (chicken, beef, pork, salmon...) directly before a culinary word must itself be picked ("chicken broth" is flagged). Other bare foods in front of a culinary word, and a bare "chicken" elsewhere, rely on the dictionary: a recall limit of the scan.
+- Food spans never cross punctuation (H8). `crisps` is read as a verb or a food by a token rule (M4).
+- The post-trial scan changes listed above are covered by offline tests plus the 3-basket re-run.
 
 ---
 
 
-Seed 3. Real cmd runs: model `claude-sonnet-5-5`, effort `medium`, production prompts and validators, up to 3 repairs per job.
+Seed 5. Real cmd runs: model `claude-sonnet-5-5`, effort `medium`, production prompts and validators, up to 3 repairs per job.
 
 ## Concepts
 
-- accepted: **39 of 40**; on the first attempt: **30**; by attempt: {1: 30, 2: 7, 3: 1, 4: 1}; failed: [2]
+- accepted: **40 of 40**; on the first attempt: **32**; by attempt: {1: 32, 2: 7, 3: 1, 4: 0}; failed: []
 
 | # | twists | accepted on | first-attempt violations |
 |---|---|---|---|
-| 0 | challenge:six-steps, wildcard | 1 |  |
-| 1 | none | 1 |  |
-| 2 | none | FAILED | concept a description mentions 'Diced pork', which this dish does not use |
-| 3 | none | 1 |  |
-| 4 | challenge:six-steps, stars | 2 | at least one concept must use 8+ of the ten picks |
+| 0 | none | 1 |  |
+| 1 | swap | 1 |  |
+| 2 | none | 2 | concept a title mentions 'Fried egg', which this dish does not use; concept c description mentions 'Custard', which this dish does not use; concept c description mentions 'Raspberry coulis', which this dish does not use |
+| 3 | style:street-food, wildcard | 1 |  |
+| 4 | none | 1 |  |
 | 5 | none | 1 |  |
 | 6 | none | 1 |  |
 | 7 | none | 1 |  |
-| 8 | style:picnic | 2 | at least one concept must use 8+ of the ten picks |
-| 9 | none | 1 |  |
-| 10 | none | 1 |  |
-| 11 | none | 2 | concept b uses only 6 picks; each concept needs 7+ |
+| 8 | none | 1 |  |
+| 9 | none | 3 | the answer is not a JSON object with a 'concepts' list |
+| 10 | swap | 1 |  |
+| 11 | none | 1 |  |
 | 12 | none | 1 |  |
 | 13 | none | 1 |  |
 | 14 | none | 1 |  |
-| 15 | stars | 2 | concept c description mentions 'Custard', which this dish does not use |
-| 16 | none | 1 |  |
+| 15 | challenge:one-pan | 1 |  |
+| 16 | style:cosy-pub, challenge:six-steps, stars, wildcard, swap | 2 | concept c description mentions 'Diced lamb', which this dish does not use |
 | 17 | none | 1 |  |
 | 18 | none | 1 |  |
-| 19 | none | 2 | concept b title mentions 'Potato farl', which this dish does not use; concept c description mentions 'Diced beef', which this dish does not use |
-| 20 | none | 2 | concept b title mentions 'chilli', which this dish does not use; concept c title mentions 'chilli', which this dish does not use |
+| 19 | none | 1 |  |
+| 20 | none | 1 |  |
 | 21 | none | 1 |  |
-| 22 | none | 1 |  |
-| 23 | challenge:one-pan, wildcard | 3 | at least one concept must use 8+ of the eleven picks |
-| 24 | none | 1 |  |
-| 25 | none | 2 | at least one concept must use 8+ of the ten picks |
+| 22 | style:picnic, wildcard, swap | 1 |  |
+| 23 | none | 2 | concept c title mentions 'Honey', which this dish does not use |
+| 24 | none | 2 | concept b title mentions 'Garlic butter', which this dish does not use; concept b description mentions 'Garlic butter', which this dish does not use |
+| 25 | none | 1 |  |
 | 26 | none | 1 |  |
 | 27 | none | 1 |  |
-| 28 | none | 4 | at least one concept must use 8+ of the ten picks |
-| 29 | none | 1 |  |
-| 30 | style:picnic, challenge:six-steps, wildcard | 1 |  |
+| 28 | none | 1 |  |
+| 29 | style:posh-tasting, challenge:six-steps | 2 | concept b description mentions 'relish', which this dish does not use |
+| 30 | none | 1 |  |
 | 31 | none | 1 |  |
-| 32 | none | 1 |  |
-| 33 | none | 1 |  |
-| 34 | style:breakfast-for-dinner, challenge:no-oven | 1 |  |
+| 32 | challenge:thirty-minutes, stars | 1 |  |
+| 33 | style:breakfast-for-dinner, swap | 1 |  |
+| 34 | none | 1 |  |
 | 35 | none | 1 |  |
-| 36 | style:date-night-bistro, stars, swap | 1 |  |
-| 37 | style:posh-tasting, challenge:six-steps, stars, swap | 1 |  |
-| 38 | style:takeaway-at-home | 1 |  |
-| 39 | none | 1 |  |
+| 36 | none | 2 | concept c title mentions 'Omelette', which this dish does not use; concept c description mentions 'Omelette', which this dish does not use |
+| 37 | none | 2 | concept b title mentions 'Garlic butter', which this dish does not use; concept b description mentions 'Garlic butter', which this dish does not use |
+| 38 | none | 1 |  |
+| 39 | style:street-food, challenge:six-steps | 1 |  |
 
 ### Every rejection (all attempts)
 
 - basket 2 attempt 1:
-  - concept a description mentions 'Diced pork', which this dish does not use
-- basket 2 attempt 2:
-  - concept b title mentions 'Tomato', which this dish does not use
-- basket 2 attempt 3:
-  - concept a description mentions 'Diced pork', which this dish does not use
-- basket 2 attempt 4:
-  - concept c description mentions 'Pork mince', which this dish does not use
-- basket 4 attempt 1:
-  - at least one concept must use 8+ of the ten picks
-- basket 8 attempt 1:
-  - at least one concept must use 8+ of the ten picks
-- basket 11 attempt 1:
-  - concept b uses only 6 picks; each concept needs 7+
-- basket 15 attempt 1:
+  - concept a title mentions 'Fried egg', which this dish does not use
   - concept c description mentions 'Custard', which this dish does not use
-- basket 19 attempt 1:
-  - concept b title mentions 'Potato farl', which this dish does not use
-  - concept c description mentions 'Diced beef', which this dish does not use
-- basket 20 attempt 1:
-  - concept b title mentions 'chilli', which this dish does not use
-  - concept c title mentions 'chilli', which this dish does not use
+  - concept c description mentions 'Raspberry coulis', which this dish does not use
+- basket 9 attempt 1:
+  - the answer is not a JSON object with a 'concepts' list
+- basket 9 attempt 2:
+  - concept a uses only 5 picks; each concept needs 7+
+  - concept c title mentions 'Chilli oil', which this dish does not use
+  - concept c description mentions 'Chilli oil', which this dish does not use
+  - at least one concept must use 8+ of the ten picks
+- basket 16 attempt 1:
+  - concept c description mentions 'Diced lamb', which this dish does not use
 - basket 23 attempt 1:
-  - at least one concept must use 8+ of the eleven picks
-- basket 23 attempt 2:
-  - concept c description mentions 'crisps', which this dish does not use
-- basket 25 attempt 1:
-  - at least one concept must use 8+ of the ten picks
-- basket 28 attempt 1:
-  - at least one concept must use 8+ of the ten picks
-- basket 28 attempt 2:
-  - concept b uses only 5 picks; each concept needs 7+
-  - concept b vibe mentions 'pastry', which this dish does not use
-- basket 28 attempt 3:
-  - concept c title mentions 'relish', which this dish does not use
+  - concept c title mentions 'Honey', which this dish does not use
+- basket 24 attempt 1:
+  - concept b title mentions 'Garlic butter', which this dish does not use
+  - concept b description mentions 'Garlic butter', which this dish does not use
+- basket 29 attempt 1:
+  - concept b description mentions 'relish', which this dish does not use
+- basket 36 attempt 1:
+  - concept c title mentions 'Omelette', which this dish does not use
+  - concept c description mentions 'Omelette', which this dish does not use
+- basket 37 attempt 1:
+  - concept b title mentions 'Garlic butter', which this dish does not use
+  - concept b description mentions 'Garlic butter', which this dish does not use
 
 ## Bank-it recipes
 
-- accepted: **9 of 10**; on the first attempt: **8**; by attempt: {1: 8, 2: 1, 3: 0, 4: 0}; failed: [4]
+- accepted: **20 of 20**; on the first attempt: **16**; by attempt: {1: 16, 2: 3, 3: 1, 4: 0}; failed: []
 
 | # | twists | accepted on | first-attempt violations |
 |---|---|---|---|
-| 0 | challenge:six-steps, wildcard | 1 |  |
-| 1 | none | 2 | step 3 mentions 'crisps', which this dish does not use |
-| 3 | none | 1 |  |
-| 4 | challenge:six-steps, stars | FAILED | step 3 mentions 'Cooking oil', which this dish does not use |
-| 5 | none | 1 |  |
+| 0 | none | 1 |  |
+| 1 | swap | 3 | tip 2 mentions 'Real ale', which this dish does not use |
+| 2 | none | 1 |  |
+| 3 | style:street-food, wildcard | 1 |  |
+| 4 | none | 1 |  |
+| 5 | none | 2 | step 6 mentions 'crisps', which this dish does not use |
 | 6 | none | 1 |  |
 | 7 | none | 1 |  |
-| 8 | style:picnic | 1 |  |
-| 9 | none | 1 |  |
-| 10 | none | 1 |  |
+| 8 | none | 1 |  |
+| 9 | none | 2 | step 3 mentions 'Bacon fat', which this dish does not use |
+| 10 | swap | 1 |  |
+| 11 | none | 1 |  |
+| 12 | none | 1 |  |
+| 13 | none | 1 |  |
+| 14 | none | 1 |  |
+| 15 | challenge:one-pan | 1 |  |
+| 16 | style:cosy-pub, challenge:six-steps, stars, wildcard, swap | 1 |  |
+| 17 | none | 1 |  |
+| 18 | none | 2 | step 2 mentions 'Double cream', which this dish does not use |
+| 19 | none | 1 |  |
 
 ### Every rejection (all attempts)
 
 - basket 1 attempt 1:
-  - step 3 mentions 'crisps', which this dish does not use
-- basket 4 attempt 1:
-  - step 3 mentions 'Cooking oil', which this dish does not use
-- basket 4 attempt 2:
-  - tip 1 mentions 'crisps', which this dish does not use
-- basket 4 attempt 3:
-  - tip 1 mentions 'tea', which this dish does not use
-  - tip 2 mentions 'crisps', which this dish does not use
-- basket 4 attempt 4:
-  - cookware must be a list of 1-4 vessels and tools
-  - tip 1 mentions 'crisps', which this dish does not use
+  - tip 2 mentions 'Real ale', which this dish does not use
+- basket 1 attempt 2:
+  - tip 2 mentions 'Real ale', which this dish does not use
+- basket 5 attempt 1:
+  - step 6 mentions 'crisps', which this dish does not use
+- basket 9 attempt 1:
+  - step 3 mentions 'Bacon fat', which this dish does not use
+- basket 18 attempt 1:
+  - step 2 mentions 'Double cream', which this dish does not use
 
 ## Baskets
 
-- 0: firm-tofu, french-breakfast-radish, fresh-ginger, garlic-salt, gooseberry, lasagne-sheets, orzo, sauerkraut, stem-ginger-in-syrup, straw-mushroom, whiting-fillet
-- 1: choux-paste, enoki-mushroom, fresh-ginger, fromage-frais, giant-puffball, lamb-shoulder, pickled-turnips, ready-made-lasagne, sesame-seeds, sushi-rice
-- 2: brown-beech-mushroom, coconut-flour, enoki-mushroom, fresh-garlic, harissa, lasagne-sheets, pasta-sauce-jar, pork-loin-chop, swordfish-steak, tinned-carrots
-- 3: baby-spinach, chocolate-buttons, croissant, kimchi, lemongrass, ready-made-potato-salad, red-leicester, rump-steak, sauerkraut, wasabi-paste
-- 4: brandy, dried-mixed-mushrooms, egg-noodle-dough, garlic-cloves, green-peas, lemongrass, pineapple-juice, salami-milano, sultana, tinned-macaroni-cheese
-- 5: beef-topside, borlotti-beans-fresh, bridge-roll, estima-potato, green-lentils, lemongrass, mint-jelly, persimmon, rapadura, sauerkraut
-- 6: butterhead-lettuce, fresh-turmeric, garlic-flakes, guava, hot-cross-bun, kimchi, lemon-sole, manchego, peanuts, rye-bread
-- 7: baking-powder, beef-topside, egg-noodle-dough, orange, ready-made-vegetable-curry, russet-potato, salmon-roe, sauerkraut, tartare-sauce, tinned-carrots
-- 8: bay-bolete, celery-leaf, chestnut-flour, croissant, garlic-cloves, guar-beans, onion-bhajis, salami-milano, teriyaki-sauce, turkey-breast-steak
-- 9: chicken-mince, flour-tortillas, fresh-ginger, ground-nutmeg, groundnut-oil, honeydew-melon, lamb-mince, lentil-pasta, onion-bhajis, takuan
-- 10: chicken-carcass, fresh-garlic, fresh-ginger, frozen-onion-rings, gruyere, horseradish-root, pale-ale, pecan-halves, rye-crispbread, vialone-nano-rice
-- 11: beef-sirloin-steak, cheese-and-onion-filling, egg-noodle-nests, fresh-ginger, lemongrass, mixed-peppercorns, onion-bhajis, sauerkraut, sweet-potato, tinned-borlotti-beans
-- 12: dried-yeast, egg-noodle-nests, fresh-ginger, gooseberry, lemongrass, lingonberry-jam, monterey-jack, peanut-flour, pomegranate, whiting-fillet
-- 13: choux-paste, dried-onion-granules, garlic-cloves, kimchi, mixed-fruit-jam, pork-meatballs, quiche-lorraine, salad-potato, spinach, tinned-mushrooms
-- 14: egg-noodle-dough, fresh-chives, fresh-coriander, fresh-egg-tagliatelle, girolle, kimchi, navel-orange, saganaki-cheese, sauerkraut, white-kidney-beans
-- 15: beaten-egg, boneless-chicken-thigh, coconut-oil, durum-wheat-semolina, estima-potato, kimchi, pancake-wrap, spinach, tamarind, wasabi-root
-- 16: emmental, farfalle, honey-bbq-sauce, invert-sugar-syrup, kamaboko, onion-bhajis, oyster-mushroom, rooster-potato, tinned-lychees, wood-ear-mushroom
-- 17: bridge-roll, celery, chilli-flakes, cider-vinegar, croissant, flounder, halloumi, kimchi, lemongrass, shiitake-mushroom
-- 18: choux-paste, cooking-spray, fresh-garlic, fresh-ginger, girolle, hot-sauce, kimchi, lamb-leg, peanut-flour, plaice-fillet
-- 19: beef-topside, blue-foot-mushroom, fast-action-dried-yeast, frozen-blueberries, frozen-strawberries, minute-steak, oat-bars, rooster-potato, sauerkraut, sweet-potato
-- 20: blackberry, button-mushroom, chickpeas, ice-cream-cornet, kidney-beans, lemongrass, light-soy-sauce, oyster-mushroom, sambal-oelek, tinned-spaghetti-hoops
-- 21: cep, cheese-and-onion-loaf, honeycomb, kimchi, lamb-chump-chop, new-potato, orange-curd, sauerkraut, stargazy-pie, tinned-carrots
-- 22: cream-cracker, dried-lavender, fresh-ginger, frozen-potato-wedges, guar-beans, halibut-steak, sand-dab, victoria-plum, white-turmeric, white-wine-vinegar
-- 23: ackee, breaded-calamari-rings, chapati, coconut-flour, fine-beans, galangal, ground-nutmeg, kimchi, lamb-mince, maple-flavouring, pecan-halves
-- 24: beef-silverside, cane-syrup, fresh-ginger, garlic-bread-baguette, honeydew-melon, lentil-pasta, sauerkraut, sauvignon-blanc, tamarillo, whelks
-- 25: black-fig, camembert, cucumber, egg-noodle-dough, fresh-garlic, frozen-onion-rings, ground-coriander, microwave-rice-pouch, nut-brittle, spanish-mackerel
-- 26: brie, estima-potato, garlic-cloves, onion-powder, passion-fruit, peanuts, physalis, pork-spare-ribs, sauerkraut, sweet-potato
-- 27: american-cheese-slices, boiled-egg, cranberry-and-walnut-sourdough, fresh-garlic, gin, hot-chilli-powder, nectarine, ready-made-vegetable-curry, sweet-potato, tinned-lychees
-- 28: almond-paste, choux-paste, cocoa-powder, firm-tofu, garlic-cloves, jazz-apple, raisin, sweet-potato, tinned-chopped-tomatoes, yellow-split-peas
-- 29: blackcurrant, grana-padano, gruyere, ice-cream-cones, kimchi, lemongrass, pork-medallions, preserved-turnip, ready-made-pizza-base, star-anise
-- 30: baby-potato, chicken-gravy-powder, conchiglie, cranberry, dried-porcini, green-split-peas, liquid-egg-white, sauerkraut, sudachi, turbot, walnuts
-- 31: choux-paste, elephant-garlic, english-breakfast-tea, fuerte-avocado, garden-peas, ground-ginger, gruyere, peanut-flour, tiger-prawns, tinned-cherries
-- 32: aubergine, chardonnay, danish-blue, frozen-gyoza, maccheroni, oyster-mushroom, persimmon, rhubarb, roasted-peanuts, wholewheat-spaghetti
-- 33: choux-paste, flour-tortillas, fresh-ginger, girolle, lemon-curd, oyster-mushroom, pork-belly-strips, pork-leg, taco-seasoning, yellow-pepper
-- 34: bulgur-wheat, chickpeas, goat-s-cheese-log, granny-smith-apple, lemongrass, medium-cut-marmalade, radish, sourdough-loaf, tinned-chopped-tomatoes, whole-cloves
-- 35: coconut-flour, dried-yeast, fresh-ginger, lemongrass, lentil-pasta, ready-made-fish-pie, red-sauerkraut, unsalted-butter, whitefish, wood-ear-mushroom
-- 36: baby-potato, beef-sirloin-steak, dried-blueberries, grana-padano, kimchi, north-atlantic-prawns, roasted-peanuts, sauerkraut, strawberry, water-biscuit
-- 37: creme-de-cassis, garlic-cloves, kidney-beans, lemongrass, natural-yoghurt, raw-sauerkraut, ricotta, sesame-bagel, tinned-processed-peas, yorkshire-pudding
-- 38: beef-topside, birch-syrup, cep, enoki-mushroom, fava-beans, garlic-cloves, lemongrass, salad-potato, scone, trail-mix
-- 39: celeriac, choux-paste, cod-loin, granulated-sugar, lentil-pasta, persimmon, pisco, sauerkraut, tinned-mushy-peas, white-cabbage
+- 0: chicken-carcass, cooked-ham, lemon, lemongrass, ready-made-pizza-base, salad-potato, sauerkraut, star-anise, sugar-cinnamon-mix, white-peach
+- 1: cinnamon-sticks, coarse-polenta, devilled-egg, gochujang, oro-blanco, sauerkraut, sultana, sweet-potato, tinned-ham, wood-ear-mushroom
+- 2: crowdie, dried-parsley, free-range-egg, guar-beans, kimchi, raspberry, salad-potato, star-anise, sweet-potato, wood-ear-mushroom
+- 3: choux-pastry, cinnamon-sticks, girolle, kimchi, ready-made-cottage-pie, rooster-potato, sapodilla, single-cream, tinned-octopus, tomahawk-steak, white-turmeric
+- 4: black-eyed-peas, blackcurrant-cordial, coconut-flour, flour-tortillas, frozen-onion-rings, fuerte-avocado, leek, manchego, mint-yoghurt, white-kimchi
+- 5: adzuki-beans, bechamel-sauce, blackberry, brown-basmati-rice, cantaloupe-melon, dried-basil, egg-noodle-dough, girolle, oyster-mushroom, ready-made-shepherd-s-pie
+- 6: black-eyed-peas, crepe, egg-noodle-dough, fresh-ginger, halloumi, kimchi, oat-bars, ready-made-coleslaw, self-raising-flour, spring-greens
+- 7: baby-button-mushroom, cassia-bark, discovery-apple, dried-onion-granules, fresh-turmeric, guar-beans, pearl-semolina, ready-made-fish-pie, sourdough-loaf, turkey-breast-steak
+- 8: cheese-and-onion-filling, chicken-and-mushroom-pie, croissant, durum-wheat-semolina, frozen-blueberries, garlic-cloves, girolle, guar-beans, pancake-mix, swordfish-steak
+- 9: back-bacon, black-fig, bulgur-wheat, cantaloupe-melon, dried-chillies-whole, frozen-dim-sum, girolle, instant-mash, prosecco, raw-sauerkraut
+- 10: currant, curtido, dried-kidney-beans, egg-noodle-dough, fresh-garlic, kimchi, perch-fillet, tinned-spaghetti-in-tomato-sauce, tonic-water, whole-cloves
+- 11: beef-silverside, bicarbonate-of-soda, cep, coconut-flour, curtido, egg-noodle-dough, garlic-cloves, lemongrass, pale-ale, tinned-chickpeas
+- 12: cola, frozen-onion-rings, honey-roast-ham, lasagne-sheets, redcurrant, sauerkraut, shiitake-mushroom, spaghetti, swordfish-steak, vintage-port
+- 13: celery-salt, chestnut-mushroom, choux-paste, fresh-turmeric, ice-cream-cones, leek, rose-wine, swordfish-steak, whiting-fillet, wood-ear-mushroom
+- 14: banana, coconut-flour, fresh-ginger, frozen-pakora, lamb-breast, merlot, new-potato, prosecco, red-sauerkraut, whole-turkey
+- 15: baby-spinach, crispbread, fresh-turmeric, frozen-blueberries, green-olives, horse-mackerel, minute-steak, pumpkin-seeds, rose-wine, thick-cut-white-toast
+- 16: candied-peel, chicken-flavour-instant-noodles, diced-lamb, dried-blueberries, galangal, girolle, hot-cross-bun, rose-wine, tinned-carrots, vacherin-fribourgeois, vanilla-syrup
+- 17: candied-peel, choux-paste, dried-shiitake-mushroom, kamaboko, lemongrass, mozzarella, naan-bread, portobello-mushroom, trail-mix, vanilla-extract
+- 18: button-mushroom, chickpea-flour, fresh-ginger, garlic-cloves, king-edward-potato, oyster-mushroom, pale-ale, sea-bass-fillet, soda-bread, tilapia
+- 19: cayenne-pepper, cep, chicken-livers, frozen-spring-rolls, garlic-cloves, ground-cinnamon, herring, lemongrass, orzo, tinned-chopped-tomatoes
+- 20: brown-sauce, green-split-peas, honey-fungus, kimchi, peach, pork-mince, ready-made-macaroni-cheese, ready-made-pizza-base, sauerkraut, vegan-mayonnaise
+- 21: carp, enoki-mushroom, frozen-onion-rings, ginger-biscuits, malbec, new-potato, ready-made-vegetable-curry, sauerkraut, sweet-potato, whole-chicken
+- 22: chunky-salsa, crepe, green-split-peas, halloumi, hazelnuts, lemongrass, mung-bean-sprouts, red-sauerkraut, shiitake-mushroom, wholemeal-pitta, wild-strawberry
+- 23: bosc-pear, brie, chestnut-flour, flat-rice-noodles, garlic-cloves, honeycomb, lemongrass, lime-juice, salami-milano, white-peach
+- 24: crumpet, fuerte-avocado, garlic-cloves, guar-beans, kiwi-fruit, lean-beef-mince, oolong-tea, sea-trout, toasted-sesame-seeds, wholemeal-pitta
+- 25: butternut-squash, kimchi, lemongrass, lime-curd, plain-flour, sesame-bagel, tinned-sliced-beetroot, trail-mix, whole-chicken, whole-mackerel
+- 26: coconut-flour, cucumber-kimchi, dried-orange-zest, elephant-garlic, green-split-peas, horchata, oyster-mushroom, ready-made-coleslaw, scotch-egg, sweet-potato
+- 27: butternut-squash, chicken-flavour-instant-noodles, dried-rosemary, fava-beans, frozen-onion-rings, hot-cross-bun, lemongrass, mozzarella, tinned-peaches, vodka
+- 28: baby-button-mushroom, blackcurrant, candied-peel, choux-paste, egg-yolk, oca, red-lentils, shiitake-mushroom, strong-wholemeal-flour, sweet-chilli-sauce
+- 29: choux-paste, dried-apricot, dried-porcini, green-chilli, ground-nutmeg, padron-pepper, pinto-beans, sea-bass-fillet, spinach-wrap, yellow-mustard-seeds
+- 30: black-treacle, chicken-drumstick, diced-lamb, flat-mushroom, girolle, hot-dog-roll, kimchi, pancake-wrap, pistachios, tinned-peaches
+- 31: black-bean-sauce, chestnut-mushroom, choux-paste, enoki-mushroom, fresh-ginger, guar-beans, pasta-sauce-jar, pork-shoulder, scone, spiny-lobster
+- 32: enoki-mushroom, feta, guar-beans, instant-mash, king-edward-potato, lemongrass, pork-tenderloin, prune-plum, sesame-seeds, turkey-mince
+- 33: black-pudding, cheese-spread, choux-paste, fresh-ginger, frozen-mixed-vegetables, john-dory, pearl-onion, ready-made-coleslaw, rye-bread, vanilla-pods
+- 34: cardamom-seeds, dried-kidney-beans, garlic-cloves, ground-nutmeg, linguine, oyster-mushroom, pied-de-mouton, rooster-potato, steak-and-ale-pie, wasabi-root
+- 35: carp, kimchi, lamb-mince, lemongrass, sauerkraut, shredded-wheat, single-cream, strawberry-ice-cream, wholewheat-couscous, wood-ear-mushroom
+- 36: brown-egg, flat-rice-noodles, fresh-ginger, frozen-yoghurt, garlic-cloves, honey-roast-ham, lentil-pasta, ready-made-vegetable-curry, vanilla-extract, wood-ear-mushroom
+- 37: beef-cheek, black-pudding, dried-shiitake-mushroom, fresh-basil, garlic-cloves, lentil-pasta, pickled-turnips, sauerkraut, star-anise, sweet-potato
+- 38: bird-s-eye-chilli, brown-lentils, crumpet, dried-shiitake-mushroom, frozen-pepperoni-pizza, garlic-cloves, kimchi, pork-tenderloin, rainbow-nonpareils, star-anise
+- 39: blewit, butternut-squash, croissant, fish-bones, fresh-garlic, pangasius, roasted-seed-mix, shiitake-mushroom, tawny-port, water-chestnut

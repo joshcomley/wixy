@@ -1314,3 +1314,12 @@ def test_m3_verbs_and_adjectives_before_a_culinary_word_are_not_foods() -> None:
 def test_pastry_is_shorthand_only_for_a_picked_pie_pasty_or_tart() -> None:
     assert _scan("pastry and filling", {"cheese-and-onion-pasty"}) == []
     assert _scan("crisp pastry", {"lemongrass"}) == ["pastry"]
+
+
+def test_trial6_false_positives_bacon_fat_omelette_and_a_second_verb() -> None:
+    assert _scan("leaving the bacon fat in the pan", {"back-bacon"}) == []
+    assert _scan("a Spanish omelette", {"brown-egg"}) == []
+    assert _scan("an omelette", {"lemongrass"}) == ["Omelette"]
+    assert _scan("duck fat", {"lemongrass"}) == ["Duck fat"]
+    assert _scan("rough it up so it catches and crisps.", set()) == []
+    assert _scan("salt and crisps", set()) == ["crisps"]

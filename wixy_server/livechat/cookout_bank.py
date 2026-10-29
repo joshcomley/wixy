@@ -147,6 +147,8 @@ IMPLIED_WORDS: Mapping[str, frozenset[str]] = {
     "samosa": frozenset({"pastry"}),
     "samosas": frozenset({"pastry"}),
     "wellington": frozenset({"pastry"}),
+    "egg": frozenset({"omelette", "frittata"}),
+    "eggs": frozenset({"omelette", "frittata"}),
     "roll": frozenset({"pastry"}),
     "rolls": frozenset({"pastry"}),
     "turnover": frozenset({"pastry"}),
@@ -842,6 +844,10 @@ def _crisps_is_verb(tokens: tuple[str, ...], index: int) -> bool:
     "serve crisps", "a handful of crisps" read the food (round 2, review M4)."""
     before = tokens[index - 1] if index > 0 else ""
     after = tokens[index + 1] if index + 1 < len(tokens) else ""
+    if before in ("and", "then") and any(
+        t in ("it", "they", "which", "that", "this", "edges", "skin") for t in tokens[:index]
+    ):
+        return True  # "it catches and crisps": a second verb of the same subject
     if before in _CRISPS_FOOD_BEFORE:
         return False
     if not after:
