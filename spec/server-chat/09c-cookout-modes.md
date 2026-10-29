@@ -45,6 +45,9 @@ earlier files stand unchanged. Where reality contradicts a cited fact, prefer re
    offered on the bread turn (there are too few unusual breads), fridge raid means "start with a
    **bread** you have at home", and a leftover encore can only continue a round of the same game mode.
 7. **Classic is untouched and stays the default.** A Classic round behaves byte-for-byte as today.
+8. **Toasted sandwich is switched on separately, after the release is fully live.** It ships switched
+   off. The delivery coordinator turns it on with one server setting, after a checked tool confirms no
+   older server process is still running (§5.6). Before that, the start sheet shows only Classic.
 
 ---
 
@@ -394,9 +397,13 @@ amended by the chef fix), with these Toasted sandwich rules in place of the Clas
 diversity and staple rules:
 
 1. **Bread everywhere:** the bread id (the effective basket's `bread`-kind item, §5.5) is in every
-   concept's `pickedIngredientIds`, and is never in `omitted`. Each concept names it:
-   `bank.mentions(title, bread_id) or bank.mentions(description, bread_id)` (the stars rule's
-   check).
+   concept's `pickedIngredientIds`, and is never in `omitted`. A missing bread id, a different bread
+   id (it is not in the basket, so the id whitelist rejects it) or an omitted bread is a violation.
+   **The prose is not checked for the bread's name.** The prompt asks the chef to name the bread, but
+   a model writes "White bread toastie" for `sliced-white-bread` or "Ciabatta toastie" for
+   `ciabatta-roll`, and `bank.mentions` (exact names, aliases, bare family words) does not recognise
+   those normal short forms. Instead the UI shows the canonical bread name, resolved from the
+   validated bread id, on every dish card (§6.4), so the player always sees which bread it is.
 2. **Coverage on fillings** (F = fillings in the basket, 7 or 8): each concept uses at least `F − 2`
    fillings (5 of 7), at least one uses `F − 1` (6 of 7), and the union is all F. Why: one sandwich
    holding seven fillings is a lot; letting each idea leave out up to two clashing ones (jam and
@@ -407,12 +414,24 @@ diversity and staple rules:
 4. **Staples:** `stapleIds` ⊆ the mode's staples; at most `cap = 2` capped staples; butter, salt,
    black pepper and water never count. Pass 2's undeclared-staple scan treats butter as always
    declared in this mode.
-5. **Still a closed toasted sandwich:** no phrase from the mode's `notDishWords` among the
-   `food_free_tokens` of `title`, `vibe` or `description`: `open sandwich`, `open-faced`,
-   `bruschetta`, `crostini`, `tartine`, `bread pudding`, `strata`, `panzanella`, `croutons`,
-   `quesadilla`, `wrap`. Violation messages name the rule ("concept b must name the bread
-   'sourdough-loaf' in its title or description", "concept c is not a closed toasted sandwich:
-   'open-faced'") so the repair run can fix it.
+5. **Unpicked foods and forbidden ids:** the chef fix's high-precision food scan and the swap's
+   forbidden-id check apply unchanged. These are the only prose checks that can reject an answer.
+
+Violation messages name the rule exactly ("concept b leaves out the bread 'sourdough-loaf'; the bread
+must be in every idea", "concepts a and c share the build 'pressed'") so the repair run can fix it.
+
+**Dish words are review signals, never failures.** "Still a closed toasted sandwich" is asked for in
+the prompt and drawn by the picture template; it is not a fatal check. The token scan cannot read
+meaning: "A closed sliced white bread toastie, never an open sandwich." keeps the words `open sandwich`,
+and "a closed ciabatta roll toastie with bruschetta-inspired tomato filling" keeps `bruschetta`, yet
+both describe exactly the right dish. So the mode's `reviewDishWords` (`open sandwich`, `open-faced`,
+`bruschetta`, `crostini`, `tartine`, `bread pudding`, `strata`, `panzanella`, `croutons`,
+`quesadilla`, `wrap`) are matched against the `food_free_tokens` of `title`, `vibe` and `description`
+only to produce **signals**: `parse_concepts` returns them in `Parsed.signals` (a list of
+`"concept c: 'open-faced'"` notes) alongside an accepted result. The runner logs only their count
+(no prose) and never repairs or fails for them. `chef_trial.py` lists every signal in full in its
+report so a person reads each one (§8.4); if trials show a real problem, the answer is a prompt change,
+not a fatal word list.
 
 Basket sizes come from the mode: `{turns, turns + 1}` = `{8, 9}` (Classic `{10, 11}`).
 
@@ -489,8 +508,8 @@ ALTER TABLE cookout_rounds ADD COLUMN mode TEXT NOT NULL DEFAULT 'classic';
   a database that already has the column (a retried migration) skips the `ALTER`; then
   `PRAGMA user_version = 22`. Every existing round reads back as `classic`.
 - No `CHECK` on `mode` (like `style`/`challenge`): the catalogue grows without a table rebuild; code
-  validates against the loaded modes. An unknown stored mode (impossible except by downgrade) is
-  served as a view with `mode.id` as stored and blocks moves with `409 bad_state`.
+  validates against the loaded modes. The unknown-mode guards of §5.6 decide what a process does with
+  a row whose mode it does not know.
 - `role_schedule` keeps its column: a Classic round stores today's 5-element paired list; a sequence
   mode stores the resolved per-turn list of `turns` kind ids (8 for Toasted sandwich).
 - `cookout_turns.turn` keeps `CHECK(turn BETWEEN 1 AND 10)`; Toasted sandwich uses 1–8. A future mode
@@ -519,12 +538,15 @@ ALTER TABLE cookout_rounds ADD COLUMN mode TEXT NOT NULL DEFAULT 'classic';
 
 ### 5.4 Wire (all additive; parsers stay defensive)
 
-- `POST /cookout` body gains `mode?: string` (default `"classic"`). Unknown → `422 invalid`. A twist
-  the mode does not allow → `422 invalid`. `extra="forbid"` stays.
+- `POST /cookout` body gains `mode?: string` (default `"classic"`). Unknown → `422 invalid`. A known
+  mode that is not switched on by `WIXY_COOKOUT_MODES` (§5.6) → `503 game_unavailable` ("that game
+  isn't available yet"), checked before anything is written. A twist the mode does not allow →
+  `422 invalid`. `extra="forbid"` stays.
 - `GET /cookout/options` gains
   `modes: [{id, label, emoji, blurb, intro: [string], turns, picksPerPlayer, twists: [string], fridgeKinds: [string] | null}]`
-  (Classic first, the default). `intro` lines may contain `{starter}`, which the client replaces with
-  the starter's name or "you".
+  listing **only switched-on modes** (Classic always, first, the default). A switched-off mode is not
+  listed at all, so no client can offer its tile. `intro` lines may contain `{starter}`, which the
+  client replaces with the starter's name or "you".
 - `GET /cookout/ingredients?q=&mode=` — with `mode=toastie` only ingredients of the mode's
   `fridgeKinds` (breads) are searched; without `mode`, or `classic`, the whole bank as today.
 - `CookoutView` gains:
@@ -549,23 +571,73 @@ Adds `mode` (id) and `bread_id` (the effective basket's `bread`-kind item after 
 Classic). The runner resolves the mode with `default_modes()`, passes it to the prompt builders and
 parsers, and checks the basket size against the mode (§3.4). `cookout_pending_*` tuples are unchanged.
 
-### 5.6 Blue/green overlap (honest limit for the v21 → v22 deploy only)
+### 5.6 The activation barrier (no v21 process may ever see a non-Classic round)
 
-During that one swap the old process runs v21 code, which has no `mode`. It cannot create a Toasted
-sandwich round (`mode` is an unknown field: `422`). If it is handed a move on a Toasted sandwich round
-it reads kinds as Classic roles, finds no candidates and answers `409 exhausted` with nothing written,
-so it can never advance or finish such a round. Its recovery sweep could pick up a Toasted sandwich
-round's pending concepts job and fail it (its basket check wants 10 or 11); the players see "Try again"
-and the retry runs on the new process. This needs a Toasted sandwich round created and finished inside
-the swap window, and it cannot recur after v22 is live (both sides of every later swap know modes).
+**Why a barrier, not a tolerated overlap.** v21 code accepts a database at a higher schema version and
+ignores the `mode` column. Handed a Toasted sandwich round, it reads the per-turn schedule with the
+Classic paired index `(turn − 1) // 2`, and `produce` is a valid Classic role. The review reproduced it
+with the deployed v21 store: for the permitted schedule `bread, produce, produce, cheese, cheese, main,
+main, finish`, a turn-3 pick handled by v21 commits and draws turn 4 as two `produce` items where the
+plan says `cheese` — a successful, wrong write that the new process then serves. Finished rounds expose
+other v21 write paths (a rescue swap of the bread draws by its bank role `base`, outside the bread
+list). So no v21 writer or background job may ever be able to reach a non-Classic row.
+
+**The setting.** `WIXY_COOKOUT_MODES` (in `Storage\.env`, read into `settings.cookout_enabled_modes:
+frozenset[str]`): a comma-separated list of non-Classic mode ids that may be **created**. Absent or
+empty (the default) = Classic only. An id that is not a loaded mode is ignored with a warning. Classic
+can never be switched off. The setting gates only creation and the options listing; rounds of a loaded
+mode that already exist keep working if the setting is later cleared.
+
+**Activation sequence (decided):**
+
+1. **Release.** Merge the whole feature (v22 migration + mode-aware code) with the setting absent.
+   Slots deploys it; Toasted sandwich creation answers `503`, the options omit it, so no
+   non-Classic row can exist while the v21 slot may still be serving or sweeping.
+2. **Drain.** The Cookout runner, recovery sweep and picture jobs run inside the server process (the
+   supervised background task group), so "every v21 process and worker is gone" means: no process is
+   running from the previously active slot. The 09b picture batch tooling is a separate Grid task but
+   never reads or writes Cookout rounds.
+3. **Switch on.** The **workspace-00058 delivery coordinator** (or whoever the operator names to run
+   the deploy) runs, on hub, `python tooling/cookout/activate_modes.py --enable toastie` from a
+   checkout of the deployed commit. The tool refuses (non-zero exit, nothing changed) unless all hold:
+   (a) Devfleet `http://127.0.0.1:9999/status` shows Wixy running; (b) the active slot named by
+   `D:\Servers\Wixy\active.txt` is at a commit whose `store.py` has `_LATEST_SCHEMA_VERSION >= 22`;
+   (c) the live database's `PRAGMA user_version >= 22`; (d) **no** running process has a command line
+   or working directory under the other slot (`Win32_Process` scan); (e) `GET /cookout/options` on the
+   live server answers. Then it writes `WIXY_COOKOUT_MODES=toastie` into `D:\Servers\Wixy\Storage\.env`
+   (preserving every other line; UTF-8, LF), bounces with `POST http://127.0.0.1:9999/restart/Wixy`
+   (an in-place restart of the active slot: no older code starts), and verifies that
+   `GET /cookout/options` now lists `toastie`. It prints each check and its result. `--disable toastie`
+   removes the id the same way (no slot checks needed to switch off).
+4. **Never roll back to v21 while non-Classic rows exist.** Rollback targets are v22-or-later commits
+   only (each refuses unknown modes, below). The activation tool's `--check-rollback <commit>` reports
+   whether a target is safe (its `store.py` is ≥ v22, or `SELECT COUNT(*) FROM cookout_rounds WHERE
+   mode != 'classic'` is 0); the runbook makes running it the first step of any Wixy rollback.
+
+**Unknown-mode guards (in v22 and every later release, for any future mode).** A process treats a row
+whose `mode` is not one of its loaded modes as untouchable:
+- every mutation that interprets the round (join, skip, pick, lucky, chaos, veto, star, wildcard,
+  vote, swap, bank, every retry, every We-cooked-it route) answers `409 bad_state` ("this game needs a
+  newer server") before writing; abandonment (by `/abandon` or by creating a new round) only sets
+  `state = 'abandoned'`, interprets nothing and stays allowed, so an unknown round can never block a
+  new game;
+- every background claim and recovery read (`cookout_pending_concepts`, `cookout_pending_recipes`,
+  `cookout_stale_pictures`, `claim_cookout_pictures`, the startup resume) filters
+  `mode IN (<loaded mode ids>)` in SQL, so no job of an unknown mode is ever claimed, resumed or failed;
+- the view is served read-only with `mode.id` as stored and no `can*` actions.
+This is what makes a future mode (Pizza) safe to release the same way: release with it switched off,
+drain, switch on.
+
+**Standalone edition:** one container, no blue/green overlap; the owner may set `WIXY_COOKOUT_MODES`
+in the deployment's environment (documented in the guide), and the same guards apply.
 
 ### 5.7 Privacy, erasure, standalone
 
 - Prompts: food records plus server constants chosen by mode id (the mode text, build list and
   phrases). Inv 57's statement of what cmd retains covers it.
 - Erasure: one column on an anchor-owned table; nothing new to delete.
-- Standalone edition: both modes are playable (the draft needs no AI); concepts are `unavailable` as
-  for Classic. Mode tiles and pictures are static assets.
+- Standalone edition: both modes are playable once switched on (the draft needs no AI); concepts are
+  `unavailable` as for Classic. Mode tiles and pictures are static assets.
 
 ---
 
@@ -580,7 +652,11 @@ fewer progress thumbnails, so they fit wherever Classic fits.
 - A new first section, **"What are we making?"**, with one **picture tile per mode** side by side
   (two tiles fill a 360 px phone: each ≥ 150 px wide, a 1:1 picture of at most 96 px, the label, and
   the `blurb` in 12 px wrapping to two lines). Tiles are radio buttons (`role="radio"`, one group,
-  arrow keys move, 44 px minimum target). **Classic** is selected by default.
+  arrow keys move, 44 px minimum target). **Classic** is selected by default. Only the modes
+  `GET /cookout/options` lists are shown; while Toasted sandwich is switched off (§5.6) the options
+  list Classic alone and the whole section is hidden, so the sheet looks exactly as it does today. A
+  `503 game_unavailable` on start (the setting was cleared meanwhile) reloads the options and shows
+  "That game isn't available right now".
 - Tile pictures are two committed WebP files, `admin-ui/data/cookout-mode-classic.webp` (a basket of
   mixed ingredients) and `admin-ui/data/cookout-mode-toastie.webp` (a golden toasted sandwich cut in
   half), 512×512, ≤ 60 KB each, generated once on hub's ComfyUI with the §3.6 house look by
@@ -637,8 +713,9 @@ Still one short card, no scrolling, the twists line as 09b describes.
 - **Reveal:** the 09b picture grid with the bread in its own first row ("Bread"), then the fillings
   grouped by player. "Plus cupboard staples:" lists butter first, marked "free".
 - **Dish cards:** the chef stage header shows "🥪 Toasted sandwich"; each card's pills show the
-  **build** label (e.g. "Skillet-fried") in place of dish type / technique; pictures are the toasted
-  sandwich pictures. "Uses 6/7 fillings" replaces "Uses 9/10" (the bread is always used and not
+  **build** label (e.g. "Skillet-fried") in place of dish type / technique, and under the title a line
+  "On <bread name>" with the bread's thumbnail, the canonical name taken from the bread's snapshot in
+  the basket (never from the chef's prose, §3.4); pictures are the toasted sandwich pictures. "Uses 6/7 fillings" replaces "Uses 9/10" (the bread is always used and not
   counted).
 - **Full recipe:** unchanged, with the build label under the title.
 - **Main-chat card:** a mode badge ("Toasted sandwich" / none for Classic, which keeps today's card);
@@ -655,13 +732,20 @@ Mode tiles have `alt` = the mode label; the bread slot's accessible name is "Bre
 
 ## 7. Honest limits
 
-- "A closed toasted sandwich" is enforced by the prompt, the bread-everywhere and bread-named checks,
-  three distinct builds and a fixed forbidden-phrase list; a model could still describe something odd
-  in words the list does not know. The picture prompt always asks for a closed, cut toasted sandwich.
+- **"A closed toasted sandwich" is a meaning, and no deterministic check can read meaning.** The
+  bread id is enforced in every idea, three different builds are enforced, and the picture template
+  always draws a closed, cut toasted sandwich; but whether the prose describes one is left to the
+  prompt. Token checks were tried in the first draft and rejected on review: they failed correct
+  answers ("never an open sandwich", "bruschetta-inspired filling", "White bread toastie"). Dish words
+  are surfaced as review signals for the trials instead (§3.4), and the bread's proper name is shown
+  from its id rather than required in the chef's prose.
 - The pools' exclusion lists are a judgement about what belongs in a sandwich; a surprising but valid
   filling might be excluded, or an odd one allowed. The lists are data, reviewed by the validator,
   and cheap to change.
-- The v21 → v22 overlap limit of §5.6.
+- The activation barrier (§5.6) is an operational step checked by a tool, not something v21 code can
+  enforce (v21 cannot be changed). Skipping the tool, or rolling back to v21 by hand while
+  non-Classic rows exist, would reopen the review's corruption; the runbook and the decision entry
+  say so.
 - The core's food-scan limit (a food absent from the bank can slip through prose) still applies.
 
 ---
@@ -719,16 +803,48 @@ Mode tiles have `alt` = the mode label; the bread slot's accessible name is "Bre
   veto and lucky dip on the bread turn; wildcard drawn from filling pools only; swapping the bread deals
   two breads, swapping a cheese deals two cheeses, the swapped-out bread forbidden in generation 2.
 - Classic regression: a seeded Classic round's create/draw/view JSON equals the pre-change golden.
+- **Activation gate:** with `WIXY_COOKOUT_MODES` absent, `POST /cookout {mode: "toastie"}` → `503
+  game_unavailable` with no message, round or event written, and `GET /cookout/options` lists Classic
+  only; with `toastie` set, creation works and the options list both; an unknown id in the setting is
+  ignored; clearing the setting leaves existing Toasted sandwich rounds fully playable.
+- **Overlap regression with the real v21 write logic** (`test_cookout_modes_overlap.py`): the test
+  loads the deployed v21 `store.py` and `cookout_game.py` from git history at a pinned v21 commit sha
+  into an isolated module namespace, over a database migrated to v22.
+  1. Canary (proves the barrier is still needed): a Toasted sandwich round with the schedule `bread,
+     produce, produce, cheese, cheese, main, main, finish` advanced to turn 3 by the v22 code; v21's
+     `_cx_commit_pick` commits the turn-3 pick and draws turn 4 as `produce`, not `cheese`.
+  2. Before activation: the v22 routes refuse to create the same round (`503`), so the database holds
+     only Classic rows, and running v21's pick, skip, swap and pending-job reads over it behaves
+     exactly as v21 does today.
+  3. After activation: `activate_modes.py`'s decision function, fed a fake Devfleet status, slot tree,
+     `user_version` and process list, refuses while any process runs from the other slot, while the
+     active slot is below v22 or while the database is below v22, and writes the setting and bounces
+     only when all checks pass (writer and bounce are injected fakes; `.env` lines other than the
+     setting are preserved byte for byte). `--check-rollback` reports a v21 target unsafe while a
+     non-Classic row exists and safe once none does.
+- **Unknown-mode guards:** a round row whose `mode` is not loaded (`'pizza'` inserted directly) is
+  refused by every interpreting mutation route (`409 bad_state`, nothing written), never returned by
+  `cookout_pending_concepts`, `cookout_pending_recipes`, `cookout_stale_pictures` or
+  `claim_cookout_pictures`, untouched by the startup resume, served read-only by `GET`, and still
+  abandoned by `/abandon` and by creating a new round.
 
 ### 8.3 pytest — chef and pictures (`test_livechat_cookout_ai.py`, `test_livechat_cookout_images.py`)
 
 - Toasted sandwich prompt: bread rule, bread name and id, coverage numbers for 7 and 8 fillings, the
   build list, butter free, the cap of two, the style line when styled; Classic prompt byte-identical.
-- `parse_concepts` (mode toastie): bread missing from one concept; bread in `omitted`; bread not named;
-  each < F − 2, best < F − 1, union short; duplicate or unknown build; `oven-baked` under no-oven; a
-  third capped staple; undeclared butter in prose **accepted**; each `notDishWords` phrase rejected;
-  wildcard basket (F = 8); stars including a starred bread; a swapped-out bread forbidden; stored
-  `dishType = "sandwich"` and mapped `technique`.
+- `parse_concepts` (mode toastie) **rejections:** bread id missing from one concept; a different
+  bread id (not in the basket); bread in `omitted`; each < F − 2, best < F − 1, union short; duplicate
+  or unknown build; `oven-baked` under no-oven; a third capped staple; a genuine unpicked food in prose
+  (e.g. "mango" when no mango was picked); a swapped-out bread used or named.
+- `parse_concepts` (mode toastie) **acceptance regressions** (the review's examples; each concept
+  otherwise valid, so the whole answer must be accepted on the first attempt with no repair run):
+  title "White bread toastie" with `sliced-white-bread`; "Ciabatta toastie" with `ciabatta-roll`;
+  "Brioche toastie" with `brioche-burger-bun`; a description that never repeats the bread's name;
+  description "A closed sliced white bread toastie, never an open sandwich." (accepted, with one
+  signal `'open sandwich'` in `Parsed.signals`); "A closed ciabatta roll toastie with
+  bruschetta-inspired tomato filling." with a picked tomato (accepted, signal `'bruschetta'`).
+  Undeclared butter in prose accepted; wildcard basket (F = 8); stars including a starred bread;
+  stored `dishType = "sandwich"` and mapped `technique`. A signal never triggers a repair run.
 - `parse_recipe` (mode toastie): butter allowed undeclared; capped staples per §3.1; build label in
   the prompt.
 - `fake_cmd.py`: canned Toasted sandwich concepts (three builds) and recipe for e2e.
@@ -740,7 +856,12 @@ Mode tiles have `alt` = the mode label; the bread slot's accessible name is "Bre
 `tooling/cookout/chef_trial.py --mode toastie` (the chef-fix tool, extended): 40 real Toasted sandwich
 baskets drawn with the real bank, modes and draw (about a quarter with twists), run through cmd with
 the production prompt and validator. Bar: ≥ 38/40 accepted, ≥ 30 on the first attempt, every
-remaining violation a genuine rule break (read each); then 10 Bank-this recipes with the same bar; then
+remaining violation a genuine rule break (read each — a rejection of a correct toasted sandwich is a
+validator defect to fix, however high the pass rate); every `Parsed.signals` entry listed and read, with
+a note on each saying whether the idea really was a closed toasted sandwich; the review's example
+phrasings (short bread names, "never an open sandwich", "-inspired" fillings) seeded into at least four
+of the replayed answers so the trial exercises them on the real validator; then 10 Bank-this recipes
+with the same bar; then
 12 pictures rendered on hub's ComfyUI from accepted concepts, each checked by the round-2 checker model
 (Haiku) with the question "Is this one closed toasted sandwich, cut to show its filling, with no open
 sandwich and no text?" — bar ≥ 11/12, every miss looked at. Report: `triad/cookout/modes/toastie-trial.md`.
@@ -776,8 +897,12 @@ book, `GET /cookout/ingredients?mode=`, `PickSnap.kind`, `build`), `docs/ai/inva
 **Inv 57**: the game mode is fixed per round and public; pools and kinds are server-side; Blind hides the
 bread like any pick; mode text is server constant), `docs/ai/glossary.md` (game mode, pick kind, bread,
 filling, build), `docs/ai/testing.md`, the `CLAUDE.md` store table (schema v22 adds
-`cookout_rounds.mode`), and `decisions/<max+1>-server-chat-cookout-modes/` (this file's decisions,
-including the family facet, the cap of two and the overlap limit). Every commit carries
+`cookout_rounds.mode`), `docs/ai/runbook.md` (the `WIXY_COOKOUT_MODES` setting, the activation
+sequence and `activate_modes.py`, and "run `activate_modes.py --check-rollback <commit>` before any
+Wixy rollback; never roll back to v21 while non-Classic rounds exist"), `docs/ai/contracts.md` also
+`503 game_unavailable` for a switched-off mode, and `decisions/<max+1>-server-chat-cookout-modes/`
+(this file's decisions, including the family facet, the cap of two, the activation barrier with the
+review's reproduction, and why dish words and bread names are not fatal checks). Every commit carries
 `Release-note: General bug fixes and improvements.` (rule R14a: a Server-chat trailer never names the
 feature).
 
@@ -806,7 +931,7 @@ Tooling files are fully typed and each parcel runs `mypy --strict` on its own to
 | Parcel | Builder | Owns exclusively |
 |---|---|---|
 | **M1 — Mode data, pools and draw** | Sonnet 5.5 | `wixy_server/livechat/cookout_modes.json`, `wixy_server/livechat/cookout_modes.py`, `tooling/cookout/validate_modes.py`, the additive `candidates`/`facet` arguments in `wixy_server/livechat/cookout_bank.py`, `wixy_server/tests/test_cookout_modes.py`, the additions to `wixy_server/tests/test_cookout_bank.py` |
-| **M2 — Server, v22 migration and wire** | Sonnet 5.5 | `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, `wixy_server/tests/test_livechat_cookout_modes.py`, `wixy_server/tests/fixtures/livechat_v21.db`, the mode-related edits to the existing Cookout server tests |
+| **M2 — Server, v22 migration and wire** | Sonnet 5.5 | `wixy_server/livechat/store.py`, `wixy_server/livechat/models.py`, `wixy_server/livechat/cookout_game.py`, `wixy_server/routes_livechat_cookout.py`, the `cookout_enabled_modes` field in `wixy_server/settings.py`, `tooling/cookout/activate_modes.py`, `wixy_server/tests/test_livechat_cookout_modes.py`, `wixy_server/tests/test_cookout_modes_overlap.py`, `wixy_server/tests/fixtures/livechat_v21.db`, the mode-related edits to the existing Cookout server tests |
 | **M3 — Chef prompts, validation and pictures** | Sonnet 5.5 | `wixy_server/livechat/cookout_ai.py`, `wixy_server/livechat/cookout_images.py`, `wixy_server/tests/fake_cmd.py`, `wixy_server/tests/test_livechat_cookout_ai.py`, `wixy_server/tests/test_livechat_cookout_images.py`, the `--mode` extension of `tooling/cookout/chef_trial.py`, `tooling/cookout/mode_tiles.py`, `admin-ui/data/cookout-mode-{classic,toastie}.webp`, `triad/cookout/modes/toastie-trial.md` |
 | **M4 — UI** | **Opus 5.5** | `admin-ui/src/server/cookout/**`, the Cookout rules in `admin-ui/src/server/chat.css`, the tile copy lines in `admin-ui/esbuild.config.mjs`, `admin-ui/tests/cookout/**`, the rebuilt `wixy_server/static/admin/` bundle |
 | **M5 — Docs and e2e** | Sonnet 5.5 | everything in §9, `e2e/tests/server-cookout-toastie.spec.ts`, the e2e fixture additions |
@@ -825,6 +950,10 @@ Tooling files are fully typed and each parcel runs `mypy --strict` on its own to
   merge after M1); M3 lands the two tile pictures in an early small PR so M4's build step has them; M4
   builds against JSON fixtures of §5.4 in parallel with M2; M5 writes docs as parcels land and the e2e
   after M2–M4 merge. The trial of §8.4 must meet its bar before M3's final PR.
+- **Activation is a separate, last step, not a merge.** Everything merges and deploys with
+  `WIXY_COOKOUT_MODES` absent (Classic only in production). Only after the deploy has completed does
+  the delivery coordinator run `activate_modes.py --enable toastie` on hub (§5.6) and confirm the
+  options list Toasted sandwich. The operator's first Toasted sandwich game happens after that.
 
 ### A.1 Frozen Python interface — M1 (`cookout_modes.py`)
 
@@ -883,7 +1012,7 @@ class ChefFormat:
     builds: tuple[Build, ...]
     each_missing_max: int | None  # 2: each idea uses >= F - 2 fillings
     best_missing_max: int | None  # 1
-    not_dish_words: tuple[str, ...]
+    review_dish_words: tuple[str, ...]  # signals only (§3.4), never a violation
     concept_text: str | None  # §3.2, with {bread} {bread_id} {n} {each} {best} {build_list}
     recipe_text: str | None  # §3.5, with {build_label} {build_phrase}
     style_line: str | None
@@ -1019,7 +1148,9 @@ A view without `mode` (an older server) parses as Classic with `turns = 10`, `pi
 ### A.4 Frozen Python interface — M2 ↔ M3
 
 `get_cookout_round()` adds `"mode": str` and `"bread_id": str | None` (§5.5). M3 resolves the mode with
-`default_modes().mode(row["mode"])` (unknown → fail the job with the existing failed text) and calls:
+`default_modes().mode(row["mode"])`. The store's claim and recovery reads never return an unknown mode
+(§5.6); if one reaches the runner anyway (a direct call), the job **aborts without writing anything**
+— it must never fail, finish or claim a row of a mode this process does not know. It calls:
 
 ```python
 def build_concepts_prompt(
@@ -1061,7 +1192,9 @@ def build_image_prompt(
 ```
 
 Stored concept JSON gains `"build": str` (Toasted sandwich only); M2's view reads it and resolves the
-label from the mode. The AI functions take `mode` without a default on purpose, so every call site
+label from the mode. `Parsed` gains `signals: tuple[str, ...] = ()` (non-fatal dish-word notes,
+§3.4); it never affects acceptance or the repair loop. The AI functions take `mode` without a default
+on purpose, so every call site
 states it; Classic call sites pass `default_modes().default` and produce exactly today's output.
 
 ### A.5 Acceptance (the work is done when all hold)
@@ -1070,5 +1203,8 @@ states it; Classic call sites pass `default_modes().default` and produce exactly
    from the real v21 fixture.
 2. The §8.4 trial meets its bars, report committed.
 3. The e2e plays a full two-player Toasted sandwich round at 360×640 with no scrolling during picking.
-4. The operator's first Toasted sandwich game on production: bread first, seven fillings, three
+4. Deployed with the setting absent; then `activate_modes.py --enable toastie` run by the delivery
+   coordinator on hub after the deploy completed, every check printed as passed, and the options list
+   Toasted sandwich.
+5. The operator's first Toasted sandwich game on production: bread first, seven fillings, three
    toasted sandwich pictures, a banked recipe.
