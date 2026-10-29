@@ -251,6 +251,7 @@ class Calibration:
     scores: list[CheckerScore]
     choice: str | None
     report: str
+    detail: list[dict[str, object]] = field(default_factory=list)
 
 
 async def run_stage(
@@ -492,5 +493,183 @@ async def run_calibration(
         disagreement_lines(names, all_checks, truths, finals["sol"], finals["opus"]),
         {"agreed on": agree, "still disagreed on": len(truths) - agree},
     )
-    save_json(work / "calibration" / "scores.json", [s.__dict__ for s in scores])
-    return Calibration(seed, scores, choice, report)
+    cal_dir = work / "calibration"
+    save_json(cal_dir / "scores.json", [s.__dict__ for s in scores])
+    for label, check_rows in (("luna", verdicts["luna"]), ("haiku", verdicts["haiku"])):
+        save_jsonl(cal_dir / f"checks-{label}.jsonl", check_rows)
+    for label, blind_rows in blind.items():
+        save_jsonl(cal_dir / f"judge-{label}-blind.jsonl", blind_rows)
+    for label, final_rows in finals.items():
+        save_jsonl(cal_dir / f"judge-{label}-final.jsonl", final_rows)
+    detail: list[dict[str, object]] = []
+    for ident in names:
+        v, t = all_checks[ident], truths[ident]
+        detail.append(
+            {
+                "name": names[ident],
+                "checker": "luna" if ident in verdicts["luna"] else "haiku",
+                "checker verdict": f"{v.verdict} {', '.join(v.problems)} {v.reason}".strip(),
+                "Sol": f"{finals['sol'][ident].verdict} {finals['sol'][ident].reason}".strip(),
+                "Opus": f"{finals['opus'][ident].verdict} {finals['opus'][ident].reason}".strip(),
+                "ident": ident,
+                "disagree": not (t.resolved and t.verdict == v.verdict),
+            }
+        )
+    return Calibration(seed, scores, choice, report, detail)
+
+
+# --- raw files, HTML report and the command line ---------------------------------------------
+
+
+def save_jsonl(path: Path, rows: Mapping[str, object]) -> None:
+    """One line per image id: the raw answers behind a score, for anyone who wants to audit it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="\n") as fh:
+        for ident in sorted(rows):
+            row = rows[ident]
+            data = row.__dict__ if hasattr(row, "__dict__") else _slots_dict(row)
+            fh.write(json.dumps({"id": ident, **data}, sort_keys=True) + "\n")
+
+
+def _slots_dict(obj: object) -> dict[str, object]:
+    return {name: getattr(obj, name) for name in getattr(type(obj), "__slots__", ())}
+
+
+def render_html(
+    title: str,
+    answer_line: str,
+    rows: Sequence[Mapping[str, object]],
+) -> str:
+    """The report page: the answer first, then each of the 100 pictures as a 160 px thumbnail
+    (inlined, so the file stands alone) with every verdict and reason; disagreements first."""
+    import base64
+    import html
+
+    def cell(row: Mapping[str, object]) -> str:
+        thumb = row.get("thumb")
+        img = ""
+        if isinstance(thumb, bytes):
+            img = (
+                '<img width="160" height="160" alt="" src="data:image/webp;base64,'
+                + base64.b64encode(thumb).decode("ascii")
+                + '">'
+            )
+        lines = "".join(
+            f"<div><b>{html.escape(str(k))}</b>: {html.escape(str(v))}</div>"
+            for k, v in row.items()
+            if k not in ("thumb", "disagree")
+        )
+        cls = "dis" if row.get("disagree") else ""
+        return f'<section class="{cls}">{img}<div>{lines}</div></section>'
+
+    ordered = sorted(rows, key=lambda r: (not r.get("disagree"), str(r.get("name"))))
+    body = "\n".join(cell(r) for r in ordered)
+    return (
+        "<!doctype html><html lang=en-GB><meta charset=utf-8>"
+        '<meta name=viewport content="width=device-width,initial-scale=1">'
+        f"<title>{html.escape(title)}</title>"
+        "<style>body{font:16px system-ui;margin:16px;max-width:60rem}"
+        "section{display:flex;gap:12px;flex-wrap:wrap;border-bottom:1px solid #8884;"
+        "padding:8px 0}section.dis{background:#fd02}"
+        "section>div{flex:1 1 14rem;min-width:0;overflow-wrap:anywhere;font-size:14px}"
+        "</style>"
+        f"<h1>{html.escape(title)}</h1><p>{html.escape(answer_line)}</p>{body}"
+    )
+
+
+def pilot_first_attempts(
+    journal_state_rows: Mapping[str, Mapping[str, object]],
+    first_attempt_ids: Sequence[str],
+) -> list[str]:
+    """Ids that have a first-attempt picture (before any regeneration)."""
+    return [i for i in first_attempt_ids if i in journal_state_rows]
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """`calibrate.py run`: draw 100 first-attempt pilot pictures, prove the checkers can see,
+    check, judge, score, write the report. Needs the live fleet and a finished pilot."""
+    import argparse
+    import asyncio
+    import secrets
+    import sys
+
+    repo = Path(__file__).resolve().parents[3]
+    for p in (str(repo), str(Path(__file__).resolve().parent)):
+        if p not in sys.path:
+            sys.path.insert(0, p)
+    import images as im
+
+    from tooling.cookout.visual import cmdruns
+
+    parser = argparse.ArgumentParser(prog="calibrate.py")
+    parser.add_argument("--work-dir", default=None)
+    parser.add_argument(
+        "--catalogue", default=str(repo / "wixy_server" / "livechat" / "cookout_catalogue.json")
+    )
+    parser.add_argument("--out-dir", default=str(repo / "triad" / "cookout" / "r2"))
+    args = parser.parse_args(argv)
+    work = im.WorkDir(Path(args.work_dir) if args.work_dir else im.default_work_dir())
+    subjects = im.load_subjects(Path(args.catalogue))
+    plan = json.loads(work.plan.read_text("utf-8"))
+
+    first: list[str] = []
+    for ident in plan["pilot"]:
+        attempts = work.read_attempts(ident)
+        if attempts and attempts[0]["attempt"] == 1 and work.card(ident, 1).exists():
+            first.append(ident)
+    seed = secrets.randbits(32)
+    for_luna, for_haiku = draw_sample(first, seed)
+    cal_dir = work.root / "calibration"
+    save_json(cal_dir / "sample.json", {"seed": seed, "luna": for_luna, "haiku": for_haiku})
+
+    def to_image(ident: str) -> CheckImage:
+        s = subjects[ident]
+        return CheckImage(ident, s.name, s.what, s.presentation, work.card(ident, 1))
+
+    pool = cmdruns.RunPool(
+        client=cmdruns.real_client(), journal=cmdruns.Journal(work.images / "runs.jsonl")
+    )
+    runner = im.PoolRunner(pool, cmdruns.RunSpec, cmdruns.Model)
+    rng = random.Random(seed)
+    cards = {i: work.card(i, 1) for i in first}
+    pick = im.pick_decoy_factory(subjects, lambda: cards, rng)
+    decoys = [pick() for _ in range(4)]
+    right = [to_image(i) for i in for_luna[:2]]
+
+    async def go() -> Calibration:
+        await prove_checkers(runner, right, decoys, work.root, rng)
+        return await run_calibration(
+            runner,
+            [to_image(i) for i in for_luna],
+            [to_image(i) for i in for_haiku],
+            pick,
+            work.root,
+            seed,
+            rng,
+        )
+
+    result = asyncio.run(go())
+    out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "image-calibration.md").write_text(result.report, encoding="utf-8", newline="\n")
+    rows = [
+        {
+            **{k: v for k, v in d.items() if k != "ident"},
+            "thumb": work.thumb(str(d["ident"]), 1).read_bytes()
+            if work.thumb(str(d["ident"]), 1).exists()
+            else None,
+        }
+        for d in result.detail
+    ]
+    first_line = result.report.split("\n\n")[1] if "\n\n" in result.report else ""
+    (out / "image-calibration.html").write_text(
+        render_html("Cookout picture checking: calibration", first_line, rows),
+        encoding="utf-8",
+        newline="\n",
+    )
+    print(result.choice or "no checker qualified: ask the operator")
+    return 0 if result.choice else 3
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

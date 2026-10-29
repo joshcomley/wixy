@@ -561,3 +561,203 @@ def test_committed_review_file_and_image_prompt(mods: dict[str, ModuleType]) -> 
     assert "lemon.." not in prompt and "a whole lemon." in prompt
     assert "no text, no logos, no watermark" in prompt and "warm off-white" in prompt
     assert p.prompt_hash(prompt) == p.prompt_hash(prompt) and len(p.prompt_hash(prompt)) == 16
+
+
+# --- the whole pipeline with fakes ------------------------------------------------------------
+
+_NAMES = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot"]
+
+
+class FakeComfy:
+    """Writes a flat grey PNG whose level encodes WHICH ingredient it shows. `bad` maps an
+    ingredient to how many of its first renders show the wrong thing."""
+
+    def __init__(self, level_of: dict[str, int], bad: dict[str, int]) -> None:
+        self.level_of, self.bad, self.renders = level_of, dict(bad), 0
+        self.count: dict[str, int] = {}
+
+    def generate_many(self, prompts: list[str], out_dir: Path, *, seeds: list[int]) -> list[Path]:
+        import re
+
+        from PIL import Image
+
+        ident = re.search(r"tok(\w+)", prompts[0]).group(1)  # type: ignore[union-attr]
+        self.count[ident] = self.count.get(ident, 0) + 1
+        self.renders += 1
+        shows = ident if self.count[ident] > self.bad.get(ident, 0) else "zzz"
+        level = self.level_of.get(shows, 250)
+        path = out_dir / f"wyr_{self.renders}.png"
+        Image.new("RGB", (64, 64), (level, level, level)).save(path)
+        return [path]
+
+
+class FakeJudge:
+    """Reads the picture's grey level to decide what it shows, then answers like a checker."""
+
+    def __init__(self, level_of: dict[str, int], name_of: dict[str, str]) -> None:
+        self.level_of, self.name_of = level_of, name_of
+        self.opus_calls, self.rewrites = 0, 0
+
+    async def run(self, **kw: Any) -> str:
+        import re
+
+        from PIL import Image
+
+        prompt, cwd = str(kw["prompt"]), Path(str(kw["cwd"]))
+        if "text-to-image model keeps failing" in prompt:
+            self.rewrites += 1
+            ids = re.findall(r"^id: (\w+)$", prompt, re.M)
+            return json.dumps(
+                {
+                    "items": [
+                        {"id": i, "visual": f"a whole raw plain thing tok{i} on a pale surface"}
+                        for i in ids
+                    ]
+                }
+            )
+        if "failed an automatic check" in prompt:
+            self.opus_calls += 1
+            return json.dumps(
+                {
+                    "choose": None,
+                    "reason": "try again",
+                    "visual": "a clearer whole raw thing tokzzz on a pale surface",
+                }
+            )
+        rows = []
+        for line in prompt.splitlines():
+            m = re.match(r"Image (\d+): should show (\w+)", line)
+            if not m:
+                continue
+            with Image.open(cwd / f"{m.group(1)}.webp") as im:
+                level = im.convert("RGB").getpixel((5, 5))[0]
+            shown = min(self.level_of, key=lambda k: abs(self.level_of[k] - level))
+            ok = abs(self.level_of[shown] - level) < 20 and self.name_of[shown] == m.group(2)
+            rows.append(
+                (m.group(1), "correct", [], "")
+                if ok
+                else (m.group(1), "wrong", ["wrong_food"], "That is not the right food.")
+            )
+        return _vjson(rows)
+
+
+def _pipeline(
+    tmp_path: Path, mods: dict[str, ModuleType], bad: dict[str, int]
+) -> tuple[Any, Any, Any, Any, dict[str, int]]:
+    im, c = mods["images"], mods["check"]
+    levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
+    subjects = {
+        n.lower(): im.Subject(
+            n.lower(),
+            n,
+            f"cat{i % 3}",
+            f"A plain {n}.",
+            f"one whole raw plain {n} tok{n.lower()}",
+            "whole",
+        )
+        for i, n in enumerate(_NAMES)
+    }
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, bad)
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+    totals = asyncio.run(
+        im.run_pipeline(
+            sorted(subjects),
+            subjects,
+            work,
+            comfy,
+            lambda: {},
+            judge,
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            chunk_size=3,
+            review_path=tmp_path / "rev.json",
+            rng=random.Random(4),
+            sleep=lambda _s: None,
+        )
+    )
+    return im, work, comfy, judge, totals
+
+
+def test_pipeline_regenerates_a_failed_picture_then_accepts(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, work, comfy, _judge, totals = _pipeline(tmp_path, mods, {"bravo": 1})
+    assert totals["accepted"] == 6 and totals["pictureless"] == 0
+    assert comfy.renders == 7  # six first attempts + one regeneration
+    state = im.journal_state(work.journal)
+    assert all(e["state"] == "accepted" for e in state.values())
+    assert [a["attempt"] for a in work.read_attempts("bravo")] == [1, 2]
+    pics = im.accepted_pictures(work)
+    assert len(pics) == 6 and {p.ident for p in pics} == set(state)
+    # a re-run does nothing: accepted ids are skipped
+    again = _pipeline(tmp_path, mods, {})[4]
+    assert again["rendered"] == 0
+
+
+def test_pipeline_walks_the_ladder_to_opus_then_picture_less(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, work, comfy, judge, totals = _pipeline(tmp_path, mods, {"echo": 99})
+    assert totals["accepted"] == 5 and totals["pictureless"] == 1
+    assert [a["attempt"] for a in work.read_attempts("echo")] == [1, 2, 3, 4, 5, 6]
+    assert judge.rewrites >= 1 and judge.opus_calls == 1  # attempt-3 rewrite; one Opus review
+    decided = json.loads((tmp_path / "rev.json").read_text("utf-8"))
+    assert decided["echo"]["decision"] == "pictureless"
+    assert im.journal_state(work.journal)["echo"].get("pictureless") is True
+    assert "echo" not in {p.ident for p in im.accepted_pictures(work)}
+
+
+def test_pipeline_pause_file_stops_between_pictures(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+    work = im.WorkDir(tmp_path / "work")
+    work.pause.parent.mkdir(parents=True)
+    work.pause.write_text("")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v tokA", "whole")}
+    totals = asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({}, {}),
+            lambda: {},
+            FakeJudge({}, {}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=lambda _s: None,
+        )
+    )
+    assert totals["rendered"] == 0
+
+
+def test_plan_pilot_is_stratified_and_seeded(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    cats = {f"c{c}-{n}": f"cat{c}" for c in range(15) for n in range(60)}
+    plan = im.make_plan(cats, 7)
+    assert plan == im.make_plan(cats, 7) and plan != im.make_plan(cats, 8)
+    assert len(plan["pilot"]) == 600 and not set(plan["pilot"]) & set(plan["rest"])
+    first15 = {cats[i] for i in plan["pilot"][:15]}
+    assert len(first15) == 15  # any prefix is stratified
+
+
+def test_html_report_is_standalone_and_lists_disagreements_first(
+    mods: dict[str, ModuleType],
+) -> None:
+    cal = mods["calibrate"]
+    page = cal.render_html(
+        "T",
+        "Haiku got 49 of 50 right.",
+        [
+            {"name": "Zed", "thumb": b"RIFFxxxx", "disagree": False},
+            {"name": "Abe", "thumb": None, "disagree": True},
+        ],
+    )
+    assert page.index("Abe") < page.index("Zed") and "data:image/webp;base64," in page
+    assert "http://" not in page and "https://" not in page
