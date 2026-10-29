@@ -1,0 +1,175 @@
+{
+  "version": 1,
+  "modes": [
+    {
+      "id": "classic",
+      "label": "Classic",
+      "emoji": "🍳",
+      "blurb": "Pick 10 ingredients, get 3 dishes",
+      "intro": [],
+      "plan": { "type": "classic" },
+      "chef": { "format": "classic" },
+      "picture": { "format": "classic" },
+      "twists": ["swap", "vote", "style", "cooked", "wildcard", "fridge", "challenge", "veto",
+                 "encore", "lucky", "stars", "chaos"]
+    },
+    {
+      "id": "toastie",
+      "label": "Toasted sandwich",
+      "emoji": "🥪",
+      "blurb": "Pick a bread and 7 fillings, get 3 toasties",
+      "intro": [
+        "You're making a toasted sandwich.",
+        "{starter} picks the bread first, then you take turns adding fillings — 4 picks each.",
+        "The chef makes three toasted sandwiches with your bread."
+      ],
+      "plan": {
+        "type": "sequence",
+        "opening": ["bread"],
+        "pairs": ["cheese", "main", "produce"],
+        "closing": ["finish"]
+      },
+      "kinds": {
+        "bread": {
+          "label": "the bread", "prompt": "pick the bread", "facet": "family", "chaos": false,
+          "select": {
+            "ids": [
+              "granary-bread", "seeded-batch-loaf", "sliced-white-bread", "sliced-wholemeal-bread",
+              "thick-cut-white-toast-bread",
+              "bloomer", "cob-loaf", "cottage-loaf", "farmhouse-loaf", "split-tin-loaf", "tin-loaf",
+              "pain-de-campagne", "rye-sourdough", "seeded-sourdough", "sourdough-boule",
+              "sourdough-loaf", "wholemeal-sourdough",
+              "danish-rye-bread", "pumpernickel", "rye-bread", "vollkornbrot",
+              "brioche-loaf", "challah", "hokkaido-milk-toast", "milk-bread", "hot-cross-bun",
+              "cheese-and-onion-loaf", "cranberry-and-walnut-sourdough", "fruit-loaf",
+              "gluten-free-white-bread", "olive-bread", "spelt-bread", "walnut-bread",
+              "ciabatta", "ciabatta-roll", "focaccia",
+              "french-baguette", "demi-baguette", "batard",
+              "bagel", "sesame-bagel", "everything-bagel",
+              "english-muffin", "potato-farl",
+              "floury-bap", "barm-cake",
+              "brioche-burger-bun", "sesame-seed-burger-bun", "potato-bun", "pretzel-roll",
+              "soda-bread",
+              "croissant"
+            ]
+          }
+        },
+        "cheese": {
+          "label": "a cheese", "prompt": "add a cheese", "facet": "family", "chaos": true,
+          "select": {
+            "categories": ["dairy-eggs"],
+            "families": [
+              "alpine-cheese", "american-cheese", "blue-cheese", "brined-cheese", "british-cheese",
+              "cheddar", "cheese-filling", "danish-cheese", "dutch-cheese", "fresh-cheese",
+              "goat-cheese", "grilling-cheese", "hard-cheese", "pasta-filata", "processed-cheese",
+              "semi-hard-cheese", "sheep-cheese", "smoked-cheese", "soft-cheese"
+            ]
+          }
+        },
+        "main": {
+          "label": "a main filling", "prompt": "add a main filling", "facet": "category",
+          "chaos": true, "select": { "roles": ["protein", "base"] }
+        },
+        "produce": {
+          "label": "veg or fruit", "prompt": "add veg or fruit", "facet": "category",
+          "chaos": true, "select": { "roles": ["produce"] }
+        },
+        "finish": {
+          "label": "a finishing touch", "prompt": "add a finishing touch", "facet": "category",
+          "chaos": true, "select": { "roles": ["accent"] }
+        }
+      },
+      "kindOrder": ["bread", "cheese", "main", "produce", "finish"],
+      "fillingRules": {
+        "excludeCategories": ["grains-bakery", "drinks-alcohol"],
+        "excludeFamilies": {
+          "sweet-baking": [
+            "baking-chemical", "raising-agent", "setting-agent", "thickener", "yeast",
+            "flavouring", "sugar-white", "sugar-brown", "sugar-specialty", "sugar-unrefined"
+          ],
+          "oils-fats-condiments": [
+            "cooking-oil", "seed-oil", "nut-oil", "tropical-oil", "olive-oil", "animal-fat",
+            "spread", "white-vinegar", "rice-vinegar", "wine-vinegar", "fruit-vinegar",
+            "herb-vinegar"
+          ],
+          "sauces-stocks-fermented": ["stock", "stock-cube", "japanese-stock"],
+          "dairy-eggs": ["butter", "milk", "frozen-dairy"],
+          "prepared-pantry": [
+            "flatbread", "tortilla", "garlic-bread", "sliced-bread", "crackers", "pastry",
+            "pizza-dough", "frozen-pizza", "breakfast-bakery", "batter", "dried-noodle",
+            "instant-noodle", "ready-grain", "ready-rice", "rice-snack", "ice-cream-extras",
+            "ice-cream", "jelly", "instant-soup", "cereal", "yorkshire-pudding"
+          ]
+        },
+        "excludeRoleCategories": [["base", "legumes-nuts-seeds"], ["base", "dairy-eggs"]],
+        "excludeIds": [
+          "cheese-rind", "dried-egg-powder", "egg-wash", "dried-black-beans", "dried-butter-beans",
+          "dried-cannellini-beans", "dried-chickpeas", "dried-fava-beans", "dried-kidney-beans",
+          "falafel-mix", "custard-powder", "frozen-bao-buns", "microwave-popcorn-bag",
+          "popcorn-kernels", "suet-dumpling-mix"
+        ],
+        "includeIds": ["dulce-de-leche", "garlic-butter"]
+      },
+      "staples": {
+        "free": ["water", "salt", "black-pepper", "butter"],
+        "capped": ["plain-flour", "cooking-oil", "granulated-sugar", "milk"],
+        "cap": 2
+      },
+      "chef": {
+        "format": "single-dish",
+        "dishNoun": "toasted sandwich",
+        "anchorKind": "bread",
+        "eachMissingMax": 2,
+        "bestMissingMax": 1,
+        "reviewDishWords": [
+          "open sandwich", "open-faced", "bruschetta", "crostini", "tartine", "bread pudding",
+          "strata", "panzanella", "croutons", "quesadilla", "wrap"
+        ],
+        "conceptText": [
+          "Two friends played a cooking game and drafted the ingredients for a TOASTED SANDWICH: one bread and {n} fillings (the JSON below). Invent THREE different toasted sandwiches from them.",
+          "",
+          "Every idea is a CLOSED TOASTED SANDWICH: two pieces of the chosen bread ({bread}, id \"{bread_id}\") on the outside, the fillings inside, toasted until golden and hot right through. Never an open sandwich, a wrap, a salad, a bake where the bread is cubed or crumbed, or a dish with the bread on the side.",
+          "- Use the bread in all three ideas and name it in each title or description.",
+          "- Try hard to use every filling in every idea. Each idea must use at least {each} of the {n} fillings, at least one idea must use {best} or more, and between them the three ideas must use all {n}. Leave a filling out only when it would really clash, and say why in \"omitted\".",
+          "- Give each idea a different \"build\" from this list: {build_list}.",
+          "- Butter is always allowed (list \"butter\" in stapleIds when you use it); salt, black pepper and water are free. You may also use at most TWO of: plain flour, cooking oil, granulated sugar, milk. Nothing else that is not in the basket.",
+          "- Surprising fillings are part of the fun: make them taste good together."
+        ],
+        "recipeText": "This is the full recipe for one toasted sandwich idea, for two people (two sandwiches). Keep the bread on the outside and make it the \"{build_label}\" way: {build_phrase}. Butter is always allowed.",
+        "styleLine": "The style flavours the toasted sandwiches; every idea is still a closed toasted sandwich.",
+        "builds": [
+          { "id": "pressed", "label": "Pressed", "technique": "grill",
+            "promptPhrase": "in a sandwich toaster or panini press",
+            "picturePhrase": "with the ridged marks of a sandwich press", "usesOven": false },
+          { "id": "skillet", "label": "Skillet-fried", "technique": "pan-fry",
+            "promptPhrase": "fried in a pan under a weight, turned once",
+            "picturePhrase": "pan-fried until deep golden and crunchy", "usesOven": false },
+          { "id": "grill-toasted", "label": "Grill-toasted", "technique": "grill",
+            "promptPhrase": "toasted under the grill, turned, closed and finished",
+            "picturePhrase": "toasted under the grill with darker golden edges", "usesOven": false },
+          { "id": "oven-baked", "label": "Oven-baked", "technique": "bake",
+            "promptPhrase": "baked in the oven, croque style",
+            "picturePhrase": "baked with a bubbling golden top", "usesOven": true },
+          { "id": "dipped", "label": "Dipped and fried", "technique": "pan-fry",
+            "promptPhrase": "dipped in a batter of allowed ingredients and fried",
+            "picturePhrase": "with a crunchy fried golden coating", "usesOven": false },
+          { "id": "crisp-crusted", "label": "Crisp-crusted", "technique": "pan-fry",
+            "promptPhrase": "with a filling ingredient fried onto the outside into a crust",
+            "picturePhrase": "with a lacy, crunchy, golden crust fried onto the outside",
+            "usesOven": false },
+          { "id": "jaffle", "label": "Jaffle", "technique": "grill",
+            "promptPhrase": "sealed at the edges in a jaffle iron",
+            "picturePhrase": "sealed at the edges in a rounded jaffle shape", "usesOven": false }
+        ]
+      },
+      "picture": {
+        "format": "single-dish",
+        "template": "Photorealistic appetising food photograph of \"{title}\": one closed toasted sandwich made with {bread}, {build_phrase}, cut in half with the two halves stacked slightly apart so the hot, melted filling of {fillings} shows in the cross-section. Golden, crunchy, evenly toasted bread. {presentation}, shallow depth of field, no people, no hands, no raw-ingredient collage, no open sandwich, no unlisted side dishes, no text, labels, logos, or watermark.",
+        "defaultPresentation": "Served simply on a wooden board in a home kitchen, natural light"
+      },
+      "twists": ["swap", "vote", "style", "cooked", "wildcard", "fridge", "challenge", "veto",
+                 "encore", "lucky", "stars", "chaos"],
+      "fridgeKinds": ["bread"]
+    }
+  ]
+}
