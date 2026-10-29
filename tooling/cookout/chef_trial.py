@@ -282,7 +282,8 @@ def render_markdown(
         lines += ["", f"## {title}", ""]
         lines.append(
             f"- accepted: **{s['accepted']} of {s['total']}**; on the first attempt: "
-            f"**{s['accepted_first_attempt']}**; by attempt: {s['by_attempt']}; failed: {s['failed']}"
+            f"**{s['accepted_first_attempt']}**; by attempt: {s['by_attempt']}; "
+            f"failed: {s['failed']}"
         )
         lines += [
             "",
@@ -315,6 +316,9 @@ async def main_async(args: argparse.Namespace) -> int:
     rng = random.Random(args.seed)
     twist_slots = set(rng.sample(range(args.baskets), max(1, args.baskets // 4)))
     baskets = [draw_basket(bank, rng, i, i in twist_slots) for i in range(args.baskets)]
+    if args.only:
+        wanted_ids = {int(x) for x in args.only.split(",")}
+        baskets = [b for b in baskets if b.index in wanted_ids]
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     work = Path(tempfile.mkdtemp(prefix="cookout-trial-"))
@@ -375,6 +379,7 @@ def main() -> int:
     parser.add_argument("--baskets", type=int, default=40)
     parser.add_argument("--recipes", type=int, default=10)
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument("--only", default="", help="re-run only these basket indexes (same seed)")
     parser.add_argument("--out", default="triad/cookout/r2")
     args = parser.parse_args()
     return asyncio.run(main_async(args))

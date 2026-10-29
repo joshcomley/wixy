@@ -401,6 +401,10 @@ at least two different dishType values.
 - "omitted" lists every picked ingredient the concept does NOT use (exactly the complement of \
 "pickedIngredientIds"), each with a short reason. NEVER mention an omitted ingredient anywhere \
 except inside its own omitted "reason".
+- Put ONLY picked ingredient ids in "pickedIngredientIds" and ONLY unpicked cupboard staple ids in \
+"stapleIds" (never a staple id in pickedIngredientIds). Before you answer, count each concept's \
+pickedIngredientIds: every one needs {MIN_PICKED_EACH} or more and at least one needs \
+{MIN_PICKED_BEST} or more.
 - Write "title", "vibe" and "description" naming only foods the concept uses. British English, \
 plain text, no markdown.
 {twist_block}
