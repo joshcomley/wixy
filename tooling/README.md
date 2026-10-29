@@ -31,6 +31,7 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
   (fixed image + checker prompts), `check.py` (verdict parser, neutral-name batches, decoys, vision
   proof), `calibrate.py` (the 100-picture spot check: sampler, judge stages, scoring, report),
   `images.py` (empty-queue gate, attempt ladder, journal, renditions, deterministic pack +
-  manifest), `review.py` (Opus review queue, `image_review.json`). Library modules only; each
-  imports its siblings by plain name, so tests put this folder on `sys.path`. Unit tests:
+  manifest), `review.py` (Opus review queue, `image_review.json`). Commands: `images.py plan|run|status|publish|apply-overrides` (run on a hub Grid worker, never
+  session 0; `<work>/PAUSE` stops it between pictures) and `calibrate.py` (the spot check). The
+  modules import their siblings by plain name, so tests put this folder on `sys.path`. Unit tests:
   `wixy_server/tests/test_cookout_visual_tooling.py`.
