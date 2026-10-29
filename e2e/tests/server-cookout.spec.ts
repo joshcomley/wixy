@@ -537,9 +537,14 @@ test.describe("Cookout", () => {
     await expect(pageA.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
     await expect(pageA.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`)).toBeAttached();
 
-    // Bob opens the (still picking) Cookout from its card; it replaces whatever he had.
+    // Bob opens the (still picking) Cookout from its card; it replaces whatever he had. "Whatever he had" is
+    // Alice's newer Would-you-rather, offered to him as a tab: wait until it has REACHED him first. A newer
+    // game arriving takes the one game slot (gameTabs.offer), so if it lands just after his tap it closes the
+    // Cookout he opened — under load that race failed this test 8 times in 50 (traced on cherry, 2026-10-29).
+    await expect(pageB.locator(".wx-srv-tab-wyr")).toBeVisible({ timeout: 20_000 });
     await joinCookout(pageB, seq);
     await expect(pageB.locator(".wx-srv-tab-cookout")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-tab-wyr")).toBeHidden();
     await expect(pageB.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
 
     // The round's chat (decisions/00194): the game runs full screen (no chat header, no composer at home);
