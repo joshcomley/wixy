@@ -118,6 +118,17 @@ flowing at real speed); a spec that counts idle time with `runFor` must call `fr
 `waitForNextDraftPatchAccepted(page, { path })` waits for the PATCH that edits a given content path;
 without `path` it is satisfied by any accepted PATCH, including one the test's own click did not cause.
 
+**Image bakes and uploads:** never leave one inside Playwright's default 5 s `expect` timeout (the
+Alignment test's "Save aligned photo" did, and a loaded CI runner broke it: the dialog was still open at
+5.0 s; click to dialog-closed measured 0.07 s unthrottled, 1.2-2.6 s with the page's CPU throttled 6-20x
+via CDP `Emulation.setCPUThrottlingRate`, 4-8 s at 25x and 9-14 s at 30x, where the old 5 s wait failed). Arm `waitForMediaUpload(page)` from `e2e/tests/helpers.ts` before the click or
+`setInputFiles` that causes the upload (it resolves on the `POST /api/admin/media` answering 200, skips a
+5xx the admin client retries, and rejects with the status on any other), then wait for the on-screen
+effect with `{ timeout: MEDIA_PIPELINE_TIMEOUT_MS }` (60 s: the admin client's own 3 x 10 s upload attempts
+plus backoff is 31.5 s, doubled for the bake). A test doing that raises its own budget with
+`test.setTimeout(MEDIA_PIPELINE_TIMEOUT_MS * 3)`. `section-panel.spec.ts`'s `uploadThroughMediaDialog`
+is the media-dialog flavour.
+
 The one `@pytest.mark.live_cmd` test (a real cmd round-trip) is excluded by default; run it
 during deploy verification: `pytest -o addopts="" -m live_cmd wixy_server/tests/`.
 
