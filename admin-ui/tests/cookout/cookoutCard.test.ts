@@ -11,6 +11,7 @@ import { finishedView, picture } from "./fixtures";
 function summary(patch: Partial<CookoutSummary>): CookoutSummary {
   return {
     state: "picking",
+    mode: "classic",
     blind: false,
     pickedCount: 0,
     concepts: "none",

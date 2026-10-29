@@ -21,6 +21,13 @@
 // A plain `div` with a backdrop rather than a `<dialog>`: Escape is this chat's panic key (it locks
 // everything at once), so nothing here listens for it and the sheet closes by its buttons. Like the other
 // screens of the ⋯ menu it sits BELOW the chat header, so the panic ✕ and the lock gestures stay reachable.
+//
+// GAME MODES (spec/server-chat/09c-cookout-modes.md §6.1): when the server lists more than Classic, a first
+// section "What are we making?" shows one picture tile per mode (a radio group; Classic selected), and the
+// Open/Blind choice follows under "How do we play?". The twists shown are the chosen mode's; a toasted
+// sandwich's fridge raid searches breads. "New" preselects the round's mode; an encore locks the tile to its
+// source round's mode ("Same game as before"). With Classic alone listed the sheet is exactly as before.
+// Open/Blind is called the "play style" in this file, so "mode" means one thing.
 
 import type {
   CatalogueEntry,
@@ -29,11 +36,13 @@ import type {
   CookoutOptions,
   EncoreKind,
   IngredientSnap,
+  ModeOption,
   SearchResult,
   StyleId,
 } from "./api";
-import { isChallengeId, isStyleId } from "./api";
+import { CLASSIC_MODE_ID, CLASSIC_OPTION, isChallengeId, isStyleId } from "./api";
 import { createFridgeSearch } from "./fridgeSearch";
+import { modeTileUrl, ordinal } from "./modes";
 
 /** An encore's source concept and the starters it offers (its leftovers, or the banked dish's own). */
 export interface EncorePreset {
@@ -44,10 +53,14 @@ export interface EncorePreset {
   /** The source dish's title, for the banner (null when unknown). */
   readonly title: string | null;
   readonly candidates: readonly IngredientSnap[];
+  /** The source round's game mode: an encore stays in it (09c §2.5). Absent = Classic. */
+  readonly mode?: string;
 }
 
-/** What the sheet opens with. Anything absent is the default (Open, no twists). */
+/** What the sheet opens with. Anything absent is the default (Classic, Open, no twists). */
 export interface StartPreset {
+  /** The game mode to preselect ("New" of a round); an encore's own mode wins and locks the tile. */
+  readonly mode?: string;
   readonly blind?: boolean;
   readonly style?: StyleId | "spin" | null;
   readonly challenge?: ChallengeId | null;
@@ -57,8 +70,11 @@ export interface StartPreset {
   readonly encore?: EncorePreset | null;
 }
 
-/** What Start sends. Chef-only twists are already dropped when the server has no chef. */
+/** What Start sends. Chef-only twists are already dropped when the server has no chef, and twists the chosen
+ * mode does not allow are dropped too. */
 export interface StartChoices {
+  /** The game mode's id ("classic" by default). */
+  readonly mode: string;
   readonly blind: boolean;
   readonly style: StyleId | "spin" | null;
   readonly challenge: ChallengeId | null;
@@ -85,8 +101,8 @@ export interface CookoutStartSheetDeps {
   /** The style/challenge catalogue and the chef's availability (cached per unlock by the caller); null
    * when it could not be read. */
   loadOptions(): Promise<CookoutOptions | null>;
-  /** The fridge raid's bank search. */
-  search(q: string): Promise<SearchResult>;
+  /** The fridge raid's bank search, within the chosen mode's fridge kinds (Classic: the whole bank). */
+  search(q: string, mode: string): Promise<SearchResult>;
   /** A fresh id for a start. */
   newId(): string;
   /** Test seams for the search debounce. */
@@ -107,6 +123,23 @@ export interface CookoutStartSheet {
 /** At most two starters a round; one when the fridge raid supplies the other (09a §1.3). */
 export function encoreSeedLimit(hasFridge: boolean): number {
   return hasFridge ? 1 : 2;
+}
+
+/** The fridge raid row's words for a mode (09c §6.1): Classic's own, else "Start with a bread you have at
+ * home" from the mode's fridge kinds. */
+export function fridgeWords(mode: ModeOption): { readonly hint: string; readonly placeholder: string } {
+  if (mode.id === CLASSIC_MODE_ID || mode.fridgeKinds === null || mode.fridgeKinds.length === 0) {
+    return { hint: "Start with one thing you actually have at home tonight", placeholder: "Search the pantry — e.g. tomatoes" };
+  }
+  const kinds = mode.fridgeKinds.map((k) => k.replace(/-+/g, " "));
+  return { hint: `Start with a ${kinds.join(" or ")} you have at home`, placeholder: `Search for a ${kinds.join(" or ")} — e.g. sourdough` };
+}
+
+/** The cloche row's hint (09c §6.1): Classic's own words, a mode's "a mystery 9th ingredient". */
+export function clocheHint(mode: ModeOption): string {
+  return mode.id === CLASSIC_MODE_ID
+    ? "Lift a lid for a surprise 11th ingredient"
+    : `Lift a lid for a mystery ${ordinal(mode.turns + 1)} ingredient`;
 }
 
 export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutStartSheet {
@@ -145,6 +178,22 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   sheet.setAttribute("aria-labelledby", heading.id);
   const intro = el("p", "wx-srv-ck-start-intro", "Take turns picking 10 ingredients, then see what the chef invents.");
 
+  // -- What are we making? (the game mode tiles; hidden while Classic is the only mode) -------------------
+
+  const what = el("div", "wx-srv-ck-start-what");
+  what.hidden = true;
+  const whatHead = el("p", "wx-srv-ck-start-section", "What are we making?");
+  whatHead.id = "wx-srv-ck-start-what";
+  const tiles = el("div", "wx-srv-ck-mtiles");
+  tiles.setAttribute("role", "radiogroup");
+  tiles.setAttribute("aria-labelledby", whatHead.id);
+  const lockedNote = el("p", "wx-srv-ck-mtiles-note", "Same game as before");
+  lockedNote.hidden = true;
+  what.append(whatHead, tiles, lockedNote);
+  const howHead = el("p", "wx-srv-ck-start-section", "How do we play?");
+  howHead.id = "wx-srv-ck-start-how";
+  howHead.hidden = true;
+
   // -- The encore banner ---------------------------------------------------------------------------------
 
   const encoreBox = el("div", "wx-srv-ck-encore");
@@ -160,13 +209,13 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   encoreList.setAttribute("aria-label", "Starters");
   encoreBox.append(encoreHead, encoreHint, encoreList);
 
-  // -- The modes -------------------------------------------------------------------------------------------
+  // -- The play style: Open or Blind ------------------------------------------------------------------------
 
-  const modes = el("div", "wx-srv-ck-start-modes");
-  modes.setAttribute("role", "radiogroup");
-  modes.setAttribute("aria-label", "Game mode");
+  const playStyles = el("div", "wx-srv-ck-start-modes");
+  playStyles.setAttribute("role", "radiogroup");
+  playStyles.setAttribute("aria-label", "Open or Blind");
 
-  function modeOption(blind: boolean, icon: string, name: string, hint: string): HTMLButtonElement {
+  function playStyleOption(blind: boolean, icon: string, name: string, hint: string): HTMLButtonElement {
     const option = el("button", "wx-srv-ck-mode");
     option.type = "button";
     option.setAttribute("role", "radio");
@@ -179,9 +228,9 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     return option;
   }
 
-  const openOption = modeOption(false, "👀", "Open mode", "You both see every pair and every pick");
-  const blindOption = modeOption(true, "🕵️", "Blind mode", "Secret picks, then one big reveal");
-  modes.append(openOption, blindOption);
+  const openOption = playStyleOption(false, "👀", "Open mode", "You both see every pair and every pick");
+  const blindOption = playStyleOption(true, "🕵️", "Blind mode", "Secret picks, then one big reveal");
+  playStyles.append(openOption, blindOption);
 
   // -- The twists ------------------------------------------------------------------------------------------
 
@@ -230,13 +279,14 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   }
 
   const cloche = toggleRow("cloche", "🛎️", "Wildcard cloche", "Lift a lid for a surprise 11th ingredient");
+  const clocheHintEl = cloche.button.querySelector<HTMLElement>(".wx-srv-ck-twist-hint");
   const stars = toggleRow("stars", "⭐", "Secret stars", "Each star one of your picks; the chef makes them the heroes");
   chefRows.append(styleRow, challengeRow, cloche.row, stars.row);
 
   const fridgeRow = el("div", "wx-srv-ck-twist wx-srv-ck-twist-fridge");
   const fridge = createFridgeSearch({
     document: doc,
-    search: (q) => deps.search(q),
+    search: (q) => deps.search(q, modeChosen),
     onChange: (snap) => {
       fridgeChosen = snap;
       // The fridge raid takes one of the two starter places.
@@ -246,7 +296,9 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     ...(deps.setTimeout === undefined ? {} : { setTimeout: deps.setTimeout }),
     ...(deps.clearTimeout === undefined ? {} : { clearTimeout: deps.clearTimeout }),
   });
-  fridgeRow.append(rowHead("🧊", "Fridge raid", "Start with one thing you actually have at home tonight"), fridge.element);
+  const fridgeHead = rowHead("🧊", "Fridge raid", "Start with one thing you actually have at home tonight");
+  const fridgeHintEl = fridgeHead.querySelector<HTMLElement>(".wx-srv-ck-twist-hint");
+  fridgeRow.append(fridgeHead, fridge.element);
   twistsBody.append(chefNote, chefRows, fridgeRow);
 
   const error = el("p", "wx-srv-ck-start-error");
@@ -257,13 +309,16 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   const go = plainButton("wx-srv-ck-start-go", "Start Cookout");
   actions.append(cancel, go);
   const body = el("div", "wx-srv-ck-start-body");
-  body.append(intro, encoreBox, modes, twists, error);
+  body.append(intro, what, encoreBox, howHead, playStyles, twists, error);
   sheet.append(heading, body, actions);
   root.append(backdrop, sheet);
 
   // -- State -----------------------------------------------------------------------------------------------
 
   let opened = false;
+  let modeChosen: string = CLASSIC_MODE_ID;
+  /** An encore's mode: the tile cannot change. */
+  let modeLocked = false;
   let blindChosen = false;
   let style: StyleId | "spin" | null = null;
   let challenge: ChallengeId | null = null;
@@ -288,15 +343,31 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     return options !== null && options.chef;
   }
 
+  /** The modes the server lists (Classic alone until the options are read). */
+  function listedModes(): readonly ModeOption[] {
+    return options?.modes ?? [CLASSIC_OPTION];
+  }
+
+  /** The chosen mode's entry; a locked encore mode the server no longer lists still names itself. */
+  function chosenMode(): ModeOption {
+    return listedModes().find((m) => m.id === modeChosen) ?? (modeChosen === CLASSIC_MODE_ID ? CLASSIC_OPTION : { ...CLASSIC_OPTION, id: modeChosen, label: modeChosen });
+  }
+
+  /** Whether the chosen mode allows a twist (09c §4: the start sheet shows only the mode's twists). */
+  function allows(twist: string): boolean {
+    return chosenMode().twists.includes(twist);
+  }
+
   function choices(): StartChoices {
     const chef = chefAvailable();
     return {
+      mode: modeChosen,
       blind: blindChosen,
-      style: chef ? style : null,
-      challenge: chef ? challenge : null,
-      wildcard: chef && wildcard,
-      stars: chef && starsOn,
-      fridgeSeedId: fridgeChosen?.id ?? null,
+      style: chef && allows("style") ? style : null,
+      challenge: chef && allows("challenge") ? challenge : null,
+      wildcard: chef && allows("wildcard") && wildcard,
+      stars: chef && allows("stars") && starsOn,
+      fridgeSeedId: allows("fridge") ? (fridgeChosen?.id ?? null) : null,
       encore:
         encore === null || encoreSeeds.length === 0
           ? null
@@ -397,7 +468,91 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     );
   }
 
+  /** One "What are we making?" tile: the mode's picture (its emoji when there is none or it fails), its
+   * label and its one-line blurb. */
+  function modeTile(mode: ModeOption): HTMLButtonElement {
+    const on = mode.id === modeChosen;
+    const tile = plainButton("wx-srv-ck-mtile", "");
+    tile.setAttribute("role", "radio");
+    tile.setAttribute("aria-checked", on ? "true" : "false");
+    tile.dataset["modeId"] = mode.id;
+    tile.classList.toggle("wx-srv-ck-mtile-on", on);
+    tile.tabIndex = on ? 0 : -1;
+    const art = el("span", "wx-srv-ck-mtile-art");
+    const emoji = el("span", "wx-srv-ck-mtile-emoji", mode.emoji !== "" ? mode.emoji : "🍽️");
+    emoji.setAttribute("aria-hidden", "true");
+    const url = modeTileUrl(mode.id);
+    if (url !== null) {
+      const img = doc.createElement("img");
+      img.className = "wx-srv-ck-mtile-img";
+      img.src = url;
+      img.alt = mode.label;
+      img.decoding = "async";
+      img.draggable = false;
+      emoji.hidden = true;
+      img.addEventListener("error", () => {
+        img.remove();
+        emoji.hidden = false;
+      });
+      art.append(img, emoji);
+    } else {
+      art.append(emoji);
+    }
+    tile.append(art, el("span", "wx-srv-ck-mtile-label", mode.label));
+    if (mode.blurb !== "") tile.append(el("span", "wx-srv-ck-mtile-blurb", mode.blurb));
+    tile.append(glyph("wx-srv-ck-mtile-tick", "✓"));
+    tile.disabled = busy || (modeLocked && !on);
+    tile.addEventListener("click", () => chooseMode(mode.id));
+    return tile;
+  }
+
+  function drawModes(): void {
+    const listed = listedModes();
+    const shown = listed.length > 1;
+    what.hidden = !shown;
+    howHead.hidden = !shown;
+    playStyles.setAttribute("aria-labelledby", shown ? howHead.id : "");
+    if (!shown) {
+      playStyles.removeAttribute("aria-labelledby");
+      tiles.replaceChildren();
+      return;
+    }
+    const entries = modeLocked ? listed.filter((m) => m.id === modeChosen) : listed;
+    tiles.replaceChildren(...(entries.length > 0 ? entries : [chosenMode()]).map((m) => modeTile(m)));
+    lockedNote.hidden = !modeLocked;
+  }
+
+  function chooseMode(id: string): void {
+    if (busy || modeLocked || id === modeChosen) return;
+    modeChosen = id;
+    // A fridge pick searched in another mode may not be one this mode can start with.
+    fridgeChosen = null;
+    fridge.reset();
+    refresh();
+  }
+
+  // The arrows move the choice (and the focus) between the mode tiles, as a radio group does.
+  tiles.addEventListener("keydown", (event) => {
+    const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
+    const back = event.key === "ArrowUp" || event.key === "ArrowLeft";
+    if (!forward && !back) return;
+    event.preventDefault();
+    const listed = listedModes();
+    if (modeLocked || listed.length < 2) return;
+    const index = Math.max(0, listed.findIndex((m) => m.id === modeChosen));
+    const next = listed[(index + (forward ? 1 : listed.length - 1)) % listed.length];
+    if (next === undefined) return;
+    chooseMode(next.id);
+    tiles.querySelector<HTMLElement>(`[data-mode-id="${next.id}"]`)?.focus();
+  });
+
   function refresh(): void {
+    const mode = chosenMode();
+    drawModes();
+    intro.textContent =
+      mode.id === CLASSIC_MODE_ID
+        ? "Take turns picking 10 ingredients, then see what the chef invents."
+        : `Take turns picking ${mode.turns} ingredients, then see what the chef invents.`;
     for (const [option, on] of [
       [openOption, !blindChosen],
       [blindOption, blindChosen],
@@ -419,6 +574,16 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     const chef = chefAvailable();
     chefRows.hidden = !chef;
     chefNote.hidden = !optionsLoaded || chef;
+    // Only the chosen mode's twists (09c §4), in that mode's words.
+    styleRow.hidden = !allows("style");
+    challengeRow.hidden = !allows("challenge");
+    cloche.row.hidden = !allows("wildcard");
+    stars.row.hidden = !allows("stars");
+    fridgeRow.hidden = !allows("fridge");
+    if (clocheHintEl !== null) clocheHintEl.textContent = clocheHint(mode);
+    const fridgeText = fridgeWords(mode);
+    if (fridgeHintEl !== null) fridgeHintEl.textContent = fridgeText.hint;
+    fridge.setPlaceholder(fridgeText.placeholder);
     chefNote.textContent = "Chef's style, kitchen challenges, the cloche and secret stars need the chef, who isn't available right now.";
     if (chef) drawCatalogue();
     for (const [toggle, on] of [
@@ -442,8 +607,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     refresh();
   }
 
-  // The arrows move the choice (and the focus) between the two modes, as a radio group does.
-  modes.addEventListener("keydown", (event) => {
+  // The arrows move the choice (and the focus) between Open and Blind, as a radio group does.
+  playStyles.addEventListener("keydown", (event) => {
     const forward = event.key === "ArrowDown" || event.key === "ArrowRight";
     const back = event.key === "ArrowUp" || event.key === "ArrowLeft";
     if (!forward && !back) return;
@@ -471,6 +636,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     if (busy) return;
     encore = null;
     encoreSeeds = [];
+    // Not an encore any more: the game mode can be chosen again.
+    modeLocked = false;
     refresh();
   });
 
@@ -482,8 +649,8 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       (node) =>
         !(node as HTMLButtonElement).disabled &&
         node.closest("[hidden]") === null &&
-        // Inside the radio group only the chosen mode is a stop.
-        !(node.parentElement === modes && node.tabIndex < 0),
+        // Inside each radio group only the chosen option is a stop.
+        !((node.parentElement === playStyles || node.parentElement === tiles) && node.tabIndex < 0),
     );
     const first = stops[0];
     const last = stops[stops.length - 1];
@@ -534,13 +701,17 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
           thrown instanceof Error && thrown.message !== "" ? thrown.message : "Couldn't start a Cookout — try again.";
         error.hidden = false;
         setBusy(false);
+        // A mode switched off meanwhile (09c §6.1): read the options again so its tile goes.
+        if (chosen.mode !== CLASSIC_MODE_ID) void loadOptions(true);
       }
       return;
     }
     if (started === generation) close();
   }
 
-  async function loadOptions(): Promise<void> {
+  /** `reload`: after a failed start; the sheet keeps its message and only drops what the server no longer
+   * lists (a gone mode falls back to Classic). */
+  async function loadOptions(reload = false): Promise<void> {
     const asked = generation;
     let loaded: CookoutOptions | null = null;
     try {
@@ -549,8 +720,16 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       loaded = null;
     }
     if (asked !== generation || !opened) return;
+    if (reload && loaded === null) return;
     options = loaded;
     optionsLoaded = true;
+    // A preselected mode the server does not list (switched off) falls back to Classic — unless an encore
+    // locked it, when the server's own answer says why it cannot start.
+    if (!modeLocked && !listedModes().some((m) => m.id === modeChosen)) {
+      modeChosen = CLASSIC_MODE_ID;
+      fridgeChosen = null;
+      fridge.reset();
+    }
     refresh();
   }
 
@@ -568,6 +747,9 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
       generation += 1;
       clientId = "";
       clientKey = "";
+      const encoreMode = preset.encore !== undefined && preset.encore !== null && preset.encore.candidates.length > 0 ? (preset.encore.mode ?? CLASSIC_MODE_ID) : null;
+      modeChosen = encoreMode ?? preset.mode ?? CLASSIC_MODE_ID;
+      modeLocked = encoreMode !== null;
       blindChosen = preset.blind ?? false;
       style = preset.style ?? null;
       challenge = preset.challenge ?? null;

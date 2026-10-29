@@ -70,6 +70,7 @@ import { loadWorld } from "./adventure/world";
 import {
   abandonCookout,
   bankCookoutConcept,
+  CLASSIC_MODE_ID,
   createCookout,
   getCookout,
   getCookoutOptions,
@@ -1482,6 +1483,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openLightbox: (src, alt) => lightbox.open(src, alt),
     afterChange: () => threadScroll.afterContentChange(false),
     newId: () => cryptoRandomId(win),
+    loadOptions: () => loadCookoutOptions(),
   });
   // The start sheet (Open / Blind and the optional twists, then Start Cookout): from the ... menu, the
   // pane's New and the encore buttons. `GET /cookout/options` is read once per unlock (cleared on every
@@ -1507,11 +1509,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     document: documentRef,
     start: (choices, clientId) => addCookout(choices, clientId),
     loadOptions: () => loadCookoutOptions(),
-    async search(q) {
+    async search(q, mode) {
       const session = currentSession;
       if (session === null) return { ok: false, kind: "unavailable" };
       try {
-        return await searchIngredients(session, q);
+        return await searchIngredients(session, q, mode);
       } catch (error) {
         if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
         return { ok: false, kind: "unavailable" };
@@ -2434,6 +2436,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
         blind: choices.blind,
+        // A Classic start sends no `mode`: the request is the core one exactly (09c A.3).
+        ...(choices.mode === CLASSIC_MODE_ID ? {} : { mode: choices.mode }),
         ...(choices.style === null ? {} : { style: choices.style }),
         ...(choices.challenge === null ? {} : { challenge: choices.challenge }),
         ...(choices.wildcard ? { wildcard: true } : {}),
@@ -2447,10 +2451,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     if (requestGeneration !== contentGeneration || currentSession === null) return;
     if (!result.ok) {
+      // A game mode switched off meanwhile (09c §6.1): the cached options listed it, so they are read again.
+      const modeGone = result.kind === "game_unavailable" && choices.mode !== CLASSIC_MODE_ID;
+      if (modeGone) cookoutOptions = null;
       throw new Error(
         result.kind === "unsupported"
           ? "Cookout isn't available yet — try again in a moment."
-          : result.kind === "game_unavailable"
+          : modeGone
+            ? "That game isn't available right now"
+            : result.kind === "game_unavailable"
             ? "Cookout isn't available on this server right now."
             : result.kind === "invalid"
               ? "The kitchen can't start with those twists — change a choice and try again."

@@ -42,6 +42,8 @@ describe("the message summary", () => {
   it("reads a well-formed summary", () => {
     expect(parseCookoutSummary({ state: "picking", blind: true, pickedCount: 4, concepts: "none", bankedCount: 0, rev: 3 })).toEqual({
       state: "picking",
+      // A summary without a mode is a Classic round's (09c §5.4).
+      mode: "classic",
       blind: true,
       pickedCount: 4,
       concepts: "none",
@@ -58,7 +60,7 @@ describe("the message summary", () => {
 
   it("defaults unknown or out-of-range counts and states rather than trusting them", () => {
     const s = parseCookoutSummary({ state: "finished", blind: "yes", pickedCount: 99, concepts: "odd", bankedCount: -1, rev: 2 });
-    expect(s).toEqual({ state: "finished", blind: false, pickedCount: 0, concepts: "none", bankedCount: 0, rev: 2, generation: 1, waiting: [], swap: "none", dinnerDecided: false, cookedCount: 0 });
+    expect(s).toEqual({ state: "finished", mode: "classic", blind: false, pickedCount: 0, concepts: "none", bankedCount: 0, rev: 2, generation: 1, waiting: [], swap: "none", dinnerDecided: false, cookedCount: 0 });
   });
 
   it("is null for anything that is not a summary", () => {
