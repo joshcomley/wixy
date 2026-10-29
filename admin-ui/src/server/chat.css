@@ -6365,7 +6365,8 @@ video.wx-srv-gallery-media {
 .wx-srv-ck {
   position: relative;
   gap: 0;
-  container-type: inline-size;
+  /* A SIZE container: the picking table's compact switch is a query on the pane's own height (09b §D.3). */
+  container-type: size;
   container-name: ck;
   overflow: hidden;
   border: 1px solid var(--ck-line);
@@ -6380,7 +6381,10 @@ video.wx-srv-gallery-media {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 8px 8px 8px 12px;
+  /* Exactly 44 px: the 44 px controls fill it (the table's height budget counts on it). */
+  height: 44px;
+  box-sizing: border-box;
+  padding: 0 4px 0 12px;
   background: linear-gradient(135deg, var(--ck-tomato) 0%, #ea7a32 60%, var(--ck-saffron) 130%);
   color: #fff;
 }
@@ -6490,7 +6494,9 @@ video.wx-srv-gallery-media {
   }
 }
 
-@container ck (max-width: 309px) {
+/* Below ~420 px the title keeps its pan and the mode badge, never the word (the tab already says Cookout):
+   `?`, the book, End and ✕ need the room, and nothing in the row may clip. */
+@container ck (max-width: 419px) {
   .wx-srv-ck-title-text {
     display: none;
   }
@@ -6574,320 +6580,12 @@ video.wx-srv-gallery-media {
   animation: wx-srv-ck-toast-in 180ms ease-out;
 }
 
-/* -- Progress: the pills and the turn banner -------------------------------------------------------------- */
-
-.wx-srv-ck-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: var(--ck-paper);
-  border: 1px solid var(--ck-line);
-}
-
-.wx-srv-ck-pills {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-width: 0;
-}
-
-.wx-srv-ck-pills-name {
-  flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--ck-muted);
-}
-
-.wx-srv-ck-pills-active .wx-srv-ck-pills-name {
-  color: var(--ck-tomato);
-}
-
-.wx-srv-ck-pills-dots {
-  flex: none;
-  display: flex;
-  gap: 5px;
-}
-
-.wx-srv-ck-pill {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  box-sizing: border-box;
-  border-radius: 10px;
-  border: 2px dashed var(--ck-line-strong);
-  font-size: 1rem;
-  line-height: 1;
-}
-
-.wx-srv-ck-pill-full {
-  border: 2px solid var(--ck-saffron);
-  background: var(--ck-chip);
-  animation: wx-srv-ck-pop 220ms ease-out;
-}
-
-.wx-srv-ck-pill-secret {
-  border: 2px solid var(--ck-plum);
-  background: var(--ck-plum);
-  font-size: 0.75rem;
-}
-
-.wx-srv-ck-pill-now {
-  border-style: solid;
-  border-color: var(--ck-tomato);
-  animation: wx-srv-ck-throb 1.4s ease-in-out infinite;
-}
-
-.wx-srv-ck-turn {
-  margin: 4px 0 0;
-  font-weight: 700;
-  font-size: 0.9375rem;
-  color: var(--wx-ink);
-}
-
-.wx-srv-ck-turn-mine {
-  color: var(--ck-tomato);
-}
-
-.wx-srv-ck-join,
-.wx-srv-ck-again {
-  align-self: stretch;
-  min-height: 48px;
-  margin-top: 4px;
-  border: 0;
-  border-radius: 14px;
-  background: var(--ck-tomato);
-  color: #fff;
-  font: inherit;
-  font-size: 1rem;
-  font-weight: 800;
-  box-shadow: 0 3px 0 var(--ck-tomato-deep);
-  cursor: pointer;
-}
-
-.wx-srv-ck-join:active:not(:disabled),
-.wx-srv-ck-again:active {
-  transform: translateY(2px);
-  box-shadow: 0 1px 0 var(--ck-tomato-deep);
-}
-
-.wx-srv-ck-join:disabled {
-  opacity: 0.7;
-  cursor: progress;
-}
-
-/* -- The stage: drafting ---------------------------------------------------------------------------------- */
+/* -- The chef stage's frame ----------------------------------------------------------------------------- */
 
 .wx-srv-ck-stage {
   display: flex;
   flex-direction: column;
   gap: 10px;
-}
-
-.wx-srv-ck-role,
-.wx-srv-ck-watch {
-  margin: 0;
-  font-size: 0.8125rem;
-  font-weight: 700;
-  color: var(--ck-muted);
-  text-transform: none;
-}
-
-.wx-srv-ck-pair {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
-  align-items: stretch;
-}
-
-.wx-srv-ck-or {
-  justify-self: center;
-  padding: 0 10px;
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ck-muted);
-}
-
-@container ckbody (min-width: 560px) {
-  .wx-srv-ck-pair {
-    grid-template-columns: 1fr auto 1fr;
-    align-items: center;
-  }
-  .wx-srv-ck-pair > .wx-srv-ck-opt {
-    align-self: stretch;
-  }
-}
-
-.wx-srv-ck-opt {
-  position: relative;
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  grid-template-areas:
-    "emoji cat cat"
-    "emoji name name"
-    "blurb blurb cta";
-  column-gap: 10px;
-  row-gap: 2px;
-  align-items: center;
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
-  border: 2px solid var(--ck-line-strong);
-  border-radius: 18px;
-  background: var(--ck-paper);
-  color: var(--wx-ink);
-  font: inherit;
-  text-align: left;
-  box-shadow: var(--ck-shadow);
-  transition:
-    transform 90ms ease-out,
-    box-shadow 90ms ease-out,
-    border-color 120ms ease-out;
-  -webkit-tap-highlight-color: transparent;
-}
-
-button.wx-srv-ck-opt {
-  cursor: pointer;
-}
-
-button.wx-srv-ck-opt:hover:not(:disabled),
-button.wx-srv-ck-opt:focus-visible {
-  border-color: var(--ck-tomato);
-}
-
-button.wx-srv-ck-opt:active:not(:disabled) {
-  transform: translateY(3px);
-  box-shadow: 0 0 0 var(--ck-line-strong);
-}
-
-button.wx-srv-ck-opt:disabled {
-  cursor: progress;
-  opacity: 0.6;
-}
-
-.wx-srv-ck-opt-chosen,
-button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
-  opacity: 1;
-  border-color: var(--ck-herb);
-  transform: translateY(3px) scale(0.98);
-  box-shadow: 0 0 0 4px var(--ck-herb-tint);
-}
-
-.wx-srv-ck-pair-watch .wx-srv-ck-opt {
-  box-shadow: none;
-  border-style: dashed;
-}
-
-.wx-srv-ck-opt-emoji {
-  grid-area: emoji;
-  align-self: start;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: var(--ck-chip);
-  font-size: 1.6rem;
-  line-height: 1;
-}
-
-.wx-srv-ck-opt-cat {
-  grid-area: cat;
-  justify-self: start;
-  max-width: 100%;
-  box-sizing: border-box;
-  min-width: 0;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--ck-chip);
-  color: var(--ck-muted);
-  font-size: 0.6875rem;
-  font-weight: 800;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.wx-srv-ck-opt-name {
-  grid-area: name;
-  font-size: 1.125rem;
-  font-weight: 800;
-  line-height: 1.2;
-  overflow-wrap: anywhere;
-}
-
-.wx-srv-ck-opt-blurb {
-  grid-area: blurb;
-  margin-top: 4px;
-  font-size: 0.8125rem;
-  line-height: 1.35;
-  color: var(--ck-muted);
-}
-
-.wx-srv-ck-opt-cta {
-  grid-area: cta;
-  justify-self: end;
-  align-self: end;
-  margin-top: 4px;
-  padding: 7px 14px;
-  white-space: nowrap;
-  border-radius: 999px;
-  background: var(--ck-tomato);
-  color: #fff;
-  font-size: 0.875rem;
-  font-weight: 800;
-}
-
-.wx-srv-ck-opt-chosen .wx-srv-ck-opt-cta {
-  background: var(--ck-herb);
-}
-
-.wx-srv-ck-skip {
-  min-height: 48px;
-  padding: 8px 14px;
-  border: 2px solid var(--ck-line-strong);
-  border-radius: 14px;
-  background: transparent;
-  color: var(--wx-ink);
-  font: inherit;
-  font-size: 0.9375rem;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.wx-srv-ck-skip:hover:not(:disabled),
-.wx-srv-ck-skip:focus-visible {
-  border-color: var(--ck-saffron);
-  background: var(--ck-chip);
-}
-
-.wx-srv-ck-skip:disabled {
-  opacity: 0.6;
-  cursor: progress;
-}
-
-.wx-srv-ck-final {
-  margin: 0;
-  padding: 10px 14px;
-  border-radius: 14px;
-  background: var(--ck-chip);
-  color: var(--ck-muted);
-  font-size: 0.875rem;
-  font-weight: 700;
-  text-align: center;
 }
 
 /* The covered cloche: the partner's secret turn (no ingredient words exist here at all). */
@@ -6921,118 +6619,1261 @@ button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
   color: rgba(255, 255, 255, 0.78);
 }
 
-/* -- The basket tray -------------------------------------------------------------------------------------- */
-
-.wx-srv-ck-tray {
-  border-radius: 14px;
-  background: var(--ck-paper);
-  border: 1px solid var(--ck-line);
-}
-
-.wx-srv-ck-tray-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 12px;
-  border: 0;
-  background: transparent;
-  color: var(--wx-ink);
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.wx-srv-ck-tray-title {
-  flex: 1 1 auto;
-  text-align: left;
-}
+/* -- The dishes' ingredient chips and the earlier-dishes caret ------------------------------------------- */
 
 .wx-srv-ck-tray-caret {
   color: var(--ck-muted);
 }
 
-.wx-srv-ck-tray-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 0 12px 12px;
-}
-
-.wx-srv-ck-tray-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.wx-srv-ck-tray-who {
-  font-size: 0.75rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--ck-muted);
-}
-
-.wx-srv-ck-tray-chips,
-.wx-srv-ck-reveal-chips,
 .wx-srv-ck-uses-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
 }
 
-.wx-srv-ck-chip-ing,
-.wx-srv-ck-chip-secret {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  max-width: 100%;
-  box-sizing: border-box;
-  padding: 5px 10px 5px 6px;
-  border-radius: 999px;
-  background: var(--ck-chip);
-  border: 1px solid var(--ck-line);
-  font-size: 0.8125rem;
-  font-weight: 600;
+/* -- Round 2: the picture-first table (spec/server-chat/09b-cookout-visual.md §D) -------------------------
+   While a round is being picked the pane is a fixed grid that fits the phone without scrolling. Every
+   height below is part of a budget against the PANE's own height (`ck` is a size container): with the
+   44 px title row and the 64 px chat row,
+
+     normal  (pane >= 506 px content, 508 with its border): table padding 6 + twists 24 + banner 44 +
+             progress 44 + actions 44 + 4 gaps x 6 = 186, leaving the stage >= 212 = one card at its
+             minimum (border 4 + padding 12 + picture 96 + 2 + name 51 + 2 + what-line 45);
+     compact (409-505 px): no twists strip, a 36 px one-line banner, 4 px gaps, no what-line, a 1 px
+             border and 4 px padding: 6 + 36 + 44 + 44 + 3 x 4 = 142 fixed, card minimum 159;
+     below 409 px only the stage scrolls; every other row stays fixed and tappable.
+
+   Change a height here and the thresholds in the two @container rules below must change with it. */
+
+.wx-srv-ck-scroll.wx-srv-ck-scroll-table {
+  overflow: hidden;
+  padding: 0;
 }
 
-.wx-srv-ck-chip-secret {
-  background: var(--ck-plum);
-  border-color: var(--ck-plum);
+.wx-srv-ck-table {
+  display: grid;
+  height: 100%;
+  min-height: 0;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 44px 44px minmax(0, 1fr) 44px;
+  row-gap: 6px;
+  padding: 2px 8px 4px;
+}
+
+.wx-srv-ck-table:has(> .wx-srv-ck-strip:not([hidden])) {
+  grid-template-rows: 24px 44px 44px minmax(0, 1fr) 44px;
+}
+
+/* The twists strip: "Twists" and one icon per start-sheet twist. Not a target. */
+.wx-srv-ck-strip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 24px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-strip-word {
+  margin-right: 2px;
+}
+
+.wx-srv-ck-strip-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-strip-icon.wx-srv-ck-wheel {
+  line-height: 24px;
+}
+
+.wx-srv-ck-strip-icon .wx-srv-ck-wheel-face {
+  height: 24px;
+}
+
+.wx-srv-ck-strip-icon .wx-srv-ck-wheel-reel {
+  transform: translateY(calc(-100% + 24px));
+}
+
+/* The turn banner: one big line (whose turn, what to do) and a small one. */
+.wx-srv-ck-banner {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  min-width: 0;
+}
+
+.wx-srv-ck-turn {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--wx-ink);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-banner-mine .wx-srv-ck-turn {
+  color: var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-turn-sub {
+  margin: 0;
+  font-size: 0.75rem;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--ck-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-banner.wx-srv-ck-banner-join {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wx-srv-ck-join,
+.wx-srv-ck-again {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ck-tomato);
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--ck-tomato-deep);
+  cursor: pointer;
+}
+
+.wx-srv-ck-join {
+  flex: none;
+  box-shadow: none;
+}
+
+.wx-srv-ck-again {
+  align-self: stretch;
+  min-height: 48px;
+  margin-top: 4px;
+}
+
+.wx-srv-ck-join:active:not(:disabled),
+.wx-srv-ck-again:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ck-tomato-deep);
+}
+
+.wx-srv-ck-join:disabled {
+  opacity: 0.7;
+  cursor: progress;
+}
+
+/* "Basket so far": ONE 44 px button; its tiles are passive. */
+.wx-srv-ck-progress {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border: 1px solid var(--ck-line);
+  border-radius: 12px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.wx-srv-ck-progress:hover,
+.wx-srv-ck-progress:focus-visible {
+  border-color: var(--ck-saffron);
+}
+
+.wx-srv-ck-prog-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.wx-srv-ck-prog-divider {
+  flex: none;
+  width: 1px;
+  height: 24px;
+  margin: 0 6px;
+  background: var(--ck-line-strong);
+}
+
+.wx-srv-ck-prog-who {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ck-chip);
+  color: var(--ck-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-prog-active .wx-srv-ck-prog-who {
+  background: var(--ck-tomato);
   color: #fff;
 }
 
-.wx-srv-ck-chip-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.wx-srv-ck-prog-slot {
+  position: relative;
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  box-sizing: border-box;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  line-height: 1;
+  overflow: visible;
 }
 
-.wx-srv-ck-chip-empty {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 0 10px;
-  border-radius: 999px;
-  border: 2px dashed var(--ck-line);
-  box-sizing: border-box;
+.wx-srv-ck-prog-full {
+  animation: wx-srv-ck-pop 220ms ease-out;
+}
+
+.wx-srv-ck-prog-full .wx-srv-ck-pic-img {
+  border-radius: 6px;
+}
+
+.wx-srv-ck-prog-secret {
+  background: var(--ck-plum);
+  font-size: 0.625rem;
+}
+
+.wx-srv-ck-prog-empty {
+  border: 1.5px dashed var(--ck-line-strong);
+}
+
+.wx-srv-ck-prog-now {
+  border-style: solid;
+  border-color: var(--ck-tomato);
+  animation: wx-srv-ck-throb 1.4s ease-in-out infinite;
+}
+
+/* A starter: a dot on its lower edge. A star: a tiny ★ in its corner. Both sit INSIDE the 22 px tile (the
+   tile clips its picture; a mark poking out would be hidden overflow). */
+.wx-srv-ck-prog-starter::after {
+  content: "";
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--ck-herb);
+  box-shadow: 0 0 0 1px #fff;
+}
+
+.wx-srv-ck-prog-star::before {
+  content: "★";
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  width: 10px;
+  height: 10px;
+  border-radius: 0 6px 0 4px;
+  background: var(--ck-plum);
+  color: var(--ck-saffron);
+  font-size: 0.5rem;
+  line-height: 10px;
+  text-align: center;
+}
+
+/* The stage: two picture cards and "or" — or the Blind cloche. */
+.wx-srv-ck-table-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.wx-srv-ck-table-stage > .wx-srv-ck-pair,
+.wx-srv-ck-table-stage > .wx-srv-ck-cloche {
+  flex: 1 1 auto;
+}
+
+.wx-srv-ck-pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr);
+  column-gap: 6px;
+  align-items: stretch;
+  width: 100%;
+  max-width: 720px;
+  min-height: 212px;
+  margin: 0 auto;
+}
+
+.wx-srv-ck-or {
+  align-self: center;
+  justify-self: center;
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
   color: var(--ck-muted);
+}
+
+.wx-srv-ck-card {
+  position: relative;
+  display: block;
+  min-width: 0;
+  min-height: 0;
+  max-width: 340px;
+  width: 100%;
+  justify-self: center;
+  padding: 6px;
+  box-sizing: border-box;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: center;
+  box-shadow: var(--ck-shadow);
+  container-type: inline-size;
+  container-name: ckcard;
+  transition:
+    transform 90ms ease-out,
+    box-shadow 90ms ease-out,
+    border-color 120ms ease-out,
+    opacity 120ms ease-out;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button.wx-srv-ck-card {
+  cursor: pointer;
+}
+
+button.wx-srv-ck-card:hover:not(:disabled),
+button.wx-srv-ck-card:focus-visible {
+  border-color: var(--ck-tomato);
+}
+
+button.wx-srv-ck-card:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 0 0 var(--ck-line-strong);
+}
+
+button.wx-srv-ck-card:disabled {
+  cursor: progress;
+}
+
+/* The picture flexes (never below 96 px, never above the card's width or 300 px); the words never clip. */
+.wx-srv-ck-card-in {
+  display: grid;
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(96px, min(100cqw, 300px)) auto auto;
+  row-gap: 2px;
+  align-content: center;
+  justify-items: center;
+}
+
+.wx-srv-ck-card-pic {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border-radius: 12px;
+}
+
+.wx-srv-ck-card-pic .wx-srv-ck-pic-emoji {
+  font-size: clamp(2.5rem, 30cqw, 5rem);
+}
+
+.wx-srv-ck-card-name {
+  max-width: 100%;
+  font-size: 0.875rem;
+  line-height: 17px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-card-what {
+  max-width: 100%;
   font-size: 0.75rem;
+  line-height: 15px;
+  color: var(--ck-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-card-chosen {
+  border-color: var(--ck-tomato);
+  outline: 3px solid var(--ck-tomato);
+  outline-offset: 1px;
+}
+
+.wx-srv-ck-card-dim {
+  opacity: 0.55;
+}
+
+.wx-srv-ck-pair-watch .wx-srv-ck-card {
+  opacity: 0.85;
+  box-shadow: none;
+}
+
+.wx-srv-ck-pair-sweep .wx-srv-ck-card {
+  border-style: dashed;
+  border-color: var(--ck-tomato);
+}
+
+.wx-srv-ck-card-exotic,
+.wx-srv-ck-pair-chaos .wx-srv-ck-card {
+  border-color: #8a5bd6;
+  box-shadow: 0 3px 0 #6b3fb8;
+}
+
+.wx-srv-ck-card-busy {
+  position: absolute;
+  left: 50%;
+  top: 40%;
+  transform: translate(-50%, -50%);
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: rgba(30, 22, 16, 0.85);
+  color: #fff;
+  font-size: 0.8125rem;
   font-weight: 700;
   white-space: nowrap;
+  pointer-events: none;
 }
 
-.wx-srv-ck-chip-small {
-  padding: 3px 8px 3px 4px;
-  font-size: 0.75rem;
+/* The cloche on the table: the partner's secret turn, or waiting for Join. */
+.wx-srv-ck-table-stage > .wx-srv-ck-cloche {
+  justify-content: center;
+  padding: 12px;
+}
+
+.wx-srv-ck-table-stage .wx-srv-ck-cloche-dome {
+  line-height: 1.5;
+}
+
+/* The actions: the skip and the 🎲 Twists button (or, sweeping, Cancel). */
+.wx-srv-ck-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.wx-srv-ck-skip,
+.wx-srv-ck-twists-btn,
+.wx-srv-ck-sweep-cancel {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.9375rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.wx-srv-ck-skip {
+  flex: 1 1 auto;
+  min-width: 180px;
+}
+
+.wx-srv-ck-twists-btn {
+  flex: none;
+  min-width: 96px;
+  margin-left: auto;
+}
+
+.wx-srv-ck-skip:hover:not(:disabled),
+.wx-srv-ck-skip:focus-visible,
+.wx-srv-ck-twists-btn:hover:not(:disabled),
+.wx-srv-ck-twists-btn:focus-visible,
+.wx-srv-ck-sweep-cancel:hover:not(:disabled),
+.wx-srv-ck-sweep-cancel:focus-visible {
+  border-color: var(--ck-saffron);
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-skip:disabled,
+.wx-srv-ck-twists-btn:disabled,
+.wx-srv-ck-sweep-cancel:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+/* "Final pair": the skip slot says so (there is nothing left to skip). */
+.wx-srv-ck-skip.wx-srv-ck-skip-final:disabled {
+  opacity: 1;
+  border-style: dashed;
+  background: transparent;
+  color: var(--ck-muted);
+  cursor: default;
+}
+
+/* The `?` in the title row; in compact mode a dot says the round has twists (the strip is gone). */
+.wx-srv-ck-help {
+  position: relative;
+  padding: 0;
+  font-size: 1.0625rem;
+  font-weight: 800;
+}
+
+/* COMPACT (09b §D.3): the pane is shorter than the normal budget. */
+@container ck (max-height: 505.98px) {
+  .wx-srv-ck-table,
+  .wx-srv-ck-table:has(> .wx-srv-ck-strip:not([hidden])) {
+    grid-template-rows: 36px 44px minmax(0, 1fr) 44px;
+    row-gap: 4px;
+  }
+  .wx-srv-ck-table:has(> .wx-srv-ck-banner-join) {
+    grid-template-rows: 44px 44px minmax(0, 1fr) 44px;
+  }
+  .wx-srv-ck-table > .wx-srv-ck-strip {
+    display: none;
+  }
+  .wx-srv-ck-turn {
+    font-size: 0.9375rem;
+  }
+  .wx-srv-ck-turn-sub {
+    display: none;
+  }
+  .wx-srv-ck-pair {
+    min-height: 159px;
+  }
+  .wx-srv-ck-card {
+    padding: 4px;
+    border-width: 1px;
+  }
+  .wx-srv-ck-card-what {
+    display: none;
+  }
+  .wx-srv-ck-help-twists::after {
+    content: "";
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ck-saffron);
+    box-shadow: 0 0 0 2px var(--ck-tomato);
+  }
+}
+
+/* Desktop: the pair centred in at most 720 px, pictures up to 300 px (the card's own rule). */
+@container ck (min-width: 640px) {
+  .wx-srv-ck-table {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+  .wx-srv-ck-banner,
+  .wx-srv-ck-progress,
+  .wx-srv-ck-actions,
+  .wx-srv-ck-strip {
+    width: 100%;
+    max-width: 720px;
+    margin: 0 auto;
+  }
+  .wx-srv-ck-progress {
+    max-width: 420px;
+  }
+}
+
+/* -- Round 2: the picture tile every ingredient is drawn with (pictures.ts) ------------------------------------
+   The catalogue photographs' own warm off-white in BOTH themes, so a picture's edge disappears into it. */
+
+.wx-srv-ck-pic {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #f5f2ec;
+  line-height: 1;
+}
+
+.wx-srv-ck-pic-img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.wx-srv-ck-pic-emoji {
+  font-size: 1em;
+  /* Emoji glyphs reach past a 1.0 line box; 1.5 holds the whole glyph (no hidden overflow). */
+  line-height: 1.5;
+}
+
+.wx-srv-ck-pic-secret {
+  background: var(--ck-plum);
+}
+
+.wx-srv-ck-pic-loading {
+  background: linear-gradient(100deg, #f5f2ec 30%, #ece6dc 50%, #f5f2ec 70%) 0 0 / 300% 100%;
+  animation: wx-srv-ck-shimmer 1.2s linear infinite;
+}
+
+@keyframes wx-srv-ck-shimmer {
+  to {
+    background-position: -150% 0;
+  }
+}
+
+/* Visually hidden, still read (a long blurb, a thumb's name). */
+.wx-srv-ck-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Small inline thumbs: a dish's "uses" (28 px), a recipe line (24 px), the staples, the fridge raid. */
+.wx-srv-ck-mini {
+  position: relative;
+  display: inline-flex;
+}
+
+.wx-srv-ck-mini-pic {
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+}
+
+.wx-srv-ck-use-omitted .wx-srv-ck-mini-pic {
+  opacity: 0.4;
+  filter: grayscale(0.8);
+}
+
+.wx-srv-ck-use-star {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  font-size: 0.6875rem;
+  color: var(--ck-saffron);
+}
+
+.wx-srv-ck-use-starred .wx-srv-ck-mini-pic {
+  box-shadow: 0 0 0 2px var(--ck-saffron);
+}
+
+.wx-srv-ck-recipe-pic {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 0.875rem;
+}
+
+.wx-srv-ck-fridge-pic {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  font-size: 1rem;
+}
+
+.wx-srv-ck-swap-pic {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  font-size: 1.125rem;
 }
 
 .wx-srv-ck-staples {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
   margin: 0;
   font-size: 0.75rem;
   color: var(--ck-muted);
+}
+
+.wx-srv-ck-staples-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.wx-srv-ck-staple {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wx-srv-ck-staple .wx-srv-ck-mini-pic {
+  width: 24px;
+  height: 24px;
+  font-size: 0.875rem;
+}
+
+/* -- Round 2: the sheets (the basket so far, the 🎲 Twists menu) ---------------------------------------------- */
+
+.wx-srv-ck-sheet {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+}
+
+.wx-srv-ck-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 22, 16, 0.45);
+}
+
+.wx-srv-ck-sheet-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 85%;
+  box-sizing: border-box;
+  border-radius: 18px 18px 0 0;
+  background: var(--ck-paper);
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.18);
+  animation: wx-srv-ck-sheet-in 160ms ease-out;
+}
+
+@keyframes wx-srv-ck-sheet-in {
+  from {
+    transform: translateY(24px);
+    opacity: 0;
+  }
+}
+
+.wx-srv-ck-sheet-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 4px 4px 16px;
+  border-bottom: 1px solid var(--ck-line);
+}
+
+.wx-srv-ck-sheet-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-sheet-close {
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.wx-srv-ck-sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 16px 16px;
+}
+
+.wx-srv-ck-bgroup-who {
+  margin: 0 0 6px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-blist {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wx-srv-ck-bline {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.wx-srv-ck-bline-pic {
+  width: 56px;
+  height: 56px;
+  font-size: 1.75rem;
+  border-radius: 10px;
+}
+
+.wx-srv-ck-bline-words {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wx-srv-ck-bline-name {
+  font-weight: 700;
+  font-size: 0.9375rem;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-bline-what {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-bline-secret .wx-srv-ck-bline-pic {
+  font-size: 1.25rem;
+}
+
+.wx-srv-ck-bline-left {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+/* The sheet's "☆ Star this": a words-wide pill, not the 32 px round toggle. */
+.wx-srv-ck-bline .wx-srv-ck-star {
+  width: auto;
+  height: auto;
+  min-height: 44px;
+  margin: 0;
+  padding: 0 12px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 999px;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.wx-srv-ck-twist-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  min-height: 56px;
+  padding: 8px 14px;
+  box-sizing: border-box;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 14px;
+  background: var(--ck-cream);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-ck-twist-item:hover:not(:disabled),
+.wx-srv-ck-twist-item:focus-visible {
+  border-color: var(--ck-saffron);
+}
+
+.wx-srv-ck-chaos.wx-srv-ck-twist-item:hover:not(:disabled),
+.wx-srv-ck-chaos.wx-srv-ck-twist-item:focus-visible {
+  border-color: #8a5bd6;
+}
+
+.wx-srv-ck-sweep.wx-srv-ck-twist-item {
+  border-style: dashed;
+  border-color: var(--ck-tomato);
+}
+
+.wx-srv-ck-twist-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wx-srv-ck-twist-item-name {
+  font-size: 0.9375rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-twist-item-hint {
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+/* -- Round 2: the intro (intro.ts) --------------------------------------------------------------------------- */
+
+.wx-srv-ck-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 12px;
+}
+
+.wx-srv-ck-intro-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 22, 16, 0.5);
+}
+
+.wx-srv-ck-intro-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: 360px;
+  max-height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: 18px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+  animation: wx-srv-ck-sheet-in 160ms ease-out;
+}
+
+.wx-srv-ck-intro-card > * {
+  flex: none;
+}
+
+.wx-srv-ck-intro-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 800;
+}
+
+.wx-srv-ck-intro-lines {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 0.875rem;
+  line-height: 1.35;
+}
+
+.wx-srv-ck-intro-line:first-child {
+  font-weight: 700;
+}
+
+.wx-srv-ck-intro-twists {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-intro-go {
+  min-height: 48px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--ck-tomato);
+  color: #fff;
+  font: inherit;
+  font-size: 1rem;
+  font-weight: 800;
+  box-shadow: 0 3px 0 var(--ck-tomato-deep);
+  cursor: pointer;
+}
+
+/* -- Round 2: the revealed basket as pictures ---------------------------------------------------------------- */
+
+.wx-srv-ck-rgroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wx-srv-ck-rgroup-who {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-reveal-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.wx-srv-ck-rtile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: center;
+}
+
+button.wx-srv-ck-rtile {
+  cursor: pointer;
+}
+
+/* A revealed tile that is the ☆/★ toggle: a tile, not the 32 px round toggle — and a locked one stays
+   fully visible (only its corner ☆ fades). */
+.wx-srv-ck-rtile.wx-srv-ck-star {
+  width: auto;
+  height: auto;
+  margin: 0;
+  border-radius: 0;
+  font-size: inherit;
+  line-height: normal;
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-rtile.wx-srv-ck-star:disabled,
+.wx-srv-ck-rtile.wx-srv-ck-star:disabled:not(.wx-srv-ck-star-on) {
+  opacity: 1;
+  cursor: default;
+}
+
+.wx-srv-ck-rtile.wx-srv-ck-star:disabled:not(.wx-srv-ck-star-on) .wx-srv-ck-rtile-star {
+  opacity: 0.3;
+}
+
+.wx-srv-ck-rtile-pic {
+  width: 100%;
+  max-width: 72px;
+  height: auto;
+  aspect-ratio: 1;
+  font-size: 1.5rem;
+  border-radius: 10px;
+}
+
+.wx-srv-ck-rtile-starred .wx-srv-ck-rtile-pic {
+  box-shadow: 0 0 0 2px var(--ck-saffron);
+}
+
+.wx-srv-ck-rtile-name {
+  max-width: 100%;
+  font-size: 0.6875rem;
+  line-height: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-rtile-via,
+.wx-srv-ck-rtile-star {
+  position: absolute;
+  top: -4px;
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  font-size: 0.6875rem;
+  line-height: 1;
+}
+
+.wx-srv-ck-rtile-via {
+  left: -2px;
+  background: var(--ck-herb-tint);
+}
+
+.wx-srv-ck-rtile-star {
+  right: -2px;
+  background: var(--ck-paper);
+  color: var(--ck-saffron);
+  box-shadow: 0 0 0 1px var(--ck-line-strong);
+}
+
+.wx-srv-ck-rtile-pic .wx-srv-ck-pic-emoji {
+  font-size: 1.75rem;
+}
+
+@container ckbody (min-width: 560px) {
+  .wx-srv-ck-reveal-grid {
+    max-width: 640px;
+  }
+  .wx-srv-ck-rtile-pic {
+    max-width: 96px;
+  }
+  .wx-srv-ck-rtile-pic .wx-srv-ck-pic-emoji {
+    font-size: 2.5rem;
+  }
+  .wx-srv-ck-rtile-name {
+    font-size: 0.75rem;
+    line-height: 15px;
+  }
+}
+
+/* -- Round 2: the chef carousel (carousel.ts) ----------------------------------------------------------------- */
+
+.wx-srv-ck-car {
+  position: relative;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.wx-srv-ck-car-view {
+  overflow: hidden;
+}
+
+.wx-srv-ck-car-track {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+}
+
+.wx-srv-ck-car-track::-webkit-scrollbar {
+  display: none;
+}
+
+.wx-srv-ck-car-slide {
+  flex: 0 0 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  box-sizing: border-box;
+  scroll-snap-align: start;
+  text-align: center;
+}
+
+.wx-srv-ck-car-pic {
+  width: min(70vw, 40dvh, 300px);
+  height: auto;
+  aspect-ratio: 1;
+  font-size: 4rem;
+  border-radius: 16px;
+}
+
+.wx-srv-ck-car-name {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-car-what {
+  margin: 0;
+  font-size: 0.875rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-car-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 420px;
+  margin: 0;
+  padding: 0 0 0 18px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.wx-srv-ck-car-arrow {
+  display: none;
+  position: absolute;
+  top: calc(min(70vw, 40dvh, 300px) / 2 - 22px);
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 50%;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 1.5rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.wx-srv-ck-car-prev {
+  left: 4px;
+}
+
+.wx-srv-ck-car-next {
+  right: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .wx-srv-ck-car-arrow {
+    display: inline-grid;
+    place-items: center;
+  }
+}
+
+.wx-srv-ck-car-dots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 2px;
+}
+
+.wx-srv-ck-car-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+.wx-srv-ck-car-dot::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ck-line-strong);
+}
+
+.wx-srv-ck-car-dot-on::before {
+  width: 10px;
+  height: 10px;
+  background: var(--ck-tomato);
 }
 
 /* -- The chef stage --------------------------------------------------------------------------------------- */
@@ -7134,11 +7975,6 @@ button.wx-srv-ck-opt.wx-srv-ck-opt-chosen:disabled {
   .wx-srv-ck-dish-pic {
     aspect-ratio: 16 / 11;
   }
-}
-
-.wx-srv-ck-reveal-chip {
-  padding: 3px 9px 3px 5px;
-  font-size: 0.75rem;
 }
 
 .wx-srv-ck-dish {
@@ -8393,124 +9229,7 @@ button.wx-srv-ck-twist-toggle {
   height: 1.4em;
 }
 
-/* -- The table: sweeps, chaos and the twist buttons ----------------------------------------------------------- */
-
-.wx-srv-ck-optwrap {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
-@container ckbody (min-width: 560px) {
-  .wx-srv-ck-pair > .wx-srv-ck-optwrap {
-    align-self: stretch;
-  }
-}
-
-.wx-srv-ck-sweep {
-  align-self: flex-start;
-  min-height: 36px;
-  padding: 4px 12px;
-  border: 2px dashed var(--ck-tomato);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ck-tomato-deep);
-  font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.wx-srv-ck-sweep:disabled {
-  border-color: var(--ck-line-strong);
-  color: var(--ck-muted);
-  cursor: not-allowed;
-}
-
-.wx-srv-ck-swept,
-.wx-srv-ck-chaos-note {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: 12px;
-  background: var(--ck-chip);
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-.wx-srv-ck-chaos-note {
-  background: var(--ck-plum);
-  color: #fff;
-}
-
-.wx-srv-ck-pair-chaos .wx-srv-ck-opt,
-.wx-srv-ck-opt-exotic {
-  border-color: #8a5bd6;
-  box-shadow: 0 3px 0 #6b43ad;
-}
-
-.wx-srv-ck-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.wx-srv-ck-twistbar {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
-  gap: 8px;
-}
-
-.wx-srv-ck-lucky,
-.wx-srv-ck-chaos {
-  min-height: 44px;
-  padding: 6px 12px;
-  border: 2px solid var(--ck-line-strong);
-  border-radius: 14px;
-  background: var(--ck-paper);
-  color: var(--wx-ink);
-  font: inherit;
-  font-size: 0.875rem;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.wx-srv-ck-lucky:hover:not(:disabled),
-.wx-srv-ck-lucky:focus-visible {
-  border-color: var(--ck-saffron);
-}
-
-.wx-srv-ck-chaos:hover:not(:disabled),
-.wx-srv-ck-chaos:focus-visible {
-  border-color: #8a5bd6;
-}
-
-.wx-srv-ck-lucky:disabled,
-.wx-srv-ck-chaos:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
 /* -- Starters, stars and the twist badges on basket chips ---------------------------------------------------- */
-
-.wx-srv-ck-pill-starter {
-  box-shadow: inset 0 0 0 2px var(--ck-herb);
-}
-
-.wx-srv-ck-pill {
-  position: relative;
-}
-
-.wx-srv-ck-pill-star-mark {
-  position: absolute;
-  top: -6px;
-  right: -6px;
-  font-size: 0.75rem;
-  color: var(--ck-saffron);
-}
 
 .wx-srv-ck-chip-badge {
   flex: none;
@@ -8521,15 +9240,6 @@ button.wx-srv-ck-twist-toggle {
   font-size: 0.6875rem;
   font-weight: 800;
   white-space: nowrap;
-}
-
-.wx-srv-ck-chip-wildcard .wx-srv-ck-chip-badge {
-  background: var(--ck-chip);
-  color: var(--ck-tomato-deep);
-}
-
-.wx-srv-ck-chip-starred {
-  border-color: var(--ck-saffron);
 }
 
 .wx-srv-ck-star {

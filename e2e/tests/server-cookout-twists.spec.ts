@@ -13,6 +13,10 @@
 // Blind game: the first player's DOM and responses never hold the second player's chaos pair, star or vote
 // before their reveals. Every phase is also checked on a 360 px phone. Set WIXY_E2E_SHOTS=<dir> to save
 // screenshots of the main flow's key moments.
+//
+// The picture-first table (spec/server-chat/09b): the drafting twists live behind the table's "Twists" button
+// and its sheet, a chaos pair is the `wx-srv-ck-pair-chaos` table, a sweep taps one of the watcher's cards, and
+// the stars are the reveal tiles themselves.
 
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
@@ -26,7 +30,7 @@ test.describe.configure({ timeout: 360_000 });
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;
 const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
-/** The cupboard staples are listed in every view, so they are never "withheld". */
+/** The cupboard staples are listed in every view (the finished reveal), so they are never "withheld". */
 const STAPLE_IDS = new Set(["water", "salt", "black-pepper", "butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"]);
 
 async function unlockServer(page: Page, name: string): Promise<void> {
@@ -110,8 +114,37 @@ function game(page: Page): Locator {
   return page.locator('.wx-srv-ck[data-game="cookout"]');
 }
 
+/** The two picture cards the active player may tap (a watcher's cards are plain divs, not buttons). */
 function pickable(page: Page): Locator {
-  return game(page).locator("button.wx-srv-ck-opt:not([disabled])");
+  return game(page).locator(".wx-srv-ck-pair button.wx-srv-ck-card:not([disabled])");
+}
+
+/** The first time a browser opens a round being picked, the intro card covers the pane and blocks every tap
+ * underneath: dismiss it with "Let's cook". */
+async function dismissIntro(page: Page): Promise<void> {
+  const intro = game(page).locator(".wx-srv-ck-intro:not([hidden])");
+  await expect(intro).toBeVisible();
+  await humanPause(page);
+  await intro.locator(".wx-srv-ck-intro-go").click();
+  await expect(intro).toHaveCount(0);
+  await humanPause(page);
+}
+
+/** Opens the table's 🎲 Twists sheet and taps one of its items (the sheet closes itself or is closed here). */
+async function openTwists(page: Page): Promise<Locator> {
+  await humanPause(page);
+  await game(page).locator("button.wx-srv-ck-twists-btn").click();
+  const sheet = game(page).locator('.wx-srv-ck-sheet[data-sheet="twists"]');
+  await expect(sheet).toBeVisible();
+  await humanPause(page);
+  return sheet;
+}
+
+async function closeSheet(page: Page): Promise<void> {
+  await humanPause(page);
+  await game(page).locator(".wx-srv-ck-sheet-close").click();
+  await expect(game(page).locator(".wx-srv-ck-sheet")).toBeHidden();
+  await humanPause(page);
 }
 
 function dishes(page: Page): Locator {
@@ -185,16 +218,20 @@ async function startCookout(page: Page, twists: TwistChoices): Promise<{ seq: st
   await expect(game(page)).toBeVisible();
   const seq = await page.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
   expect(seq).not.toBeNull();
+  // The intro card names the round's twists; then "Let's cook".
+  if (twists.challenge === "one-pan") await expect(game(page).locator(".wx-srv-ck-intro-twists")).toContainText(/one pan/i);
+  await dismissIntro(page);
   return { seq: seq!, fridgeName };
 }
 
-/** The partner opens the round's card in the chat and presses Join Cookout. */
+/** The partner opens the round's card in the chat, dismisses the intro and presses Join (in the turn banner). */
 async function joinCookout(page: Page, seq: string): Promise<void> {
   const card = page.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`);
   await eventually([page], async () => await card.isVisible(), "the partner sees the Cookout card");
   await card.locator(".wx-srv-ck-mcard-open").click();
   await expect(game(page)).toBeVisible();
-  const join = game(page).locator(".wx-srv-ck-join");
+  await dismissIntro(page);
+  const join = game(page).locator(".wx-srv-ck-banner .wx-srv-ck-join");
   await expect(join).toBeVisible();
   await humanPause(page);
   await join.click();
@@ -225,10 +262,10 @@ interface Offer {
 }
 
 async function offerOn(page: Page): Promise<Offer> {
-  const cards = game(page).locator(".wx-srv-ck-pair .wx-srv-ck-opt");
+  const cards = game(page).locator(".wx-srv-ck-pair .wx-srv-ck-card");
   await expect(cards).toHaveCount(2);
   const ids = await cards.evaluateAll((els) => els.map((e) => e.getAttribute("data-ingredient") ?? ""));
-  const names = await cards.evaluateAll((els) => els.map((e) => e.querySelector(".wx-srv-ck-opt-name")?.textContent ?? ""));
+  const names = await cards.evaluateAll((els) => els.map((e) => e.querySelector(".wx-srv-ck-card-name")?.textContent ?? ""));
   return { ids, names };
 }
 
@@ -237,7 +274,7 @@ async function pickFirst(page: Page): Promise<{ offer: Offer; picked: string }> 
   const picked = offer.ids[0]!;
   await humanPause(page);
   await pickable(page).first().click();
-  await expect(game(page).locator(`[data-ingredient="${picked}"]`)).toHaveCount(0, { timeout: 20_000 });
+  await expect(game(page).locator(`.wx-srv-ck-table-stage [data-ingredient="${picked}"]`)).toHaveCount(0, { timeout: 20_000 });
   return { offer, picked };
 }
 
@@ -317,49 +354,65 @@ test.describe("Cookout twists", () => {
     const { seq, fridgeName } = await startCookout(pageA, { blind: false, style: "spin", challenge: "one-pan", cloche: true, stars: true, fridge: "rice" });
     expect(fridgeName).not.toBeNull();
     await shot(pageA, "twists-1-started");
-    await expect(game(pageA)).toContainText(/one pan/i);
+    await expect(game(pageA).locator(".wx-srv-ck-strip")).toHaveAttribute("aria-label", /one pan/i);
     await expectFitsPhone(pageA, "pane after start");
 
     // The fridge ingredient is the creator's Turn 1 starter, public to both once the partner joins.
-    await expect(game(pageA).locator(".wx-srv-ck-pill-starter")).toHaveCount(1);
+    await expect(game(pageA).locator(".wx-srv-ck-prog-starter")).toHaveCount(1);
     await joinCookout(pageB, seq);
-    await expect(game(pageB).locator(".wx-srv-ck-pill-starter")).toHaveCount(1);
-    await expect(game(pageB)).toContainText(/one pan/i);
+    await expect(game(pageB).locator(".wx-srv-ck-prog-starter")).toHaveCount(1);
+    await expect(game(pageB).locator(".wx-srv-ck-strip")).toHaveAttribute("aria-label", /one pan/i);
 
     // -- Drafting twists -----------------------------------------------------------------------------------------
-    // Turn 2 is Bob's: he lucky-dips (the server flips the coin and commits the pick).
+    // Turn 2 is Bob's: he lucky-dips from the Twists sheet (the server flips the coin and commits the pick).
     const first = await whoseTurn(pages);
     expect(first.index).toBe(1);
-    await humanPause(pageB);
-    await game(pageB).locator(".wx-srv-ck-lucky").click();
+    await openTwists(pageB);
+    await game(pageB).locator(".wx-srv-ck-twist-item.wx-srv-ck-lucky").click();
     await eventually(pages, async () => (await pickable(pageB).count()) === 0, "the lucky dip is committed");
 
     // Turn 3 is Alice's: she uses the chaos shelf; Bob (the waiting partner, Open mode) sweeps one option.
     const second = await whoseTurn(pages);
     expect(second.index).toBe(0);
-    await humanPause(pageA);
-    await game(pageA).locator(".wx-srv-ck-chaos").click();
-    await eventually(pages, async () => (await game(pageA).locator(".wx-srv-ck-chaos-note").count()) === 1, "Alice sees her chaos pair");
-    await eventually(pages, async () => (await game(pageB).locator(".wx-srv-ck-chaos-note").count()) === 1, "Bob sees the chaos pair");
-    await expect(game(pageA).locator(".wx-srv-ck-chaos")).toBeDisabled(); // once per player
+    await openTwists(pageA);
+    await game(pageA).locator(".wx-srv-ck-twist-item.wx-srv-ck-chaos").click();
+    await eventually(pages, async () => (await game(pageA).locator(".wx-srv-ck-pair-chaos").count()) === 1, "Alice sees her chaos pair");
+    await eventually(pages, async () => (await game(pageB).locator(".wx-srv-ck-pair-chaos").count()) === 1, "Bob sees the chaos pair");
+    await expect(game(pageA).locator(".wx-srv-ck-turn-sub")).toContainText("chaos shelf");
+    await expect(game(pageB).locator(".wx-srv-ck-turn-sub")).toContainText("chaos shelf");
+    // Once per player: the used chaos shelf is a disabled item in Alice's Twists sheet.
+    await openTwists(pageA);
+    await expect(game(pageA).locator(".wx-srv-ck-twist-item.wx-srv-ck-chaos")).toBeDisabled();
+    await closeSheet(pageA);
     await shot(pageA, "twists-2-chaos-pair");
     const chaosPair = await offerOn(pageA);
-    const sweep = game(pageB).locator(".wx-srv-ck-sweep").first();
-    await expect(sweep).toBeVisible();
+    // Bob (the waiting partner, Open mode) chooses "Sweep one" from his Twists sheet, then taps one card.
+    await openTwists(pageB);
+    const sweepItem = game(pageB).locator(".wx-srv-ck-twist-item.wx-srv-ck-sweep");
+    await expect(sweepItem).toBeEnabled();
+    await sweepItem.click();
+    await expect(game(pageB).locator(".wx-srv-ck-sheet")).toBeHidden();
+    const sweepCards = game(pageB).locator(".wx-srv-ck-pair button.wx-srv-ck-card");
+    await expect(sweepCards).toHaveCount(2);
+    await expect(sweepCards.first()).toHaveAttribute("aria-label", /^Sweep .+ off the table$/);
+    await expect(game(pageB).locator(".wx-srv-ck-sweep-cancel")).toBeVisible();
     await humanPause(pageB);
-    await sweep.click();
+    await sweepCards.first().click();
     await eventually(pages, async () => {
       const now = await offerOn(pageA);
       return now.ids.some((id) => !chaosPair.ids.includes(id));
     }, "the swept option is replaced on Alice's table");
-    await expect(game(pageB).locator(".wx-srv-ck-sweep").first()).toBeDisabled(); // Bob's sweep is spent
+    // Bob's sweep is spent: nothing left for him to use on this table.
+    await expect(game(pageB).locator(".wx-srv-ck-twists-btn")).toHaveCount(0);
     await shot(pageB, "twists-3-swept");
     // Alice picks from what is on the table now.
     await pickFirst(pageA);
 
     // The rest of the draft (turns 4-10) alternates normally.
     for (let turn = 4; turn <= 10; turn += 1) {
-      const { page } = await whoseTurn(pages);
+      const { page, index } = await whoseTurn(pages);
+      // Bob's sweep stays spent for the whole game: he has no twist to use while Alice picks.
+      if (index === 0) await expect(game(pageB).locator(".wx-srv-ck-twists-btn")).toHaveCount(0);
       await pickFirst(page);
     }
 
@@ -372,19 +425,19 @@ test.describe("Cookout twists", () => {
 
     // Alice stars one of her own picks; it is secret from Bob until he has starred too.
     await humanPause(pageA);
-    await game(pageA).locator(".wx-srv-ck-star").first().click();
+    await game(pageA).locator("button.wx-srv-ck-star").first().click();
     await expect(game(pageA).locator(".wx-srv-ck-star-on")).toHaveCount(1);
     await expect(game(pageB).locator(".wx-srv-ck-stars-revealed")).toHaveCount(0);
-    await expect(game(pageB).locator(".wx-srv-ck-chip-starred")).toHaveCount(0); // Alice's star is not on Bob's screen
+    await expect(game(pageB).locator(".wx-srv-ck-rtile-starred")).toHaveCount(0); // Alice's star is not on Bob's screen
     const viewB = lastView(bodiesB);
     expect((viewB?.["stars"] as { partner: unknown } | undefined)?.partner ?? null).toBeNull();
     await humanPause(pageB);
-    await game(pageB).locator(".wx-srv-ck-star").first().click();
+    await game(pageB).locator("button.wx-srv-ck-star").first().click();
     await expect(game(pageA).locator(".wx-srv-ck-stars-revealed")).toBeVisible();
     await expect(game(pageB).locator(".wx-srv-ck-stars-revealed")).toBeVisible();
-    await expect(game(pageA).locator(".wx-srv-ck-chip-starred")).toHaveCount(2);
+    await expect(game(pageA).locator(".wx-srv-ck-rtile-starred")).toHaveCount(2);
     // Revealed stars are locked: the toggles are disabled.
-    await expect(game(pageA).locator(".wx-srv-ck-star").first()).toBeDisabled();
+    await expect(game(pageA).locator("button.wx-srv-ck-star").first()).toBeDisabled();
 
     // Still gated by the cloche: lift it.
     await expect(game(pageA).locator(".wx-srv-ck-dish")).toHaveCount(0);
@@ -395,7 +448,7 @@ test.describe("Cookout twists", () => {
 
     // -- The dishes (the fake cmd answers eleven-item, star- and challenge-aware dishes) ------------------------
     await eventually(pages, async () => (await dishes(pageA).count()) === 3 && (await dishes(pageB).count()) === 3, "the three dishes", 90_000);
-    await expect(game(pageA).locator(".wx-srv-ck-reveal-chip")).toHaveCount(11); // ten picks + the wildcard
+    await expect(game(pageA).locator(".wx-srv-ck-reveal .wx-srv-ck-rtile")).toHaveCount(11); // ten picks + the wildcard
     await shot(pageA, "twists-6-dishes");
     await expectFitsPhone(pageA, "dishes");
 
@@ -433,7 +486,7 @@ test.describe("Cookout twists", () => {
     await expect(dishes(pageB).first().locator(".wx-srv-ck-bank, .wx-srv-ck-banked")).toHaveCount(1);
     await shot(pageB, "twists-8-swap-choose");
     await humanPause(pageB);
-    await game(pageB).locator(".wx-srv-ck-swap-pair button.wx-srv-ck-opt:not([disabled])").first().click();
+    await game(pageB).locator(".wx-srv-ck-swap-pair button.wx-srv-ck-card:not([disabled])").first().click();
 
     // Generation 2: new dishes, a "Swapped X -> Y" note, and the Earlier dishes section.
     await eventually(pages, async () => (await game(pageA).locator(".wx-srv-ck-swapped").count()) === 1, "the swap banner", 30_000);
@@ -518,13 +571,14 @@ test.describe("Cookout twists", () => {
     await pageA.locator(".wx-srv-ck-start-go").click();
     await expect(pageA.locator(".wx-srv-bubble-ck")).toHaveCount(roundsBefore + 1);
     const encoreSeq = await pageA.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
-    await expect(game(pageA).locator(".wx-srv-ck-pill-starter")).not.toHaveCount(0);
+    await dismissIntro(pageA); // a new round: its intro shows again
+    await expect(game(pageA).locator(".wx-srv-ck-prog-starter")).not.toHaveCount(0);
     // Bob is in the old round's tab: go to the chat to find the new round's card.
     await humanPause(pageB);
     await pageB.locator(".wx-srv-tab-chat").click();
     await humanPause(pageB);
     await joinCookout(pageB, encoreSeq!);
-    await expect(game(pageB).locator(".wx-srv-ck-pill-starter")).not.toHaveCount(0);
+    await expect(game(pageB).locator(".wx-srv-ck-prog-starter")).not.toHaveCount(0);
     await shot(pageB, "twists-13-encore-round");
 
     // The earlier finished round is untouched by the encore (never abandoned).
@@ -555,11 +609,11 @@ test.describe("Cookout twists", () => {
       const other = pages[1 - index]!;
       if (index === 1 && bobChaosPair === null) {
         // Bob's first turn: he spends his chaos shelf; Alice must not see the exotic pair anywhere.
-        await humanPause(page);
-        await game(page).locator(".wx-srv-ck-chaos").click();
-        await eventually(pages, async () => (await game(page).locator(".wx-srv-ck-chaos-note").count()) === 1, "Bob's chaos pair");
+        await openTwists(page);
+        await game(page).locator(".wx-srv-ck-twist-item.wx-srv-ck-chaos").click();
+        await eventually(pages, async () => (await game(page).locator(".wx-srv-ck-pair-chaos").count()) === 1, "Bob's chaos pair");
         bobChaosPair = await offerOn(page);
-        await expect(game(other).locator(".wx-srv-ck-chaos-note")).toHaveCount(0);
+        await expect(game(other).locator(".wx-srv-ck-pair-chaos")).toHaveCount(0);
         await expect(game(other).locator("[data-ingredient]")).toHaveCount(0);
         const text = (await game(other).locator(".wx-srv-ck-scroll").innerText()).toLowerCase();
         bobChaosPair.names.forEach((name, i) => {
@@ -576,16 +630,16 @@ test.describe("Cookout twists", () => {
     if (!STAPLE_IDS.has(unpicked)) expect(bodyHasId(bodiesA, unpicked), `Alice's responses carry Bob's chaos option ${unpicked}`).toBe(false);
 
     // The gate: Bob stars first; Alice's view carries no partner star until she has starred too.
-    await expect(game(pageB).locator(".wx-srv-ck-star").first()).toBeVisible({ timeout: 30_000 });
+    await expect(game(pageB).locator("button.wx-srv-ck-star").first()).toBeVisible({ timeout: 30_000 });
     await humanPause(pageB);
-    await game(pageB).locator(".wx-srv-ck-star").first().click();
+    await game(pageB).locator("button.wx-srv-ck-star").first().click();
     await expect(game(pageB).locator(".wx-srv-ck-star-on")).toHaveCount(1);
     await expect(game(pageA).locator(".wx-srv-ck-stars-revealed")).toHaveCount(0);
-    await expect(game(pageA).locator(".wx-srv-ck-chip-starred")).toHaveCount(0);
+    await expect(game(pageA).locator(".wx-srv-ck-rtile-starred")).toHaveCount(0);
     const gatedA = lastView(bodiesA);
     expect((gatedA?.["stars"] as { partner: unknown; partnerChosen: unknown } | undefined)?.partner ?? null).toBeNull();
     await humanPause(pageA);
-    await game(pageA).locator(".wx-srv-ck-star").first().click();
+    await game(pageA).locator("button.wx-srv-ck-star").first().click();
     await expect(game(pageA).locator(".wx-srv-ck-stars-revealed")).toBeVisible();
     await expect(game(pageB).locator(".wx-srv-ck-stars-revealed")).toBeVisible();
 
