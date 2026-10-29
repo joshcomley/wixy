@@ -129,9 +129,11 @@ def pending_work(
             todo.append(ident)
         elif entry["state"] == "accepted":
             continue
-        elif entry["state"] in ("rendered", "checked") and not masters_exist(ident):
+        elif entry["state"] in ("rendered", "queued", "regenerate"):
+            # `rendered` is not done: it still needs its check (or a re-render if the master
+            # file went missing); `run_pipeline` tells those two apart
             todo.append(ident)
-        elif entry["state"] in ("queued", "regenerate"):
+        elif entry["state"] == "checked" and not masters_exist(ident):
             todo.append(ident)
     return todo
 
@@ -524,6 +526,17 @@ def record_verdict(
     work.write_attempts(ident, attempts)
 
 
+def unchecked_attempt(work: WorkDir, ident: str, entry: Mapping[str, Any] | None) -> int | None:
+    """The attempt number of a picture that is rendered (card on disk) but has no verdict yet."""
+    if entry is None or entry.get("state") != "rendered":
+        return None
+    attempts = work.read_attempts(ident)
+    if not attempts or attempts[-1].get("verdict") is not None:
+        return None
+    attempt = int(attempts[-1]["attempt"])
+    return attempt if work.card(ident, attempt).exists() else None
+
+
 def next_attempt(work: WorkDir, ident: str) -> int:
     attempts = work.read_attempts(ident)
     return max((a["attempt"] for a in attempts), default=0) + 1
@@ -813,6 +826,7 @@ async def run_pipeline(
     review_path: Path = _review.REVIEW_PATH,
     rng: random.Random | None = None,
     sleep: Callable[[float], None] = time.sleep,
+    render_only: bool = False,
 ) -> dict[str, int]:
     """Render and check `ids` to completion: render a chunk (one picture at a time, only when
     ComfyUI is idle), check it, regenerate failures along the attempt ladder, send persistent
@@ -839,6 +853,12 @@ async def run_pipeline(
             await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
         chunk: list[tuple[str, int]] = []
         for ident in chunk_ids:
+            waiting = unchecked_attempt(work, ident, journal_state(work.journal).get(ident))
+            if waiting is not None:
+                rendered[ident] = work.card(ident, waiting)
+                if not render_only:
+                    chunk.append((ident, waiting))  # rendered before a restart: just check it
+                continue
             if not wait_for_idle(get_queue, pause_file=work.pause, sleep=sleep):
                 return totals  # PAUSE file: stop between pictures
             attempt = next_attempt(work, ident)
@@ -862,6 +882,8 @@ async def run_pipeline(
             )
             totals["rendered"] += 1
             chunk.append((ident, attempt))
+        if render_only or not chunk:
+            continue
         batch_no += 1
         outcome = await check_chunk(
             runner,
@@ -928,6 +950,11 @@ def _parser() -> Any:
     run.add_argument("--phase", choices=["pilot", "rest", "all"], default="pilot")
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
     run.add_argument("--limit", type=int, default=None)
+    run.add_argument(
+        "--render-only",
+        action="store_true",
+        help="render and journal only; check later (the pilot, before calibration picks a checker)",
+    )
     sub.add_parser("status")
     pub = sub.add_parser("publish", help="build, release, verify and install a pack")
     pub.add_argument(
@@ -1009,6 +1036,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _check.HAIKU,
             _check.SOL,
             _check.OPUS,
+            render_only=args.render_only,
         )
     )
     print(json.dumps(totals))
