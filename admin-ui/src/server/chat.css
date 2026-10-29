@@ -9126,8 +9126,16 @@ button.wx-srv-ck-rtile {
   color: var(--ck-muted);
 }
 
-.wx-srv-ck-mcard-mode {
-  background: var(--ck-chip);
+.wx-srv-ck-mcard-head-mode {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title {
+  white-space: nowrap;
+}
+
+.wx-srv-ck-mcard .wx-srv-ck-mcard-mode {
   color: var(--wx-ink);
 }
 

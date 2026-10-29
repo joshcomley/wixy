@@ -105,6 +105,8 @@ export function createCookoutCards(deps: CookoutCardDeps): CookoutCards {
     head.append(icon, el("span", "wx-srv-ck-mcard-title", "Cookout"));
     // The game mode's badge (none for Classic, whose card is as before).
     if (mode !== null) {
+      // A long mode name wraps the badges under the title rather than squeezing "Cookout".
+      head.classList.add("wx-srv-ck-mcard-head-mode");
       const modeBadge = el("span", "wx-srv-ck-badge wx-srv-ck-mcard-mode", mode.label);
       modeBadge.dataset["gameMode"] = mode.id;
       head.append(modeBadge);

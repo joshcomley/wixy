@@ -6,6 +6,7 @@ import type { LockHooks, ServerSession } from "../../src/server/types";
 import { parseCookoutView, parseRecipeBook, type CookoutOutcome } from "../../src/server/cookout/api";
 import { bankedRecipes, bookBody, finishedView, pickingView, type Json } from "./fixtures";
 import { STYLE_COSY, setup } from "./twistFixtures";
+import { SOURDOUGH, classicOptionWire, optionsBody, toastieFinished, toastiePicking } from "./modeFixtures";
 
 // Cookout wired into the Server chat (spec 09 §5.1, §5.4): the ⋯ menu's Cookout and Recipe book, the start
 // sheet, the card in the main chat, the game tab (one game at a time), the "Cookout" tag on the game's
@@ -441,6 +442,225 @@ describe("cookout: game mode — full screen, the chat FAB, floating message and
     const popup = thread.element.querySelector<HTMLElement>(".wx-srv-gamepop")!;
     expect(popup.hidden).toBe(false);
     expect(popup.textContent).toContain("Cookout chat");
+    thread.teardown();
+  });
+});
+
+// -- Game modes (spec/server-chat/09c-cookout-modes.md §5.4, §6.1) ---------------------------------------------
+// The thread reads the REAL options and ingredient-search requests here (only `fetch` is stubbed), so the
+// requests' URLs are the ones the server would see.
+
+describe("cookout: game modes", () => {
+  interface Wire {
+    optionsReads: number;
+    ingredientUrls: string[];
+  }
+
+  /** Stubs `fetch`: `/cookout/options` answers `options()`, `/cookout/ingredients` answers a bread; nothing else is reachable. */
+  function stubFetch(options: () => Json): Wire {
+    const wire: Wire = { optionsReads: 0, ingredientUrls: [] };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.includes("/cookout/options")) {
+          wire.optionsReads += 1;
+          return new Response(JSON.stringify(options()), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        if (url.includes("/cookout/ingredients")) {
+          wire.ingredientUrls.push(url);
+          return new Response(JSON.stringify({ ingredients: [SOURDOUGH] }), { status: 200, headers: { "Content-Type": "application/json" } });
+        }
+        throw new TypeError("offline");
+      }),
+    );
+    return wire;
+  }
+
+  async function openSheet(thread: ServerThreadView): Promise<HTMLElement> {
+    openMenu(thread);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-cookout")!.click();
+    await flush();
+    await flush();
+    return thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!;
+  }
+
+  const tileOf = (sheet: HTMLElement, id: string): HTMLButtonElement | null => sheet.querySelector<HTMLButtonElement>(`.wx-srv-ck-mtile[data-mode-id="${id}"]`);
+  const goOf = (sheet: HTMLElement): HTMLButtonElement => sheet.querySelector<HTMLButtonElement>(".wx-srv-ck-start-go")!;
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("a Classic start sends no `mode` at all, even when the server lists the other game", async () => {
+    stubFetch(() => optionsBody());
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    expect(tileOf(sheet, "classic")?.getAttribute("aria-checked")).toBe("true");
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout).toHaveBeenCalledTimes(1);
+    const body = createCookout.mock.calls[0]![1] as Record<string, unknown>;
+    expect(Object.keys(body).sort()).toEqual(["blind", "clientId", "deviceId", "sender"]);
+    expect(body).toEqual({ clientId: "ck-uuid-0001", sender: "Josh", deviceId: "device-1234", blind: false });
+    thread.teardown();
+  });
+
+  it("with Classic the only listed game there are no tiles and the start is the same core request", async () => {
+    stubFetch(() => optionsBody([classicOptionWire()]));
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    expect(sheet.querySelectorAll(".wx-srv-ck-mtile")).toHaveLength(0);
+    expect(sheet.querySelector<HTMLElement>(".wx-srv-ck-start-what")!.hidden).toBe(true);
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout.mock.calls[0]![1]).toEqual({ clientId: "ck-uuid-0001", sender: "Josh", deviceId: "device-1234", blind: false });
+    thread.teardown();
+  });
+
+  it("choosing the Toasted sandwich tile starts the round with mode \"toastie\", and the card and tab follow", async () => {
+    stubFetch(() => optionsBody());
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9, { mode: "toastie" }) });
+    getCookout.mockResolvedValue(answer(toastiePicking({ seq: 9 })));
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    tileOf(sheet, "toastie")!.click();
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout).toHaveBeenCalledWith(SESSION, { clientId: "ck-uuid-0001", sender: "Josh", deviceId: "device-1234", blind: false, mode: "toastie" });
+    expect(sheet.hidden).toBe(true);
+    expect(tabs(thread)).toEqual(["Chat", "Cookout game"]);
+    await flush();
+    expect(thread.element.querySelector(".wx-srv-ck-turn")?.textContent).toBe("Your turn — pick the bread");
+    expect(thread.element.querySelector(".wx-srv-ck-mcard-mode")?.textContent).toBe("Toasted sandwich");
+    expect(thread.element.querySelector(".wx-srv-ck-mcard-status")?.textContent).toBe("Picking ingredients (0/8)…");
+    thread.teardown();
+  });
+
+  it("the mode rides along with Blind and the chosen twists", async () => {
+    stubFetch(() => optionsBody());
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9, { mode: "toastie", blind: true }) });
+    getCookout.mockResolvedValue(answer(toastiePicking({ seq: 9, blind: true })));
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    tileOf(sheet, "toastie")!.click();
+    sheet.querySelector<HTMLButtonElement>('.wx-srv-ck-mode[data-mode="blind"]')!.click();
+    sheet.querySelector<HTMLButtonElement>(".wx-srv-ck-twist-stars")!.click();
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout.mock.calls[0]![1]).toMatchObject({ blind: true, stars: true, mode: "toastie" });
+    thread.teardown();
+  });
+
+  it("a 503 on a toastie start says \"That game isn't available right now\", drops the tile, and the next options read hits the server again", async () => {
+    let listed = true;
+    const wire = stubFetch(() => optionsBody(listed ? undefined : [classicOptionWire()]));
+    createCookout.mockResolvedValue({ ok: false, kind: "game_unavailable" });
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    expect(wire.optionsReads).toBe(1);
+    tileOf(sheet, "toastie")!.click();
+    listed = false; // the operator switched the mode off meanwhile
+    goOf(sheet).click();
+    await flush();
+    await flush();
+    expect(sheet.hidden).toBe(false);
+    expect(sheet.querySelector(".wx-srv-ck-start-error")!.textContent).toBe("That game isn't available right now");
+    expect(tabs(thread)).not.toContain("Cookout game");
+    // The cached options were cleared and read again, so the gone mode's tile is gone and Classic is chosen.
+    expect(wire.optionsReads).toBe(2);
+    expect(sheet.querySelectorAll(".wx-srv-ck-mtile")).toHaveLength(0);
+    // A later open reads them from the cache of that second read (and the third open would too).
+    sheet.querySelector<HTMLButtonElement>(".wx-srv-ck-start-cancel")!.click();
+    await openSheet(thread);
+    expect(wire.optionsReads).toBe(2);
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9) });
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout.mock.calls[1]![1]).not.toHaveProperty("mode");
+    thread.teardown();
+  });
+
+  it("the cached options are dropped by a toastie 503 even when the re-read is what shows the new list", async () => {
+    const wire = stubFetch(() => optionsBody());
+    createCookout.mockResolvedValue({ ok: false, kind: "game_unavailable" });
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    tileOf(sheet, "toastie")!.click();
+    goOf(sheet).click();
+    await flush();
+    await flush();
+    // Still listed on the second read: the tile stays, the message stays, and a retry is possible.
+    expect(wire.optionsReads).toBe(2);
+    expect(sheet.querySelector(".wx-srv-ck-start-error")!.textContent).toBe("That game isn't available right now");
+    expect(tileOf(sheet, "toastie")?.getAttribute("aria-checked")).toBe("true");
+    thread.teardown();
+  });
+
+  it("a 503 on a Classic start keeps its own words and does not re-read the options", async () => {
+    const wire = stubFetch(() => optionsBody());
+    createCookout.mockResolvedValue({ ok: false, kind: "game_unavailable" });
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    goOf(sheet).click();
+    await flush();
+    await flush();
+    expect(sheet.querySelector(".wx-srv-ck-start-error")!.textContent).toBe("Cookout isn't available on this server right now.");
+    expect(wire.optionsReads).toBe(1);
+    thread.teardown();
+  });
+
+  it("the fridge raid in Toasted sandwich mode searches /cookout/ingredients?q=…&mode=toastie; Classic asks without a mode", async () => {
+    const wire = stubFetch(() => optionsBody());
+    const { thread } = await mount();
+    const sheet = await openSheet(thread);
+    sheet.querySelector<HTMLButtonElement>(".wx-srv-ck-twists-toggle")!.click();
+    const type = (text: string): void => {
+      const input = sheet.querySelector<HTMLInputElement>(".wx-srv-ck-fridge-input")!;
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    };
+    // Classic first: no mode parameter.
+    type("sour");
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    await flush();
+    expect(wire.ingredientUrls).toHaveLength(1);
+    expect(wire.ingredientUrls[0]).toMatch(/\/cookout\/ingredients\?q=sour$/);
+    tileOf(sheet, "toastie")!.click();
+    type("sour");
+    await new Promise((resolve) => setTimeout(resolve, 320));
+    await flush();
+    expect(wire.ingredientUrls).toHaveLength(2);
+    expect(wire.ingredientUrls[1]).toMatch(/\/cookout\/ingredients\?q=sour&mode=toastie$/);
+    expect([...sheet.querySelectorAll<HTMLElement>(".wx-srv-ck-fridge-option")].map((o) => o.dataset["ingredient"])).toEqual(["sourdough-loaf"]);
+    sheet.querySelector<HTMLButtonElement>('.wx-srv-ck-fridge-option[data-ingredient="sourdough-loaf"]')!.click();
+    createCookout.mockResolvedValue({ ok: true, message: cookoutMessage(9, { mode: "toastie" }) });
+    getCookout.mockResolvedValue(answer(toastiePicking({ seq: 9 })));
+    goOf(sheet).click();
+    await flush();
+    expect(createCookout.mock.calls[0]![1]).toMatchObject({ mode: "toastie", fridgeSeedId: "sourdough-loaf" });
+    thread.teardown();
+  });
+
+  it("\"New\" in a toasted sandwich round preselects that mode; a toastie message's card is badged in the thread", async () => {
+    stubFetch(() => optionsBody());
+    getCookout.mockResolvedValue(answer(toastieFinished({ seq: 9, images: "done" })));
+    const { thread } = await mount([cookoutMessage(9, { mode: "toastie", state: "finished", concepts: "ready", pickedCount: 8, rev: 12 })]);
+    await flush();
+    expect(thread.element.querySelector(".wx-srv-ck-mcard-status")!.textContent).toBe("3 toasted sandwich ideas ready");
+    expect(thread.element.querySelector(".wx-srv-ck-mcard-mode")!.textContent).toBe("Toasted sandwich");
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-mcard-open")!.click();
+    await flush();
+    const newButton = thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-new")!;
+    expect(newButton.hidden).toBe(false);
+    newButton.click();
+    await flush();
+    await flush();
+    const sheet = thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!;
+    expect(sheet.hidden).toBe(false);
+    expect(tileOf(sheet, "toastie")?.getAttribute("aria-checked")).toBe("true");
     thread.teardown();
   });
 });
