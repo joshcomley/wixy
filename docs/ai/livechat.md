@@ -2690,7 +2690,7 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   cloche card, the vote buttons, the rescue-swap flow and the **Earlier dishes** section; a banked recipe gains **We cooked
   it!** (hearts, the photo chooser, unmark); the Recipe book gains the cooked badge, ratings, the real photo and the
   Remix / Leftovers buttons; every vote, Bank and retry sends the `generation` of the view it was rendered from.
-  *(This paragraph follows the spec; re-check the exact labels against the merged UI.)*
+  Button labels (checked against the merged UI): **🪙 Lucky dip**, **🌋 Chaos shelf (once)**, **🧹 Sweep it (once)**, **🍽️ I'd eat this tonight**, **🔄 Rescue swap (once)**, **Keep these dishes**, **Lift it!** / **No thanks — start cooking**, **We cooked it!**, **Add our photo**, **🔁 Encore with the leftovers**.
 - **Tests.** In addition to §24: `test_livechat_cookout_twists.py` (every twist's store behaviour, Blind redaction on every
   response, two-connection races, generation fencing, the swap archive, T4), `test_cookout_twists_catalogue.py` (the
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,

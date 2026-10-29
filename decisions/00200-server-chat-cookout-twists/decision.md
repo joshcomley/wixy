@@ -39,7 +39,7 @@ livechat.md §24.1, Inv 57 (extended), glossary, contracts, testing.
 
 # Reality vs the spec
 - Decision id: the spec names 00194; main had already used 00193-00198 when this landed, so this entry is 00200.
-- *(Fill in anything X4's merged UI or the final server code did differently from 09a before delivery.)*
+- The twists e2e (`server-cookout-twists.spec.ts`) found nothing in the merged X1-X4 code that contradicts 09a: the labels, selectors and flows of the client match §9. A late `ready` crossing the other side's failure in the call broker (a separate, call-feature fix) was found while chasing an e2e flake.
 
 # What to watch for
 - Any new place that serialises a vote, star or chaos pair must go through `cookout_view_json`'s redaction; never reveal on a
