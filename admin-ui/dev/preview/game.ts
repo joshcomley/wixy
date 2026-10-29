@@ -290,7 +290,7 @@ export class Game {
     if (drag === null || drag.pointerId !== id) return;
     this.drag = null;
     const v = cancelled ? 0 : drag.tracker.release(t);
-    const plan = planSpin(drag.angle, v);
+    const plan = planSpin(drag.angle, v, drag.axis, this.deps.rng());
     if (plan === null) {
       this.notify("Flick it harder!", t);
       return;

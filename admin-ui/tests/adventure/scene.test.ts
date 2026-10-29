@@ -32,7 +32,7 @@ interface Rig {
   ms: { t: number };
 }
 
-function rig(): Rig {
+function rig(random: () => number = () => 0.5): Rig {
   const clock = { s: T0 };
   const vibrate = vi.fn<(ms: number) => void>();
   const names: Rig["names"] = { viewer: "Ann", partner: "Bea" };
@@ -43,7 +43,7 @@ function rig(): Rig {
     reducedMotion: () => motion.reduced,
     vibrate,
     serverNowS: () => clock.s,
-    random: () => 0.5, // the idle globe starts at lambda 0
+    random, // by default 0.5: the idle globe starts at lambda 0
     viewer: () => names.viewer,
     partner: () => names.partner,
   });
@@ -247,6 +247,26 @@ describe("scene: the second spin and its landing", () => {
     expect(landing.candidates[0]).toBe(landing.landUnit);
     expect(new Set(landing.candidates).size).toBe(landing.candidates.length);
     expect(landing.candidates.length).toBeLessThanOrEqual(10);
+  });
+
+  it("the same flick from the same start lands at a different latitude for a different random draw", () => {
+    const latitudeFor = (draw: number): number => {
+      const state = { flick: false };
+      const r = rig(() => (state.flick ? draw : 0.5));
+      r.scene.setView(view("spin_lng"), r.ms.t);
+      r.at(T0);
+      const lng = swipe(r, "lng", 160, 120).up;
+      if (lng.kind !== "spin") throw new Error("expected a spin");
+      r.clock.s = T0 + 0.2;
+      r.scene.setView(view("spin_lat", { rev: 2, lng: spin("Ann", lng.plan.from, lng.plan.delta, lng.plan.durationMs, T0 + 0.1) }), r.ms.t);
+      r.at(T0 + lng.plan.durationMs / 1000 + 0.5);
+      state.flick = true;
+      const { up } = swipe(r, "lat", 150, 110, 2);
+      if (up.kind !== "spin" || up.landing === null) throw new Error("expected a spin with a landing");
+      // The point under the pin that the spin's POST carries.
+      return up.landing.point[1];
+    };
+    expect(Math.abs(latitudeFor(0.3) - latitudeFor(0.45))).toBeGreaterThan(5);
   });
 
   it("says so, and spins nothing, when there is nowhere left to land", () => {

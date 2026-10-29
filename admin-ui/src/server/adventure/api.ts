@@ -283,7 +283,7 @@ function parseSpin(value: unknown): AdventureSpin | null {
   const durationMs = asFinite(record["durationMs"]);
   const at = asFinite(record["at"]);
   if (by === null || from === null || delta === null || durationMs === null || at === null) return null;
-  // The server's own bounds are 720..3600 degrees and 3.5..7 s; these are the loose "cannot freeze the
+  // The server's own bounds are 720..3960 degrees and 3.5..7 s; these are the loose "cannot freeze the
   // animation loop" bounds, so a future change of the server's numbers never blinds the client.
   if (Math.abs(from) > 1e6 || Math.abs(delta) < 1 || Math.abs(delta) > 100_000) return null;
   if (durationMs < 100 || durationMs > 60_000) return null;
