@@ -46,6 +46,7 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
   /** A finger or pointer is on the carousel. */
   let holding = false;
   let observer: IntersectionObserver | null = null;
+  let resizer: ResizeObserver | null = null;
 
   const element = doc.createElement("section");
   element.className = "wx-srv-ck-car";
@@ -133,8 +134,19 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
     return b;
   }
 
+  /** Centres the arrows on the current slide's picture (its size flexes with the screen and the words). */
+  function placeArrows(): void {
+    const pic = items[current]?.querySelector<HTMLElement>(".wx-srv-ck-car-pic");
+    if (pic === null || pic === undefined) return;
+    const top = pic.getBoundingClientRect();
+    const box = element.getBoundingClientRect();
+    if (top.height === 0) return;
+    element.style.setProperty("--ck-car-arrow-top", `${Math.round(top.top - box.top + top.height / 2)}px`);
+  }
+
   function mark(i: number): void {
     current = i;
+    placeArrows();
     dotButtons.forEach((dot, n) => {
       dot.classList.toggle("wx-srv-ck-car-dot-on", n === i);
       if (n === i) dot.setAttribute("aria-current", "true");
@@ -221,6 +233,10 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
     );
     for (const slide of items) observer.observe(slide);
   }
+  if (typeof ResizeObserver === "function") {
+    resizer = new ResizeObserver(() => placeArrows());
+    resizer.observe(element);
+  }
   mark(0);
 
   return {
@@ -240,6 +256,8 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
       clearTimer();
       observer?.disconnect();
       observer = null;
+      resizer?.disconnect();
+      resizer = null;
     },
     index: () => current,
     go,

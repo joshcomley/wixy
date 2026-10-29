@@ -705,71 +705,145 @@ function chefPending(raw: Record<string, unknown>): Record<string, unknown> {
 }
 
 interface ChefFit {
+  /** Every expected part was found (the names of any missing one otherwise). */
+  missing: string[];
   paneHeight: number;
   pageScrolls: boolean;
+  columnScrolls: boolean;
   chefTop: number;
   chefBottom: number;
+  chefHeight: number;
   viewTop: number;
   viewBottom: number;
+  columnHeight: number;
   headingTop: number;
-  headingHeight: number;
+  headingBottom: number;
   picW: number;
   picH: number;
+  picTop: number;
+  picBottom: number;
   wordsScroll: string;
   overflow: string[];
   dotHit: boolean;
+  nextShown: boolean;
   nextHit: boolean;
+  nextCentre: number;
   slideName: string;
 }
 
+/** Measures the chef's box on ANY markup: a part that is not there is reported in `missing` (and its
+ * geometry reads as zero), so an old or broken layout fails an explicit expectation, never a crash. */
 async function measureChef(page: Page): Promise<ChefFit> {
   return await page.evaluate((): ChefFit => {
-    const pane = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"]')!;
-    const scroll = pane.querySelector<HTMLElement>(".wx-srv-ck-scroll")!;
-    scroll.scrollTop = 0;
-    const chef = pane.querySelector<HTMLElement>(".wx-srv-ck-chef-working")!;
-    const chefBox = chef.getBoundingClientRect();
-    const view = scroll.getBoundingClientRect();
-    const slides = [...chef.querySelectorAll<HTMLElement>(".wx-srv-ck-car-slide")];
+    const missing: string[] = [];
+    const pane = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"]');
+    const scroll = pane?.querySelector<HTMLElement>(".wx-srv-ck-scroll") ?? null;
+    if (scroll !== null) scroll.scrollTop = 0;
+    const chef = pane?.querySelector<HTMLElement>(".wx-srv-ck-chef") ?? null;
+    const zero = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+    const rect = (el: Element | null | undefined, name: string): { top: number; bottom: number; left: number; right: number; width: number; height: number } => {
+      if (el === null || el === undefined) {
+        missing.push(name);
+        return zero;
+      }
+      return el.getBoundingClientRect();
+    };
+    const view = rect(scroll, "column");
+    const chefBox = rect(chef, "chef box");
+    const slides = [...(chef?.querySelectorAll<HTMLElement>(".wx-srv-ck-car-slide") ?? [])];
     const slide =
       slides.find((s) => {
         const r = s.getBoundingClientRect();
         return r.left >= view.left - 1 && r.right <= view.right + 1;
-      }) ?? slides[0]!;
-    const pic = slide.querySelector<HTMLElement>(".wx-srv-ck-pic")!.getBoundingClientRect();
-    const words = slide.querySelector<HTMLElement>(".wx-srv-ck-car-words")!;
-    const heading = chef.querySelector<HTMLElement>(".wx-srv-ck-chef-text")!.getBoundingClientRect();
+      }) ?? slides[0];
+    if (slide === undefined) missing.push("carousel slide");
+    const pic = rect(slide?.querySelector(".wx-srv-ck-pic"), "slide picture");
+    const words = slide?.querySelector<HTMLElement>(".wx-srv-ck-car-words") ?? null;
+    const heading = rect(chef?.querySelector(".wx-srv-ck-chef-text"), "chef heading");
     const overflow: string[] = [];
-    for (const node of chef.querySelectorAll<HTMLElement>("*")) {
+    for (const node of chef?.querySelectorAll<HTMLElement>("*") ?? []) {
       // The track scrolls sideways by design (one slide at a time); a picture's own box is exempt.
       if (node.classList.contains("wx-srv-ck-car-track") || node.tagName === "IMG") continue;
       if (node.getClientRects().length === 0) continue;
       if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) overflow.push(node.className);
     }
     const hit = (el: HTMLElement | null): boolean => {
-      if (el === null) return true;
+      if (el === null) return false;
       const r = el.getBoundingClientRect();
       const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
       return at !== null && el.contains(at);
     };
+    const next = chef?.querySelector<HTMLElement>(".wx-srv-ck-car-next") ?? null;
+    const nextShown = next !== null && getComputedStyle(next).display !== "none";
+    const nextBox = next?.getBoundingClientRect();
     return {
-      paneHeight: pane.getBoundingClientRect().height,
+      missing,
+      paneHeight: pane?.getBoundingClientRect().height ?? 0,
       pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight,
+      columnScrolls: scroll !== null && scroll.scrollHeight > scroll.clientHeight + 1 && chef !== null && chefBox.bottom > view.bottom + 1,
       chefTop: chefBox.top,
       chefBottom: chefBox.bottom,
+      chefHeight: chefBox.height,
       viewTop: view.top,
       viewBottom: view.bottom,
+      columnHeight: scroll === null ? 0 : scroll.clientHeight - 24,
       headingTop: heading.top,
-      headingHeight: heading.height,
+      headingBottom: heading.bottom,
       picW: pic.width,
       picH: pic.height,
-      wordsScroll: getComputedStyle(words).overflowY,
+      picTop: pic.top,
+      picBottom: pic.bottom,
+      wordsScroll: words === null ? "" : getComputedStyle(words).overflowY,
       overflow,
-      dotHit: hit(chef.querySelector<HTMLElement>(".wx-srv-ck-car-dot-on")),
-      nextHit: getComputedStyle(chef.querySelector<HTMLElement>(".wx-srv-ck-car-next")!).display === "none" || hit(chef.querySelector<HTMLElement>(".wx-srv-ck-car-next")),
-      slideName: slide.querySelector(".wx-srv-ck-car-name")?.textContent ?? "",
+      dotHit: hit(chef?.querySelector<HTMLElement>(".wx-srv-ck-car-dot-on") ?? null),
+      nextShown,
+      nextHit: nextShown && hit(next),
+      nextCentre: nextBox === undefined ? 0 : nextBox.top + nextBox.height / 2,
+      slideName: slide?.querySelector(".wx-srv-ck-car-name")?.textContent ?? "",
     };
   });
+}
+
+/** Every expectation about one measured chef box (`where` names the case in a failure). */
+function expectChefFits(fit: ChefFit, where: string): void {
+  expect(fit.missing, `${where}: parts of the chef stage not found`).toEqual([]);
+  expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
+  // The working box is whole inside the visible column: under the title row, above the chat row.
+  expect(fit.chefTop, `${where}: chef box top`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+  expect(fit.chefBottom, `${where}: chef box bottom`).toBeLessThanOrEqual(fit.viewBottom + 1);
+  expect(fit.columnScrolls, `${where}: the column scrolls the chef box`).toBe(false);
+  expect(fit.headingTop, `${where}: heading under the title row`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+  expect(fit.headingBottom, `${where}: heading drawn`).toBeGreaterThan(fit.headingTop);
+  // The picture keeps 96 px on a normal-height pane, 64 px on a shorter one, beside the longest words.
+  const minPic = fit.paneHeight >= 508 ? 95.5 : 63.5;
+  expect(fit.picH, `${where}: picture height`).toBeGreaterThanOrEqual(minPic);
+  expect(fit.picW, `${where}: picture width`).toBeGreaterThanOrEqual(minPic);
+  expect(fit.slideName).toBe(LONG_NAME);
+  expect(fit.dotHit, `${where}: the current dot can be tapped`).toBe(true);
+  if (fit.nextShown) {
+    expect(fit.nextHit, `${where}: the next arrow can be tapped`).toBe(true);
+    // The arrow sits at the picture's vertical centre.
+    expect(Math.abs(fit.nextCentre - (fit.picTop + fit.picBottom) / 2), `${where}: arrow centred on the picture`).toBeLessThanOrEqual(2);
+  }
+  // Nothing in the box overflows except the words block under the picture — which, with three of the
+  // longest facts, may not fit beside the picture on a phone: it then scrolls on its own (never clipped).
+  expect(fit.overflow.every((c) => c === "wx-srv-ck-car-words"), `${where}: overflow ${fit.overflow.join(", ")}`).toBe(true);
+  if (fit.overflow.length > 0) expect(fit.wordsScroll, `${where}: the words block scrolls`).toBe("auto");
+}
+
+/** Measures once the chef box has settled at the column's height (after a resize or a banner). */
+async function settledChef(page: Page, where: string): Promise<ChefFit> {
+  let fit = await measureChef(page);
+  await expect
+    .poll(
+      async () => {
+        fit = await measureChef(page);
+        return fit.missing.length === 0 && Math.abs(fit.chefHeight - fit.columnHeight) <= 1;
+      },
+      { message: `${where}: the chef box fills exactly the visible column`, timeout: 3_000 },
+    )
+    .toBe(true);
+  return fit;
 }
 
 test.describe("Cookout chef stage", () => {
@@ -786,8 +860,7 @@ test.describe("Cookout chef stage", () => {
       await route.fulfill({ response, json: chefPending(json) });
     });
     await startCookout(page, false, false);
-    const chef = game(page).locator(".wx-srv-ck-chef-working");
-    await expect(chef.locator(".wx-srv-ck-car")).toBeVisible();
+    await expect(game(page).locator(".wx-srv-ck-chef")).toBeVisible();
     for (const [width, height, inset] of [
       [360, 640, 0],
       [360, 640, 34],
@@ -809,27 +882,23 @@ test.describe("Cookout chef stage", () => {
         }
         style.textContent = px > 0 ? `.wx-srv-tabs { padding-bottom: ${px}px !important }` : "";
       }, inset);
-      await page.waitForTimeout(250);
       const where = `${width}x${height} inset ${inset}`;
-      const fit = await measureChef(page);
-      expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
-      // The working box is whole inside the visible column: under the title row, above the chat row.
-      expect(fit.chefTop, `${where}: chef box top`).toBeGreaterThanOrEqual(fit.viewTop - 1);
-      expect(fit.chefBottom, `${where}: chef box bottom`).toBeLessThanOrEqual(fit.viewBottom + 1);
-      expect(fit.headingTop, `${where}: heading under the title row`).toBeGreaterThanOrEqual(fit.viewTop - 1);
-      expect(fit.headingHeight, `${where}: heading drawn`).toBeGreaterThan(0);
-      // The picture keeps 96 px on a normal-height pane, 64 px on a shorter one, beside the longest words.
-      const minPic = fit.paneHeight >= 508 ? 95.5 : 63.5;
-      expect(fit.picH, `${where}: picture height`).toBeGreaterThanOrEqual(minPic);
-      expect(fit.picW, `${where}: picture width`).toBeGreaterThanOrEqual(minPic);
-      expect(fit.slideName).toBe(LONG_NAME);
-      expect(fit.dotHit, `${where}: the current dot can be tapped`).toBe(true);
-      expect(fit.nextHit, `${where}: the next arrow can be tapped`).toBe(true);
-      // Nothing in the box overflows except the words block under the picture — which, with three of the
-      // longest facts, may not fit beside the picture on a phone: it then scrolls on its own (never clipped).
-      expect(fit.overflow.every((c) => c === "wx-srv-ck-car-words"), `${where}: ${fit.overflow.join(", ")}`).toBe(true);
-      expect(fit.wordsScroll, `${where}: the words block scrolls`).toBe("auto");
+      expectChefFits(await settledChef(page, where), where);
     }
+    // The End confirm cannot open over the chef (End exists only while picking) — and were any banner to
+    // stand above the column, the box would still be exactly the column's height: force one and re-check.
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(game(page).locator(".wx-srv-ck-end")).toBeHidden();
+    await expect(game(page).locator(".wx-srv-ck-confirm")).toBeHidden();
+    await page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"] .wx-srv-ck-confirm');
+      if (banner !== null) banner.hidden = false;
+    });
+    expectChefFits(await settledChef(page, "360x640 with the confirm banner"), "360x640 with the confirm banner");
+    await page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"] .wx-srv-ck-confirm');
+      if (banner !== null) banner.hidden = true;
+    });
     // No toast about a pick lingers over the carousel.
     await expect(game(page).locator(".wx-srv-ck-toast")).toBeHidden();
     stopAwake();

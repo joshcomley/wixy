@@ -6546,7 +6546,10 @@ video.wx-srv-gallery-media {
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  container-type: inline-size;
+  /* A SIZE container: the chef's box takes exactly this column's visible height (100cqh), whatever stands
+     above it in the pane (the title row, the End confirm, a future banner). It is a flex item of a pane
+     with a definite height, so its size never depends on its content. */
+  container-type: size;
   container-name: ckbody;
   display: flex;
   flex-direction: column;
@@ -7750,8 +7753,8 @@ button.wx-srv-ck-rtile {
 
 /* -- Round 2: the chef carousel (carousel.ts) -----------------------------------------------------------------
    While the chef works its box comes FIRST in the stage and is exactly the visible height of the scrolling
-   column (the pane's height, a size container, less the 44 px title row, the 64 px chat row and the column's
-   12 px padding top and bottom): heading row, then the carousel filling the rest. Each slide is the picture
+   column (`ckbody`, a size container: its content box, so whatever else stands in the pane is already out
+   of it): heading row, then the carousel filling the rest. Each slide is the picture
    (it flexes, never under 64 px nor over 300 px) above its words; on a screen too short for the longest
    words beside the smallest picture, the words block scrolls on its own — never clipped, never under the
    title row. */
@@ -7769,7 +7772,7 @@ button.wx-srv-ck-rtile {
   flex-wrap: nowrap;
   align-items: stretch;
   gap: 6px;
-  height: calc(100cqh - 44px - 64px - 24px);
+  height: 100cqh;
   min-height: 0;
   box-sizing: border-box;
   padding: 8px 10px 4px;
@@ -7903,7 +7906,9 @@ button.wx-srv-ck-rtile {
 .wx-srv-ck-car-arrow {
   display: none;
   position: absolute;
-  top: 30%;
+  /* The carousel sets this to the current picture's vertical centre. */
+  top: var(--ck-car-arrow-top, 30%);
+  transform: translateY(-50%);
   width: 44px;
   height: 44px;
   border: 1px solid var(--ck-line-strong);
