@@ -153,7 +153,7 @@ def test_delete_then_scrub_leaves_no_deleted_text_in_the_wal_even_with_a_concurr
     reader = sqlite3.connect(str(store._db_path), isolation_level=None, check_same_thread=False)
     reader.execute("BEGIN")
     reader.execute("SELECT text FROM messages WHERE seq = ?", (message.seq,)).fetchone()
-    store.delete_message(seq=message.seq, now=2.0)  # type: ignore[call-arg]
+    store.delete_message(seq=message.seq, now=2.0)
     wal = Path(f"{store._db_path}-wal")
     release = threading.Timer(0.4, lambda: reader.execute("COMMIT"))
     release.start()
