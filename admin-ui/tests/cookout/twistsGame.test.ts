@@ -236,12 +236,23 @@ describe("starters", () => {
     expect(qa(h.pane, ".wx-srv-ck-pill-full").filter((p) => !p.classList.contains("wx-srv-ck-pill-starter"))).toHaveLength(2);
   });
 
+  it("during the draft only the table's option cards carry data-ingredient: a basket chip never looks like an option", () => {
+    const h = makeHarness();
+    h.show(withStarters());
+    expect(qa(h.pane, ".wx-srv-ck-chip-ing").length).toBeGreaterThan(0);
+    const marked = qa(h.pane, "[data-ingredient]");
+    expect(marked.length).toBeGreaterThan(0);
+    expect(marked.every((e) => e.classList.contains("wx-srv-ck-opt"))).toBe(true);
+    // A pick already in the basket is not on the table any more (the browser test's "it left the table").
+    expect(h.pane.querySelector('[data-ingredient="parsley"], [data-ingredient="flat-leaf-parsley"]')).toBeNull();
+  });
+
   it("the fridge raid's turn-1 starter reads 🧊 and an encore's reads 🔁", () => {
     const h = makeHarness();
     const view = h.show(withStarters());
     expect(view.starters.map((s) => viaBadge(view, s))).toEqual(["🧊 Starter", "🔁 Starter"]);
     expect(qa(h.pane, ".wx-srv-ck-chip-badge").map((b) => b.textContent)).toEqual(["🧊 Starter", "🔁 Starter"]);
-    expect(q(h.pane, '.wx-srv-ck-chip-ing[data-ingredient="cherry-tomatoes"]').classList.contains("wx-srv-ck-chip-seed")).toBe(true);
+    expect(q(h.pane, '.wx-srv-ck-chip-ing[data-picked="cherry-tomatoes"]').classList.contains("wx-srv-ck-chip-seed")).toBe(true);
   });
 
   it("the header names the round's twists as chips", () => {
@@ -274,7 +285,7 @@ describe("secret stars and the chef gate", () => {
     expect(q(h.pane, ".wx-srv-ck-gate-text").textContent).toBe("Star one of your five picks — the chef will make it a hero");
     const toggles = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-star");
     expect(toggles).toHaveLength(5);
-    expect(toggles.map((t) => t.closest<HTMLElement>("[data-ingredient]")?.dataset["ingredient"])).toEqual([
+    expect(toggles.map((t) => t.closest<HTMLElement>("[data-picked]")?.dataset["picked"])).toEqual([
       "thick-white-toast",
       "flat-leaf-parsley",
       "double-espresso",
@@ -328,10 +339,10 @@ describe("secret stars and the chef gate", () => {
     expect(toggles.every((t) => t.disabled)).toBe(true);
     for (const t of toggles) t.click();
     expect(h.api.star).not.toHaveBeenCalled();
-    const ownChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-ingredient="double-espresso"]');
+    const ownChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="double-espresso"]');
     expect(ownChip.classList.contains("wx-srv-ck-chip-starred")).toBe(true);
     expect(ownChip.querySelector(".wx-srv-ck-star-mark, .wx-srv-ck-star-on")?.textContent).toBe("★");
-    const partnerChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-ingredient="ribeye-steak"]');
+    const partnerChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="ribeye-steak"]');
     expect(partnerChip.classList.contains("wx-srv-ck-chip-starred")).toBe(true);
     expect(partnerChip.querySelector(".wx-srv-ck-star-mark")?.textContent).toBe("★");
     expect(partnerChip.querySelector("button")).toBeNull();
@@ -480,7 +491,7 @@ describe("the wildcard cloche", () => {
     if (wild === undefined) throw new Error("fixture");
     expect(viaBadge(view, wild)).toBe("🛎️ Wildcard");
     // The basket section is drawn from the server's effective basket: the wildcard is there, with no ☆ on it.
-    const chip = q(h.pane, '.wx-srv-ck-reveal-chip[data-ingredient="red-lentils"]');
+    const chip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="red-lentils"]');
     expect(q(chip, ".wx-srv-ck-chip-badge").textContent).toBe("🛎️ Wildcard");
     expect(chip.querySelector(".wx-srv-ck-star")).toBeNull();
   });

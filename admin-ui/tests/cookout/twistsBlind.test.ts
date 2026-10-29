@@ -158,7 +158,7 @@ describe("a Blind round, finished: the picks are revealed together, the stars an
   it("the partner's star is not marked while the stars are still secret", () => {
     const h = makeHarness();
     h.show(finishedLeaking(null, {}, { gate: ["stars"] }));
-    const partnerChip = q(h.pane, `.wx-srv-ck-reveal-chip[data-ingredient="${PARTNER_STAR}"]`);
+    const partnerChip = q(h.pane, `.wx-srv-ck-reveal-chip[data-picked="${PARTNER_STAR}"]`);
     // The ten picks are revealed (it is the big reveal) ...
     expect(partnerChip.textContent).toContain("Dark brown sugar");
     // ... but which one the partner starred is not.
@@ -226,7 +226,7 @@ describe("a Blind round, finished: the picks are revealed together, the stars an
     h.show(finishedLeaking(null));
     expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred")).toHaveLength(1);
     h.show(finishedLeaking(null, { revealed: true }));
-    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred").map((c) => c.dataset["ingredient"]).sort()).toEqual(["dark-brown-sugar", "double-espresso"]);
+    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred").map((c) => c.dataset["picked"]).sort()).toEqual(["dark-brown-sugar", "double-espresso"]);
   });
 
   it("an abandoned Blind round reveals nothing: not the partner's picks, chaos pair or star", () => {

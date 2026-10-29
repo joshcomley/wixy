@@ -1122,7 +1122,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
    * own picks while stars can still change, a plain ★ otherwise. */
   function pickChip(view: CookoutView, snap: PickSnap, className: string, mine: boolean): HTMLElement {
     const chip = basketChip(snap, className);
-    chip.dataset["ingredient"] = snap.id;
+    // `data-picked`, never `data-ingredient`: that marks an option on the table, and a basket chip is not one.
+    chip.dataset["picked"] = snap.id;
     const badge = snap.via === "seed" || snap.via === "wildcard" || snap.via === "swap" ? viaBadge(view, snap) : "";
     if (badge !== "") {
       chip.classList.add(`wx-srv-ck-chip-${snap.via}`);
