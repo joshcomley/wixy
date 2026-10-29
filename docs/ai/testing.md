@@ -255,6 +255,11 @@ Pillow is a core dependency; `pillow-heif` is installed by the server extra.
   `FakeCmdServer` (real ephemeral-port uvicorn for the websocket).
   It also answers the Cookout runs (`wixy-cookout-concepts` / `wixy-cookout-recipe`) from canned JSON built out of the
   prompt's own basket (`canned_cookout_concepts` / `canned_cookout_recipe`).
+- `e2e/fixture_server.py` `POST /test/server/clear-games` + `e2e/fixtures.ts` `cleanGames` (an `auto` per-test fixture): every
+  e2e test starts with no would-you-rather / Adventure / Cookout round left in the one shared chat by an earlier test on the
+  same worker (an open round makes the page offer a game tab on load, which broke `server-wyr`'s "no game, no tabs" after
+  `server-adventure`). The fixture app also points Cookout's AI runner at the second, never-stopped fake cmd
+  (`create_app(cookout_cmd_client=...)`), as it does the Adventure researcher.
 - `wixy_server/tests/fixtures/livechat_v20.db` — a genuine schema-v20 `server.db` written by the pre-Cookout store with real
   rows in every v20 table; `test_livechat_cookout.py` copies it to prove v20 -> v21 keeps every row byte for byte.
 - The Cookout bank validator (`tooling/cookout/validate_bank.py`) is imported by `test_cookout_bank.py`; mutation tests start

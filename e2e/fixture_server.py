@@ -552,6 +552,10 @@ def main() -> None:
         adventure_researcher=adventure_researcher,
         adventure_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
         cookout_timing=CookoutTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        cookout_cmd_client=CmdChatClient(
+            portal_base_url=f"http://127.0.0.1:{fake_pin_port}",
+            chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
+        ),
         adventure_picture_finder=adventure_picture_finder,
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
@@ -905,6 +909,33 @@ def main() -> None:
             return True
 
         return {"deleted": await anyio.to_thread.run_sync(_delete)}
+
+    @app.post("/test/server/clear-games", include_in_schema=False)
+    async def _post_clear_games() -> dict[str, int]:
+        """Delete every game round (would-you-rather, Adventure, Cookout) left in the ONE shared
+        chat by an earlier test, with its files. An open round makes the page offer a game tab on
+        load, so without this a spec asserting "no game, no tabs" fails whenever the worker ran
+        a game spec before it (server-adventure then server-wyr)."""
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+
+        def _clear() -> int:
+            with store._read_txn() as conn:  # noqa: SLF001 - test-only fixture hook
+                seqs = [
+                    int(row[0])
+                    for table in ("wyr_rounds", "adv_rounds", "cookout_rounds")
+                    for row in conn.execute(f"SELECT anchor_message_seq FROM {table}")  # noqa: S608
+                ]
+            for seq in seqs:
+                for attachment_id in store.delete_message(seq=seq, now=time.time()):
+                    shutil.rmtree(
+                        paths.server_attachment_media_dir(attachment_id), ignore_errors=True
+                    )
+            if seqs:
+                app.state.livechat_notifier.publish()
+            return len(seqs)
+
+        return {"cleared": await anyio.to_thread.run_sync(_clear)}
 
     @app.post("/test/server/reset-pin-lockout", include_in_schema=False)
     async def _post_reset_pin_lockout() -> dict[str, bool]:

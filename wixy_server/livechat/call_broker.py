@@ -336,7 +336,11 @@ class CallBroker:
         # Terminal controls may already be in flight when the other side ends.
         # Only this socket's last former pair epoch is eligible; no new authority.
         harmless_terminal = isinstance(command, (Ack, Lease, Mute)) or (
-            isinstance(command, CallAction) and command.type in ("end", "decline", "failed")
+            isinstance(command, CallAction)
+            # `ready` crosses the other side's `failed`/`end` on the wire: this device finished
+            # preparing audio a few ms after the pair had already ended. It is not an
+            # ownership violation and must not close the (healthy) socket.
+            and command.type in ("end", "decline", "failed", "ready")
         )
         if harmless_terminal and command.callId == peer.last_terminal:
             return
