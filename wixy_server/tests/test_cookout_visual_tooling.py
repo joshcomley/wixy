@@ -807,3 +807,87 @@ def test_render_only_then_check_later(mods: dict[str, ModuleType], tmp_path: Pat
     assert all(e["state"] == "rendered" for e in im.journal_state(work.journal).values())
     second = go(False)  # no re-render: the existing pictures are simply checked
     assert second["rendered"] == 0 and second["accepted"] == 6 and comfy.renders == 6
+
+
+# --- the clean-environment history check (spec B.6) --------------------------------------------
+
+
+class _PackServer:
+    """Serves one file at /pack.tar from a mutable bytes holder on a loopback port."""
+
+    def __init__(self) -> None:
+        import http.server
+        import threading
+
+        outer = self
+        self.body = b""
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(outer.body)))
+                self.end_headers()
+                self.wfile.write(outer.body)
+
+            def log_message(self, *a: object) -> None:
+                pass
+
+        self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/pack.tar"
+
+    def close(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+
+def _v1_history(im: Any, tmp_path: Path, srv: _PackServer) -> list[dict[str, Any]]:
+    pics = [im.AcceptedPicture("a", b"card-a" * 9, b"thumb-a" * 9, 1, "claude-haiku-5-5")]
+    manifest = im.build_pack(pics, tmp_path / "v1.tar", pack_version=1, url=srv.url)
+    srv.body = (tmp_path / "v1.tar").read_bytes()
+    v2 = {"packVersion": 2, "pack": {"url": "http://x/v2.tar", "bytes": 5}, "items": {}}
+    return [v2, manifest]
+
+
+def test_clean_install_check_proves_v1_from_v2_onward(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    srv = _PackServer()
+    try:
+        history = _v1_history(im, tmp_path, srv)
+        assert im.clean_install_check(history, 2) == []  # real fetch, real install, fresh storage
+        assert im.clean_install_check(history, 1) == []  # nothing to prove for v1 itself
+        srv.body = srv.body + b"x"  # the release asset changed under the manifest
+        problems = im.clean_install_check(history, 2)
+        assert problems and "clean install of v1 failed" in problems[0]
+    finally:
+        srv.close()
+
+
+def test_clean_install_check_uses_a_fresh_empty_store(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    seen: list[int] = []
+
+    def fake_fetch(manifest: Any, store: Any) -> int:
+        seen.append(len(list(store.objects_dir.rglob("*.webp"))))
+        return 0  # installs nothing
+
+    no_pack: list[dict[str, Any]] = [{"packVersion": 1, "pack": None, "items": {}}]
+    assert "no earlier manifest" in im.clean_install_check(no_pack, 2)[0]
+    srv = _PackServer()
+    try:
+        with_v1 = _v1_history(im, tmp_path, srv)
+        problems = im.clean_install_check(with_v1, 2, fake_fetch)
+    finally:
+        srv.close()
+    assert seen == [0]  # no cache: it started empty
+    assert problems and "missing afterwards" in problems[0]
+
+
+def test_images_docstring_matches_the_code(mods: dict[str, ModuleType]) -> None:
+    doc = mods["images"].__doc__ or ""
+    assert "scheduled task" in doc and "nothing here claims a CLI" not in doc
+    assert "Run as a Grid task" not in doc
