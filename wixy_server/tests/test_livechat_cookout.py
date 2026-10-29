@@ -1258,8 +1258,12 @@ class TestBlindRedaction:
             "slot": 2, "name": None, "pickCount": 0, "picks": [], "chaosUsed": False,
             "vetoUsed": False,
         }  # fmt: skip
-        assert set(v["current"]["options"][0]) == {"id", "name", "category", "emoji", "blurb"}
-        assert len(v["staples"]) == 8 and v["staples"][0] == {"id": "water", "name": "Water"}
+        assert set(v["current"]["options"][0]) == {
+            "id", "name", "category", "emoji", "blurb", "what", "image",
+        }  # fmt: skip
+        assert len(v["staples"]) == 8 and v["staples"][0] == {
+            "id": "water", "name": "Water", "image": None,
+        }  # fmt: skip
         assert v["concepts"] == {"state": "none", "data": None, "error": None}
         assert v["images"] == {"state": "none", "pictures": {"a": None, "b": None, "c": None}}
         assert v["recipes"]["a"] == {
@@ -1327,8 +1331,8 @@ class TestConcepts:
         first = view["concepts"]["data"][0]
         assert first["id"] == "a" and len(first["pickedIngredients"]) == 8
         assert first["staplesUsed"] == [
-            {"id": "salt", "name": "Salt"},
-            {"id": "butter", "name": "Butter"},
+            {"id": "salt", "name": "Salt", "image": None},
+            {"id": "butter", "name": "Butter", "image": None},
         ]
         assert len(first["omitted"]) == 2 and set(first["omitted"][0]) == {"ingredient", "reason"}
 

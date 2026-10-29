@@ -17,12 +17,13 @@ import random
 from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import cookout_twists
 from wixy_server.livechat.cookout_bank import CookoutExhaustedError, load_cookout_bank_or_empty
+from wixy_server.livechat.cookout_visuals import default_visuals
 from wixy_server.livechat.models import (
     AttachmentRow,
     CookoutGenerationRow,
@@ -514,18 +515,37 @@ def veto_used(turns: Sequence[CookoutTurnRow], slot: int) -> bool:
 
 
 def _snap_json(snap: dict[str, str]) -> JsonObject:
-    """The wire `IngredientSnap`: the stored snapshot minus its draw-only `family`."""
+    """The wire `IngredientSnap`: the stored snapshot minus its draw-only `family`, plus the
+    read-time `what` and `image` looked up by id (09b E.1). The stored snapshot never changes; a
+    better picture shipped later simply shows up."""
+    extras = default_visuals().snap_extras(snap["id"])
     return {
         "id": snap["id"],
         "name": snap["name"],
         "category": snap["category"],
         "emoji": snap["emoji"],
         "blurb": snap["blurb"],
+        "what": cast("str | None", extras["what"]),
+        "image": cast("JsonObject | None", extras["image"]),
     }
 
 
-def _pick_json(turn: int | None, via: Via, snap: dict[str, str]) -> JsonObject:
-    return {**_snap_json(snap), "turn": turn, "via": via}
+def _facts_json(ingredient_id: str) -> JsonValue:
+    facts = default_visuals().facts(ingredient_id)
+    return cast("JsonValue", facts)
+
+
+def _with_facts(out: JsonObject, ingredient_id: str, facts: bool) -> JsonObject:
+    if facts:
+        out["facts"] = _facts_json(ingredient_id)
+    return out
+
+
+def _pick_json(
+    turn: int | None, via: Via, snap: dict[str, str], *, facts: bool = False
+) -> JsonObject:
+    """A `PickSnap`. `facts` is sent only once the round is past picking (09b E.1)."""
+    return _with_facts({**_snap_json(snap), "turn": turn, "via": via}, snap["id"], facts)
 
 
 def _loads(text: str | None) -> Any:
@@ -570,20 +590,24 @@ def _resolver(
         found = bank.ingredient(ingredient_id) if bank is not None else None
         if found is None:
             return None
-        return {
-            "id": found.id,
-            "name": found.name,
-            "category": found.category,
-            "emoji": found.emoji,
-            "blurb": found.blurb,
-        }
+        return bank_ingredient_json(found)
 
     return resolve
 
 
+def bank_ingredient_json(found: IngredientLike) -> JsonObject:
+    """A bank ingredient as an `IngredientSnap` (fridge search, options, resolver fallback)."""
+    return _snap_json(snapshot(found))
+
+
 def _staple_json(bank: BankLike | None, staple_id: str) -> JsonObject:
     staple = bank.staple(staple_id) if bank is not None else None
-    return {"id": staple_id, "name": staple.name if staple is not None else staple_id}
+    extras = default_visuals().snap_extras(staple_id)
+    return {
+        "id": staple_id,
+        "name": staple.name if staple is not None else staple_id,
+        "image": cast("JsonObject | None", extras["image"]),
+    }
 
 
 def _concept_cards(
@@ -794,6 +818,9 @@ def cookout_view_json(
     viewer_slot = slot_of(round_, viewer_key, viewer_email)
     blind = round_.blind
     revealed = (not blind) or round_.state == "finished"
+    # Facts ride only on picks once the round is past `picking` (09b E.1): not needed earlier, and
+    # it keeps the frequently polled view small.
+    with_facts = round_.state != "picking"
     cur = current_turn(round_, turns)
 
     players: list[JsonValue] = []
@@ -809,7 +836,11 @@ def cookout_view_json(
                 "name": name,
                 "pickCount": len(own_picks),
                 "picks": (
-                    [_pick_json(r.turn, via_of(r), s) for r, s in own_picks if s is not None]
+                    [
+                        _pick_json(r.turn, via_of(r), s, facts=with_facts)
+                        for r, s in own_picks
+                        if s is not None
+                    ]
                     if visible
                     else None
                 ),
@@ -1032,7 +1063,9 @@ def cookout_view_json(
         "wildcard": {
             "state": round_.wildcard,
             "ingredient": (
-                _snap_json(round_.wildcard_snap)
+                _with_facts(
+                    _snap_json(round_.wildcard_snap), round_.wildcard_snap["id"], with_facts
+                )
                 if round_.wildcard == "lifted" and round_.wildcard_snap is not None
                 else None
             ),

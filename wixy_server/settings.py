@@ -136,6 +136,10 @@ class Settings:
     comfy_output_dir: str
     wyr_image_model: str
     wyr_pool_size: int
+    # Cookout ingredient pictures (09b B.6): optional extra object directories searched for
+    # content-addressed pictures; `None` when unset.
+    cookout_images_dir: Path | None = None
+    cookout_images_baked_dir: Path | None = None
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -242,4 +246,10 @@ def load_settings(storage_root: Path) -> Settings:
         comfy_output_dir=_get("WIXY_COMFY_OUTPUT_DIR"),
         wyr_image_model=_get("WIXY_WYR_IMAGE_MODEL", "krea2-turbo-nvfp4"),
         wyr_pool_size=wyr_pool_size,
+        cookout_images_dir=Path(images_dir)
+        if (images_dir := _get("WIXY_COOKOUT_IMAGES_DIR"))
+        else None,
+        cookout_images_baked_dir=(
+            Path(baked_dir) if (baked_dir := _get("WIXY_COOKOUT_IMAGES_BAKED_DIR")) else None
+        ),
     )
