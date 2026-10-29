@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import Any, Literal, Protocol
 
 from builder.jsontypes import JsonObject, JsonValue
 
@@ -64,6 +64,15 @@ available), `pending` while generating, then `done` / `failed` (partial success 
 
 CookoutRecipeState = Literal["pending", "banked", "failed", "unavailable"]
 """Stage 2 (one concept's full recipe, after "Bank this"): row absent = not requested."""
+
+CookoutWildcardState = Literal["off", "armed", "offered", "lifted", "declined"]
+"""The wildcard cloche (twist T5, spec 09a §1.4): `off` unless armed at creation, `armed` until the
+tenth pick, `offered` while the players decide, then `lifted` (a surprise eleventh ingredient) or
+`declined`."""
+
+CookoutSwapState = Literal["none", "proposed", "done"]
+"""The rescue swap (twist T1, spec 09a §1.6): once per round, `proposed` while the partner chooses a
+replacement, `done` after the chef has been asked for a new generation of dishes."""
 
 
 MessageHook = Callable[["MessageRow"], Awaitable[None]]
@@ -173,6 +182,11 @@ class CookoutSummary:
     concepts: CookoutConceptsState
     banked_count: int
     rev: int
+    generation: int = 1
+    waiting: tuple[Literal["stars", "wildcard"], ...] = ()
+    swap: CookoutSwapState = "none"
+    dinner_decided: bool = False
+    cooked_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -343,7 +357,11 @@ class AdventureViewData:
 class CookoutTurnRow:
     """One turn of a Cookout round (schema v21 `cookout_turns`): `offers` is every pair the turn
     showed, as immutable ingredient snapshots (`{id, name, category, emoji, blurb, family}`), the
-    first dealt and one more per skip; `choice_id` is the picked ingredient once it is done."""
+    first dealt and one more per skip; `choice_id` is the picked ingredient once it is done.
+
+    A seeded turn (a fridge-raid or encore starter, spec 09a §1.3) has `offers == ()`, a `seed`
+    snapshot and `choice_id == seed id`. `replaced` keeps every option a veto or the chaos shelf
+    swept off the live pair (`{offer, position, snap, by}`), so it still counts as offered."""
 
     turn: int
     player: int
@@ -351,11 +369,19 @@ class CookoutTurnRow:
     choice_id: str | None
     skip_move_ids: tuple[str, ...]
     pick_move_id: str | None
+    seed: dict[str, str] | None = None
+    seed_source: Literal["fridge", "encore"] | None = None
+    replaced: tuple[dict[str, Any], ...] = ()
+    chaos_offer: int | None = None
+    veto_offer: int | None = None
+    lucky: bool = False
+    twist_move_ids: tuple[dict[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
 class CookoutRecipeRow:
-    """One concept's "Bank this" row (`cookout_recipes`); absent until requested."""
+    """One concept's "Bank this" row (`cookout_recipes`, keyed by generation); absent until
+    requested. The "We cooked it!" columns (twist T4) stay empty until the recipe is marked."""
 
     concept_id: str
     state: CookoutRecipeState
@@ -368,6 +394,26 @@ class CookoutRecipeRow:
     tries: int
     deadline_at: float | None
     banked_at: float | None
+    generation: int = 1
+    cooked_at: float | None = None
+    cooked_by: str | None = None
+    rating1: int | None = None
+    rating2: int | None = None
+    photo_message_seq: int | None = None
+    photo_attachment_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutGenerationRow:
+    """A superseded dish set (`cookout_generations`): what a completed rescue swap archived."""
+
+    generation: int
+    basket: tuple[str, ...]
+    concepts_json: str
+    pictures: dict[str, str]
+    vote1: str | None
+    vote2: str | None
+    superseded_at: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,17 +450,62 @@ class CookoutRoundRow:
     rev: int
     created_at: float
     updated_at: float
+    style: str | None = None
+    style_spun: bool = False
+    challenge: str | None = None
+    wildcard: CookoutWildcardState = "off"
+    wildcard_snap: dict[str, str] | None = None
+    wildcard_move_id: str | None = None
+    stars: bool = False
+    star1_id: str | None = None
+    star2_id: str | None = None
+    vote1: str | None = None
+    vote2: str | None = None
+    generation: int = 1
+    bank_move_ids: tuple[dict[str, Any], ...] = ()
+    swap_state: CookoutSwapState = "none"
+    swap_by: int | None = None
+    swap_out_id: str | None = None
+    swap_pair: tuple[dict[str, str], dict[str, str]] | None = None
+    swap_seen: tuple[dict[str, str], ...] = ()
+    swap_in: dict[str, str] | None = None
+    swap_move_ids: tuple[dict[str, Any], ...] = ()
+    encore_kind: Literal["leftovers", "remix"] | None = None
+    encore_from_seq: int | None = None
+    encore_generation: int | None = None
+    encore_concept_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class CookoutViewData:
     """Everything `GET /cookout/{seq}` reads, in ONE transaction: the round, its turns in order,
-    its recipe rows and the anchor's picture attachments."""
+    its recipe rows (current generation only), the anchor's picture attachments, the superseded
+    generations and the attachments of every linked "We cooked it!" photo message."""
 
     round: CookoutRoundRow
     turns: tuple[CookoutTurnRow, ...]
     recipes: tuple[CookoutRecipeRow, ...]
     attachments: tuple[AttachmentRow, ...]
+    generations: tuple[CookoutGenerationRow, ...] = ()
+    all_recipes: tuple[CookoutRecipeRow, ...] = ()
+    """Every recipe row of every generation (archived generations' recipe slots read these)."""
+    photo_attachments: tuple[AttachmentRow, ...] = ()
+    encore_title: str | None = None
+    """The source concept's title while the encore link still resolves (read-time, never stored)."""
+
+
+@dataclass(frozen=True, slots=True)
+class CookoutBankData:
+    """One Recipe-book row: a banked recipe (any generation) with its round, the round's turns (for
+    snapshot-faithful ingredient names), its attachments and — for a superseded generation — the
+    archived dish set it came from."""
+
+    round: CookoutRoundRow
+    recipe: CookoutRecipeRow
+    attachments: tuple[AttachmentRow, ...]
+    turns: tuple[CookoutTurnRow, ...] = ()
+    generation_row: CookoutGenerationRow | None = None
+    photo_attachments: tuple[AttachmentRow, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -682,6 +773,11 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
                 "concepts": row.cookout.concepts,
                 "bankedCount": row.cookout.banked_count,
                 "rev": row.cookout.rev,
+                "generation": row.cookout.generation,
+                "waiting": list(row.cookout.waiting),
+                "swap": row.cookout.swap,
+                "dinnerDecided": row.cookout.dinner_decided,
+                "cookedCount": row.cookout.cooked_count,
             }
             if row.cookout is not None
             else None
