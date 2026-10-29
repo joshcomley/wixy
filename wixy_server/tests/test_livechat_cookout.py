@@ -469,8 +469,8 @@ def view_for(
 
 
 class TestSchema:
-    def test_the_latest_schema_version_is_21(self) -> None:
-        assert _LATEST_SCHEMA_VERSION == 21
+    def test_the_latest_schema_version_is_22(self) -> None:
+        assert _LATEST_SCHEMA_VERSION == 22
 
     def test_a_fresh_database_has_the_three_tables(
         self, store: LiveChatStore, db_path: Path
@@ -484,7 +484,7 @@ class TestSchema:
             "idx_cookout_rounds_state",
             "idx_cookout_recipes_banked",
         } <= names
-        assert raw(db_path, "PRAGMA user_version") == [(21,)]
+        assert raw(db_path, "PRAGMA user_version") == [(22,)]
 
     def test_a_genuine_v20_database_migrates_and_keeps_every_row(self, db_path: Path) -> None:
         """`fixtures/livechat_v20.db` was written by the PRE-Cookout store (git bade7e50) with real
@@ -503,7 +503,7 @@ class TestSchema:
         assert {m.sender for m in listed} == {"Josh", "Rose"} and len(listed) == 4
         assert all(m.cookout is None for m in listed)
         assert {m.wyr_ref_kind for m in listed if m.wyr_ref is not None} == {"adventure"}
-        assert raw(db_path, "PRAGMA user_version") == [(21,)]
+        assert raw(db_path, "PRAGMA user_version") == [(22,)]
         names = {r[0] for r in raw(db_path, "SELECT name FROM sqlite_master")}
         assert {"cookout_rounds", "cookout_turns", "cookout_recipes"} <= names
         # The migration produces the FINAL v21 shape directly (the twist addendum is folded in).
@@ -582,6 +582,7 @@ class TestCreate:
             "swap": "none",
             "dinnerDecided": False,
             "cookedCount": 0,
+            "mode": "classic",
         }
         first, second = data_of(store, seq).turns[0].offers[0]
         blob = json.dumps(wire)

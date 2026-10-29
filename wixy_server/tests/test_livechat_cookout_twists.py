@@ -334,7 +334,7 @@ class TestSchemaFinalShape:
             "encore_from_seq", "encore_generation", "encore_concept_id",
         ):  # fmt: skip
             assert name in cols, name
-        assert raw(db_path, "PRAGMA user_version") == [(21,)]
+        assert raw(db_path, "PRAGMA user_version") == [(22,)]
 
     def test_recipes_are_keyed_by_generation_with_both_indexes(
         self, store: LiveChatStore, db_path: Path

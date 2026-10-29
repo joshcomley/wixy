@@ -344,6 +344,7 @@ class TestCreate:
                 "swap": "none",
                 "dinnerDecided": False,
                 "cookedCount": 0,
+                "mode": "classic",
             }
             assert message["text"] is None and message["sender"] == "Bubble"
             assert message["wyr"] is None and message["adventure"] is None

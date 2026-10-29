@@ -140,6 +140,10 @@ class Settings:
     # content-addressed pictures; `None` when unset.
     cookout_images_dir: Path | None = None
     cookout_images_baked_dir: Path | None = None
+    # Spec 09c §5.6: the non-Classic Cookout game modes that may be CREATED (`WIXY_COOKOUT_MODES`,
+    # comma-separated). Absent/empty = Classic only; ids that are not a loaded mode are ignored with
+    # a warning where the modes are known. Existing rounds of a loaded mode never depend on it.
+    cookout_enabled_modes: frozenset[str] = frozenset()
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -251,5 +255,8 @@ def load_settings(storage_root: Path) -> Settings:
         else None,
         cookout_images_baked_dir=(
             Path(baked_dir) if (baked_dir := _get("WIXY_COOKOUT_IMAGES_BAKED_DIR")) else None
+        ),
+        cookout_enabled_modes=frozenset(
+            part.strip().lower() for part in _get("WIXY_COOKOUT_MODES").split(",") if part.strip()
         ),
     )
