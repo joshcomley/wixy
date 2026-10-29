@@ -1,6 +1,6 @@
 // E2E for Cookout, the two-player ingredient-picking game (workspace 00058, spec/server-chat/09-cookout.md):
 // two people (two browser contexts) play a whole round with real clicks. Open mode: both see every pair,
-// the starter uses both skips (the third pair has no Skip button), the partner joins explicitly, ten
+// the starter uses both skips (the third pair's Skip is the disabled "Final pair"), the partner joins explicitly, ten
 // picks alternate, the chef's three dishes appear (the fake cmd answers the hidden concepts run with the
 // canned dishes built from the basket), "Bank this" turns a dish into a saved full recipe, and the Recipe
 // book lists it. Blind mode: the partner's pair and picks are never in the other browser's DOM nor in any
@@ -9,7 +9,9 @@
 // has the shared mini chat, and the pane fits a 360 px phone.
 //
 // The fixture server has no ComfyUI, so the dishes have no pictures (that path is covered by the unit
-// tests); everything else is the real server, store, runner and client. Set WIXY_E2E_SHOTS=<dir> to also
+// tests), so every picture is the emoji tile; everything else is the real server, store, runner and client.
+// The picture-first table (spec/server-chat/09b): a first-time INTRO card blocks the pane until "Let's cook",
+// one tap on a picture card picks, the basket is the progress button and its sheet. Set WIXY_E2E_SHOTS=<dir> to also
 // save screenshots of the main flow's key moments.
 
 import { expect, test } from "../fixtures";
@@ -106,8 +108,36 @@ function game(page: Page): Locator {
   return page.locator('.wx-srv-ck[data-game="cookout"]');
 }
 
+/** The two picture cards the active player may tap (a watcher's cards are plain divs, not buttons). */
 function pickable(page: Page): Locator {
-  return game(page).locator("button.wx-srv-ck-opt:not([disabled])");
+  return game(page).locator(".wx-srv-ck-pair button.wx-srv-ck-card:not([disabled])");
+}
+
+/** The first time a browser opens a round being picked, the intro card covers the pane and blocks every tap
+ * underneath: dismiss it with "Let's cook". */
+async function dismissIntro(page: Page): Promise<void> {
+  const intro = game(page).locator(".wx-srv-ck-intro:not([hidden])");
+  await expect(intro).toBeVisible();
+  await humanPause(page);
+  await intro.locator(".wx-srv-ck-intro-go").click();
+  await expect(intro).toHaveCount(0);
+  await humanPause(page);
+}
+
+/** Opens the basket sheet from the progress button (the old tray). */
+async function openBasket(page: Page): Promise<Locator> {
+  await humanPause(page);
+  await game(page).locator("button.wx-srv-ck-progress").click();
+  const sheet = game(page).locator('.wx-srv-ck-sheet[data-sheet="basket"]');
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
+async function closeSheet(page: Page): Promise<void> {
+  await humanPause(page);
+  await game(page).locator(".wx-srv-ck-sheet-close").click();
+  await expect(game(page).locator(".wx-srv-ck-sheet")).toBeHidden();
+  await humanPause(page);
 }
 
 /** Opens the chat header's ... menu. A game tab runs full screen with the header hidden (decisions/00194),
@@ -121,8 +151,9 @@ async function openMoreMenu(page: Page): Promise<void> {
   await page.locator(".wx-srv-more-button").click();
 }
 
-/** Starts a Cookout from the ... menu and its start sheet; the starter lands in the Cookout tab. */
-async function startCookout(page: Page, blind: boolean): Promise<string> {
+/** Starts a Cookout from the ... menu and its start sheet; the starter lands in the Cookout tab and the intro
+ * card is dismissed (unless `intro` is false). */
+async function startCookout(page: Page, blind: boolean, intro = true): Promise<string> {
   const before = await page.locator(".wx-srv-bubble-ck").count();
   await openMoreMenu(page);
   await expect(page.locator(".wx-srv-more-cookout")).toBeVisible();
@@ -137,16 +168,18 @@ async function startCookout(page: Page, blind: boolean): Promise<string> {
   await expect(game(page)).toBeVisible();
   const seq = await page.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
   expect(seq).not.toBeNull();
+  if (intro) await dismissIntro(page);
   return seq!;
 }
 
-/** The partner opens the round's card in the chat and presses Join Cookout. */
+/** The partner opens the round's card in the chat, dismisses the intro and presses Join (in the turn banner). */
 async function joinCookout(page: Page, seq: string): Promise<void> {
   const card = page.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`);
   await eventually([page], async () => await card.isVisible(), "the partner sees the Cookout card");
   await card.locator(".wx-srv-ck-mcard-open").click();
   await expect(game(page)).toBeVisible();
-  const join = game(page).locator(".wx-srv-ck-join");
+  await dismissIntro(page);
+  const join = game(page).locator(".wx-srv-ck-banner .wx-srv-ck-join");
   await expect(join).toBeVisible();
   await humanPause(page);
   await join.click();
@@ -177,10 +210,10 @@ interface Offer {
 }
 
 async function offerOn(page: Page): Promise<Offer> {
-  const cards = game(page).locator(".wx-srv-ck-pair .wx-srv-ck-opt");
+  const cards = game(page).locator(".wx-srv-ck-pair .wx-srv-ck-card");
   await expect(cards).toHaveCount(2);
   const ids = await cards.evaluateAll((els) => els.map((e) => e.getAttribute("data-ingredient") ?? ""));
-  const names = await cards.evaluateAll((els) => els.map((e) => e.querySelector(".wx-srv-ck-opt-name")?.textContent ?? ""));
+  const names = await cards.evaluateAll((els) => els.map((e) => e.querySelector(".wx-srv-ck-card-name")?.textContent ?? ""));
   return { ids, names };
 }
 
@@ -190,7 +223,7 @@ async function pickFirst(page: Page): Promise<{ offer: Offer; picked: string; pi
   const picked = offer.ids[0]!;
   await humanPause(page);
   await pickable(page).first().click();
-  await expect(game(page).locator(`[data-ingredient="${picked}"]`)).toHaveCount(0, { timeout: 15_000 });
+  await expect(game(page).locator(`.wx-srv-ck-table-stage [data-ingredient="${picked}"]`)).toHaveCount(0, { timeout: 15_000 });
   return { offer, picked, pickedName: offer.names[0]! };
 }
 
@@ -207,7 +240,7 @@ function recordBodies(page: Page): string[] {
   return bodies;
 }
 
-/** The cupboard staples are listed in every view (the tray names them), so they are never "withheld". */
+/** The cupboard staples are listed in every view, so they are never "withheld". */
 const STAPLE_IDS = new Set(["water", "salt", "black-pepper", "butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"]);
 
 /** True when any response body carries this exact ingredient id as a JSON string value. */
@@ -267,20 +300,27 @@ test.describe("Cookout", () => {
     await joinCookout(pageB, seq);
     await shot(pageB, "cookout-2-bob-joined");
 
-    // Turn 1: Alice skips twice (both are open, so Bob watches the same pairs), then the third pair
-    // has no Skip button and must be picked from.
+    // Turn 1: Alice skips twice (both are open, so Bob watches the same pairs), then the third pair's Skip is
+    // the disabled "Final pair" and must be picked from.
     const firstPair = await offerOn(pageA);
-    await eventually([pageA, pageB], async () => (await game(pageB).locator(".wx-srv-ck-pair .wx-srv-ck-opt").count()) === 2, "Bob watches the pair");
+    await eventually([pageA, pageB], async () => (await game(pageB).locator(".wx-srv-ck-pair .wx-srv-ck-card").count()) === 2, "Bob watches the pair");
     expect(await offerOn(pageB)).toEqual(firstPair);
-    await expect(game(pageB).locator("button.wx-srv-ck-opt")).toHaveCount(0); // watching, not picking
-    for (const offer of ["1", "2"]) {
+    await expect(game(pageB).locator("button.wx-srv-ck-card")).toHaveCount(0); // watching, not picking
+    const skip = game(pageA).locator(".wx-srv-ck-skip");
+    await expect(skip).toHaveText("Deal two new ones (2 left)");
+    for (const [offer, label] of [
+      ["1", "Deal two new ones (1 left)"],
+      ["2", "Final pair"],
+    ] as const) {
       await humanPause(pageA);
-      await game(pageA).locator(".wx-srv-ck-skip").click();
+      await skip.click();
       await expect(game(pageA).locator(".wx-srv-ck-pair")).toHaveAttribute("data-offer", offer);
+      await expect(skip).toHaveText(label);
       await eventually([pageA, pageB], async () => (await game(pageB).locator(".wx-srv-ck-pair").getAttribute("data-offer")) === offer, `Bob sees pair ${offer}`);
     }
-    await expect(game(pageA).locator(".wx-srv-ck-skip")).toHaveCount(0);
-    await expect(game(pageA).locator(".wx-srv-ck-final")).toBeVisible();
+    await expect(skip).toBeDisabled();
+    await expect(skip).toHaveClass(/wx-srv-ck-skip-final/);
+    await expect(game(pageA).locator(".wx-srv-ck-turn-sub")).toContainText("final pair");
     await shot(pageA, "cookout-3-forced-pick");
 
     // Ten picks, strictly alternating, starting with Alice.
@@ -296,7 +336,7 @@ test.describe("Cookout", () => {
 
     // The chef's three dishes appear for both.
     await eventually([pageA, pageB], async () => (await dishCount(pageA)) === 3 && (await dishCount(pageB)) === 3, "the three dishes", 60_000);
-    await expect(game(pageA).locator(".wx-srv-ck-reveal-chip")).toHaveCount(10);
+    await expect(game(pageA).locator(".wx-srv-ck-reveal .wx-srv-ck-rtile")).toHaveCount(10);
     for (const name of picked) await expect(game(pageB).locator(".wx-srv-ck-reveal")).toContainText(name);
     await shot(pageA, "cookout-4-three-dishes");
 
@@ -370,19 +410,31 @@ test.describe("Cookout", () => {
       // The waiting player sees a secret turn and no ingredient at all: not in the DOM...
       await eventually(pages, async () => (await game(other).locator(".wx-srv-ck-cloche").count()) === 1, "the other side shows a secret turn");
       await expect(game(other).locator("[data-ingredient]")).toHaveCount(0);
-      // The whole scrolling pane (progress, stage and the basket tray) plus the chat card for this round.
+      // The whole scrolling pane (banner, progress and stage) plus the chat card for this round.
       const text =
         (await game(other).locator(".wx-srv-ck-scroll").innerText()) + " " + (await other.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`).innerText());
       offer.ids.forEach((id, i) => {
         if (!STAPLE_IDS.has(id)) expect(textShows(text, offer.names[i]!), `${offer.names[i]} is on the waiting screen`).toBe(false);
       });
       await expect(game(other)).toContainText("Secret turn");
+      if (turn === 3) {
+        // The basket sheet (the old tray) on the waiting screen: the partner's picks are locks, never names.
+        const basket = await openBasket(other);
+        await expect(basket.locator(".wx-srv-ck-bline-secret")).not.toHaveCount(0);
+        const basketText = await basket.innerText();
+        for (const seen of offeredTo[index]!) {
+          seen.ids.forEach((id, i) => {
+            if (!STAPLE_IDS.has(id)) expect(textShows(basketText, seen.names[i]!), `${seen.names[i]} is in the waiting basket sheet`).toBe(false);
+          });
+        }
+        await closeSheet(other);
+      }
 
       if (turn === 1) await shot(pageB, "cookout-blind-secret-turn");
       const result = await pickFirst(page);
       picked.push(result.pickedName);
-      // ...and the picker's own earlier picks show to them, the partner's as locks.
-      if (turn >= 2) await expect(game(other).locator(".wx-srv-ck-pill-secret")).not.toHaveCount(0);
+      // ...and the picker's own earlier picks show to them, the partner's as locks (the progress button's lock tiles).
+      if (turn >= 2) await expect(game(other).locator(".wx-srv-ck-prog-secret")).not.toHaveCount(0);
       if (turn === 9) {
         // Nine picks in, the last turn is the only one left: still nothing of the partner's, anywhere.
         const aSaw = offeredTo[0].flatMap((o) => o.ids);
@@ -395,7 +447,7 @@ test.describe("Cookout", () => {
     // All ten are in: both screens reveal the whole basket and the chef's dishes.
     await eventually(pages, async () => (await dishCount(pageA)) === 3 && (await dishCount(pageB)) === 3, "the three dishes", 60_000);
     for (const page of pages) {
-      await expect(game(page).locator(".wx-srv-ck-reveal-chip")).toHaveCount(10);
+      await expect(game(page).locator(".wx-srv-ck-reveal .wx-srv-ck-rtile")).toHaveCount(10);
       await expect(game(page).locator(".wx-srv-ck-reveal-title")).toContainText("big reveal");
       for (const name of picked) await expect(game(page).locator(".wx-srv-ck-reveal")).toContainText(name);
     }
@@ -440,7 +492,9 @@ test.describe("Cookout", () => {
 
     // Nothing was revealed to Bob: no reveal banner, no ingredient of Alice's, in the DOM or any response.
     await expect(game(pageB).locator(".wx-srv-ck-reveal")).toHaveCount(0);
+    // No ingredient at all is left in Bob's DOM (not even hidden), and none of Alice's offered ones anywhere.
     await expect(game(pageB).locator("[data-ingredient]")).toHaveCount(0);
+    for (const id of aOffers.filter((i) => !STAPLE_IDS.has(i))) await expect(game(pageB).locator(`[data-ingredient="${id}"]`), `Alice's ${id} is in Bob's DOM`).toHaveCount(0);
     for (const id of aOffers.filter((i) => !STAPLE_IDS.has(i))) expect(bodyHasId(bodiesB, id), `Bob's responses carry ${id}`).toBe(false);
     // An ended round cannot be played on: neither side has a pair to pick from.
     await expect(pickable(pageA)).toHaveCount(0);
@@ -483,9 +537,14 @@ test.describe("Cookout", () => {
     await expect(pageA.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
     await expect(pageA.locator(`.wx-srv-bubble-ck[data-message-seq="${seq}"]`)).toBeAttached();
 
-    // Bob opens the (still picking) Cookout from its card; it replaces whatever he had.
+    // Bob opens the (still picking) Cookout from its card; it replaces whatever he had. "Whatever he had" is
+    // Alice's newer Would-you-rather, offered to him as a tab: wait until it has REACHED him first. A newer
+    // game arriving takes the one game slot (gameTabs.offer), so if it lands just after his tap it closes the
+    // Cookout he opened — under load that race failed this test 8 times in 50 (traced on cherry, 2026-10-29).
+    await expect(pageB.locator(".wx-srv-tab-wyr")).toBeVisible({ timeout: 20_000 });
     await joinCookout(pageB, seq);
     await expect(pageB.locator(".wx-srv-tab-cookout")).toBeVisible();
+    await expect(pageB.locator(".wx-srv-tab-wyr")).toBeHidden();
     await expect(pageB.locator(".wx-srv-tab-game:visible")).toHaveCount(1);
 
     // The round's chat (decisions/00194): the game runs full screen (no chat header, no composer at home);
@@ -533,34 +592,47 @@ test.describe("Cookout", () => {
     });
     const page = await context.newPage();
     await unlockServer(page, "Alice");
-    await startCookout(page, false);
+    await startCookout(page, false, false);
+    // The intro card is itself a phone-sized modal: inside the viewport, its button a real target.
+    const introCard = game(page).locator(".wx-srv-ck-intro:not([hidden]) .wx-srv-ck-intro-card");
+    await expect(introCard).toBeVisible();
+    const introBox = (await introCard.boundingBox())!;
+    expect(introBox.x).toBeGreaterThanOrEqual(0);
+    expect(introBox.x + introBox.width).toBeLessThanOrEqual(360.5);
+    expect(introBox.y).toBeGreaterThanOrEqual(0);
+    expect(introBox.y + introBox.height).toBeLessThanOrEqual(780.5);
+    expect((await game(page).locator(".wx-srv-ck-intro-go").boundingBox())!.height).toBeGreaterThanOrEqual(43.5);
+    await page.screenshot({ path: test.info().outputPath("phone-intro.png") });
+    await dismissIntro(page);
     await expect(pickable(page)).toHaveCount(2);
     await page.screenshot({ path: test.info().outputPath("phone-picking.png") });
 
-    // Nothing overflows sideways.
+    // Nothing overflows sideways, and the page itself does not scroll (the table is a fixed grid).
     const pageOverflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
     expect(pageOverflow).toBeLessThanOrEqual(1);
+    const pageScroll = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
+    expect(pageScroll).toBeLessThanOrEqual(1);
     const paneFit = await game(page).evaluate((el) => ({ scroll: el.scrollWidth, client: el.clientWidth }));
     expect(paneFit.scroll).toBeLessThanOrEqual(paneFit.client + 1);
 
-    // Both ingredient cards, the Skip button, the chat FAB and the tab bar are inside the viewport, and the
+    // Both picture cards, the Skip button, the progress button, the chat FAB and the tab bar are inside the viewport, and the
     // things a thumb has to hit are proper targets. Full screen: the composer is not at home.
     await expect(page.locator(".wx-srv-thread-view > .wx-chat-composer")).toBeHidden();
-    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
+    for (const selector of [".wx-srv-ck-card", ".wx-srv-ck-skip", ".wx-srv-ck-progress", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box, selector).not.toBeNull();
       expect(box.y + box.height, `${selector} bottom`).toBeLessThanOrEqual(780.5);
       expect(box.x, `${selector} left`).toBeGreaterThanOrEqual(0);
       expect(box.x + box.width, `${selector} right`).toBeLessThanOrEqual(360.5);
     }
-    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
+    for (const selector of [".wx-srv-ck-card", ".wx-srv-ck-skip", ".wx-srv-ck-progress", ".wx-srv-ck .wx-srv-float-fab", ".wx-srv-tab-chat", ".wx-srv-tab-cookout"]) {
       const box = (await page.locator(selector).first().boundingBox())!;
       expect(box.height, `${selector} height`).toBeGreaterThanOrEqual(43.5);
     }
     // The FAB never covers a play control: scrolled to the bottom, the last control ends above it.
     await game(page).locator(".wx-srv-ck-scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight));
     const fab = (await page.locator(".wx-srv-ck .wx-srv-float-fab").boundingBox())!;
-    for (const selector of [".wx-srv-ck-opt", ".wx-srv-ck-skip"]) {
+    for (const selector of [".wx-srv-ck-card", ".wx-srv-ck-skip", ".wx-srv-ck-progress"]) {
       for (const box of await Promise.all((await page.locator(selector).all()).map((l) => l.boundingBox()))) {
         if (box === null) continue;
         const overlaps = box.x < fab.x + fab.width && fab.x < box.x + box.width && box.y < fab.y + fab.height && fab.y < box.y + box.height;
@@ -580,6 +652,257 @@ test.describe("Cookout", () => {
       return top !== null && (top === el || el.contains(top));
     });
     expect(hit).toBe(true);
+    await context.close();
+  });
+});
+
+// -- The chef stage's fit (spec/server-chat/09b-cookout-visual.md §D.4) ----------------------------------------
+// While the chef works, its box (heading row + the ingredient carousel) is the first thing in the stage and
+// exactly the visible height of the column, at every 09b viewport. The round's view is rewritten on its way
+// to the browser into "all ten picked, the chef at work", with the LONGEST text the catalogue allows (a
+// 36-character name, a 60-character what-line, three 150-character facts); pictures are absent (the emoji
+// tile has the picture's box, so the fit is the same). With a normal-height pane (>= 508 px) everything fits
+// with no overflow at all; below that only the words block under the picture may scroll, on its own, and
+// nothing is ever clipped or under the title row.
+
+const LONG_NAME = "Frozen puff pastry vol-au-vent bites";
+const LONG_WHAT = "Small, crisp cases of buttery puff pastry, ready for filling";
+
+function longFact(n: number): string {
+  const text = `Fact ${n}: puff pastry is made by folding butter into dough many times, so that thin layers puff up and separate in the heat of a very hot oven. `;
+  return text.repeat(2).slice(0, 150);
+}
+
+function chefPending(raw: Record<string, unknown>): Record<string, unknown> {
+  const picks = (slot: 1 | 2): unknown[] =>
+    [0, 1, 2, 3, 4].map((i) => ({
+      id: `long-${slot}-${i}`,
+      name: LONG_NAME,
+      category: "prepared-pantry",
+      emoji: "🥐",
+      blurb: "",
+      what: LONG_WHAT,
+      image: null,
+      facts: [longFact(1), longFact(2), longFact(3)],
+      turn: i * 2 + slot,
+      via: "pick",
+    }));
+  const players = raw["players"] as Array<Record<string, unknown>>;
+  return {
+    ...raw,
+    state: "finished",
+    revealed: true,
+    current: null,
+    players: [
+      { ...players[0], pickCount: 5, picks: picks(1) },
+      { ...players[1], name: "Bob", pickCount: 5, picks: picks(2) },
+    ],
+    basket: null,
+    concepts: { state: "pending", data: null, error: null },
+    images: { state: "none", pictures: { a: null, b: null, c: null } },
+    gate: { waitingFor: [] },
+  };
+}
+
+interface ChefFit {
+  /** Every expected part was found (the names of any missing one otherwise). */
+  missing: string[];
+  paneHeight: number;
+  pageScrolls: boolean;
+  columnScrolls: boolean;
+  chefTop: number;
+  chefBottom: number;
+  chefHeight: number;
+  viewTop: number;
+  viewBottom: number;
+  columnHeight: number;
+  headingTop: number;
+  headingBottom: number;
+  picW: number;
+  picH: number;
+  picTop: number;
+  picBottom: number;
+  wordsScroll: string;
+  overflow: string[];
+  dotHit: boolean;
+  nextShown: boolean;
+  nextHit: boolean;
+  nextCentre: number;
+  slideName: string;
+}
+
+/** Measures the chef's box on ANY markup: a part that is not there is reported in `missing` (and its
+ * geometry reads as zero), so an old or broken layout fails an explicit expectation, never a crash. */
+async function measureChef(page: Page): Promise<ChefFit> {
+  return await page.evaluate((): ChefFit => {
+    const missing: string[] = [];
+    const pane = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"]');
+    const scroll = pane?.querySelector<HTMLElement>(".wx-srv-ck-scroll") ?? null;
+    if (scroll !== null) scroll.scrollTop = 0;
+    const chef = pane?.querySelector<HTMLElement>(".wx-srv-ck-chef") ?? null;
+    const zero = { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 };
+    const rect = (el: Element | null | undefined, name: string): { top: number; bottom: number; left: number; right: number; width: number; height: number } => {
+      if (el === null || el === undefined) {
+        missing.push(name);
+        return zero;
+      }
+      return el.getBoundingClientRect();
+    };
+    const view = rect(scroll, "column");
+    const chefBox = rect(chef, "chef box");
+    const slides = [...(chef?.querySelectorAll<HTMLElement>(".wx-srv-ck-car-slide") ?? [])];
+    const slide =
+      slides.find((s) => {
+        const r = s.getBoundingClientRect();
+        return r.left >= view.left - 1 && r.right <= view.right + 1;
+      }) ?? slides[0];
+    if (slide === undefined) missing.push("carousel slide");
+    const pic = rect(slide?.querySelector(".wx-srv-ck-pic"), "slide picture");
+    const words = slide?.querySelector<HTMLElement>(".wx-srv-ck-car-words") ?? null;
+    const heading = rect(chef?.querySelector(".wx-srv-ck-chef-text"), "chef heading");
+    const overflow: string[] = [];
+    for (const node of chef?.querySelectorAll<HTMLElement>("*") ?? []) {
+      // The track scrolls sideways by design (one slide at a time); a picture's own box is exempt.
+      if (node.classList.contains("wx-srv-ck-car-track") || node.tagName === "IMG") continue;
+      if (node.getClientRects().length === 0) continue;
+      if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) overflow.push(node.className);
+    }
+    const hit = (el: HTMLElement | null): boolean => {
+      if (el === null) return false;
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return at !== null && el.contains(at);
+    };
+    const next = chef?.querySelector<HTMLElement>(".wx-srv-ck-car-next") ?? null;
+    const nextShown = next !== null && getComputedStyle(next).display !== "none";
+    const nextBox = next?.getBoundingClientRect();
+    return {
+      missing,
+      paneHeight: pane?.getBoundingClientRect().height ?? 0,
+      pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight,
+      columnScrolls: scroll !== null && scroll.scrollHeight > scroll.clientHeight + 1 && chef !== null && chefBox.bottom > view.bottom + 1,
+      chefTop: chefBox.top,
+      chefBottom: chefBox.bottom,
+      chefHeight: chefBox.height,
+      viewTop: view.top,
+      viewBottom: view.bottom,
+      columnHeight: scroll === null ? 0 : scroll.clientHeight - 24,
+      headingTop: heading.top,
+      headingBottom: heading.bottom,
+      picW: pic.width,
+      picH: pic.height,
+      picTop: pic.top,
+      picBottom: pic.bottom,
+      wordsScroll: words === null ? "" : getComputedStyle(words).overflowY,
+      overflow,
+      dotHit: hit(chef?.querySelector<HTMLElement>(".wx-srv-ck-car-dot-on") ?? null),
+      nextShown,
+      nextHit: nextShown && hit(next),
+      nextCentre: nextBox === undefined ? 0 : nextBox.top + nextBox.height / 2,
+      slideName: slide?.querySelector(".wx-srv-ck-car-name")?.textContent ?? "",
+    };
+  });
+}
+
+/** Every expectation about one measured chef box (`where` names the case in a failure). */
+function expectChefFits(fit: ChefFit, where: string): void {
+  expect(fit.missing, `${where}: parts of the chef stage not found`).toEqual([]);
+  expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
+  // The working box is whole inside the visible column: under the title row, above the chat row.
+  expect(fit.chefTop, `${where}: chef box top`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+  expect(fit.chefBottom, `${where}: chef box bottom`).toBeLessThanOrEqual(fit.viewBottom + 1);
+  expect(fit.columnScrolls, `${where}: the column scrolls the chef box`).toBe(false);
+  expect(fit.headingTop, `${where}: heading under the title row`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+  expect(fit.headingBottom, `${where}: heading drawn`).toBeGreaterThan(fit.headingTop);
+  // The picture keeps 96 px on a normal-height pane, 64 px on a shorter one, beside the longest words.
+  const minPic = fit.paneHeight >= 508 ? 95.5 : 63.5;
+  expect(fit.picH, `${where}: picture height`).toBeGreaterThanOrEqual(minPic);
+  expect(fit.picW, `${where}: picture width`).toBeGreaterThanOrEqual(minPic);
+  expect(fit.slideName).toBe(LONG_NAME);
+  expect(fit.dotHit, `${where}: the current dot can be tapped`).toBe(true);
+  if (fit.nextShown) {
+    expect(fit.nextHit, `${where}: the next arrow can be tapped`).toBe(true);
+    // The arrow sits at the picture's vertical centre.
+    expect(Math.abs(fit.nextCentre - (fit.picTop + fit.picBottom) / 2), `${where}: arrow centred on the picture`).toBeLessThanOrEqual(2);
+  }
+  // Nothing in the box overflows except the words block under the picture — which, with three of the
+  // longest facts, may not fit beside the picture on a phone: it then scrolls on its own (never clipped).
+  expect(fit.overflow.every((c) => c === "wx-srv-ck-car-words"), `${where}: overflow ${fit.overflow.join(", ")}`).toBe(true);
+  if (fit.overflow.length > 0) expect(fit.wordsScroll, `${where}: the words block scrolls`).toBe("auto");
+}
+
+/** Measures once the chef box has settled at the column's height (after a resize or a banner). */
+async function settledChef(page: Page, where: string): Promise<ChefFit> {
+  let fit = await measureChef(page);
+  await expect
+    .poll(
+      async () => {
+        fit = await measureChef(page);
+        return fit.missing.length === 0 && Math.abs(fit.chefHeight - fit.columnHeight) <= 1;
+      },
+      { message: `${where}: the chef box fills exactly the visible column`, timeout: 3_000 },
+    )
+    .toBe(true);
+  return fit;
+}
+
+test.describe("Cookout chef stage", () => {
+  test("the chef's carousel fits the screen at every 09b viewport, with the longest text", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 360, height: 640 } });
+    const page = await context.newPage();
+    const errors = trackConsoleErrors(page);
+    await unlockServer(page, "Alice");
+    const stopAwake = keepAwake([page]);
+    // Every read of a Cookout round comes back as "the chef is at work", with the longest text.
+    await page.route(/\/api\/admin\/server\/cookout\/\d+\?as=/, async (route) => {
+      const response = await route.fetch();
+      const json = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({ response, json: chefPending(json) });
+    });
+    await startCookout(page, false, false);
+    await expect(game(page).locator(".wx-srv-ck-chef")).toBeVisible();
+    for (const [width, height, inset] of [
+      [360, 640, 0],
+      [360, 640, 34],
+      [390, 844, 0],
+      [390, 844, 34],
+      [360, 560, 0],
+      [360, 560, 34],
+      [360, 480, 0],
+      [360, 480, 34],
+      [1280, 800, 0],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate((px) => {
+        let style = document.getElementById("e2e-inset");
+        if (style === null) {
+          style = document.createElement("style");
+          style.id = "e2e-inset";
+          document.head.append(style);
+        }
+        style.textContent = px > 0 ? `.wx-srv-tabs { padding-bottom: ${px}px !important }` : "";
+      }, inset);
+      const where = `${width}x${height} inset ${inset}`;
+      expectChefFits(await settledChef(page, where), where);
+    }
+    // The End confirm cannot open over the chef (End exists only while picking) — and were any banner to
+    // stand above the column, the box would still be exactly the column's height: force one and re-check.
+    await page.setViewportSize({ width: 360, height: 640 });
+    await expect(game(page).locator(".wx-srv-ck-end")).toBeHidden();
+    await expect(game(page).locator(".wx-srv-ck-confirm")).toBeHidden();
+    await page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"] .wx-srv-ck-confirm');
+      if (banner !== null) banner.hidden = false;
+    });
+    expectChefFits(await settledChef(page, "360x640 with the confirm banner"), "360x640 with the confirm banner");
+    await page.evaluate(() => {
+      const banner = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"] .wx-srv-ck-confirm');
+      if (banner !== null) banner.hidden = true;
+    });
+    // No toast about a pick lingers over the carousel.
+    await expect(game(page).locator(".wx-srv-ck-toast")).toBeHidden();
+    stopAwake();
+    expect(errors.filter((m) => !/favicon/i.test(m))).toEqual([]);
     await context.close();
   });
 });

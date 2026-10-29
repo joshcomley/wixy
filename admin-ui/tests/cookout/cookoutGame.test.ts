@@ -9,8 +9,9 @@ import {
   categoryName,
   createCookoutGame,
   formatElapsed,
+  roleShort,
   skipLabel,
-  turnPrompt,
+  turnBanner,
   type CookoutGame,
   type CookoutGameApi,
 } from "../../src/server/cookout/cookoutGame";
@@ -25,7 +26,10 @@ import {
   finishedView,
   picture,
   pickingView,
+  P1_PICKS,
   P2_PICKS,
+  imageUrl,
+  imaged,
   type Json,
 } from "./fixtures";
 
@@ -200,19 +204,49 @@ function ids(): () => string {
 
 describe("words", () => {
   it("the skip button says how many skips are left, and the third pair is final", () => {
-    expect(skipLabel(0)).toBe("Neither — deal 2 new options (2 skips left)");
-    expect(skipLabel(1)).toBe("Neither — deal final 2 options (1 skip left)");
-    expect(skipLabel(2)).toBe("Final pair — pick one of the two above");
+    expect(skipLabel(0)).toBe("Deal two new ones (2 left)");
+    expect(skipLabel(1)).toBe("Deal two new ones (1 left)");
+    expect(skipLabel(2)).toBe("Final pair");
+    expect(roleShort("protein")).toBe("🍗 protein");
+    expect(roleShort(null)).toBe("");
   });
 
   it("the turn banner names the pick and the go, or who is being waited for", () => {
-    expect(turnPrompt(v(pickingView({ turn: 3, offerIndex: 0 })), "Cupcake")).toBe("Your turn — Pick 2 of 5 (Go 1 of 3)");
-    expect(turnPrompt(v(pickingView({ turn: 4, you: 1, showOptions: false, blind: true, p2Picks: null, p2Count: 1 })), null)).toBe(
-      "Waiting for Cupcake — Pick 2 of 5",
+    expect(turnBanner(v(pickingView({ turn: 3, offerIndex: 0 })), "Cupcake")).toEqual({
+      line1: "Your turn — tap the one you want",
+      line2: "Pick 2 of 5 · 🍗 protein · 2 new pairs left",
+      join: false,
+      mine: true,
+    });
+    expect(turnBanner(v(pickingView({ turn: 3, offerIndex: 2, options: [LENTILS, SALMON] })), "Cupcake").line2).toBe(
+      "Pick 2 of 5 · 🍗 protein · final pair",
     );
-    expect(turnPrompt(v(pickingView({ turn: 2, player2: null, showOptions: false, waitingForJoin: true })), "Cupcake")).toBe(
-      "Waiting for Cupcake to join — Pick 1 of 5",
-    );
+    expect(turnBanner(v(pickingView({ turn: 4, you: 1, showOptions: false, blind: true, p2Picks: null, p2Count: 1 })), null)).toMatchObject({
+      line1: "Cupcake is choosing…",
+      line2: "Secret pick · Pick 2 of 5",
+      mine: false,
+    });
+    expect(turnBanner(v(pickingView({ turn: 4, you: 1 })), null)).toMatchObject({
+      line1: "Cupcake is choosing…",
+      line2: "Pick 2 of 5 · 🍗 protein",
+    });
+    expect(turnBanner(v(pickingView({ turn: 2, player2: null, showOptions: false, waitingForJoin: true })), "Cupcake")).toMatchObject({
+      line1: "Waiting for Cupcake to join",
+      join: false,
+    });
+  });
+
+  it("the banner offers Join to the joiner, and writes a long partner name as 'your partner'", () => {
+    expect(turnBanner(v(pickingView({ turn: 2, you: null, player2: null, showOptions: false, waitingForJoin: true })), "Cupcake")).toMatchObject({
+      line1: "Join to take your turn",
+      join: true,
+    });
+    expect(turnBanner(v(pickingView({ turn: 2, player2: null, showOptions: false, waitingForJoin: true })), "Bartholomew-Maximilian")).toMatchObject({
+      line1: "Waiting for your partner to join",
+    });
+    const long = pickingView({ turn: 4, you: 1 });
+    ((long["players"] as Json[])[1] as Json)["name"] = "Bartholomew-Maximilian";
+    expect(turnBanner(v(long), null).line1).toBe("Your partner is choosing…");
   });
 
   it("category ids read as the bank's names", () => {
@@ -355,12 +389,13 @@ describe("the start sheet", () => {
 });
 
 describe("Join", () => {
-  it("shows a Join Cookout button to a viewer who is not Player 1 while Slot 2 is free, and joins", async () => {
+  it("shows a Join button in the banner to a viewer who is not Player 1 while Slot 2 is free, and joins", async () => {
     const h = make();
-    h.show(pickingView({ you: null, player2: null }));
-    const join = q<HTMLButtonElement>(h.pane, ".wx-srv-ck-join");
-    expect(join.textContent).toBe("Join Cookout");
-    h.api.join.mockResolvedValue(ok(pickingView({ you: 2, rev: 4 })));
+    h.show(pickingView({ you: null, player2: null, turn: 2, showOptions: false, waitingForJoin: true }));
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Join to take your turn");
+    const join = q<HTMLButtonElement>(q(h.pane, ".wx-srv-ck-banner"), ".wx-srv-ck-join");
+    expect(join.textContent).toBe("Join");
+    h.api.join.mockResolvedValue(ok(pickingView({ you: 2, rev: 4, turn: 2 })));
     join.click();
     expect(h.api.join).toHaveBeenCalledWith(41);
     await flush();
@@ -371,30 +406,45 @@ describe("Join", () => {
     const h = make();
     h.show(pickingView({ you: 1, player2: null }));
     expect(h.pane.querySelector(".wx-srv-ck-join")).toBeNull();
+    h.show(pickingView({ you: 1, player2: null, turn: 2, showOptions: false, waitingForJoin: true, rev: 4 }));
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Waiting for Cupcake to join");
+    expect(h.pane.querySelector(".wx-srv-ck-join")).toBeNull();
     h.show(pickingView({ you: null, rev: 5 }));
     expect(h.pane.querySelector(".wx-srv-ck-join")).toBeNull();
   });
 });
 
 describe("the draft: two cards, two skips", () => {
-  it("shows the two ingredient cards with emoji, category and blurb, and the first skip", () => {
+  it("shows the two ingredient picture cards (emoji fallback, name, what-line), the banner and the first skip", () => {
     const h = make();
     h.show(pickingView({ turn: 1, offerIndex: 0 }));
-    const cards = h.pane.querySelectorAll<HTMLButtonElement>("button.wx-srv-ck-opt");
+    const stage = q(h.pane, ".wx-srv-ck-table-stage");
+    const cards = stage.querySelectorAll<HTMLButtonElement>("button.wx-srv-ck-card");
     expect([...cards].map((c) => c.dataset["ingredient"])).toEqual(["ribeye-steak", "salmon-fillet"]);
-    expect(q(cards[0] as HTMLElement, ".wx-srv-ck-opt-cat").textContent).toBe("Meat & Poultry");
-    expect(q(cards[0] as HTMLElement, ".wx-srv-ck-opt-name").textContent).toBe("Ribeye steak");
-    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Your turn — Pick 1 of 5 (Go 1 of 3)");
-    expect(q(h.pane, ".wx-srv-ck-skip").textContent).toBe("Neither — deal 2 new options (2 skips left)");
+    expect(cards[0]?.getAttribute("aria-label")).toBe("Pick Ribeye steak");
+    // No picture in the fixture: the tile falls back on the ingredient's emoji, in the same box.
+    expect(q(cards[0] as HTMLElement, ".wx-srv-ck-pic .wx-srv-ck-pic-emoji").textContent).toBe("🥩");
+    expect(q(cards[0] as HTMLElement, ".wx-srv-ck-card-name").textContent).toBe("Ribeye steak");
+    // The blurb is short enough to show whole; there is no category label on a card any more.
+    expect(q(cards[0] as HTMLElement, ".wx-srv-ck-card-what").textContent).toBe("Richly marbled and full of flavour.");
+    expect(h.pane.querySelector(".wx-srv-ck-opt-cat")).toBeNull();
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Your turn — tap the one you want");
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Pick 1 of 5 · 🍗 protein · 2 new pairs left");
+    expect(q(h.pane, ".wx-srv-ck-skip").textContent).toBe("Deal two new ones (2 left)");
+    // Nothing needs a twist, so there is no 🎲 button.
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
   });
 
-  it("the second pair offers the final skip, the third has no skip at all", () => {
+  it("the second pair offers the last skip, the third pair's skip is the disabled 'Final pair'", () => {
     const h = make();
     h.show(pickingView({ offerIndex: 1, options: [LENTILS, SALMON] }));
-    expect(q(h.pane, ".wx-srv-ck-skip").textContent).toBe("Neither — deal final 2 options (1 skip left)");
+    expect(q(h.pane, ".wx-srv-ck-skip").textContent).toBe("Deal two new ones (1 left)");
+    expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").disabled).toBe(false);
     h.show(pickingView({ offerIndex: 2, options: [LENTILS, SALMON], rev: 9 }));
-    expect(h.pane.querySelector(".wx-srv-ck-skip")).toBeNull();
-    expect(q(h.pane, ".wx-srv-ck-final").textContent).toBe("Final pair — pick one of the two above");
+    const skip = q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip");
+    expect(skip.textContent).toBe("Final pair");
+    expect(skip.disabled).toBe(true);
+    expect(skip.classList.contains("wx-srv-ck-skip-final")).toBe(true);
   });
 
   it("a skip sends the turn, the offer and the pair on screen with a fresh move id", async () => {
@@ -405,7 +455,8 @@ describe("the draft: two cards, two skips", () => {
     expect(h.api.skip).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, optionIds: [LENTILS.id, SALMON.id] });
     expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-skip").disabled).toBe(true);
     await flush();
-    expect(h.pane.querySelector(".wx-srv-ck-final")).not.toBeNull();
+    expect(q(h.pane, ".wx-srv-ck-skip").classList.contains("wx-srv-ck-skip-final")).toBe(true);
+    expect(q(h.pane, ".wx-srv-ck-skip").textContent).toBe("Final pair");
   });
 
   it("a skip after the pair changed in place (a veto, same offer) names the NEW pair, not the one it replaced", async () => {
@@ -425,6 +476,11 @@ describe("the draft: two cards, two skips", () => {
       .mockResolvedValueOnce({ ok: false, kind: "unavailable" })
       .mockResolvedValueOnce(ok(pickingView({ turn: 2, rev: 9, p1Picks: [RIBEYE], showOptions: false, blind: true, p2Picks: null })));
     q<HTMLButtonElement>(h.pane, '[data-ingredient="ribeye-steak"]').click();
+    // ONE tap picks: the tapped card says "Picking…", the other is dimmed, both are disabled.
+    expect(q(h.pane, '[data-ingredient="ribeye-steak"]').classList.contains("wx-srv-ck-card-chosen")).toBe(true);
+    expect(q(h.pane, '[data-ingredient="ribeye-steak"] .wx-srv-ck-card-busy').textContent).toBe("Picking…");
+    expect(q(h.pane, '[data-ingredient="salmon-fillet"]').classList.contains("wx-srv-ck-card-dim")).toBe(true);
+    expect(h.pane.querySelectorAll("button.wx-srv-ck-card:disabled")).toHaveLength(2);
     await flush();
     const retry = [...h.clock.timeouts.values()][0];
     retry?.();
@@ -459,9 +515,10 @@ describe("the draft: two cards, two skips", () => {
   it("in Open mode the partner's pair is shown read-only while they choose", () => {
     const h = make();
     h.show(pickingView({ you: 2, turn: 3 }));
-    expect(h.pane.querySelectorAll("button.wx-srv-ck-opt")).toHaveLength(0);
-    expect(h.pane.querySelectorAll("div.wx-srv-ck-opt")).toHaveLength(2);
-    expect(q(h.pane, ".wx-srv-ck-watch").textContent).toBe("Josh is choosing between:");
+    expect(h.pane.querySelectorAll("button.wx-srv-ck-card")).toHaveLength(0);
+    expect(h.pane.querySelectorAll("div.wx-srv-ck-card")).toHaveLength(2);
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Josh is choosing…");
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Pick 2 of 5 · 🍗 protein");
     expect(h.pane.querySelector(".wx-srv-ck-skip")).toBeNull();
   });
 });
@@ -470,29 +527,48 @@ describe("Blind mode", () => {
   it("shows the covered cloche on the partner's turn, with no ingredient string of theirs anywhere", () => {
     const h = make();
     // The view carries what the server sends Player 1 on Player 2's turn: no pair, no role, no picks.
-    h.show(pickingView({ blind: true, you: 1, turn: 4, showOptions: false, p2Picks: null, p2Count: 1 }));
+    // The viewer's own two picks carry pictures (hash "a"); nothing of the partner's has a picture here.
+    const mine = P1_PICKS.slice(0, 2).map((s) => imaged(s, "a"));
+    h.show(pickingView({ blind: true, you: 1, turn: 4, showOptions: false, p1Picks: mine, p2Picks: null, p2Count: 1 }));
     expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("🕵️ Secret turn: Cupcake is choosing…");
     expect(q(h.pane, ".wx-srv-ck-badge").textContent).toBe("Blind");
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Cupcake is choosing…");
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Secret pick · Pick 2 of 5");
     const text = h.pane.textContent ?? "";
     const html = h.pane.innerHTML;
     for (const partner of [...P2_PICKS, RIBEYE, SALMON]) {
       expect(text).not.toContain(partner["name"] as string);
       expect(html).not.toContain(partner["id"] as string);
     }
+    expect(html).toContain(imageUrl("a")); // the viewer's own pictures do draw...
+    expect(html).not.toContain(imageUrl("b")); // ...and no partner picture is anywhere
     expect(text).not.toContain("protein");
-    // The partner's pick is a counted secret, never a name.
-    expect(h.pane.querySelectorAll(".wx-srv-ck-chip-secret")).toHaveLength(1);
-    expect(h.pane.querySelectorAll(".wx-srv-ck-pill-secret")).toHaveLength(1);
+    // The partner's pick is one counted secret (a lock tile in the progress button), never a name.
+    expect(h.pane.querySelectorAll(".wx-srv-ck-prog-secret")).toHaveLength(1);
+    expect(h.pane.querySelectorAll('.wx-srv-ck-prog-group[data-slot="1"] .wx-srv-ck-prog-full')).toHaveLength(2);
+    expect(h.pane.querySelector(".wx-srv-ck-card")).toBeNull();
+    // The basket sheet says the same: "Secret pick", and still nothing of theirs.
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    const sheet = q(h.pane, '.wx-srv-ck-sheet[data-sheet="basket"]');
+    expect(sheet.querySelectorAll('.wx-srv-ck-bgroup[data-slot="2"] .wx-srv-ck-bline-secret')).toHaveLength(1);
+    expect(q(sheet, ".wx-srv-ck-bline-secret .wx-srv-ck-bline-name").textContent).toBe("Secret pick");
+    for (const partner of [...P2_PICKS, RIBEYE, SALMON]) {
+      expect(sheet.textContent).not.toContain(partner["name"] as string);
+      expect(sheet.innerHTML).not.toContain(partner["id"] as string);
+    }
   });
 
   it("the ten picks are revealed together when the round finishes, flipping open once", () => {
     const h = make();
     h.show(pickingView({ blind: true, you: 1, turn: 10, showOptions: false, p2Picks: null, p2Count: 4 }));
     h.show(finishedView({ blind: true, concepts: "pending", images: "none", rev: 20 }));
-    const chips = h.pane.querySelectorAll(".wx-srv-ck-reveal-chip");
+    const chips = h.pane.querySelectorAll(".wx-srv-ck-rtile");
     expect(chips).toHaveLength(10);
     expect([...chips].every((c) => c.classList.contains("wx-srv-ck-flip"))).toBe(true);
+    // The fixture picks carry no turn, so they all land in the one "Extras" group.
+    expect(h.pane.querySelectorAll(".wx-srv-ck-rgroup[data-group]")).toHaveLength(1);
     expect(q(h.pane, ".wx-srv-ck-reveal-title").textContent).toContain("The big reveal");
+    expect(q(h.pane, '.wx-srv-ck-rtile[data-picked="ribeye-steak"] .wx-srv-ck-rtile-name').textContent).toBe("Ribeye steak");
     expect(h.pane.textContent).toContain("Ribeye steak");
     // The next refresh keeps the banner (no second flip, no cut-short flip).
     const banner = q(h.pane, ".wx-srv-ck-reveal");
@@ -518,7 +594,9 @@ describe("Blind mode, every viewer", () => {
     expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("🕵️ Secret turn: Josh is choosing…");
     noPartnerStrings(h.pane);
     expect(h.pane.textContent).not.toContain("Thick-cut white toast");
-    expect(h.pane.querySelectorAll(".wx-srv-ck-chip-secret")).toHaveLength(2);
+    expect(h.pane.querySelectorAll(".wx-srv-ck-prog-secret")).toHaveLength(2);
+    expect(h.pane.querySelector(".wx-srv-ck-card")).toBeNull();
+    expect(h.pane.innerHTML).not.toContain("/admin/cookout-img/");
   });
 
   it("an abandoned Blind round never reveals the partner's picks", () => {
@@ -532,15 +610,19 @@ describe("Blind mode, every viewer", () => {
     const h = make();
     h.show(pickingView({ blind: true, you: 1, turn: 2, player2: null, showOptions: false, waitingForJoin: true, p2Picks: null }));
     expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("Waiting for Cupcake to join…");
-    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Waiting for Cupcake to join — Pick 1 of 5");
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Waiting for Cupcake to join");
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Pick 1 of 5 is theirs");
     noPartnerStrings(h.pane);
   });
 
-  it("the slots still to fill are one '… to go' pill, never a row of lone empty slots", () => {
+  it("the slots still to fill are one '… to go' line per player in the basket sheet, never a row of lone empty lines", () => {
     const h = make();
     h.show(pickingView({ blind: true, you: 1, turn: 4, showOptions: false, p2Picks: null, p2Count: 1 }));
-    const rows = [...h.pane.querySelectorAll(".wx-srv-ck-tray-row")];
-    expect(rows.map((r) => [...r.querySelectorAll(".wx-srv-ck-chip-empty")].map((e) => e.textContent))).toEqual([["3 to go"], ["4 to go"]]);
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    const groups = [...h.pane.querySelectorAll('.wx-srv-ck-sheet[data-sheet="basket"] .wx-srv-ck-bgroup')];
+    expect(groups.map((g) => [...g.querySelectorAll(".wx-srv-ck-bline-left")].map((e) => e.textContent))).toEqual([["3 to go"], ["4 to go"]]);
+    // Player 2's one pick is a counted secret; the empty slots are not lines of their own.
+    expect(groups.map((g) => g.querySelectorAll(".wx-srv-ck-bline").length)).toEqual([2, 1]);
   });
 });
 
@@ -741,6 +823,6 @@ describe("the header", () => {
     q<HTMLButtonElement>(h.pane, ".wx-srv-ck-close").click();
     expect(h.tabs.seqOf("cookout")).toBeNull();
     expect(h.pane.hidden).toBe(true);
-    expect(h.pane.querySelector(".wx-srv-ck-opt")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-card")).toBeNull();
   });
 });

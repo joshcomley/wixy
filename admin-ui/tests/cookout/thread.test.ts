@@ -195,7 +195,7 @@ describe("cookout: starting a round", () => {
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck")!.hidden).toBe(false);
     expect(thread.element.querySelector(".wx-srv-bubble-ck .wx-srv-ck-mcard")).not.toBeNull();
     // Player 1 takes Turn 1 at once: the pair is on screen.
-    expect(thread.element.querySelectorAll(".wx-srv-ck button.wx-srv-ck-opt")).toHaveLength(2);
+    expect(thread.element.querySelectorAll(".wx-srv-ck button.wx-srv-ck-card")).toHaveLength(2);
     expect(getCookout).toHaveBeenCalledWith(SESSION, 9, "Josh");
     thread.teardown();
   });

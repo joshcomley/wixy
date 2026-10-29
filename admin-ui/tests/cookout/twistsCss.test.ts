@@ -13,8 +13,8 @@ const BUNDLE = readFileSync(join(HERE, "..", "..", "..", "wixy_server", "static"
 
 /** A representative selector of every twist surface. */
 const SELECTORS = [
-  ".wx-srv-ck-twists-toggle",
-  ".wx-srv-ck-lucky",
+  ".wx-srv-ck-twists-btn",
+  ".wx-srv-ck-twist-item",
   ".wx-srv-ck-chaos",
   ".wx-srv-ck-sweep",
   ".wx-srv-ck-star",
