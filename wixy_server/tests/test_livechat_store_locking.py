@@ -132,3 +132,37 @@ def test_the_scrub_still_empties_the_wal_once_readers_are_gone(tmp_path: Path) -
     assert store.scrub(deadline_s=5.0) is True
     wal = Path(f"{store._db_path}-wal")
     assert not wal.exists() or wal.stat().st_size == 0
+
+
+def test_delete_then_scrub_leaves_no_deleted_text_in_the_wal_even_with_a_concurrent_reader(
+    tmp_path: Path,
+) -> None:
+    """The PASSIVE-first scrub keeps the erasure guarantee: `scrub()` returns True only after a
+    TRUNCATE succeeded and the `-wal` file is empty, so the deleted bytes are gone when it does."""
+    store = make_store(tmp_path)
+    secret = "ERASE-ME-" + "x" * 24
+    message, _ = store.create_message(
+        client_id="lock-erase-0001",
+        sender="Josh",
+        device_id="device-lock-0001",
+        by_email=None,
+        text=secret,
+        attachment_ids=(),
+        now=1.0,
+    )
+    reader = sqlite3.connect(str(store._db_path), isolation_level=None, check_same_thread=False)
+    reader.execute("BEGIN")
+    reader.execute("SELECT text FROM messages WHERE seq = ?", (message.seq,)).fetchone()
+    store.delete_message(seq=message.seq, now=2.0)  # type: ignore[call-arg]
+    wal = Path(f"{store._db_path}-wal")
+    release = threading.Timer(0.4, lambda: reader.execute("COMMIT"))
+    release.start()
+    try:
+        assert store.scrub(deadline_s=10.0) is True  # waits for the reader, then TRUNCATEs
+    finally:
+        release.join()
+        reader.close()
+    assert not wal.exists() or wal.stat().st_size == 0
+    assert secret.encode() not in store._db_path.read_bytes()
+    if wal.exists():
+        assert secret.encode() not in wal.read_bytes()
