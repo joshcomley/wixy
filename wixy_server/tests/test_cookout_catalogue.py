@@ -11,6 +11,7 @@ import copy
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -18,6 +19,7 @@ from typing import Any
 import pytest
 
 from wixy_server.livechat import cookout_catalogue
+from wixy_server.livechat.cookout_bank import load_cookout_bank
 from wixy_server.livechat.cookout_catalogue import (
     CatalogueError,
     entry_problems,
@@ -25,6 +27,7 @@ from wixy_server.livechat.cookout_catalogue import (
     load_cookout_catalogue_or_empty,
     name_key,
     parse_cookout_catalogue,
+    subjects,
 )
 
 REPO = Path(__file__).resolve().parents[2]
@@ -47,7 +50,7 @@ BANK = vc.load_bank_items()
 def good_entry(ingredient_id: str = "andouille-sausage") -> dict[str, Any]:
     item = BANK[ingredient_id]
     return {
-        "what": "A smoky, coarse pork sausage from Cajun cooking in Louisiana.",
+        "what": "A smoky, coarse pork sausage from Cajun cooking.",
         "visual": "one whole raw sausage link, dark reddish-brown smoked casing, coarse texture "
         "visible, lying in a gentle curve",
         "presentation": "whole",
@@ -55,7 +58,7 @@ def good_entry(ingredient_id: str = "andouille-sausage") -> dict[str, Any]:
             "It came to Louisiana with French settlers and became a staple of Cajun cooking.",
             "It is a key ingredient in gumbo and jambalaya.",
         ],
-        "nameKey": item.key,
+        "nameKey": vc.name_key(item),
         "source": {"author": "claude-haiku-5-5", "factCheck": "claude-haiku-5-5", "at": 1793318400},
     }
 
@@ -90,25 +93,62 @@ def test_good_entry_loads_with_the_frozen_fields(tmp_path: Path) -> None:
     assert entry is not None
     assert entry.presentation == "whole"
     assert len(entry.facts) == 2
-    assert entry.name_key == BANK["andouille-sausage"].key
+    assert entry.name_key == name_key(BANK["andouille-sausage"])
     assert len(catalogue) == 1
     assert catalogue.get("nothing") is None
 
 
-def test_name_key_is_the_documented_hash() -> None:
-    assert name_key("Lemon", ["unwaxed lemon"], "fruit") == name_key(
-        "Lemon", ["unwaxed lemon"], "fruit"
+def test_name_key_is_sha256_of_name_us_category() -> None:
+    import hashlib
+
+    subject = BANK["andouille-sausage"]
+    expected = hashlib.sha256((subject.name + "" + subject.category).encode("utf-8")).hexdigest()[
+        :16
+    ]
+    assert name_key(subject) == expected
+
+
+def test_name_key_ignores_aliases_but_not_name_or_category() -> None:
+    subject = BANK["andouille-sausage"]
+    assert name_key(replace(subject, aliases=("a", "b"))) == name_key(subject)
+    assert name_key(replace(subject, name="Other")) != name_key(subject)
+    assert name_key(replace(subject, category="fruit")) != name_key(subject)
+
+
+def test_subjects_cover_ingredients_then_the_three_seasonings() -> None:
+    bank = load_cookout_bank()
+    listed = subjects(bank)
+    assert len(listed) == 3494
+    assert [s.id for s in listed[-3:]] == ["water", "salt", "black-pepper"]
+    ordinary = listed[0]
+    assert ordinary.id == bank.ingredients[0].id and ordinary.category_name
+    by_id = {s.id: s for s in listed}
+    water, salt, pepper = by_id["water"], by_id["salt"], by_id["black-pepper"]
+    assert (water.category, water.category_name) == ("drinks-alcohol", "Splash, Brews & Infusions")
+    assert (salt.category, pepper.category) == ("spices-seasonings", "spices-seasonings")
+    assert salt.category_name == pepper.category_name == "Spices & Chilis"
+    for seasoning in (water, salt, pepper):
+        assert seasoning.aliases == () and seasoning.role == "accent" and seasoning.blurb == ""
+    assert (water.name, salt.name, pepper.name) == ("Water", "Salt", "Black pepper")
+
+
+def test_a_renamed_staple_turns_its_seasoning_entry_stale() -> None:
+    bank = load_cookout_bank()
+    before = {s.id: name_key(s) for s in subjects(bank)}
+    renamed_staples = tuple(
+        replace(st, name="Sea salt") if st.id == "salt" else st for st in bank.staples
     )
-    assert len(name_key("Lemon", [], "fruit")) == 16
-    assert name_key("Lemon", [], "fruit") != name_key("Lemon", [], "vegetables")
-    assert name_key("Lemon", ["a"], "fruit") != name_key("Lemon", [], "fruit")
+    renamed = replace(bank, staples=renamed_staples)
+    after = {s.id: name_key(s) for s in subjects(renamed)}
+    assert after["salt"] != before["salt"]
+    assert after["water"] == before["water"] and after["black-pepper"] == before["black-pepper"]
 
 
 @pytest.mark.parametrize(
     ("field", "value", "fragment"),
     [
         ("what", "Short", "what is 5 characters"),
-        ("what", "x" * 73, "what is 73 characters"),
+        ("what", "x" * 61, "what is 61 characters"),
         ("what", "A tasty thing 🍋 for you.", "emoji"),
         ("what", "A <b>tasty</b> thing for you.", "HTML"),
         ("visual", "too short to be a picture", "visual is 25 characters"),
@@ -281,7 +321,7 @@ def test_visual_may_not_name_another_ingredient_after_with() -> None:
 def test_vessel_categories_need_a_vessel() -> None:
     oil = next(i for i in BANK.values() if i.category == "oils-fats-condiments")
     entry = good_entry()
-    entry["nameKey"] = oil.key
+    entry["nameKey"] = vc.name_key(oil)
     entry["what"] = "A cooking fat used across many kitchens."
     entry["visual"] = "a generous quantity of the fat, golden and glossy, shown on its own plainly"
     entry["presentation"] = "heap"
@@ -332,4 +372,4 @@ def test_waivers_cover_only_listed_empty_entries(tmp_path: Path) -> None:
 def test_bank_view_has_3494_entries_including_the_seasonings() -> None:
     assert len(BANK) == 3494
     assert {"water", "salt", "black-pepper"} <= set(BANK)
-    assert all(len(i.key) == 16 for i in BANK.values())
+    assert all(len(vc.name_key(i)) == 16 for i in BANK.values())

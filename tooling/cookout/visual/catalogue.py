@@ -55,6 +55,7 @@ from tooling.cookout.visual.cmdruns import (  # noqa: E402
     RunPool,
     RunSpec,
 )
+from wixy_server.livechat.cookout_catalogue import CatalogueSubject, name_key  # noqa: E402
 
 CATALOGUE = REPO / "wixy_server" / "livechat" / "cookout_catalogue.json"
 REPORT = REPO / "triad" / "cookout" / "r2" / "catalogue-report.md"
@@ -196,8 +197,8 @@ photograph, a one-line "what it is" caption, and 2-3 fun facts shown while playe
 British English readers who may never have heard of the ingredient.
 
 For EACH ingredient below return:
-- "what": 10-72 characters, one plain sentence saying what it is ("A large tropical sea crustacean
-  with sweet, lobster-like meat."). Do NOT start with the ingredient's own name. No emoji, no HTML.
+- "what": 10-60 characters (count them; it must fit three short lines on a phone), one plain sentence
+  saying what it is ("A big tropical sea crustacean with sweet meat."). Do NOT start with the ingredient's own name. No emoji, no HTML.
 - "visual": 30-260 characters describing the ONE subject of the photograph, as a shopper or cook would
   see it raw or as bought: a whole lemon, a fillet of salmon, a bunch of parsley, a small heap of
   cumin seeds, a block of cheese with one wedge cut. Liquids, pastes, powders and small loose items
@@ -228,7 +229,7 @@ Your FINAL message must be exactly one JSON object and nothing else (no commenta
 with one item per ingredient, using each ingredient's "id" unchanged and covering every id given:
 
 {"items": [{"id": "andouille-sausage",
-  "what": "A smoky, coarse pork sausage from Cajun cooking in Louisiana.",
+  "what": "A smoky, coarse pork sausage from Cajun cooking.",
   "visual": "one whole raw andouille sausage link, dark reddish-brown smoked casing, coarse texture visible, lying in a gentle curve",
   "presentation": "whole",
   "facts": ["Andouille came to Louisiana with French settlers and became a staple of Cajun cooking.",
@@ -252,7 +253,7 @@ fact index given, in this shape:
 """
 
 
-def author_prompt(entries: Sequence[tuple[vc.BankItem, Item]], note: str = "") -> str:
+def author_prompt(entries: Sequence[tuple[CatalogueSubject, Item]], note: str = "") -> str:
     lines = []
     for bank_item, state in entries:
         record: dict[str, object] = {
@@ -261,7 +262,7 @@ def author_prompt(entries: Sequence[tuple[vc.BankItem, Item]], note: str = "") -
             "aliases": list(bank_item.aliases),
             "category": bank_item.category_name,
             "role": bank_item.role,
-            "blurb": bank_item.blurb,
+            "blurb": bank_item.blurb or "(none)",
         }
         if state.rejected or state.kept:
             record["do_not_repeat"] = state.rejected + state.kept
@@ -277,7 +278,8 @@ def author_prompt(entries: Sequence[tuple[vc.BankItem, Item]], note: str = "") -
 
 
 def check_prompt(
-    entries: Sequence[tuple[vc.BankItem, Mapping[str, object]]], examples: Sequence[str] = ()
+    entries: Sequence[tuple[CatalogueSubject, Mapping[str, object]]],
+    examples: Sequence[str] = (),
 ) -> str:
     lines = []
     for bank_item, draft in entries:
@@ -311,7 +313,7 @@ def check_prompt(
 
 def parse_author(
     data: Mapping[str, object],
-    batch: Sequence[vc.BankItem],
+    batch: Sequence[CatalogueSubject],
     names: Mapping[str, str],
     now: int,
 ) -> tuple[dict[str, dict[str, object]], dict[str, str]]:
@@ -347,7 +349,7 @@ def parse_author(
 
 
 def _author_item_problem(
-    raw: Mapping[str, object], bank_item: vc.BankItem, names: Mapping[str, str], now: int
+    raw: Mapping[str, object], bank_item: CatalogueSubject, names: Mapping[str, str], now: int
 ) -> str | None:
     allowed = {"id", "what", "visual", "presentation", "facts", "concern"}
     if set(raw) - allowed or not (allowed - {"concern"}) <= set(raw):
@@ -363,7 +365,7 @@ def _author_item_problem(
         "visual": raw["visual"],
         "presentation": raw["presentation"],
         "facts": facts,
-        "nameKey": bank_item.key,
+        "nameKey": name_key(bank_item),
         "source": {"author": HAIKU.model, "factCheck": HAIKU.model, "at": now},
     }
     problems = vc.item_problems(bank_item.id, candidate, bank_item, names)
@@ -424,7 +426,7 @@ class Builder:
         self,
         *,
         pool: RunPool,
-        bank: Mapping[str, vc.BankItem],
+        bank: Mapping[str, CatalogueSubject],
         committed_path: Path,
         work_dir: Path,
         waivers_path: Path = vc.WAIVERS_PATH,
@@ -472,7 +474,7 @@ class Builder:
         for item_id, bank_item in self.bank.items():
             entry = self.committed.get(item_id)
             state = stored.get(item_id)
-            if entry is not None and entry.get("nameKey") == bank_item.key:
+            if entry is not None and entry.get("nameKey") == name_key(bank_item):
                 if state is not None and state.stage == STAGE_CHECK:
                     self.items[item_id] = state  # a re-check queued by a failed audit
                 else:
@@ -482,7 +484,25 @@ class Builder:
             else:
                 # new, or the bank entry changed since it was written: author it from scratch
                 self.items[item_id] = Item()
+        # A draft written under older rules (a longer `what`, an older key) must not reach the
+        # fact-check pass: send it back to the author.
+        for item_id, state in self.items.items():
+            if state.stage == STAGE_CHECK and state.draft is not None:
+                if self._draft_problems(item_id, state.draft):
+                    self.items[item_id] = Item()
         self.save_state()
+
+    def _draft_problems(self, item_id: str, draft: Mapping[str, object]) -> list[str]:
+        bank_item = self.bank[item_id]
+        candidate = {
+            "what": draft.get("what"),
+            "visual": draft.get("visual"),
+            "presentation": draft.get("presentation"),
+            "facts": draft.get("facts"),
+            "nameKey": name_key(bank_item),
+            "source": {"author": HAIKU.model, "factCheck": HAIKU.model, "at": 0},
+        }
+        return vc.item_problems(item_id, candidate, bank_item, self.names)
 
     def save_state(self) -> None:
         payload = {"items": {k: v.to_json() for k, v in sorted(self.items.items())}}
@@ -722,7 +742,7 @@ class Builder:
             "visual": base["visual"],
             "presentation": base["presentation"],
             "facts": list(state.kept),
-            "nameKey": bank_item.key,
+            "nameKey": name_key(bank_item),
             "source": {
                 "author": HAIKU.model,
                 "factCheck": HAIKU.model,

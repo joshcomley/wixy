@@ -22,28 +22,28 @@ import re
 import sys
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from wixy_server.livechat.cookout_bank import load_cookout_bank  # noqa: E402
 from wixy_server.livechat.cookout_catalogue import (  # noqa: E402
     CATALOGUE_PATH,
     NATURAL_FORMS,
+    SEASONING_SUBJECT_IDS,
     VESSELS,
+    CatalogueSubject,
     entry_problems,
     fold,
     name_key,
+    subjects,
 )
 
 BANK_PATH = REPO / "wixy_server" / "livechat" / "cookout_ingredients.json"
 WAIVERS_PATH = Path(__file__).with_name("facts_waivers.json")
 
-SEASONING_IDS = ("water", "salt", "black-pepper")
-SEASONING_CATEGORY = "staples"
-"""The `category` the three free seasonings carry in their `nameKey` (they have none in the bank)."""
 VESSEL_CATEGORIES = frozenset({"oils-fats-condiments", "sauces-stocks-fermented", "drinks-alcohol"})
 _NATURAL_WORDS = re.compile(
     r"\b(?:whole|piece|pod|pods|stick|sticks|root|bulb|honeycomb|comb|block|bar|slab|wedge|chunk|loaf)\b"
@@ -51,55 +51,10 @@ _NATURAL_WORDS = re.compile(
 _ARTICLES = frozenset({"a", "an", "the", "some", "its", "one", "two", "several", "each", "no"})
 _WORD = re.compile(r"[a-z0-9']+")
 
-_SEASONING_BLURBS = {
-    "water": "Plain drinking water",
-    "salt": "Fine white table salt",
-    "black-pepper": "Ground black pepper",
-}
 
-
-@dataclass(frozen=True, slots=True)
-class BankItem:
-    id: str
-    name: str
-    aliases: tuple[str, ...]
-    category: str
-    category_name: str
-    role: str
-    blurb: str
-
-    @property
-    def key(self) -> str:
-        return name_key(self.name, self.aliases, self.category)
-
-
-def load_bank_items(bank_path: Path = BANK_PATH) -> dict[str, BankItem]:
-    """The 3,491 pickable bank entries plus the three free seasonings, in bank order."""
-    data = json.loads(bank_path.read_text(encoding="utf-8"))
-    categories = {c["id"]: c["name"] for c in data["categories"]}
-    items: dict[str, BankItem] = {}
-    for raw in data["ingredients"]:
-        items[raw["id"]] = BankItem(
-            id=raw["id"],
-            name=raw["name"],
-            aliases=tuple(raw.get("aliases", [])),
-            category=raw["category"],
-            category_name=categories[raw["category"]],
-            role=raw["role"],
-            blurb=raw["blurb"],
-        )
-    staple_names = {s["id"]: s["name"] for s in data["staples"]}
-    for staple_id in SEASONING_IDS:
-        items[staple_id] = BankItem(
-            id=staple_id,
-            name=staple_names[staple_id],
-            aliases=(),
-            category=SEASONING_CATEGORY,
-            category_name="Free cupboard seasoning",
-            role="accent",
-            blurb=_SEASONING_BLURBS[staple_id],
-        )
-    return items
+def load_bank_items(bank_path: Path = BANK_PATH) -> dict[str, CatalogueSubject]:
+    """Every catalogue subject by id: the bank's pickable ingredients, then the three seasonings."""
+    return {subject.id: subject for subject in subjects(load_cookout_bank(bank_path))}
 
 
 def load_waivers(path: Path = WAIVERS_PATH) -> dict[str, str]:
@@ -109,7 +64,9 @@ def load_waivers(path: Path = WAIVERS_PATH) -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
-def other_ingredient_after_with(visual: str, own: BankItem, names: Mapping[str, str]) -> str | None:
+def other_ingredient_after_with(
+    visual: str, own: CatalogueSubject, names: Mapping[str, str]
+) -> str | None:
     """The first other bank ingredient's exact name that follows the word 'with' in `visual`."""
     words = _WORD.findall(fold(visual))
     own_names = {fold(own.name), *(fold(a) for a in own.aliases)}
@@ -127,14 +84,14 @@ def other_ingredient_after_with(visual: str, own: BankItem, names: Mapping[str, 
 
 
 def item_problems(
-    ingredient_id: str, raw: object, bank_item: BankItem, names: Mapping[str, str]
+    ingredient_id: str, raw: object, bank_item: CatalogueSubject, names: Mapping[str, str]
 ) -> list[str]:
     """Every problem with one entry: the loader's rules plus the bank-dependent ones."""
     problems = entry_problems(ingredient_id, raw)
     if not isinstance(raw, dict) or problems and any("missing keys" in p for p in problems):
         return problems
     where = f"{ingredient_id}:"
-    if raw.get("nameKey") != bank_item.key:
+    if raw.get("nameKey") != name_key(bank_item):
         problems.append(f"{where} stale nameKey (bank entry changed; re-author it)")
     what, visual, presentation = raw.get("what"), raw.get("visual"), raw.get("presentation")
     if isinstance(what, str):
@@ -158,9 +115,9 @@ def item_problems(
     return problems
 
 
-def ingredient_names(items: Mapping[str, BankItem]) -> dict[str, str]:
+def ingredient_names(items: Mapping[str, CatalogueSubject]) -> dict[str, str]:
     """Folded exact names of the pickable bank ingredients (not the seasonings) -> display name."""
-    return {fold(i.name): i.name for i in items.values() if i.id not in SEASONING_IDS}
+    return {fold(i.name): i.name for i in items.values() if i.id not in SEASONING_SUBJECT_IDS}
 
 
 def validate(

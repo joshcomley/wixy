@@ -19,10 +19,12 @@ import json
 import logging
 import re
 import unicodedata
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Final, Literal, cast, get_args
+
+from wixy_server.livechat.cookout_bank import CookoutBank
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +39,7 @@ VESSELS: Final = frozenset({"bowl", "jar", "bottle", "glass"})
 """Presentations that put the ingredient in a plain vessel (spec §A.1)."""
 NATURAL_FORMS: Final = frozenset({"whole", "cut"})
 
-WHAT_LENGTH: Final = (10, 72)
+WHAT_LENGTH: Final = (10, 60)
 VISUAL_LENGTH: Final = (30, 260)
 FACT_LENGTH: Final = (25, 150)
 MAX_FACTS: Final = 3
@@ -95,10 +97,73 @@ def fold(text: str) -> str:
     return "".join(c for c in decomposed if not unicodedata.combining(c)).casefold()
 
 
-def name_key(name: str, aliases: Sequence[str], category: str) -> str:
-    """The staleness key of a bank entry (spec §A.1): if the entry is renamed, re-aliased or
-    recategorised, its catalogue entry is stale and the validator fails."""
-    text = name + "\x1f" + "\x1f".join(aliases) + "\x1f" + category
+SEASONING_SUBJECT_IDS: Final = ("water", "salt", "black-pepper")
+"""The three free seasonings: bank `staples` with no category, role or blurb of their own."""
+
+_UNIT_SEPARATOR = ""
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogueSubject:
+    """What the catalogue is about: the one read-only view every consumer (the author prompt, the
+    validator, `name_key`, the loader) takes of a bank ingredient or one of the three seasonings."""
+
+    id: str
+    name: str
+    aliases: tuple[str, ...]
+    category: str
+    category_name: str
+    role: str
+    blurb: str
+
+
+# Frozen (spec 09b §A.1), never added to the bank: (category, categoryName). Role is `accent` and
+# the blurb empty for all three; the name is read from the bank's staple, so a rename there turns
+# the entry stale.
+_SEASONINGS: Final = {
+    "water": ("drinks-alcohol", "Splash, Brews & Infusions"),
+    "salt": ("spices-seasonings", "Spices & Chilis"),
+    "black-pepper": ("spices-seasonings", "Spices & Chilis"),
+}
+
+
+def subjects(bank: CookoutBank) -> list[CatalogueSubject]:
+    """Every catalogue subject: the bank's ingredients, then the three seasonings."""
+    out = [
+        CatalogueSubject(
+            id=i.id,
+            name=i.name,
+            aliases=i.aliases,
+            category=i.category,
+            category_name=i.category_name,
+            role=i.role,
+            blurb=i.blurb,
+        )
+        for i in bank.ingredients
+    ]
+    for seasoning_id in SEASONING_SUBJECT_IDS:
+        staple = bank.staple(seasoning_id)
+        if staple is None:
+            raise CatalogueError(f"the bank has no staple {seasoning_id!r}")
+        category, category_name = _SEASONINGS[seasoning_id]
+        out.append(
+            CatalogueSubject(
+                id=seasoning_id,
+                name=staple.name,
+                aliases=(),
+                category=category,
+                category_name=category_name,
+                role="accent",
+                blurb="",
+            )
+        )
+    return out
+
+
+def name_key(subject: CatalogueSubject) -> str:
+    """The staleness key (spec §A.1): sha256 of `name + US + category`, first 16 hex. Aliases are
+    deliberately not part of it: adding one does not change what the ingredient is."""
+    text = subject.name + _UNIT_SEPARATOR + subject.category
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 

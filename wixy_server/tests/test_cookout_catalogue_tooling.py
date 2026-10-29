@@ -68,7 +68,7 @@ def author_item(record: dict[str, Any], **override: Any) -> dict[str, Any]:
     name = record["name"]
     item: dict[str, Any] = {
         "id": record["id"],
-        "what": "A common ingredient found in many home kitchens.",
+        "what": "A common ingredient used in many home kitchens.",
         "visual": f"one plain serving of {name.lower()}, shown whole on its own, true colour",
         "presentation": "bowl",
         "facts": [
