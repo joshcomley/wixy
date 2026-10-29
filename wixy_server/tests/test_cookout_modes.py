@@ -259,7 +259,7 @@ def test_chef_format(modes: CookoutModes, toastie: CookoutMode) -> None:
     assert (chef.each_missing_max, chef.best_missing_max) == (2, 1)
     assert chef.dish_noun == "toasted sandwich"
     assert [b.id for b in chef.builds] == [
-        "pressed", "skillet", "grill-toasted", "oven-baked", "dipped", "crisp-crusted", "jaffle"
+        "pressed", "skillet", "grill-toasted", "oven-baked", "dipped", "crunchy-crusted", "jaffle"
     ]  # fmt: skip
     assert {b.id for b in chef.builds if b.uses_oven} == {"oven-baked"}
     assert all(b.technique in cookout_ai.TECHNIQUES for b in chef.builds)
@@ -281,6 +281,8 @@ def test_mode_text_names_no_bank_food(bank: CookoutBank, toastie: CookoutMode) -
         picture.template, picture.default_presentation,
         *(b.prompt_phrase for b in chef.builds),
         *(b.picture_phrase for b in chef.builds),
+        *(b.label for b in chef.builds),
+        *(b.id.replace("-", " ") for b in chef.builds),
     ]  # fmt: skip
     for text in texts:
         assert text
@@ -644,3 +646,77 @@ def test_empty_bank_yields_classic_only(monkeypatch: pytest.MonkeyPatch) -> None
         assert all(not k.candidates for k in only.default.kinds.values())
     finally:
         default_modes.cache_clear()
+
+
+# -- review fixes: build labels, fakes, duplicate keys, loader placeholders ----------------------
+
+
+def test_build_labels_and_ids_name_no_food(bank: CookoutBank, toastie: CookoutMode) -> None:
+    for build in toastie.chef.builds:
+        for text in (build.label, build.id.replace("-", " "), f"A {build.label} toastie"):
+            assert (
+                bank.find_contraband_ingredients(
+                    text, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+                )
+                == []
+            ), text
+
+
+def test_validator_flags_a_food_in_a_build_label(raw: dict[str, Any], tmp_path: Path) -> None:
+    def rename(m: dict[str, Any]) -> None:
+        m["chef"]["builds"][0]["label"] = "Mango pressed"
+
+    path = tmp_path / "label.json"
+    path.write_text(json.dumps(_mutated(raw, rename)), encoding="utf-8")
+    assert any("label" in p and "mango" in p.lower() for p in _validator().validate(path, rounds=0))
+
+
+def test_a_mode_can_be_built_from_the_interface_fields_alone(toastie: CookoutMode) -> None:
+    fake = CookoutMode(
+        id="fake",
+        label="Fake",
+        emoji="🧪",
+        blurb="b",
+        intro=(),
+        plan_type="sequence",
+        turns=2,
+        picks_per_player=1,
+        kinds=toastie.kinds,
+        staples=toastie.staples,
+        chef=toastie.chef,
+        picture=toastie.picture,
+        twists=frozenset(),
+        fridge_kinds=None,
+    )
+    assert fake.kind_of("anything") is None
+    assert fake.kind_for_turn(("bread", "finish"), 2) == "finish"
+
+
+def test_loader_rejects_duplicate_json_keys(bank: CookoutBank, tmp_path: Path) -> None:
+    text = MODES_FILE.read_text(encoding="utf-8").replace(
+        '"version": 1,', '"version": 1, "version": 1,', 1
+    )
+    path = tmp_path / "dupe.json"
+    path.write_text(text, encoding="utf-8")
+    with pytest.raises(CookoutModesError, match="duplicate key 'version'"):
+        load_cookout_modes(bank, path)
+
+
+@pytest.mark.parametrize(
+    ("section", "field_name", "bad", "fragment"),
+    [
+        ("chef", "recipeText", "Make it the {build_label} way, {oops}.", "unknown placeholder"),
+        ("chef", "recipeText", "Make it the way.", "never uses the placeholder"),
+        ("picture", "template", "A photo of {title {bread}", "not a valid format string"),
+    ],
+)
+def test_loader_checks_placeholders(
+    raw: dict[str, Any],
+    bank: CookoutBank,
+    section: str,
+    field_name: str,
+    bad: str,
+    fragment: str,
+) -> None:
+    broken = _mutated(raw, lambda m: m[section].update({field_name: bad}))
+    _expect_error(broken, bank, fragment)

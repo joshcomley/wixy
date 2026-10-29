@@ -23,6 +23,7 @@ import json
 import random
 import re
 import secrets
+import string
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
@@ -159,11 +160,11 @@ class CookoutMode:
     twists: frozenset[TwistKey]
     fridge_kinds: frozenset[str] | None  # None = any kind (Classic)
     # Not part of the frozen interface: the plan and classification the methods read.
-    _bank: CookoutBank = field(repr=False, compare=False)
-    _opening: tuple[str, ...] = field(repr=False, compare=False)
-    _pairs: tuple[str, ...] = field(repr=False, compare=False)
-    _closing: tuple[str, ...] = field(repr=False, compare=False)
-    _kind_by_id: Mapping[str, str] = field(repr=False, compare=False)
+    _bank: CookoutBank = field(default_factory=CookoutBank.empty, repr=False, compare=False)
+    _opening: tuple[str, ...] = field(default=(), repr=False, compare=False)
+    _pairs: tuple[str, ...] = field(default=(), repr=False, compare=False)
+    _closing: tuple[str, ...] = field(default=(), repr=False, compare=False)
+    _kind_by_id: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
 
     @property
     def basket_sizes(self) -> tuple[int, int]:
@@ -277,6 +278,32 @@ class CookoutModes:
 
 
 # -- strict loading ----------------------------------------------------------------------------
+
+
+def _reject_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    out: dict[str, object] = {}
+    for key, value in pairs:
+        if key in out:
+            raise CookoutModesError(f"duplicate key {key!r} in the modes file")
+        out[key] = value
+    return out
+
+
+def _check_placeholders(where: str, text: str, allowed: frozenset[str]) -> None:
+    """The text is `str.format`-ed at runtime: fail loudly now on a bad, unknown or unused field."""
+    used: set[str] = set()
+    try:
+        for _lit, name, _spec, _conv in string.Formatter().parse(text):
+            if name is not None:
+                used.add(name)
+    except ValueError as exc:
+        raise CookoutModesError(f"{where}: not a valid format string ({exc})") from exc
+    if used - allowed:
+        raise CookoutModesError(f"{where}: unknown placeholder {{{sorted(used - allowed)[0]}}}")
+    if allowed - used:
+        raise CookoutModesError(
+            f"{where}: never uses the placeholder {{{sorted(allowed - used)[0]}}}"
+        )
 
 
 def _object(where: str, value: object) -> Mapping[str, object]:
@@ -424,6 +451,16 @@ def _chef(where: str, raw: object, kind_ids: frozenset[str]) -> ChefFormat:
         _text(f"{where}.reviewDishWords[{n}]", v, maximum=40)
         for n, v in enumerate(_list(f"{where}.reviewDishWords", data["reviewDishWords"]))
     )
+    concept_text = _lines(f"{where}.conceptText", data["conceptText"])
+    recipe_text = _lines(f"{where}.recipeText", data["recipeText"])
+    _check_placeholders(
+        f"{where}.conceptText",
+        concept_text,
+        frozenset({"bread", "bread_id", "n", "each", "best", "build_list"}),
+    )
+    _check_placeholders(
+        f"{where}.recipeText", recipe_text, frozenset({"build_label", "build_phrase"})
+    )
     return ChefFormat(
         format="single-dish",
         dish_noun=_text(f"{where}.dishNoun", data["dishNoun"], maximum=40),
@@ -432,8 +469,8 @@ def _chef(where: str, raw: object, kind_ids: frozenset[str]) -> ChefFormat:
         each_missing_max=_int(f"{where}.eachMissingMax", data["eachMissingMax"], low=0, high=4),
         best_missing_max=_int(f"{where}.bestMissingMax", data["bestMissingMax"], low=0, high=4),
         review_dish_words=words,
-        concept_text=_lines(f"{where}.conceptText", data["conceptText"]),
-        recipe_text=_lines(f"{where}.recipeText", data["recipeText"]),
+        concept_text=concept_text,
+        recipe_text=recipe_text,
         style_line=_text(f"{where}.styleLine", data["styleLine"], multiline=True),
     )
 
@@ -447,9 +484,15 @@ def _picture(where: str, raw: object) -> PictureStyle:
     if fmt != "single-dish":
         raise CookoutModesError(f"{where}.format: must be 'classic' or 'single-dish'")
     _expect_keys(where, data, {"format", "template", "defaultPresentation"})
+    template = _text(f"{where}.template", data["template"], multiline=True)
+    _check_placeholders(
+        f"{where}.template",
+        template,
+        frozenset({"title", "bread", "build_phrase", "fillings", "presentation"}),
+    )
     return PictureStyle(
         "single-dish",
-        _text(f"{where}.template", data["template"], multiline=True),
+        template,
         _text(f"{where}.defaultPresentation", data["defaultPresentation"], maximum=200),
     )
 
@@ -739,7 +782,9 @@ def load_cookout_modes(bank: CookoutBank, path: Path | None = None) -> CookoutMo
     against `bank`; raises `CookoutModesError`."""
     target = path or MODES_PATH
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        raw = json.loads(
+            target.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys
+        )
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CookoutModesError(f"cannot read the modes file {target}: {exc}") from exc
     return parse_cookout_modes(raw, bank)

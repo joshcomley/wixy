@@ -164,40 +164,14 @@ def _text_problems(mode: CookoutMode, bank: CookoutBank) -> list[str]:
     for build in chef.builds:
         texts[f"build {build.id} promptPhrase"] = build.prompt_phrase
         texts[f"build {build.id} picturePhrase"] = build.picture_phrase
+        texts[f"build {build.id} label"] = build.label
+        texts[f"build {build.id} id"] = build.id.replace("-", " ")
     for name, text in texts.items():
         found = bank.find_contraband_ingredients(
             text, allowed_ingredient_ids=bread_ids, allowed_staple_ids=staples
         )
         if found:
             problems.append(f"{mode.id}: {name} names foods {found}")
-    concept_fields = {"bread", "bread_id", "n", "each", "best", "build_list"}
-    recipe_fields = {"build_label", "build_phrase"}
-    template_fields = {"title", "bread", "build_phrase", "fillings", "presentation"}
-    for name, text, allowed in (
-        ("conceptText", texts["conceptText"], concept_fields),
-        ("recipeText", texts["recipeText"], recipe_fields),
-        ("template", texts["template"], template_fields),
-    ):
-        problems.extend(_placeholder_problems(mode.id, name, text, allowed))
-    return problems
-
-
-def _placeholder_problems(mode_id: str, name: str, text: str, allowed: set[str]) -> list[str]:
-    import string
-
-    used: set[str] = set()
-    try:
-        for _lit, field, _spec, _conv in string.Formatter().parse(text):
-            if field is not None:
-                used.add(field)
-    except ValueError as exc:
-        return [f"{mode_id}: {name} is not a valid format string ({exc})"]
-    problems = [
-        f"{mode_id}: {name} uses unknown placeholder {{{f}}}" for f in sorted(used - allowed)
-    ]
-    problems += [
-        f"{mode_id}: {name} never uses the placeholder {{{f}}}" for f in sorted(allowed - used)
-    ]
     return problems
 
 
