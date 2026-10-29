@@ -183,6 +183,8 @@ export interface Harness {
 
 export interface HarnessOptions {
   readonly reducedMotion?: boolean;
+  /** The model's reads of a round (none by default: there is no session). */
+  readonly fetchRound?: (seq: number) => Promise<CookoutOutcome>;
 }
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
@@ -201,9 +203,9 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
   } as unknown as ItemChat;
   const tabs = createGameTabs({ document, itemChat, onLayoutChange: () => {} });
   const model = createCookoutModel({
-    session: () => null,
+    session: () => (options.fetchRound === undefined ? null : { token: "tok", expiresAt: 9_999_999_999 }),
     viewer: () => "Josh",
-    fetchRound: async () => ({ ok: false, kind: "unavailable" }),
+    fetchRound: async (_session, seq) => (options.fetchRound === undefined ? { ok: false, kind: "unavailable" } : options.fetchRound(seq)),
     onChange: () => tabs.refresh(),
     setTimeout: () => 0,
     clearTimeout: () => {},

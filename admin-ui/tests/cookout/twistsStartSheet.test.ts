@@ -50,6 +50,7 @@ function make(
   options: CookoutOptions | null,
   search: (q: string) => Promise<SearchResult> = async () => ({ ok: true, ingredients: [] }),
   startImpl: () => Promise<void> = async () => {},
+  loadOptions: () => Promise<CookoutOptions | null> = async () => options,
 ): Made {
   const timers = new Map<number, Timer>();
   const cleared: number[] = [];
@@ -60,7 +61,7 @@ function make(
   const sheet = createCookoutStartSheet({
     document,
     start: start as unknown as (choices: StartChoices, clientId: string) => Promise<void>,
-    loadOptions: async () => options,
+    loadOptions,
     search: searchFn as unknown as (q: string) => Promise<SearchResult>,
     newId: () => `start-${++nextId}`,
     setTimeout: (cb, ms) => {
@@ -443,6 +444,33 @@ describe("the 'New' preset", () => {
     expect(q(m.sheet.element, ".wx-srv-ck-twists-count").textContent).toBe("5 on");
     go(m).click();
     expect(m.starts()[0]).toEqual({ blind: true, style: "spin", challenge: "one-pan", wildcard: true, stars: true, fridgeSeedId: "cherry-tomatoes", encore: null });
+  });
+
+  it("Start waits for the twist options, so a preselected chef twist is never silently dropped", async () => {
+    let answer: (options: CookoutOptions | null) => void = () => {};
+    const m = make(OPTIONS, undefined, undefined, () => new Promise((resolve) => (answer = resolve)));
+    await openWith(m, { style: "cosy-pub", stars: true });
+    expect(go(m).disabled).toBe(true);
+    go(m).click();
+    expect(m.start).not.toHaveBeenCalled();
+    answer(OPTIONS);
+    await flush();
+    expect(go(m).disabled).toBe(false);
+    go(m).click();
+    expect(m.starts()[0]).toEqual({ blind: false, style: "cosy-pub", challenge: null, wildcard: false, stars: true, fridgeSeedId: null, encore: null });
+  });
+
+  it("an options read that fails still lets the round start, without the chef twists and saying why", async () => {
+    let answer: (options: CookoutOptions | null) => void = () => {};
+    const m = make(OPTIONS, undefined, undefined, () => new Promise((resolve) => (answer = resolve)));
+    await openWith(m, { style: "cosy-pub", fridge: ingredient(TOMATOES) });
+    expect(go(m).disabled).toBe(true);
+    answer(null);
+    await flush();
+    expect(go(m).disabled).toBe(false);
+    expect(visible(m.sheet.element, ".wx-srv-ck-twists-note")).toBe(true);
+    go(m).click();
+    expect(m.starts()[0]).toEqual({ blind: false, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: "cherry-tomatoes", encore: null });
   });
 
   it("a twist-free New leaves the disclosure folded", async () => {

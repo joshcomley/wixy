@@ -228,6 +228,7 @@ describe("the start sheet", () => {
     const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
     document.body.append(sheet.element);
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     expect(sheet.element.hidden).toBe(false);
     expect(q(sheet.element, '[data-mode="open"]').getAttribute("aria-checked")).toBe("true");
     q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]').click();
@@ -243,10 +244,11 @@ describe("the start sheet", () => {
     expect(sheet.element.hidden).toBe(true);
   });
 
-  it("is one radio group: arrows move the choice, only the chosen mode is a tab stop, and Tab stays inside", () => {
+  it("is one radio group: arrows move the choice, only the chosen mode is a tab stop, and Tab stays inside", async () => {
     const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start: vi.fn(async () => {}), newId: ids() });
     document.body.append(sheet.element);
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     const open = q<HTMLButtonElement>(sheet.element, '[data-mode="open"]');
     const blind = q<HTMLButtonElement>(sheet.element, '[data-mode="blind"]');
     expect([open.tabIndex, blind.tabIndex]).toEqual([0, -1]);
@@ -266,9 +268,10 @@ describe("the start sheet", () => {
     expect(document.activeElement).toBe(go);
   });
 
-  it("opens with the given mode preselected (New in the pane), and Cancel closes it", () => {
+  it("opens with the given mode preselected (New in the pane), and Cancel closes it", async () => {
     const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start: vi.fn(async () => {}), newId: ids() });
     sheet.open({ blind: true });
+    await flush(); // the twist options are read before Start is live
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-cancel").click();
     expect(sheet.isOpen()).toBe(false);
@@ -284,6 +287,7 @@ describe("the start sheet", () => {
       newId: ids(),
     });
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
     await flush();
     expect(sheet.isOpen()).toBe(true);
@@ -297,6 +301,7 @@ describe("the start sheet", () => {
     });
     const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     const go = q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go");
     go.click();
     await flush();
@@ -307,6 +312,7 @@ describe("the start sheet", () => {
     await flush();
     sheet.close();
     sheet.open();
+    await flush(); // the twist options are read before Start is live
     go.click();
     await flush();
     expect(start.mock.calls.map((call: unknown[]) => [(call[0] as StartChoices).blind, call[1]])).toEqual([
@@ -317,12 +323,14 @@ describe("the start sheet", () => {
     ]);
   });
 
-  it("opening again while a start is in flight changes nothing (no second Start beside it)", () => {
+  it("opening again while a start is in flight changes nothing (no second Start beside it)", async () => {
     const start = vi.fn(() => new Promise<void>(() => {}));
     const sheet = createCookoutStartSheet({ document, ...SHEET_DEPS, start, newId: ids() });
     sheet.open({ blind: true });
+    await flush(); // the twist options are read before Start is live
     q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").click();
     sheet.open({ blind: false });
+    await flush(); // the twist options are read before Start is live
     expect(q<HTMLButtonElement>(sheet.element, ".wx-srv-ck-start-go").disabled).toBe(true);
     expect(q(sheet.element, '[data-mode="blind"]').getAttribute("aria-checked")).toBe("true");
   });

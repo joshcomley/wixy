@@ -5,6 +5,7 @@ import { mountServerThread, type ServerThreadView } from "../../src/server/threa
 import type { LockHooks, ServerSession } from "../../src/server/types";
 import { parseCookoutView, parseRecipeBook, type CookoutOutcome } from "../../src/server/cookout/api";
 import { bankedRecipes, bookBody, finishedView, pickingView, type Json } from "./fixtures";
+import { STYLE_COSY, setup } from "./twistFixtures";
 
 // Cookout wired into the Server chat (spec 09 §5.1, §5.4): the ⋯ menu's Cookout and Recipe book, the start
 // sheet, the card in the main chat, the game tab (one game at a time), the "Cookout" tag on the game's
@@ -141,6 +142,7 @@ function answer(raw: Json): CookoutOutcome {
 async function startCookout(thread: ServerThreadView, blind = false): Promise<void> {
   openMenu(thread);
   thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-cookout")!.click();
+  await flush(); // the twist options are read before Start is live
   if (blind) thread.element.querySelector<HTMLButtonElement>('.wx-srv-ck-mode[data-mode="blind"]')!.click();
   thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-start-go")!.click();
   await flush();
@@ -178,6 +180,7 @@ describe("cookout: starting a round", () => {
     const { thread } = await mount();
     openMenu(thread);
     thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-cookout")!.click();
+    await flush(); // the twist options are read before Start is live
     const sheet = thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!;
     expect(sheet.hidden).toBe(false);
     // Under the chat header, like the menu's other screens (jsdom lays nothing out: the header is 0 px).
@@ -327,11 +330,32 @@ describe("cookout: lock, wipe and delete", () => {
     thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-recipes")!.click();
     openMenu(thread);
     thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-cookout")!.click();
+    await flush(); // the twist options are read before Start is live
     thread.detach();
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck-book-view")!.hidden).toBe(true);
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!.hidden).toBe(true);
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-tabs")!.hidden).toBe(true);
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!.hidden).toBe(false);
+    thread.teardown();
+  });
+
+  it("closing the tab keeps the played wheel; a lock forgets it, so the round's wheel lands once more", async () => {
+    getCookout.mockImplementation(async (_s: ServerSession, seq: number) => answer({ ...finishedView({ seq }), setup: setup({ style: STYLE_COSY, styleSpun: true }) }));
+    const { thread } = await mount([cookoutMessage(9, {}, "Rose")]);
+    const openRound = async (): Promise<void> => {
+      thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-mcard-open")!.click();
+      await flush();
+    };
+    await openRound();
+    expect(thread.element.querySelector(".wx-srv-ck-wheel")).not.toBeNull();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-close")!.click();
+    await openRound();
+    expect(thread.element.querySelector(".wx-srv-ck-wheel")).toBeNull();
+    thread.detach();
+    await thread.attach(SESSION);
+    await flush();
+    await openRound();
+    expect(thread.element.querySelector(".wx-srv-ck-wheel")).not.toBeNull();
     thread.teardown();
   });
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { starsGateText, viaBadge, voteBannerText } from "../../src/server/cookout/cookoutGame";
-import { BEANS, MISO, LENTILS, PARSLEY, RIBEYE, SALMON, TOAST, FULL_RECIPE, CONCEPTS, recipesNone } from "./fixtures";
+import { BEANS, MISO, LENTILS, PARSLEY, RIBEYE, SALMON, TOAST, FULL_RECIPE, CONCEPTS, P1_PICKS, P2_PICKS, recipesNone } from "./fixtures";
 import type { FinishedOptions, PickingOptions } from "./fixtures";
 import {
   CHALLENGE_PAN,
@@ -366,6 +366,66 @@ describe("the wildcard cloche", () => {
     expect(h.pane.querySelector(".wx-srv-ck-cloche-gate")).toBeNull();
   });
 
+  it("a dish that uses all eleven (the cloche's best case) shows every chip, its stars, and Uses 11/11", () => {
+    const h = makeHarness();
+    const eleven = [...(CONCEPTS[0]!["pickedIngredients"] as Json[]), BEANS, MISO, LENTILS];
+    const basket = [...P1_PICKS.map((s, i) => pick(s, i * 2 + 1)), ...P2_PICKS.map((s, i) => pick(s, i * 2 + 2)), pick(LENTILS, null, "wildcard")];
+    h.show(
+      twistFinished(
+        {},
+        {
+          setup: setup({ wildcard: true, stars: true }),
+          wildcard: { state: "lifted", ingredient: LENTILS },
+          stars: stars({ enabled: true, mine: TOAST["id"], partnerChosen: true, revealed: true, partner: RIBEYE["id"] }),
+          basket,
+          concepts: { state: "ready", data: [{ ...CONCEPTS[0]!, pickedIngredients: eleven, omitted: [] }, CONCEPTS[1], CONCEPTS[2]], error: null },
+        },
+      ),
+    );
+    const dish = q(h.pane, ".wx-srv-ck-dish[data-concept='a']");
+    expect(q(dish, ".wx-srv-ck-uses-count").textContent).toBe("Uses 11/11");
+    expect(qa(dish, ".wx-srv-ck-uses-chips > *")).toHaveLength(11);
+    expect(qa(dish, ".wx-srv-ck-uses-chips .wx-srv-ck-chip-starred")).toHaveLength(2);
+  });
+
+  it("a tap again after a lost answer resends the SAME move id (the lid may already be up); a refused one starts afresh", async () => {
+    const h = makeHarness();
+    h.show(offered());
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-lift").click();
+    await settle();
+    expect(q(h.pane, ".wx-srv-ck-toast").textContent).toBe("Couldn't reach the kitchen — try again.");
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "bad_state" });
+    button(h, ".wx-srv-ck-lift").click();
+    expect(h.api.wildcard).toHaveBeenLastCalledWith(41, "move-1", true);
+    await settle();
+    // A definite answer settles that move: the next tap is a new one.
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-lift").click();
+    expect(h.api.wildcard).toHaveBeenLastCalledWith(41, "move-2", true);
+    await settle();
+    // The other answer is a different move.
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-decline").click();
+    expect(h.api.wildcard).toHaveBeenLastCalledWith(41, "move-3", false);
+    await settle();
+  });
+
+  it("a lock forgets a move still waiting for its answer: the next tap after unlocking is a new move", async () => {
+    const h = makeHarness();
+    h.show(offered());
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-lift").click();
+    await settle();
+    h.tabs.reset();
+    h.game.forgetAll();
+    h.show(offered());
+    h.api.wildcard.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-lift").click();
+    expect(h.api.wildcard.mock.calls.map((c: unknown[]) => c[1])).toEqual(["move-1", "move-2"]);
+    await settle();
+  });
+
   it("No thanks calls wildcard(seq, moveId, false)", async () => {
     const h = makeHarness();
     h.show(offered());
@@ -575,6 +635,38 @@ describe("the rescue swap", () => {
     expect(h.pane.querySelector(".wx-srv-ck-swap-pair")).toBeNull();
   });
 
+  it("sending back and choosing keep ONE move id across a tap again after a lost answer", async () => {
+    const h = makeHarness();
+    h.show(ready({ swap: swap({ available: true }) }));
+    button(h, ".wx-srv-ck-rescue").click();
+    q<HTMLButtonElement>(h.pane, '.wx-srv-ck-swap-item[data-ingredient="flat-leaf-parsley"]').click();
+    h.api.proposeSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    button(h, ".wx-srv-ck-swap-send").click();
+    await settle();
+    h.api.proposeSwap.mockResolvedValueOnce(h.ok(ready({ swap: swap({ state: "proposed", by: 1, out: PARSLEY }) })));
+    button(h, ".wx-srv-ck-swap-send").click();
+    expect(h.api.proposeSwap.mock.calls.map((c: unknown[]) => c[1])).toEqual(["move-1", "move-1"]);
+    await settle();
+
+    const p = makeHarness();
+    p.show(ready({ you: YOU_2, swap: swap({ state: "proposed", by: 1, out: PARSLEY, pair: [LENTILS, TOMATOES] }) }));
+    p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[1]?.click();
+    await settle();
+    p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[1]?.click();
+    await settle();
+    // The other replacement is a different move.
+    p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[0]?.click();
+    await settle();
+    expect(p.api.chooseSwap.mock.calls.map((c: unknown[]) => [c[1], c[2]])).toEqual([
+      ["move-1", "cherry-tomatoes"],
+      ["move-1", "cherry-tomatoes"],
+      ["move-2", "red-lentils"],
+    ]);
+  });
+
   it("Keep these dishes cancels the proposal", () => {
     const h = makeHarness();
     h.show(ready({ you: YOU_2, swap: swap({ state: "proposed", by: 1, out: PARSLEY, pair: [LENTILS, TOMATOES] }) }));
@@ -706,6 +798,15 @@ describe("rules badge and the Encore with the leftovers", () => {
       h.game.open(41);
       expect(h.pane.querySelector(".wx-srv-ck-wheel")).toBeNull();
       expect(q(h.pane, ".wx-srv-ck-rule-style .wx-srv-ck-rule-text").textContent).toBe("Cosy pub (spun)");
+    });
+
+    it("a lock forgets which wheels played: after unlocking, the round's wheel lands once more", () => {
+      const h = makeHarness();
+      openOnce(h);
+      h.tabs.reset();
+      h.game.forgetAll();
+      openOnce(h);
+      expect(h.pane.querySelector(".wx-srv-ck-wheel")).not.toBeNull();
     });
 
     it("never plays under reduced motion", () => {

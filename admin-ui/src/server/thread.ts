@@ -1501,6 +1501,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function resetGames(): void {
     itemChat.reset();
     gameTabs.reset();
+    cookoutGame.forgetAll();
     seenAnchor.wyr = 0;
     seenAnchor.adventure = 0;
     seenAnchor.cookout = 0;

@@ -654,12 +654,13 @@ function parseConcept(value: unknown): Concept | null {
   const title = asText(record["title"], 200);
   const description = asText(record["description"], 1200);
   if (!isConceptId(id) || title === null || title.trim() === "" || description === null) return null;
-  const picked = parseSnaps(record["pickedIngredients"], TOTAL_PICKS) ?? [];
+  // A dish can use the whole basket: 11 when the wildcard cloche was lifted (09a §1.4).
+  const picked = parseSnaps(record["pickedIngredients"], MAX_BASKET) ?? [];
   const staplesUsed = parseStaples(record["staplesUsed"]);
   const omitted: OmittedItem[] = [];
   const omittedRaw = record["omitted"];
   if (Array.isArray(omittedRaw)) {
-    for (const raw of (omittedRaw as unknown[]).slice(0, TOTAL_PICKS)) {
+    for (const raw of (omittedRaw as unknown[]).slice(0, MAX_BASKET)) {
       const item = asRecord(raw);
       const ingredient = parseSnap(item?.["ingredient"]);
       const reason = asText(item?.["reason"], 400);

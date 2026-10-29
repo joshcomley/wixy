@@ -231,3 +231,40 @@ describe("polling while something is pending", () => {
     expect(h.live()).toHaveLength(0);
   });
 });
+
+describe("read: one fresh read the caller can wait for", () => {
+  it("reads the round now, applies it, and answers with the newest view held", async () => {
+    const h = harness(async () => ({ ok: true, view: v(pickingView({ rev: 9, turn: 3 })) }));
+    h.model.apply(v(pickingView({ rev: 5 })));
+    const fresh = await h.model.read(41);
+    expect(h.fetches).toEqual([[41, "Josh"]]);
+    expect(fresh?.rev).toBe(9);
+    expect(h.model.view(41)?.current?.turn).toBe(3);
+  });
+
+  it("an older answer never wins: the newer view held is the answer", async () => {
+    const h = harness(async () => ({ ok: true, view: v(pickingView({ rev: 4 })) }));
+    h.model.apply(v(pickingView({ rev: 7, turn: 2 })));
+    expect((await h.model.read(41))?.rev).toBe(7);
+  });
+
+  it("answers null without a session or a viewer, on a failed read, and after a reset meanwhile", async () => {
+    const failing = harness(async () => ({ ok: false, kind: "unavailable" }));
+    expect(await failing.model.read(41)).toBeNull();
+    const thrown = harness(async () => {
+      throw new Error("network");
+    });
+    expect(await thrown.model.read(41)).toBeNull();
+    const locked = harness(async () => ({ ok: true, view: v(pickingView({ rev: 9 })) }));
+    locked.setSession(null);
+    expect(await locked.model.read(41)).toBeNull();
+    expect(locked.fetches).toHaveLength(0);
+    let answer: (o: CookoutOutcome) => void = () => {};
+    const slow = harness(() => new Promise((resolve) => (answer = resolve)));
+    const pending = slow.model.read(41);
+    slow.model.reset();
+    answer({ ok: true, view: v(pickingView({ rev: 9 })) });
+    expect(await pending).toBeNull();
+    expect(slow.model.view(41)).toBeUndefined();
+  });
+});

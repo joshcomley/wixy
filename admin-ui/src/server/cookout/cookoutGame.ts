@@ -151,6 +151,9 @@ export interface CookoutGame {
   close(): void;
   /** The open round, or null. */
   gameSeq(): number | null;
+  /** Lock / wipe / teardown: forget what outlives closing the tab (the wheels already played, moves still
+   * waiting for an answer). Closing the tab alone keeps them. */
+  forgetAll(): void;
 }
 
 // -- Words ---------------------------------------------------------------------------------------------
@@ -440,6 +443,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       }
     },
     refetch: (seq) => deps.model.refetch(seq),
+    read: (seq) => deps.model.read(seq),
     toast: (text) => showToast(text),
     redraw: () => redraw(),
     openChat: (seq) => deps.itemChat.openPopup(seq, "Cookout chat"),
@@ -691,13 +695,33 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return outcome;
   }
 
+  /** One move id per intended move (round, action, target) until the server gives a definite answer: a tap
+   * again after a lost answer resends the move it may already hold, which is answered with the current view
+   * rather than refused as somebody else's. */
+  const intendedMoves = new Map<string, string>();
+
+  async function intendedMove(
+    kind: Busy,
+    intent: string,
+    callFn: (seq: number, moveId: string) => Promise<CookoutOutcome>,
+    failed: string,
+  ): Promise<CookoutOutcome | null> {
+    const seq = drawnSeq;
+    if (seq === null) return null;
+    const key = `${seq}:${intent}`;
+    const moveId = intendedMoves.get(key) ?? newId();
+    intendedMoves.set(key, moveId);
+    const outcome = await twist(kind, (s) => callFn(s, moveId), failed);
+    if (outcome !== null && (outcome.ok || outcome.kind !== "unavailable") && intendedMoves.get(key) === moveId) intendedMoves.delete(key);
+    return outcome;
+  }
+
   function doStar(ingredientId: string): void {
     void twist("star", (seq) => deps.api.star(seq, ingredientId), "Couldn't save your star — try again.");
   }
 
   async function doWildcard(lift: boolean): Promise<void> {
-    const moveId = newId();
-    const outcome = await twist("wildcard", (seq) => deps.api.wildcard(seq, moveId, lift), "Couldn't reach the kitchen — try again.");
+    const outcome = await intendedMove("wildcard", `wildcard:${lift}`, (seq, moveId) => deps.api.wildcard(seq, moveId, lift), "Couldn't reach the kitchen — try again.");
     if (outcome === null) return;
     if (!outcome.ok && outcome.kind === "exhausted") {
       showToast("The pantry has no surprise left under the lid — “No thanks” starts the cooking.");
@@ -715,8 +739,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   }
 
   async function doProposeSwap(ingredientId: string): Promise<void> {
-    const moveId = newId();
-    const outcome = await twist("swap", (seq) => deps.api.proposeSwap(seq, moveId, ingredientId), "Couldn't send that back — try again.");
+    const outcome = await intendedMove("swap", `propose:${ingredientId}`, (seq, moveId) => deps.api.proposeSwap(seq, moveId, ingredientId), "Couldn't send that back — try again.");
     if (outcome?.ok === true) {
       swapChoosing = false;
       swapTarget = null;
@@ -725,9 +748,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   }
 
   async function doChooseSwap(ingredientId: string): Promise<void> {
-    const moveId = newId();
     swapChoice = ingredientId;
-    await twist("swap", (seq) => deps.api.chooseSwap(seq, moveId, ingredientId), "Couldn't swap that in — try again.");
+    await intendedMove("swap", `choose:${ingredientId}`, (seq, moveId) => deps.api.chooseSwap(seq, moveId, ingredientId), "Couldn't swap that in — try again.");
     swapChoice = null;
     redraw();
   }
@@ -2248,5 +2270,9 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     offer: (seq) => deps.tabs.offer("cookout", seq),
     close,
     gameSeq: () => deps.tabs.seqOf("cookout"),
+    forgetAll() {
+      wheelPlayed.clear();
+      intendedMoves.clear();
+    },
   };
 }

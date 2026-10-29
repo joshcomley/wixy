@@ -431,7 +431,7 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
     }
     fridge.setDisabled(busy);
     drawEncore();
-    go.disabled = busy || (encore !== null && encoreSeeds.length === 0);
+    go.disabled = busy || !optionsLoaded || (encore !== null && encoreSeeds.length === 0);
     cancel.disabled = busy;
     go.textContent = busy ? "Starting…" : encore !== null ? "Start encore" : "Start Cookout";
   }
@@ -513,7 +513,9 @@ export function createCookoutStartSheet(deps: CookoutStartSheetDeps): CookoutSta
   }
 
   async function start(): Promise<void> {
-    if (busy) return;
+    // Until the options are read the chef rows' choices cannot be judged, and a preselected twist would be
+    // dropped without a word; the read always settles (the request has a timeout, a failure reads as none).
+    if (busy || !optionsLoaded) return;
     const chosen = choices();
     if (encore !== null && chosen.encore === null) return;
     const key = JSON.stringify(chosen);

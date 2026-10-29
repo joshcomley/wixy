@@ -825,3 +825,26 @@ describe("the fridge raid's search", () => {
     await expect(searchIngredients(SESSION, "to")).rejects.toBeInstanceOf(ServerLockedError);
   });
 });
+
+describe("a dish made from the whole eleven-item basket (the cloche lifted)", () => {
+  // The chef's best case with the wildcard: every ingredient used, so `pickedIngredients` holds 11.
+  const eleven = [...[...CONCEPTS[0]!["pickedIngredients"] as Json[]], snap("tinned-baked-beans", "Tinned baked beans", "prepared-pantry", "🥫"), snap("white-miso", "White miso", "sauces-stocks-fermented", "🫙"), LENTILS_WILD];
+
+  it("keeps all 11 picked ingredients", () => {
+    expect(eleven).toHaveLength(11);
+    const raw = twistFinished({}, { concepts: { state: "ready", data: [{ ...CONCEPTS[0]!, pickedIngredients: eleven, omitted: [] }, CONCEPTS[1], CONCEPTS[2]], error: null } });
+    expect(v(raw).concepts.data?.[0]?.pickedIngredients.map((s) => s.id)).toEqual(eleven.map((s) => s["id"]));
+  });
+
+  it("keeps an 11-item omitted list too (a chef that left everything out of one dish)", () => {
+    const omitted = eleven.map((ingredient) => ({ ingredient, reason: "Saved for another night." }));
+    const raw = twistFinished({}, { concepts: { state: "ready", data: [{ ...CONCEPTS[0]!, pickedIngredients: [], omitted }, CONCEPTS[1], CONCEPTS[2]], error: null } });
+    expect(v(raw).concepts.data?.[0]?.omitted).toHaveLength(11);
+  });
+
+  it("still refuses a list longer than any basket", () => {
+    const twelve = [...eleven, KIMCHI_SNAP];
+    const raw = twistFinished({}, { concepts: { state: "ready", data: [{ ...CONCEPTS[0]!, pickedIngredients: twelve, omitted: [] }, CONCEPTS[1], CONCEPTS[2]], error: null } });
+    expect(v(raw).concepts.data?.[0]?.pickedIngredients ?? []).toHaveLength(0);
+  });
+});

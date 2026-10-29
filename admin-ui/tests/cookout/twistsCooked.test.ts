@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { ServerLockedError } from "../../src/server/api/http";
 import { parseRoundPhotos, type PhotosResult } from "../../src/server/cookout/api";
-import { PHOTO_CHANGED } from "../../src/server/cookout/cookedSheet";
+import { NOT_COOKED_ANY_MORE, PHOTO_CHANGED } from "../../src/server/cookout/cookedSheet";
 import { picture, recipesNone } from "./fixtures";
-import { bankedSlot, cookedInfo, makeHarness, q, qa, settle, twistFinished, type Harness, type Json } from "./twistFixtures";
+import { bankedSlot, cookedInfo, makeHarness, q, qa, settle, twistFinished, v, type Harness, type Json } from "./twistFixtures";
 
 // The "We cooked it!" corner of a banked recipe (spec/server-chat/09a-cookout-twists.md §1.8, §9): the mark,
 // two heart rows (own editable, partner read-only), the unmark confirmation, the plates side by side, and the
@@ -253,6 +253,37 @@ describe("the photo chooser", () => {
     })();
     qa<HTMLButtonElement>(again, ".wx-srv-ck-photos-tile")[0]?.click();
     expect(h.api.linkPhoto).toHaveBeenLastCalledWith(41, 1, "a", 9, "att-90");
+  });
+
+  it("a 409 because the partner unmarked the dish meanwhile does NOT re-open the chooser: it says so", async () => {
+    const h = makeHarness({ fetchRound: async () => ({ ok: true, view: v(cookedView(null, { rev: 9_999 })) }) });
+    openRecipe(h, cookedView(cookedInfo()));
+    h.api.photos.mockResolvedValue(photosResult());
+    button(h, `${RECIPE} .wx-srv-ck-plates-add`).click();
+    await settle();
+    h.api.linkPhoto.mockResolvedValue({ ok: false, kind: "bad_state" });
+    qa<HTMLButtonElement>(q(h.pane, ".wx-srv-ck-photos"), ".wx-srv-ck-photos-tile")[0]?.click();
+    await settle();
+    expect(h.api.photos).toHaveBeenCalledTimes(1);
+    expect(q(h.pane, ".wx-srv-ck-photos").hidden).toBe(true);
+    expect(q(h.pane, ".wx-srv-ck-toast").textContent).toBe(NOT_COOKED_ANY_MORE);
+    expect(NOT_COOKED_ANY_MORE).toBe("That dish isn't marked as cooked any more.");
+    // The fresh round is on screen: the dish offers "We cooked it!" again.
+    expect(h.pane.querySelector(`${RECIPE} .wx-srv-ck-plates-add`)).toBeNull();
+  });
+
+  it("a 409 while the dish is still cooked is the photo itself: the fresh read keeps the chooser's answer", async () => {
+    const h = makeHarness({ fetchRound: async () => ({ ok: true, view: v(cookedView(cookedInfo(), { rev: 9_999 })) }) });
+    openRecipe(h, cookedView(cookedInfo()));
+    h.api.photos.mockResolvedValue(photosResult());
+    button(h, `${RECIPE} .wx-srv-ck-plates-add`).click();
+    await settle();
+    h.api.linkPhoto.mockResolvedValue({ ok: false, kind: "bad_state" });
+    qa<HTMLButtonElement>(q(h.pane, ".wx-srv-ck-photos"), ".wx-srv-ck-photos-tile")[0]?.click();
+    await settle();
+    expect(h.api.photos).toHaveBeenCalledTimes(2);
+    expect(q(h.pane, ".wx-srv-ck-photos").hidden).toBe(false);
+    expect(q(h.pane, ".wx-srv-ck-photos-note").textContent).toBe(PHOTO_CHANGED);
   });
 
   it("a 409 bad_state says the photo changed and opens the chooser again with a FRESH list", async () => {

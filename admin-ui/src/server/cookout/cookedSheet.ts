@@ -42,6 +42,8 @@ export interface CookedControlsDeps {
   /** Runs a photos read; a lock becomes "unavailable" (and locks). */
   readPhotos(call: () => Promise<PhotosResult>): Promise<PhotosResult>;
   refetch(seq: number): void;
+  /** Reads the round now (applying it) and answers with it, or null when it could not be read. */
+  read(seq: number): Promise<CookoutView | null>;
   toast(text: string): void;
   /** Something this module draws changed: redraw the pane. */
   redraw(): void;
@@ -64,6 +66,14 @@ export interface CookedControls {
 
 /** The chooser's words when the photo it showed is no longer linkable (09a §9). */
 export const PHOTO_CHANGED = "That photo changed - pick again";
+/** A photo link refused because the dish was unmarked meanwhile (the partner, on another screen). */
+export const NOT_COOKED_ANY_MORE = "That dish isn't marked as cooked any more.";
+
+/** One dish's recipe slot in any of the round's dish sets. */
+function slotOf(view: CookoutView, generation: number, conceptId: ConceptId): RecipeSlot | null {
+  if (view.generation === generation) return view.recipes[conceptId];
+  return view.generations.find((g) => g.generation === generation)?.recipes[conceptId] ?? null;
+}
 
 type Action = "cooked" | "rating" | "photo";
 
@@ -199,11 +209,21 @@ export function createCookedControls(deps: CookedControlsDeps): CookedControls {
     if (started !== epoch) return;
     busy.delete(key);
     if (!outcome.ok) {
-      deps.refetch(target.seq);
       if (outcome.kind === "bad_state") {
-        deps.toast(PHOTO_CHANGED);
-        void openChooser(target.seq, target.generation, target.conceptId, target.title, PHOTO_CHANGED);
+        // The same 409 answers a photo that is no longer linkable AND a dish that is no longer cooked (the
+        // partner unmarked it meanwhile): read the round to tell which. Only the first is "pick again".
+        const fresh = await deps.read(target.seq);
+        if (started !== epoch) return;
+        const slot = fresh === null ? null : slotOf(fresh, target.generation, target.conceptId);
+        if (fresh !== null && (slot === null || slot.state !== "banked" || slot.cooked === null)) {
+          deps.toast(NOT_COOKED_ANY_MORE);
+        } else {
+          if (fresh === null) deps.refetch(target.seq);
+          deps.toast(PHOTO_CHANGED);
+          void openChooser(target.seq, target.generation, target.conceptId, target.title, PHOTO_CHANGED);
+        }
       } else {
+        deps.refetch(target.seq);
         deps.toast(outcome.kind === "unavailable" ? "Couldn't add that photo — try again." : "Couldn't add that photo.");
       }
     }
