@@ -112,6 +112,14 @@ delete-response delay). The database file is never replaced under its live conne
 therefore never need to clean up after themselves and must not rely on what an earlier test left.
 `WIXY_E2E_WORKERS=1` is the worst case for leftovers: run it when touching shared state.
 
+Two taps on one page inside 400 ms lock the chat when the second is a gesture-boundary control (the
+quote on a reply, a lightbox button): a test that sends and then taps the quote must wait
+`MULTI_TAP_INTERVAL_MS + 100` first (decisions/00198).
+
+A failing e2e job uploads `e2e/test-results/` (failure screenshots plus `error-context.md`) as the
+`e2e-test-results` artifact for 7 days. Playwright `trace` stays off: retain-on-failure cost +31 % wall
+clock on the full suite and once hung `context.close()`.
+
 **Clocks:** `page.clock.install()` does NOT pause time (measured on Playwright 1.61.1: page time keeps
 flowing at real speed); a spec that counts idle time with `runFor` must call `freezeClock(page)` from
 `e2e/tests/helpers.ts` after the page has loaded, or a busy machine adds its own delay to the count.

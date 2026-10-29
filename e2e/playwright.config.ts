@@ -26,4 +26,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: WORKERS,
   reporter: "list",
+  // Failure screenshots + the page snapshot reach CI's artifact upload. `trace` stays off:
+  // retain-on-failure cost +31 % wall clock on the full suite (248 s -> 325 s, 4 workers) and
+  // once hung `context.close()` for 27 s (decisions/00198).
+  use: { screenshot: "only-on-failure" },
 });
