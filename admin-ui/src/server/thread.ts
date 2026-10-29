@@ -1192,7 +1192,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     placeholder: "Message…",
     submitLabel: "Send",
     win,
-    accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
     onChipsRendered: (stagedFiles) => recomputeViewOnceTarget(stagedFiles),

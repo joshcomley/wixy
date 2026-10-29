@@ -88,7 +88,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
     const secondChunkGate = new Promise<void>((resolve) => { releaseChunk = resolve; });
 
     await unlockServer(page, "Media tester");
-    await expect(page.locator('input[type="file"]')).toHaveAttribute("accept", "image/*,video/*");
+    await expect(page.locator('input[type="file"]')).not.toHaveAttribute("accept");
     await page.route(/\/api\/admin\/server\/uploads\/[^/]+\/chunks\/1$/, async (route) => {
       announceSecondChunk();
       await secondChunkGate;
