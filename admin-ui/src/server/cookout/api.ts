@@ -101,25 +101,37 @@ export interface CookoutSummary {
   readonly cookedCount: number;
 }
 
-/** One ingredient as the round froze it when it was offered (spec §2.3 rule 5). */
+/** An ingredient's catalogue picture (09b §E.1): two same-origin, content-addressed renditions. */
+export interface IngredientImage {
+  readonly card: string;
+  readonly thumb: string;
+}
+
+/** One ingredient as the round froze it when it was offered (spec §2.3 rule 5), plus the two read-time
+ * catalogue fields (09b §E.1): what it is, and its picture. Both are null from a pre-round-2 server, for an
+ * ingredient the catalogue does not cover yet, and for a picture this server does not hold. */
 export interface IngredientSnap {
   readonly id: string;
   readonly name: string;
   readonly category: string;
   readonly emoji: string;
   readonly blurb: string;
+  readonly what: string | null;
+  readonly image: IngredientImage | null;
 }
 
 export interface Staple {
   readonly id: string;
   readonly name: string;
+  readonly image: IngredientImage | null;
 }
 
 /** A basket ingredient and how it got there (09a §4.3 `PickSnap`). `turn` is null for the wildcard and a
- * swapped-in item. */
+ * swapped-in item. `facts` (09b §E.1) arrive only once the round has left picking. */
 export interface PickSnap extends IngredientSnap {
   readonly turn: number | null;
   readonly via: PickVia;
+  readonly facts: readonly string[] | null;
 }
 
 export interface CookoutPlayer {
@@ -448,6 +460,39 @@ function parseWaiting(value: unknown): GateWait[] {
 
 // -- View pieces ---------------------------------------------------------------------------------------
 
+/** A catalogue picture URL: only this server's own content-addressed route (09b §E.3). */
+const IMAGE_URL_RE = /^\/admin\/cookout-img\/[0-9a-f]{64}\.webp$/;
+export const MAX_WHAT = 120;
+export const MAX_FACTS = 3;
+export const MAX_FACT = 200;
+
+/** `{card, thumb}` when both are this server's picture URLs, else null — a malformed half drops the whole
+ * picture, so a card never shows one rendition and falls back on the other. */
+export function parseIngredientImage(value: unknown): IngredientImage | null {
+  const record = asRecord(value);
+  const card = asString(record?.["card"]);
+  const thumb = asString(record?.["thumb"]);
+  if (card === null || thumb === null || !IMAGE_URL_RE.test(card) || !IMAGE_URL_RE.test(thumb)) return null;
+  return { card, thumb };
+}
+
+/** The "what it is" line: a non-blank string of at most 120 characters, else null. */
+export function parseWhat(value: unknown): string | null {
+  const what = asText(value, MAX_WHAT);
+  return what === null || what.trim() === "" ? null : what;
+}
+
+/** Fun facts: an array of at most three strings of at most 200 characters each, else null (all or none). */
+export function parseFacts(value: unknown): readonly string[] | null {
+  if (!Array.isArray(value) || value.length > MAX_FACTS) return null;
+  const out: string[] = [];
+  for (const raw of value as unknown[]) {
+    if (typeof raw !== "string" || raw.length > MAX_FACT) return null;
+    if (raw.trim() !== "") out.push(raw);
+  }
+  return out;
+}
+
 /** One frozen ingredient, or null. The emoji and blurb are decoration: a missing one is blank. */
 export function parseSnap(value: unknown): IngredientSnap | null {
   const record = asRecord(value);
@@ -461,6 +506,8 @@ export function parseSnap(value: unknown): IngredientSnap | null {
     category: asText(record["category"], 64) ?? "",
     emoji: asText(record["emoji"], 16) ?? "",
     blurb: asText(record["blurb"], 200) ?? "",
+    what: parseWhat(record["what"]),
+    image: parseIngredientImage(record["image"]),
   };
 }
 
@@ -485,6 +532,7 @@ export function parsePickSnap(value: unknown): PickSnap | null {
     ...snap,
     turn: asIntIn(record["turn"], 1, TOTAL_PICKS),
     via: typeof via === "string" && VIAS.includes(via) ? (via as PickVia) : "pick",
+    facts: parseFacts(record["facts"]),
   };
 }
 
@@ -517,7 +565,7 @@ function parseStaple(value: unknown): Staple | null {
   const id = asString(record["id"]);
   const name = asText(record["name"], 120);
   if (id === null || !ID_RE.test(id) || name === null || name.trim() === "") return null;
-  return { id, name };
+  return { id, name, image: parseIngredientImage(record["image"]) };
 }
 
 function parseStaples(value: unknown): Staple[] {

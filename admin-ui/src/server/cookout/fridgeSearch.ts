@@ -13,6 +13,7 @@
 // is set via `textContent`.
 
 import { SEARCH_MAX, SEARCH_MIN, type IngredientSnap, type SearchResult } from "./api";
+import { ingredientPicture } from "./pictures";
 
 export interface FridgeSearchDeps {
   readonly document: Document;
@@ -101,7 +102,8 @@ export function createFridgeSearch(deps: FridgeSearchDeps): FridgeSearch {
       return;
     }
     const chip = el("span", "wx-srv-ck-fridge-chip");
-    chip.append(emoji("wx-srv-ck-fridge-chip-emoji", chosen.emoji !== "" ? chosen.emoji : "🧊"));
+    // Its picture (09b §D.5), or the same-size emoji tile without one.
+    chip.append(ingredientPicture(doc, chosen, { rendition: "thumb", className: "wx-srv-ck-fridge-pic", alt: "" }));
     chip.append(el("span", "wx-srv-ck-fridge-chip-name", chosen.name));
     const clear = el("button", "wx-srv-ck-fridge-clear", "✕");
     clear.type = "button";
@@ -140,7 +142,7 @@ export function createFridgeSearch(deps: FridgeSearchDeps): FridgeSearch {
         option.setAttribute("data-srv-gesture-boundary", "");
         option.dataset["ingredient"] = snap.id;
         option.disabled = disabled;
-        option.append(emoji("wx-srv-ck-fridge-option-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"));
+        option.append(ingredientPicture(doc, snap, { rendition: "thumb", className: "wx-srv-ck-fridge-pic", alt: "" }));
         option.append(el("span", "wx-srv-ck-fridge-option-name", snap.name));
         option.addEventListener("click", () => choose(snap));
         return option;
