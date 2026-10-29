@@ -231,7 +231,7 @@ def canned_cookout_concepts(prompt: str) -> dict[str, Any] | None:
     challenge = twists.get("challenge")
     last = ("bake", "roast", "Golden")
     if challenge == "no-oven":
-        last = ("rice", "pan-fry", "Quick")
+        last = ("platter", "grill", "Quick")
     plan = [
         ("a", ids[0:8], "Sunday Supper", "stew", "simmer", "Slow-simmered"),
         ("b", ids[len(ids) - 8 :], "Fresh and Light", "salad", "no-cook", "Bright"),
