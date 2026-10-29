@@ -66,16 +66,21 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
     slide.setAttribute("aria-roledescription", "slide");
     slide.setAttribute("aria-label", `${i + 1} of ${count}: ${snap.name}`);
     slide.append(ingredientPicture(doc, snap, { rendition: "card", className: "wx-srv-ck-car-pic", eager: i <= 1 }));
+    // The words in one block under the picture: it scrolls on its own only when a very short screen cannot
+    // hold them beside the smallest picture — never clipped, never under the title row.
+    const words = doc.createElement("div");
+    words.className = "wx-srv-ck-car-words";
+    slide.append(words);
     const name = doc.createElement("h4");
     name.className = "wx-srv-ck-car-name";
     name.textContent = snap.name;
-    slide.append(name);
+    words.append(name);
     const what = snap.what ?? (snap.blurb !== "" ? snap.blurb : null);
     if (what !== null) {
       const line = doc.createElement("p");
       line.className = "wx-srv-ck-car-what";
       line.textContent = what;
-      slide.append(line);
+      words.append(line);
     }
     const facts = snap.facts ?? [];
     if (facts.length > 0) {
@@ -87,7 +92,7 @@ export function createCarousel(deps: CarouselDeps, slides: readonly PickSnap[]):
         li.textContent = fact;
         list.append(li);
       }
-      slide.append(list);
+      words.append(list);
     }
     items.push(slide);
     track.append(slide);

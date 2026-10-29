@@ -655,3 +655,185 @@ test.describe("Cookout", () => {
     await context.close();
   });
 });
+
+// -- The chef stage's fit (spec/server-chat/09b-cookout-visual.md §D.4) ----------------------------------------
+// While the chef works, its box (heading row + the ingredient carousel) is the first thing in the stage and
+// exactly the visible height of the column, at every 09b viewport. The round's view is rewritten on its way
+// to the browser into "all ten picked, the chef at work", with the LONGEST text the catalogue allows (a
+// 36-character name, a 60-character what-line, three 150-character facts); pictures are absent (the emoji
+// tile has the picture's box, so the fit is the same). With a normal-height pane (>= 508 px) everything fits
+// with no overflow at all; below that only the words block under the picture may scroll, on its own, and
+// nothing is ever clipped or under the title row.
+
+const LONG_NAME = "Frozen puff pastry vol-au-vent bites";
+const LONG_WHAT = "Small, crisp cases of buttery puff pastry, ready for filling";
+
+function longFact(n: number): string {
+  const text = `Fact ${n}: puff pastry is made by folding butter into dough many times, so that thin layers puff up and separate in the heat of a very hot oven. `;
+  return text.repeat(2).slice(0, 150);
+}
+
+function chefPending(raw: Record<string, unknown>): Record<string, unknown> {
+  const picks = (slot: 1 | 2): unknown[] =>
+    [0, 1, 2, 3, 4].map((i) => ({
+      id: `long-${slot}-${i}`,
+      name: LONG_NAME,
+      category: "prepared-pantry",
+      emoji: "🥐",
+      blurb: "",
+      what: LONG_WHAT,
+      image: null,
+      facts: [longFact(1), longFact(2), longFact(3)],
+      turn: i * 2 + slot,
+      via: "pick",
+    }));
+  const players = raw["players"] as Array<Record<string, unknown>>;
+  return {
+    ...raw,
+    state: "finished",
+    revealed: true,
+    current: null,
+    players: [
+      { ...players[0], pickCount: 5, picks: picks(1) },
+      { ...players[1], name: "Bob", pickCount: 5, picks: picks(2) },
+    ],
+    basket: null,
+    concepts: { state: "pending", data: null, error: null },
+    images: { state: "none", pictures: { a: null, b: null, c: null } },
+    gate: { waitingFor: [] },
+  };
+}
+
+interface ChefFit {
+  paneHeight: number;
+  pageScrolls: boolean;
+  chefTop: number;
+  chefBottom: number;
+  viewTop: number;
+  viewBottom: number;
+  headingTop: number;
+  headingHeight: number;
+  picW: number;
+  picH: number;
+  wordsScroll: string;
+  overflow: string[];
+  dotHit: boolean;
+  nextHit: boolean;
+  slideName: string;
+}
+
+async function measureChef(page: Page): Promise<ChefFit> {
+  return await page.evaluate((): ChefFit => {
+    const pane = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"]')!;
+    const scroll = pane.querySelector<HTMLElement>(".wx-srv-ck-scroll")!;
+    scroll.scrollTop = 0;
+    const chef = pane.querySelector<HTMLElement>(".wx-srv-ck-chef-working")!;
+    const chefBox = chef.getBoundingClientRect();
+    const view = scroll.getBoundingClientRect();
+    const slides = [...chef.querySelectorAll<HTMLElement>(".wx-srv-ck-car-slide")];
+    const slide =
+      slides.find((s) => {
+        const r = s.getBoundingClientRect();
+        return r.left >= view.left - 1 && r.right <= view.right + 1;
+      }) ?? slides[0]!;
+    const pic = slide.querySelector<HTMLElement>(".wx-srv-ck-pic")!.getBoundingClientRect();
+    const words = slide.querySelector<HTMLElement>(".wx-srv-ck-car-words")!;
+    const heading = chef.querySelector<HTMLElement>(".wx-srv-ck-chef-text")!.getBoundingClientRect();
+    const overflow: string[] = [];
+    for (const node of chef.querySelectorAll<HTMLElement>("*")) {
+      // The track scrolls sideways by design (one slide at a time); a picture's own box is exempt.
+      if (node.classList.contains("wx-srv-ck-car-track") || node.tagName === "IMG") continue;
+      if (node.getClientRects().length === 0) continue;
+      if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) overflow.push(node.className);
+    }
+    const hit = (el: HTMLElement | null): boolean => {
+      if (el === null) return true;
+      const r = el.getBoundingClientRect();
+      const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return at !== null && el.contains(at);
+    };
+    return {
+      paneHeight: pane.getBoundingClientRect().height,
+      pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight,
+      chefTop: chefBox.top,
+      chefBottom: chefBox.bottom,
+      viewTop: view.top,
+      viewBottom: view.bottom,
+      headingTop: heading.top,
+      headingHeight: heading.height,
+      picW: pic.width,
+      picH: pic.height,
+      wordsScroll: getComputedStyle(words).overflowY,
+      overflow,
+      dotHit: hit(chef.querySelector<HTMLElement>(".wx-srv-ck-car-dot-on")),
+      nextHit: getComputedStyle(chef.querySelector<HTMLElement>(".wx-srv-ck-car-next")!).display === "none" || hit(chef.querySelector<HTMLElement>(".wx-srv-ck-car-next")),
+      slideName: slide.querySelector(".wx-srv-ck-car-name")?.textContent ?? "",
+    };
+  });
+}
+
+test.describe("Cookout chef stage", () => {
+  test("the chef's carousel fits the screen at every 09b viewport, with the longest text", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 360, height: 640 } });
+    const page = await context.newPage();
+    const errors = trackConsoleErrors(page);
+    await unlockServer(page, "Alice");
+    const stopAwake = keepAwake([page]);
+    // Every read of a Cookout round comes back as "the chef is at work", with the longest text.
+    await page.route(/\/api\/admin\/server\/cookout\/\d+\?as=/, async (route) => {
+      const response = await route.fetch();
+      const json = (await response.json()) as Record<string, unknown>;
+      await route.fulfill({ response, json: chefPending(json) });
+    });
+    await startCookout(page, false, false);
+    const chef = game(page).locator(".wx-srv-ck-chef-working");
+    await expect(chef.locator(".wx-srv-ck-car")).toBeVisible();
+    for (const [width, height, inset] of [
+      [360, 640, 0],
+      [360, 640, 34],
+      [390, 844, 0],
+      [390, 844, 34],
+      [360, 560, 0],
+      [360, 560, 34],
+      [360, 480, 0],
+      [360, 480, 34],
+      [1280, 800, 0],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate((px) => {
+        let style = document.getElementById("e2e-inset");
+        if (style === null) {
+          style = document.createElement("style");
+          style.id = "e2e-inset";
+          document.head.append(style);
+        }
+        style.textContent = px > 0 ? `.wx-srv-tabs { padding-bottom: ${px}px !important }` : "";
+      }, inset);
+      await page.waitForTimeout(250);
+      const where = `${width}x${height} inset ${inset}`;
+      const fit = await measureChef(page);
+      expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
+      // The working box is whole inside the visible column: under the title row, above the chat row.
+      expect(fit.chefTop, `${where}: chef box top`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+      expect(fit.chefBottom, `${where}: chef box bottom`).toBeLessThanOrEqual(fit.viewBottom + 1);
+      expect(fit.headingTop, `${where}: heading under the title row`).toBeGreaterThanOrEqual(fit.viewTop - 1);
+      expect(fit.headingHeight, `${where}: heading drawn`).toBeGreaterThan(0);
+      // The picture keeps 96 px on a normal-height pane, 64 px on a shorter one, beside the longest words.
+      const minPic = fit.paneHeight >= 508 ? 95.5 : 63.5;
+      expect(fit.picH, `${where}: picture height`).toBeGreaterThanOrEqual(minPic);
+      expect(fit.picW, `${where}: picture width`).toBeGreaterThanOrEqual(minPic);
+      expect(fit.slideName).toBe(LONG_NAME);
+      expect(fit.dotHit, `${where}: the current dot can be tapped`).toBe(true);
+      expect(fit.nextHit, `${where}: the next arrow can be tapped`).toBe(true);
+      // Nothing in the box overflows except the words block under the picture — which, with three of the
+      // longest facts, may not fit beside the picture on a phone: it then scrolls on its own (never clipped).
+      expect(fit.overflow.every((c) => c === "wx-srv-ck-car-words"), `${where}: ${fit.overflow.join(", ")}`).toBe(true);
+      expect(fit.wordsScroll, `${where}: the words block scrolls`).toBe("auto");
+    }
+    // No toast about a pick lingers over the carousel.
+    await expect(game(page).locator(".wx-srv-ck-toast")).toBeHidden();
+    stopAwake();
+    expect(errors.filter((m) => !/favicon/i.test(m))).toEqual([]);
+    await context.close();
+  });
+});

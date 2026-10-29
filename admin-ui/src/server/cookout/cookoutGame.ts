@@ -773,7 +773,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (outcome.ok) {
       if (kind === "pick") {
         const chosen = current.options.find((o) => o.id === ingredientId);
-        if (chosen !== undefined) showToast(`${chosen.name} is in the basket ✓`);
+        // The tenth pick ends picking: the reveal says it all, and a toast would sit over the chef's carousel.
+        if (chosen !== undefined && outcome.view.state === "picking") showToast(`${chosen.name} is in the basket ✓`);
       } else if (kind === "lucky") {
         // The server already chose; the coin only shows its answer.
         const chosen = choiceOf(outcome.view, current.turn);
@@ -1836,13 +1837,16 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const box = el("div", "wx-srv-ck-chef");
     if (state === "pending" || state === "none") {
       box.classList.add("wx-srv-ck-chef-working");
-      box.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
+      // One heading row (the hat, the line, the clock), so the carousel below gets the rest of the screen.
+      const head = el("div", "wx-srv-ck-chef-head");
+      head.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
       const count = allPicks(view).length;
       const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
-      box.append(el("p", "wx-srv-ck-chef-text", `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`));
+      head.append(el("p", "wx-srv-ck-chef-text", `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`));
       const elapsed = el("span", "wx-srv-ck-elapsed", formatElapsed(chefSince === null ? 0 : (clock.now() - chefSince) / 1000));
       elapsed.setAttribute("aria-hidden", "true");
-      box.append(elapsed);
+      head.append(elapsed);
+      box.append(head);
       // While the chef works: the chosen ingredients go round with their fun facts (09b §D.4).
       const slides = allPicks(view);
       if (slides.length > 0) {
@@ -2372,6 +2376,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   /** While picking, the table shows and the stage below it does not; otherwise the other way round. */
   function showTable(picking: boolean): void {
+    // Leaving the table (the basket is full, the round ended): a toast about a move on it is stale.
+    if (!picking && !table.hidden) hideToast();
     table.hidden = !picking;
     stage.hidden = picking;
     scroll.classList.toggle("wx-srv-ck-scroll-table", picking);

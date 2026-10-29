@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { bannerName, skipLabel, turnBanner } from "../../src/server/cookout/cookoutGame";
 import { makeHarness, pick, q, qa, settle, setup, stars, STYLE_COSY, twistPicking, v, visible, type Json } from "./twistFixtures";
-import { P2_PICKS, pickingView, RIBEYE, SALMON, snap } from "./fixtures";
+import { finishedView, P2_PICKS, pickingView, RIBEYE, SALMON, snap } from "./fixtures";
 
 // spec/server-chat/09b-cookout-visual.md §D.3: the picture-first table. One tap on a whole card picks it
 // (and disables both); the watcher's cards are not tappable; 🎲 Twists shows only when a drafting twist is
@@ -140,6 +140,25 @@ describe("leaving the table", () => {
     expect(h.pane.querySelectorAll(".wx-srv-ck-card, .wx-srv-ck-skip")).toHaveLength(0);
     expect(h.pane.innerHTML).not.toContain(sha("c"));
     expect(visible(h.pane, ".wx-srv-ck-ended")).toBe(true);
+  });
+});
+
+describe("the toast when picking ends", () => {
+  it("the tenth pick shows no 'in the basket' toast over the chef, and leaving the table clears a standing one", async () => {
+    const h = table(pickingView({ turn: 10, options: [RIBEYE_P, SALMON_P], you: 2 }));
+    h.api.pick.mockResolvedValue(h.ok(finishedView({ concepts: "pending", images: "none" })));
+    qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-card")[0]!.click();
+    await settle();
+    expect(visible(h.pane, ".wx-srv-ck-toast")).toBe(false);
+    // An ordinary pick does toast; when the round then leaves picking the toast goes with the table.
+    const h2 = table(pickingView({ turn: 3, options: [RIBEYE_P, SALMON_P] }));
+    h2.api.pick.mockResolvedValue(h2.ok(pickingView({ turn: 4 })));
+    qa<HTMLButtonElement>(h2.pane, "button.wx-srv-ck-card")[0]!.click();
+    await settle();
+    expect(q(h2.pane, ".wx-srv-ck-toast").textContent).toBe("Ribeye steak is in the basket ✓");
+    expect(visible(h2.pane, ".wx-srv-ck-toast")).toBe(true);
+    h2.show(finishedView({ concepts: "pending", images: "none" }));
+    expect(visible(h2.pane, ".wx-srv-ck-toast")).toBe(false);
   });
 });
 
