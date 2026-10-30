@@ -335,11 +335,13 @@ test.describe("Cookout twists", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
+    // Awake from the first moment (see server-drawing.spec.ts): the second unlock can outlast the 10 s idle lock
+    // under load and lock the first device while it waits.
+    const stopAwake = keepAwake([pageA, pageB]);
     await unlockServer(pageA, "Alice");
     await unlockServer(pageB, "Bob");
     const bodiesA = recordBodies(pageA);
     const bodiesB = recordBodies(pageB);
-    const stopAwake = keepAwake([pageA, pageB]);
     const pages = [pageA, pageB] as const;
 
     // -- Start sheet: a spun style, the one-pan challenge, stars, the cloche and a fridge raid -----------------
@@ -593,10 +595,12 @@ test.describe("Cookout twists", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
+    // Awake from the first moment (see server-drawing.spec.ts): the second unlock can outlast the 10 s idle lock
+    // under load and lock the first device while it waits.
+    const stopAwake = keepAwake([pageA, pageB]);
     await unlockServer(pageA, "Alice");
     await unlockServer(pageB, "Bob");
     const bodiesA = recordBodies(pageA);
-    const stopAwake = keepAwake([pageA, pageB]);
     const pages = [pageA, pageB] as const;
 
     const { seq } = await startCookout(pageA, { blind: true, stars: true });

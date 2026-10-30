@@ -229,6 +229,9 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-live-${Date.now()}`;
@@ -281,6 +284,7 @@ test.describe("server-drawing.spec.ts", () => {
 
     expect(errorsA).toEqual([]);
     expect(errorsB).toEqual([]);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -289,11 +293,13 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-stick-${Date.now()}`;
     await seed(pageA, label, 12);
     await unlockServer(pageA, "Alice");
     await unlockServer(pageB, "Bob");
-    const stopAwake = keepAwake([pageA, pageB]);
     try {
       const anchor = bubbleWith(pageA, `${label} #11`);
       await anchor.scrollIntoViewIfNeeded();
@@ -336,6 +342,9 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-delete-${Date.now()}`;
     await seed(pageA, label);
     await unlockServer(pageA, "Alice");
@@ -371,6 +380,7 @@ test.describe("server-drawing.spec.ts", () => {
     // The message itself is untouched, on both.
     await expect(anchorA).toBeVisible();
     await expect(anchorB).toBeVisible();
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -379,6 +389,9 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-anchor-${Date.now()}`;
     await seed(pageA, label);
     await unlockServer(pageA, "Alice");
@@ -404,6 +417,7 @@ test.describe("server-drawing.spec.ts", () => {
       "B's copy to go",
     );
     await expect(anchorB).toHaveCount(0);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -412,6 +426,9 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-lock-${Date.now()}`;
     await seed(pageA, label);
     await unlockServer(pageA, "Alice");
@@ -447,6 +464,7 @@ test.describe("server-drawing.spec.ts", () => {
     // The withdrawn stroke was never stored: B still has exactly the two dots.
     await pageB.waitForTimeout(1_000);
     await expect(storedB.locator("path")).toHaveCount(2);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -663,6 +681,9 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
+    const stopAwake = keepAwake([pageA, pageB]);
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-undo-${Date.now()}`;
@@ -746,6 +767,7 @@ test.describe("server-drawing.spec.ts", () => {
 
     expect(errorsA).toEqual([]);
     expect(errorsB).toEqual([]);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 });
