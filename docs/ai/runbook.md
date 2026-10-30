@@ -119,7 +119,8 @@ never exist while an older process can reach the database.
   never be switched off; rounds of a loaded mode that already exist keep working if it is cleared).
   Standalone edition: set it in the container environment.
 - **Release with it absent**, let Slots deploy, and wait until no process runs from the previous slot.
-- **Then, on the hub**, from a checkout of the deployed commit, the delivery coordinator runs
+- **Then, on the hub**, from the canonical clone or a worktree (NEVER a Wixy slot, whose venv has no `psutil`), the
+  delivery coordinator runs it with the hub's Python (`%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`):
   `python tooling/cookout/activate_modes.py --enable toastie --token <server token>`. It refuses
   (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
   schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot (this check fails

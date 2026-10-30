@@ -420,7 +420,21 @@ class TestCheckDFailsClosed:
         detail = next(
             c.detail for c in am.evaluate_enable(facts, slots_root=SLOTS).checks if "(d)" in c.label
         )
-        assert "pid 11" in detail and "unreadable" in detail and "psutil" in detail
+        assert "pid 11" in detail and "unreadable" in detail and "owns the Wixy server" in detail
+
+    def test_a_python_without_psutil_is_refused_with_how_to_run_it_properly(self) -> None:
+        # even with nothing running at all: the tool cannot see working directories
+        facts = good_facts(processes=[], psutil_available=False)
+        decision = am.evaluate_enable(facts, slots_root=SLOTS)
+        assert not decision.ok
+        detail = next(c.detail for c in decision.checks if "(d)" in c.label)
+        assert "psutil is not installed" in detail
+        assert "pythoncore-3.14-64" in detail and "not with a Wixy slot's venv" in detail
+        assert "canonical clone" in detail
+
+    def test_the_tool_docstring_names_the_interpreter(self) -> None:
+        doc = am.__doc__ or ""
+        assert "NEVER with a Wixy slot's venv" in doc and "pythoncore-3.14-64" in doc
 
     def test_without_psutil_cwd_of_is_none_not_an_empty_string(
         self, monkeypatch: pytest.MonkeyPatch

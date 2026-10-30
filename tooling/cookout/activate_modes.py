@@ -4,7 +4,9 @@ Why this exists: a v21 server process accepts a database at a higher schema vers
 `cookout_rounds.mode` column, so a Toasted sandwich round it handled would be corrupted (the review
 reproduced it). A non-Classic round must therefore never exist while any older process can still
 reach the database. The release ships with `WIXY_COOKOUT_MODES` absent (Classic only); this tool is
-the checked, last step that sets it, on the hub:
+the checked, last step that sets it, on the hub. Run it with the hub's own Python (the one with
+`psutil`, e.g. `%LOCALAPPDATA%\\Python\\pythoncore-3.14-64\\python.exe`) from the canonical clone or a
+worktree, NEVER with a Wixy slot's venv (it has no `psutil`, so check (d) can never pass):
 
     python tooling/cookout/activate_modes.py --enable toastie --token <server token>
     python tooling/cookout/activate_modes.py --disable toastie --token <server token>
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import json
 import os
 import re
@@ -46,6 +49,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
+PSUTIL_HELP = (
+    "psutil is not installed in this Python, so no process's working directory can be read. Run "
+    "this tool with the hub's Python (%LOCALAPPDATA%\\Python\\pythoncore-3.14-64\\python.exe, which "
+    "has psutil) from the canonical clone or a worktree, not with a Wixy slot's venv"
+)
 SETTING = "WIXY_COOKOUT_MODES"
 REQUIRED_SCHEMA = 22
 DEVFLEET_URL = "http://127.0.0.1:9999"
@@ -73,6 +81,7 @@ class Facts:
     processes: Sequence[ProcessInfo] | None
     """None when the process list could not be enumerated at all."""
     options_modes: Sequence[str] | None
+    psutil_available: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,10 +182,11 @@ def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
             if _under(p.command_line, slot_dir) or (p.cwd is not None and _under(p.cwd, slot_dir)):
                 d_problems.append(f"pid {p.pid} is running from {slot_dir}")
             elif p.cwd is None:
-                d_problems.append(
-                    f"pid {p.pid}: working directory unreadable (is psutil installed, and is "
-                    "this run as the user who owns the server?)"
-                )
+                d_problems.append(f"pid {p.pid}: working directory unreadable")
+    if not facts.psutil_available:
+        d_problems.append(PSUTIL_HELP)
+    elif any(("unreadable" in d) for d in d_problems):
+        d_problems.append("run as the user who owns the Wixy server (access denied otherwise)")
     checks.append(
         Check(
             "(d) no process is running from the other slot",
@@ -400,6 +410,7 @@ class MachineProbe:
             db_versions=self._db_versions(),
             processes=self._processes(),
             options_modes=self.options_modes(),
+            psutil_available=importlib.util.find_spec("psutil") is not None,
         )
 
     def read_env(self) -> str:
