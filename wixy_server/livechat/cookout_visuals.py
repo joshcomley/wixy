@@ -42,6 +42,7 @@ from wixy_server.livechat.cookout_pack import (
     PackManifest,
     PackStore,
     StoreBusy,
+    UnknownPin,
     load_manifest,
     object_relpath,
 )
@@ -271,26 +272,48 @@ class CookoutVisualsService:
         store = self.store
         if store is None:
             return
-        if self.pin_id is None:
-            self.register()
-        else:
-            try:
-                store.refresh_slot(self.pin_id)
-            except StoreBusy, OSError, PackError:
-                _LOGGER.exception("Cookout slot pin refresh failed")
+        pinned = self._ensure_pin()
         if now >= self._next_heal:
             self._next_heal = now + self._self_heal_s
-            self._self_heal()
+            self._self_heal(pinned)
         if self._next_gc is None:
             self._next_gc = now + self._gc_s
         elif now >= self._next_gc:
             self._next_gc = now + self._gc_s
+            if not pinned:
+                _LOGGER.warning("Cookout picture GC skipped: this server holds no slot pin")
+                return
             try:
                 store.gc()
             except StoreBusy, OSError, PackError:
                 _LOGGER.exception("Cookout picture GC failed")
 
-    def _self_heal(self) -> None:
+    def _ensure_pin(self) -> bool:
+        """Make sure this server holds a live slot pin: register one if it has none, refresh the
+        lease if it has, and register AGAIN if the registry no longer knows the pin (collected
+        after a long stall). True when a pin is held. A refresh that merely failed (busy store, a
+        transient OS error) still counts as pinned: the pin file is there and a lapsed lease keeps
+        its objects for 72 hours."""
+        store = self.store
+        if store is None:
+            return False
+        if self.pin_id is None:
+            self.register()
+            return self.pin_id is not None
+        try:
+            store.refresh_slot(self.pin_id)
+        except UnknownPin:
+            _LOGGER.warning(
+                "Cookout slot pin %s is gone from the registry; registering again", self.pin_id
+            )
+            self.pin_id = None
+            self.register()
+            return self.pin_id is not None
+        except StoreBusy, OSError, PackError:
+            _LOGGER.exception("Cookout slot pin refresh failed")
+        return True
+
+    def _self_heal(self, pinned: bool) -> None:
         manifest = self.visuals.manifest
         store = self.store
         if store is None or manifest.pack is None:
@@ -307,7 +330,7 @@ class CookoutVisualsService:
             return
         _LOGGER.info("Cookout picture self-heal wrote %d objects", written)
         self.visuals.reload()
-        if self.pin_id is None:
+        if not pinned:
             return  # never collect without our own pin protecting what we just fetched
         try:
             store.gc()
