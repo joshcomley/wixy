@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   chooseAnchor,
+  cssZoom,
   declaredColumnWidth,
   distanceToPolyline,
   drawScale,
@@ -20,6 +21,26 @@ import {
   type DrawPoint,
 } from "../../src/server/drawingGeometry";
 import { MAX_POINTS_PER_STROKE, SELECT_HIT_RADIUS_PX } from "../../src/server/drawings";
+
+describe("cssZoom: client px per layout px (decisions/00205)", () => {
+  it("uses the browser's own currentCSSZoom when it has one", () => {
+    expect(cssZoom(0.9, 400, 400)).toBe(0.9);
+  });
+
+  it("otherwise measures it: the box's client width over its unrounded layout width", () => {
+    // WebKit at the admin's 90% zoom (measured): a 448.923615 px column is 404.03125 client px.
+    expect(cssZoom(undefined, 404.03125, 448.923615)).toBeCloseTo(0.9, 7);
+    expect(cssZoom(undefined, 400, 400)).toBe(1);
+  });
+
+  it("is 1 — never 0, negative or NaN — when nothing usable was measured", () => {
+    expect(cssZoom(undefined, 0, 0)).toBe(1);
+    expect(cssZoom(undefined, NaN, 300)).toBe(1);
+    expect(cssZoom(undefined, 300, NaN)).toBe(1);
+    expect(cssZoom(0, 300, 300)).toBe(1);
+    expect(cssZoom(-1, 270, 300)).toBeCloseTo(0.9, 9);
+  });
+});
 
 describe("the draw-space <-> viewer mapping (§1)", () => {
   it("scale is the viewer's column over the drawer's; a degenerate input is 1, never 0 or NaN", () => {

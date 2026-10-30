@@ -317,6 +317,99 @@ test.describe("server-drawing.spec.ts", () => {
     await closeAll(contextA, contextB);
   });
 
+  // The admin's own zoom control (admin-ui/src/zoom.ts) puts CSS `zoom` on <html>. Under it a
+  // measured box is in zoomed screen px while the svg's `left`/`top` and the column's
+  // `clientWidth` are layout px, so a drawing was placed `zoom` times its distance from the top of
+  // the whole thread: at 90% in a long thread, thousands of px off screen. Purdy saw the canvas
+  // and never any ink — hers or anyone else's (decisions/00205).
+  test("at the admin's 90% zoom, the ink stays under the pen and on the canvas for both people", async ({ browser }) => {
+    const contextA = await browser.newContext({ viewport: { width: 440, height: 900 } });
+    await contextA.addInitScript(() => {
+      window.localStorage.setItem("wx-zoom-level", "90");
+    });
+    const contextB = await browser.newContext({ viewport: { width: 440, height: 900 } });
+    const pageA = await contextA.newPage();
+    const pageB = await contextB.newPage();
+    const errorsA = trackConsoleErrors(pageA);
+    const label = `draw-zoom-${Date.now()}`;
+    // A long thread above the canvas: the old error grew with the distance from the thread's top.
+    await seed(pageA, label, 40);
+    await unlockServer(pageA, "Purdy");
+    await unlockServer(pageB, "Josh");
+    expect(await pageA.evaluate(() => document.documentElement.style.zoom)).toBe("0.9");
+
+    await pageA.locator(".wx-srv-more-button").click();
+    await humanPause(pageA);
+    await pageA.locator(".wx-srv-more-canvas").click();
+    const canvasA = pageA.locator(".wx-srv-bubble-canvas").last();
+    await expect(canvasA).toBeVisible();
+    const seq = await seqOf(canvasA);
+    const canvasB = pageB.locator(`.wx-srv-bubble-canvas[data-message-seq="${seq}"]`);
+    await expect(canvasB).toBeVisible();
+    await humanPause(pageA);
+
+    await turnPenOn(pageA);
+    const box = (await canvasA.boundingBox())!;
+    const view = pageA.viewportSize()!;
+    const start = { x: box.x + 60, y: Math.min(box.y + box.height, view.height) - 200 };
+    const end = { x: start.x + 160, y: start.y - 40 };
+    await pageA.mouse.move(start.x, start.y);
+    await pageA.mouse.down();
+    for (let i = 1; i <= 16; i++) {
+      await pageA.mouse.move(start.x + ((end.x - start.x) * i) / 16, start.y + ((end.y - start.y) * i) / 16);
+      await pageA.waitForTimeout(16);
+    }
+    // Mid-stroke, the drawer's own ink is already under the pen.
+    const ownA = await storedOn(pageA, canvasA);
+    await eventually([pageA], async () => (await ownA.count()) === 1, "A's ink while drawing");
+    const midBox = (await ownA.boundingBox())!;
+    for (const point of [start, end]) {
+      expect(point.x, "ink box covers the pen (x) mid-stroke").toBeGreaterThanOrEqual(midBox.x - 1);
+      expect(point.x, "ink box covers the pen (x) mid-stroke").toBeLessThanOrEqual(midBox.x + midBox.width + 1);
+      expect(point.y, "ink box covers the pen (y) mid-stroke").toBeGreaterThanOrEqual(midBox.y - 1);
+      expect(point.y, "ink box covers the pen (y) mid-stroke").toBeLessThanOrEqual(midBox.y + midBox.height + 1);
+    }
+    await pageA.mouse.up();
+
+    // Stored, still under the pen on A: the box hugs the stroke (half the 4px pen + 1px pad).
+    const storedPostsOk = await storedOn(pageA, canvasA);
+    await expect(storedPostsOk).toHaveCount(1);
+    const inkA = (await storedPostsOk.boundingBox())!;
+    expect(Math.abs(inkA.x - start.x)).toBeLessThan(6);
+    expect(Math.abs(inkA.x + inkA.width - end.x)).toBeLessThan(6);
+    expect(Math.abs(inkA.y - end.y)).toBeLessThan(6);
+    expect(Math.abs(inkA.y + inkA.height - start.y)).toBeLessThan(6);
+
+    // B (no zoom) sees it at the same place ON THE CANVAS, as a share of the canvas's width, and
+    // at the same size relative to it: the stored points are honest draw-space px.
+    const inkB = await storedOn(pageB, canvasB);
+    await eventually([pageA, pageB], async () => (await inkB.count()) === 1, "B's copy of the ink");
+    await canvasB.scrollIntoViewIfNeeded();
+    const cA = (await canvasA.boundingBox())!;
+    const cB = (await canvasB.boundingBox())!;
+    const bInk = (await inkB.boundingBox())!;
+    const share = (ink: { x: number; y: number; width: number }, canvas: { x: number; y: number; width: number }) => ({
+      x: (ink.x - canvas.x) / canvas.width,
+      y: (ink.y - canvas.y) / canvas.width,
+      w: ink.width / canvas.width,
+    });
+    const onA = share(inkA, cA);
+    const onB = share(bInk, cB);
+    expect(Math.abs(onA.x - onB.x), "same left on the canvas").toBeLessThan(0.02);
+    expect(Math.abs(onA.y - onB.y), "same top on the canvas").toBeLessThan(0.02);
+    expect(Math.abs(onA.w - onB.w), "same size on the canvas").toBeLessThan(0.02);
+
+    // Select mode at 90% zoom: a tap ON the stroke selects it.
+    await humanPause(pageA);
+    await pageA.locator('.wx-srv-pen-mode[data-mode="select"]').click();
+    await humanPause(pageA);
+    await pageA.mouse.click((start.x + end.x) / 2, (start.y + end.y) / 2);
+    await expect(pageA.locator(".wx-srv-drawing-selection")).toBeVisible();
+
+    expect(errorsA).toEqual([]);
+    await closeAll(contextA, contextB);
+  });
+
   test("B selects A's drawing in Select mode and deletes it: it vanishes for both", async ({ browser }) => {
     const contextA = await browser.newContext();
     const contextB = await browser.newContext();
