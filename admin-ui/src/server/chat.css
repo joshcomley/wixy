@@ -1945,6 +1945,58 @@ dialog.wx-srv-game-pictures[open] {
   display: none;
 }
 
+.wx-srv-unheard-nav[hidden] {
+  display: none;
+}
+
+/* The bar for stepping through unheard notes in the chat: floats at the bottom of the thread, just
+   above the composer, the full width less a margin, and never wider than the screen. */
+.wx-srv-unheard-nav {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  box-shadow: var(--wx-shadow);
+  font: 600 0.8125rem/1.2 system-ui, sans-serif;
+}
+
+.wx-srv-unheard-pos {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-unheard-prev,
+.wx-srv-unheard-next,
+.wx-srv-unheard-nav-close {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-unheard-nav-close {
+  padding: 0;
+}
+
 .wx-srv-unheard-view {
   position: absolute;
   left: 0;
@@ -2003,8 +2055,27 @@ dialog.wx-srv-game-pictures[open] {
   box-sizing: border-box;
 }
 
-.wx-srv-unheard-dismiss {
+.wx-srv-unheard-actions {
   align-self: flex-end;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.wx-srv-unheard-goto {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wx-srv-unheard-dismiss {
   min-height: 44px;
   padding: 0 16px;
   border-radius: 999px;

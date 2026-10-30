@@ -839,6 +839,21 @@ same player, skip buttons and transcript block, minus the message-action menu �
 button. A note finished while the view is open leaves the list live the moment it stops playing (never
 cut off mid-playback: it waits for `ended`/`pause`); transcript updates patch in place. `detach()`/`teardown()` close it.
 
+**Going to each unheard note in the chat** (`thread.ts`, decisions/00207). Each list item also has
+**Go to message** (`.wx-srv-unheard-goto`, a gesture boundary): it closes the list and reveals that
+note in the thread, in context (`revealMessage`: scrolled to the middle and highlighted, as a
+quote's jump to its original is), and opens `.wx-srv-unheard-nav`, a bar floating at the bottom of
+the thread just above the composer: `‹ Previous` · `"2 of 3 unread voice notes"` · `Next ›` · ✕.
+Previous / Next go to the nearest unheard note before / after the current one, oldest first, and
+show only where there is one; once the current note is listened to the label reads `"N more unread
+voice notes"` and the steps still work from where it was; the bar goes when nothing is left unheard,
+on ✕, and on every lock or teardown. The count tab hides while the bar shows. The bar is
+`data-srv-gesture-exempt`: Next is tapped in quick succession on purpose and must never trip R3's
+double-tap lock (Escape and the panic ✕ still lock at once). **A jump holds the thread**
+(`threadScroll.hold()` until `scrollend`, at most `REVEAL_HOLD_MAX_MS`): while a smooth scroll
+runs the thread still reads as stuck to the bottom, and a message arriving meanwhile snapped it back
+there, undoing the jump (measured 3 of 10 e2e runs; it applied to a quote's jump too).
+
 **Composer focus + the header ... menu.** With `promoteToFullWidthOnMultiline` (Server chat only) the
 text box takes its own full-width line the moment it is focused (`chatComposer.ts`
 `promotedByFocus`), not only once the text wraps. When focus leaves it goes back to its place —
