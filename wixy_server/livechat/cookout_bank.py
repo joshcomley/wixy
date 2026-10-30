@@ -133,7 +133,9 @@ HEAD_MODIFIERS = frozenset(
         "small", "streaky", "back", "lean", "free", "organic", "british", "scottish", "cut",
     }
 )  # fmt: skip
-"""Leading words of meat and fish names that are modifiers, not the food."""
+"""Leading words of meat and fish names that are modifiers, not the food. A phrase is also never
+shorthand for a pick through these words alone ("brown sauce" from brown crab, "white sauce" from
+white bread): its head food noun has to be covered (round 2 audit F2)."""
 
 NOT_RAW_EGG_WORDS = frozenset(
     {
@@ -176,6 +178,16 @@ PASTA_SHAPE_FAMILIES = frozenset(
 BARE_ONLY_WORDS = frozenset({"fish", "sage", "onion"})
 """Words a pick allows only when they stand alone ("the fish juices", "a sage and onion crumb"):
 never inside a longer food span ("fish sauce", "onion rings") and never as a shorthand source."""
+
+POOLED_HEADS = frozenset(
+    {
+        "butter", "oil", "mayonnaise", "vinegar", "syrup", "jam", "jelly", "curd", "glaze", "stock",
+        "paste", "dressing", "crumbs", "flour", "sugar", "salt", "pepper", "ketchup", "yoghurt",
+        "mustard", "marmalade", "chutney", "relish", "sauce",
+    }
+)  # fmt: skip
+"""A phrase built from two different picks ("garlic butter") counts as shorthand only when its last
+food word is a cook's compound base; "duck egg", "salt cod" or "crab apple" are other foods."""
 
 SHAPE_WORDS = frozenset({"ring", "rings"})
 """Cut or shape words ("pineapple rings") that never make a second food of a picked one."""
@@ -861,7 +873,9 @@ class CookoutBank:
         )
         plain = self.stop_words | self.culinary_words | SHAPE_WORDS
         generic_pasta = any(
-            (entry := self._by_id.get(i)) is not None and tokenise(entry.name)[-1:] == ("pasta",)
+            (entry := self._by_id.get(i)) is not None
+            and tokenise(entry.name)[-1:] == ("pasta",)
+            and entry.family not in PASTA_SHAPE_FAMILIES
             for i in allowed_ids - omitted
         )
         found: list[str] = []
@@ -921,11 +935,12 @@ class CookoutBank:
                 (len(tokens) == 1 and tokens[0] in covered)
                 or (
                     len(tokens) > 1
-                    and food_words
+                    and any(t not in HEAD_MODIFIERS for t in food_words)
                     and (
                         any(all(t in src for t in food_words) for src in sources)
                         or (
                             len(food_words) > 1
+                            and food_words[-1] in POOLED_HEADS
                             and all(
                                 (t,) in self._dictionary and any(t in src for src in sources)
                                 for t in food_words
@@ -971,9 +986,7 @@ _CRISPS_SUBJECTS = frozenset(
     }
 )  # fmt: skip
 _CRISPS_VERB_AFTER = frozenset({"up", "until", "well"})
-_CRISPS_CONJUNCTIONS = frozenset(
-    {"until", "till", "as", "once", "when", "so", "that", "and", "then"}
-)
+_CRISPS_CONJUNCTIONS = frozenset({"until", "till", "as", "once", "when", "so", "that"})
 
 
 def _crisps_is_verb(

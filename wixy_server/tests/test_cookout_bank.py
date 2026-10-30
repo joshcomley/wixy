@@ -1724,3 +1724,29 @@ def test_candidates_narrow_the_wildcard_and_the_search() -> None:
             rng=random.Random(1),
             candidates=(),
         )
+
+
+# -- senior audit F2: a modifier word never makes a phrase shorthand ----------------------------
+
+
+def test_f2_modifier_words_do_not_cover_unpicked_condiments() -> None:
+    assert _scan("serve with brown sauce", {"brown-crab"})
+    assert _scan("a splash of hot sauce", {"hot-smoked-salmon"})
+    assert _scan("a rich white sauce", {"gluten-free-white-bread"})
+    assert _scan("render the white fat", {"gluten-free-white-bread"})
+
+
+def test_f2_intended_shorthand_still_passes() -> None:
+    assert _scan("spoon over the apple sauce", {"bramley-apple"}) == []
+    assert _scan("lamb stock", {"lamb-mince"}) == []
+    assert _scan("toast the white bread", {"gluten-free-white-bread"}) == []
+
+
+def test_f2_followups_crisps_flavours_pooled_phrases_and_specific_pastas() -> None:
+    assert _scan("serve with salt and vinegar crisps", {"spiced-vinegar-relish"})
+    assert _scan("serve with beef and onion crisps", {"bulgogi-beef", "spring-onion"})
+    assert _scan("cook until the chicken crisps", {"chicken-breast"}) == []
+    assert _scan("serve with elbow macaroni", {"angel-hair-pasta"})
+    assert _scan("a custard apple", {"egg-custard", "bramley-apple"})
+    assert _scan("rice milk", {"basmati-rice", "whole-milk"})
+    assert _scan("a pat of garlic butter", {"fresh-garlic", "salted-butter"}) == []
