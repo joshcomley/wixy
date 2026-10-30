@@ -227,7 +227,7 @@ describe("cookout: starting a round", () => {
     // The request timed out after the server made the round; the stream's copy arrived first.
     createCookout.mockImplementation(async () => {
       thread.handleStreamEvent({ type: "message", message: { ...cookoutMessage(9), clientId: "ck-uuid-0001" } });
-      return { ok: false, kind: "unavailable" };
+      return { ok: false, kind: "lost" };
     });
     const { thread } = await mount();
     await startCookout(thread);
@@ -239,7 +239,7 @@ describe("cookout: starting a round", () => {
   });
 
   it("a lost answer is asked again with the same clientId, and the replay's round opens", async () => {
-    createCookout.mockResolvedValueOnce({ ok: false, kind: "unavailable" }).mockResolvedValueOnce({ ok: true, message: cookoutMessage(9) });
+    createCookout.mockResolvedValueOnce({ ok: false, kind: "lost" }).mockResolvedValueOnce({ ok: true, message: cookoutMessage(9) });
     const { thread } = await mount();
     await startCookout(thread);
     expect(createCookout).toHaveBeenCalledTimes(2);
@@ -250,7 +250,7 @@ describe("cookout: starting a round", () => {
   });
 
   it("when the replay is lost too the sheet says so, and the round arriving later still opens it", async () => {
-    createCookout.mockResolvedValue({ ok: false, kind: "unavailable" });
+    createCookout.mockResolvedValue({ ok: false, kind: "lost" });
     const { thread } = await mount();
     await startCookout(thread);
     expect(createCookout).toHaveBeenCalledTimes(2);
@@ -266,13 +266,64 @@ describe("cookout: starting a round", () => {
   });
 
   it("someone else's round arriving after a lost start is only offered, not opened over the sheet", async () => {
-    createCookout.mockResolvedValue({ ok: false, kind: "unavailable" });
+    createCookout.mockResolvedValue({ ok: false, kind: "lost" });
     const { thread } = await mount();
     await startCookout(thread);
     thread.handleStreamEvent({ type: "message", message: cookoutMessage(9, {}, "Rose") });
     await flush();
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!.hidden).toBe(false);
     expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck")!.hidden).toBe(true);
+    thread.teardown();
+  });
+
+  it("a real refusal is not asked again (only a lost answer is)", async () => {
+    createCookout.mockResolvedValue({ ok: false, kind: "unavailable" });
+    const { thread } = await mount();
+    await startCookout(thread);
+    expect(createCookout).toHaveBeenCalledTimes(1);
+    expect(thread.element.querySelector(".wx-srv-ck-start-error")!.textContent).toBe("Couldn't start a Cookout — try again.");
+    // Nor does a round that turns up later take over: the refusal made none.
+    thread.handleStreamEvent({ type: "message", message: { ...cookoutMessage(9), clientId: "ck-uuid-0001" } });
+    await flush();
+    expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!.hidden).toBe(false);
+    thread.teardown();
+  });
+
+  it("a lost start's round landing after the sheet was closed and opened again leaves the new sheet alone", async () => {
+    createCookout.mockResolvedValue({ ok: false, kind: "lost" });
+    const { thread } = await mount();
+    await startCookout(thread);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-start-cancel")!.click();
+    openMenu(thread);
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-more-cookout")!.click();
+    await flush();
+    const sheet = thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!;
+    expect(sheet.hidden).toBe(false);
+    thread.handleStreamEvent({ type: "message", message: { ...cookoutMessage(9), clientId: "ck-uuid-0001" } });
+    await flush();
+    expect(sheet.hidden).toBe(false);
+    expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck")?.hidden ?? true).toBe(true);
+    thread.teardown();
+  });
+
+  it("a lost start's round landing while a new start is in flight does not close the sheet under it", async () => {
+    createCookout.mockResolvedValueOnce({ ok: false, kind: "lost" }).mockResolvedValueOnce({ ok: false, kind: "lost" });
+    const { thread } = await mount();
+    await startCookout(thread);
+    // A different choice is a different start (a new clientId); its answer is still on its way.
+    let answerSecond: (value: unknown) => void = () => {};
+    createCookout.mockImplementationOnce(() => new Promise((resolve) => (answerSecond = resolve)));
+    thread.element.querySelector<HTMLButtonElement>('.wx-srv-ck-mode[data-mode="blind"]')!.click();
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-ck-start-go")!.click();
+    await flush();
+    const sheet = thread.element.querySelector<HTMLElement>(".wx-srv-ck-start")!;
+    thread.handleStreamEvent({ type: "message", message: { ...cookoutMessage(9), clientId: "ck-uuid-0001" } });
+    await flush();
+    expect(sheet.hidden).toBe(false);
+    answerSecond({ ok: true, message: cookoutMessage(10, { blind: true }) });
+    await flush();
+    expect(sheet.hidden).toBe(true);
+    expect(thread.element.querySelector<HTMLElement>(".wx-srv-ck")!.hidden).toBe(false);
     thread.teardown();
   });
 

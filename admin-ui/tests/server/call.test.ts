@@ -144,6 +144,53 @@ describe("live-call consent and lifetime", () => {
     expect(notice.textContent).not.toContain("microphone permission");
     f.controller.dispose();
   });
+  it("a disabled Call button says why, to the eye (its title) and to a screen reader (its description)", () => {
+    const f = setup();
+    const call = f.controller.element.querySelector<HTMLButtonElement>('button[aria-label="Call"]')!;
+    const reason = (): string | null => {
+      const id = call.getAttribute("aria-describedby");
+      return id === null ? null : (f.controller.element.querySelector(`#${id}`)?.textContent ?? "");
+    };
+    expect(call.disabled).toBe(false);
+    expect(reason()).toBeNull();
+    expect(call.title).toBe("Call");
+    // The other device's call connection dropped: nobody to call.
+    f.socket.receive({ type: "presence", peers: [] });
+    expect(call.disabled).toBe(true);
+    expect(reason()).toBe("No other device is online right now");
+    expect(call.title).toBe("No other device is online right now");
+    f.socket.receive({ type: "presence", peers: [{ id: TARGET, label: "B", available: false }] });
+    expect(reason()).toBe("No other device is online right now");
+    f.socket.receive({ type: "presence", peers: [{ id: TARGET, label: "B", available: true }] });
+    expect(call.disabled).toBe(false);
+    expect(reason()).toBeNull();
+    expect(call.title).toBe("Call");
+    // While its own invite is out, Call waits and says so.
+    f.click("Call");
+    expect(call.disabled).toBe(true);
+    expect(reason()).toBe("Your call is starting…");
+    f.controller.dispose();
+  });
+
+  it("a busy microphone is the reason when it is the one", () => {
+    const socket = new Socket();
+    const controller = createCallController({ win: window, isMicBusy: () => true, onBusy: vi.fn(),
+      hooks: { suspendLive: () => ({ release: vi.fn(), touch: vi.fn() }), activityCount: () => 0, lockNow: vi.fn() },
+      socketFactory: () => socket as unknown as WebSocket, audioFactory: () => ({
+        prepare: vi.fn(async () => {}), start: vi.fn(), stop: vi.fn(), setMuted: vi.fn(), pulse: vi.fn(), play: vi.fn(), captureLease: vi.fn(),
+      }),
+    });
+    controller.attach({ token: "secret", expiresAt: Date.now() / 1000 + 3600 }, "A");
+    socket.onopen?.();
+    socket.receive({ type: "welcome", deadline: Date.now() / 1000 + 3600 });
+    socket.receive({ type: "presence", peers: [{ id: TARGET, label: "B", available: true }] });
+    const call = controller.element.querySelector<HTMLButtonElement>('button[aria-label="Call"]')!;
+    expect(call.disabled).toBe(true);
+    expect(call.title).toBe("The microphone is in use");
+    expect(controller.element.querySelector(`#${call.getAttribute("aria-describedby")}`)?.textContent).toBe("The microphone is in use");
+    controller.dispose();
+  });
+
   it("requires a separate confirmation and allows cancellation without calling or audio", () => {
     const f = setup();
     const call = f.controller.element.querySelector<HTMLButtonElement>('button[aria-label="Call"]')!;

@@ -293,6 +293,26 @@ describe("transcript block", () => {
     expect(el.querySelector(".wx-srv-transcript-text")?.textContent).toBe("hello again");
   });
 
+  it("an erased transcript (done, then none) takes its text off the screen, even after repeated identical repaints", () => {
+    const h = harness();
+    const host = wrap(block(h));
+    const el = host.querySelector<HTMLElement>(".wx-srv-transcript")!;
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "private words" } }]);
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "private words" } }]);
+    refreshTranscriptBlocks(host);
+    expect(el.textContent).toContain("private words");
+    patchTranscriptBlocks(host, [{ ...voice, transcript: null }]);
+    expect(el.dataset["state"]).toBe("idle");
+    expect(el.querySelector(".wx-srv-transcript-text")).toBeNull();
+    expect(host.textContent).not.toContain("private words");
+    // Hidden then erased: nothing of it comes back on Show either (the Show control is gone).
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "second secret" } }]);
+    el.querySelector<HTMLButtonElement>(".wx-srv-transcript-toggle")!.click();
+    patchTranscriptBlocks(host, [{ ...voice, transcript: null }]);
+    expect(host.textContent).not.toContain("second secret");
+    expect(el.querySelector(".wx-srv-transcript-toggle")).toBeNull();
+  });
+
   it("a slow 202 landing after the stream's done does not replace the shown text", async () => {
     let reply: (answer: TranscribeAnswer) => void = () => {};
     const h = harness(new Promise<TranscribeAnswer>((resolve) => (reply = resolve)));
