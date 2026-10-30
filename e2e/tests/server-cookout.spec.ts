@@ -795,7 +795,8 @@ async function measureTable(page: Page): Promise<TableFit> {
     if (stage === null) missing.push("stage");
     const overflow: string[] = [];
     for (const node of pane?.querySelectorAll<HTMLElement>("*") ?? []) {
-      if (node.tagName === "IMG" || node.getClientRects().length === 0) continue;
+      // A picture's own box: the <img>, and the card picture's tile, whose img is cropped to fill it (F.3).
+      if (node.tagName === "IMG" || node.matches(".wx-srv-ck-card-pic, .wx-srv-ck-card-pic .wx-srv-ck-pic") || node.getClientRects().length === 0) continue;
       // Below P = 411 only the stage may scroll (vertically).
       if (node === stage && paneHeight < 411 && node.scrollWidth <= node.clientWidth + 1) continue;
       if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) {
