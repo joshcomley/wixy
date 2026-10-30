@@ -205,7 +205,11 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     target(pane.querySelector(".wx-srv-float-fab"), "chat button");
     if (a.call) {
       const live = [...document.querySelectorAll<HTMLElement>(".wx-srv-call button")].filter((b) => b.getClientRects().length > 0);
-      if (live.length === 0) failures.push("a call is live but its controls are not shown");
+      if (live.length === 0) {
+        const widget = document.querySelector(".wx-srv-call");
+        const notice = [...document.querySelectorAll(".wx-srv-call-notice")].map((n) => (n.textContent ?? "").trim()).join(" / ");
+        failures.push(`a call is live but its controls are not shown (call state "${widget?.getAttribute("data-state") ?? "none"}", notice "${notice}")`);
+      }
       // 44x44 with no exception (09b F.3).
       if (a.answered === true) {
         const names = live.map((b) => `${b.getAttribute("aria-label") ?? ""} ${b.textContent ?? ""}`.toLowerCase());
@@ -327,7 +331,13 @@ async function ring(
   const callPanel = other.locator(".wx-srv-call");
   const attempt = async (): Promise<boolean> => {
     const callButton = callPanel.getByRole("button", { name: "Call", exact: true });
-    await expect(callButton, "the second device can start a call").toBeEnabled({ timeout: 15_000 });
+    try {
+      await expect(callButton).toBeEnabled({ timeout: 15_000 });
+    } catch (error) {
+      const state = async (page: Page): Promise<string> =>
+        await page.locator(".wx-srv-call").evaluate((el) => `${el.getAttribute("data-state")} | ${(el.textContent ?? "").replace(/\s+/g, " ").trim()}`).catch(() => "no call widget");
+      throw new Error(`the second device cannot start a call: its Call button stays disabled. second device: ${await state(other)}; ringing device: ${await state(measured)}`, { cause: error });
+    }
     await humanPause(other); // two taps under 400 ms apart lock the chat (R3)
     await callButton.click({ timeout: 10_000 });
     await humanPause(other);
