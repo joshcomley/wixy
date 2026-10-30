@@ -17,6 +17,7 @@
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 import {
   unlockServer,
   humanPause,
@@ -120,9 +121,7 @@ test.describe("Cookout", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
-    const stopAwake = keepAwake([pageA, pageB]);
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     const seq = await startCookout(pageA, false);
     await expect(game(pageA).locator(".wx-srv-ck-badge")).toHaveText("Open");
@@ -221,11 +220,9 @@ test.describe("Cookout", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const bodiesA = recordBodies(pageA);
     const bodiesB = recordBodies(pageB);
-    const stopAwake = keepAwake([pageA, pageB]);
 
     const seq = await startCookout(pageA, true);
     await expect(game(pageA).locator(".wx-srv-ck-badge")).toHaveText("Blind");
@@ -296,10 +293,8 @@ test.describe("Cookout", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const bodiesB = recordBodies(pageB);
-    const stopAwake = keepAwake([pageA, pageB]);
 
     const seq = await startCookout(pageA, true);
     await joinCookout(pageB, seq);
@@ -343,9 +338,7 @@ test.describe("Cookout", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
-    const stopAwake = keepAwake([pageA, pageB]);
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     // An Adventure is open: its tab is the one game tab.
     await openMoreMenu(pageA);

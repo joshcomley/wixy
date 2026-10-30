@@ -8,6 +8,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 test.use({
   launchOptions: {
@@ -105,8 +106,7 @@ test.describe("server-reactions.spec.ts", () => {
     const label = `react-live-${Date.now()}`;
 
     await seed(pageA, { label, sender: "Purdy" });
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     const bubbleA = bubbleWith(pageA, `${label} #1`);
     const bubbleB = bubbleWith(pageB, `${label} #1`);
     await waitVisible(bubbleA, pageA);
@@ -221,8 +221,7 @@ test.describe("server-reactions.spec.ts", () => {
     const label = `react-delete-${Date.now()}`;
 
     await seed(pageA, { label, sender: "Purdy" });
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     const bubbleA = bubbleWith(pageA, `${label} #1`);
     const bubbleB = bubbleWith(pageB, `${label} #1`);
     await waitVisible(bubbleA, pageA);
@@ -261,8 +260,7 @@ test.describe("server-reactions.spec.ts", () => {
       // left edge for theirs).
       await seed(pageA, { label: `${label}-theirs`, sender: "Purdy" });
       await seed(pageA, { label: `${label}-mine`, sender: "Josh" });
-      await unlockServer(pageA, "Josh");
-      await unlockServer(pageB, "Purdy");
+      await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
       const pointer = { pointerType: "touch", pointerId: 1, clientX: 40, clientY: 40, button: 0 };
 
       for (const side of ["theirs", "mine"] as const) {
@@ -320,8 +318,7 @@ test.describe("server-reactions.spec.ts", () => {
     const pageB = await contextB.newPage();
     const sender = `Voice${Date.now()}`;
 
-    await unlockServer(pageA, sender);
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, sender], [pageB, "Purdy"]]);
     // A key press, never a mouse move: this timer runs while the test hovers a bubble and clicks
     // its ⋯ trigger, which takes pointer events only while the bubble is hovered. A move landing
     // between the hover and the click drags the pointer off the bubble for good, and the click

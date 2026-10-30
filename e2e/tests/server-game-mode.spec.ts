@@ -6,6 +6,7 @@
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 test.describe.configure({ timeout: 120_000 });
@@ -49,8 +50,7 @@ test("a game tab hides the header and composer; Chat brings them back; a ringing
   const pb = await b.newPage();
   const errors = [trackConsoleErrors(pa), trackConsoleErrors(pb)];
   try {
-    await unlock(pa, "Caller");
-    await unlock(pb, "Receiver");
+    await unlockTogether(unlock, [[pa, "Caller"], [pb, "Receiver"]], { keepAwakeAfter: false });
     await startWyr(pb);
 
     // Receiver is in the game tab: full screen.

@@ -24,6 +24,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 import {
   closeAll,
   dismissIntro,
@@ -397,11 +398,7 @@ async function rig(browser: import("@playwright/test").Browser, long: boolean): 
     await useLongText(pageA);
     await useLongText(pageB);
   }
-  // Keep both devices awake from the first moment: under load the second unlock can take longer than the 10 s
-  // idle lock, and the first device would lock while it waits (the same cause as the drawing flake).
-  const stop = keepAwake([pageA, pageB]);
-  await unlockServer(pageA, "Alice");
-  await unlockServer(pageB, "Bob");
+  const stop = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
   return { contextA, contextB, pageA, pageB, stop, errors: errors.map((e) => () => e.filter((m) => !/favicon|getUserMedia|microphone/i.test(m))) };
 }
 

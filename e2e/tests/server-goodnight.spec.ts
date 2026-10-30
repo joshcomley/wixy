@@ -6,6 +6,7 @@
 import { expect, test } from "../fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
@@ -43,16 +44,6 @@ async function send(page: Page, text: string): Promise<void> {
   await expect(page.locator(".wx-srv-bubble-mine").filter({ hasText: text })).toBeVisible();
 }
 
-/** Keeps every page awake for a whole test: R7 locks a page after 10 s without activity, in the revealed state and the
- * PIN pad as well as in the chat. Under load the second device's unlock can outlast that, locking the first device
- * (or a reveal that then stalls) while it waits. A key press counts as activity and disturbs no click. */
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void page.keyboard.press("Shift").catch(() => undefined);
-  }, 2_000);
-  return () => clearInterval(timer);
-}
-
 async function pair(
   browser: Browser,
   opts: {
@@ -64,9 +55,7 @@ async function pair(
   const b = await browser.newContext(opts.cupcake ?? {});
   const bubble = await a.newPage();
   const cupcake = await b.newPage();
-  const stopAwake = keepAwake([bubble, cupcake]);
-  await unlockServer(bubble, "Bubble");
-  await unlockServer(cupcake, "Cupcake");
+  const stopAwake = await unlockTogether(unlockServer, [[bubble, "Bubble"], [cupcake, "Cupcake"]]);
   return {
     bubble,
     cupcake,

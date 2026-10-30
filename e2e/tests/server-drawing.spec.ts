@@ -14,6 +14,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, CDPSession, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -100,13 +101,6 @@ async function keepAlive(page: Page): Promise<void> {
  * page the test is only waiting on (the second device) otherwise locks on any slow run, taking its
  * elements out from under the next step. A key press counts as activity and, unlike a mouse move,
  * cannot disturb a hover or click another call is making on the same page. Stop it before closing. */
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void page.keyboard.press("Shift").catch(() => undefined);
-  }, 2_000);
-  return () => clearInterval(timer);
-}
-
 /** Polls `check` while keeping `pages` from idle-locking. */
 async function eventually(pages: readonly Page[], check: () => Promise<boolean>, what: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -231,13 +225,11 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-live-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const targetA = bubbleWith(pageA, `${label} #2`);
     const targetB = bubbleWith(pageB, `${label} #2`);
     await expect(targetA).toBeVisible();
@@ -295,11 +287,9 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-stick-${Date.now()}`;
     await seed(pageA, label, 12);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     try {
       const anchor = bubbleWith(pageA, `${label} #11`);
       await anchor.scrollIntoViewIfNeeded();
@@ -344,11 +334,9 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-delete-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     await turnPenOn(pageA);
@@ -391,11 +379,9 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-anchor-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     const seq = await seqOf(anchorA);
@@ -428,11 +414,9 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const label = `draw-lock-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     await turnPenOn(pageA);
@@ -683,13 +667,11 @@ test.describe("server-drawing.spec.ts", () => {
     const pageB = await contextB.newPage();
     // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
     // the first device while it waits (R7), taking its page out from under the next step.
-    const stopAwake = keepAwake([pageA, pageB]);
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-undo-${Date.now()}`;
     await seed(pageA, label, 3);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const targetA = bubbleWith(pageA, `${label} #2`);
     const targetB = bubbleWith(pageB, `${label} #2`);
     await expect(targetA).toBeVisible();

@@ -308,10 +308,16 @@ Chromiums) exposes two things. Neither is a reason to retry or skip a test.
 
 - **A device left untouched for 10 s locks (R7), in every state: the chat, the revealed "Open server settings" button
   and the PIN pad.** A test that unlocks device A, then spends longer than 10 s unlocking device B (easy under load) finds A
-  back on the decoy, and the next step waits forever for an element that is gone. Every two-device spec therefore starts
-  its keep-awake (`keepAwake`: a `Shift` key press on every page every 2 s; a key press counts as activity and cannot
-  disturb a click) **before the first unlock**, not after both. Proven with an 11 s stall injected before the second
-  unlock: the old specs fail (`server-cookout-twists`, `server-drawing`, `server-goodnight`), the new ones pass.
+  back on the decoy, and the next step waits forever for an element that is gone. Five specs failed this way
+  (`server-cookout-twists`, `server-drawing`, `server-goodnight`, `server-chat` long-press, `server-adventure` Nay), so it is
+  fixed as a class: **every spec that unlocks more than one device does it through `unlockTogether`
+  (`e2e/tests/two-devices.ts`)**, which starts the keep-awake (a `Shift` key press on every page every 2 s; a key press counts
+  as activity and cannot disturb a click) *before the first unlock*. It stops by itself when any of its pages closes, so
+  a test needs no cleanup. A test that asserts the idle lock itself (`server-calls`, `server-game-mode`) passes
+  `{ keepAwakeAfter: false }`: the keep-awake then covers only the unlock phase and stops before the test's own idle countdown
+  starts. A new spec that unlocks two devices must use the helper; `two-devices.spec.ts` proves it deterministically: an 11 s
+  stall before the second unlock locks the first device when the keep-awake starts afterwards (the control), and does not
+  with `unlockTogether`. Each of the five specs was also shown red then green with the same injected stall.
 - **`page.goto` once failed with `net::ERR_NO_BUFFER_SPACE`** (Windows WSAENOBUFS) in `server-drawing.spec.ts` during a run of
   two full suites plus a repeat run. It is not port-pool exhaustion and not a leak: sampling the TCP table every 3 s over a
   14-minute run of that same load gave a peak of 4166 connections (2243 TIME_WAIT, 1102 ESTABLISHED, 816 bound, 58 CLOSE_WAIT,
