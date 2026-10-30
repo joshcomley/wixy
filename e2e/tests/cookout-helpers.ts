@@ -8,6 +8,9 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
+/** How long a wait on a server round trip may take on a loaded box (a dozen browsers on one machine). */
+export const LOADED_WAIT_MS = 30_000;
+
 export const MULTI_TAP_INTERVAL_MS = 400;
 
 export async function unlockServer(page: Page, name: string): Promise<void> {
@@ -152,8 +155,10 @@ export async function startCookout(page: Page, blind: boolean, intro = true): Pr
   await mode.click();
   await humanPause(page);
   await page.locator(".wx-srv-ck-start-go").click();
-  await expect(page.locator(".wx-srv-bubble-ck")).toHaveCount(before + 1);
-  await expect(game(page)).toBeVisible();
+  // The round is created by a server round trip and arrives through the thread poll: on a loaded box that takes
+  // longer than the 5 s default, so the wait names a real bound.
+  await expect(page.locator(".wx-srv-bubble-ck")).toHaveCount(before + 1, { timeout: LOADED_WAIT_MS });
+  await expect(game(page)).toBeVisible({ timeout: LOADED_WAIT_MS });
   const seq = await page.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
   expect(seq).not.toBeNull();
   if (intro) await dismissIntro(page);
@@ -240,8 +245,10 @@ export async function startCookoutWithTwists(page: Page, blind: boolean, twists:
   }
   await humanPause(page);
   await page.locator(".wx-srv-ck-start-go").click();
-  await expect(page.locator(".wx-srv-bubble-ck")).toHaveCount(before + 1);
-  await expect(game(page)).toBeVisible();
+  // The round is created by a server round trip and arrives through the thread poll: on a loaded box that takes
+  // longer than the 5 s default, so the wait names a real bound.
+  await expect(page.locator(".wx-srv-bubble-ck")).toHaveCount(before + 1, { timeout: LOADED_WAIT_MS });
+  await expect(game(page)).toBeVisible({ timeout: LOADED_WAIT_MS });
   const seq = await page.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
   expect(seq).not.toBeNull();
   await dismissIntro(page);

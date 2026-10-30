@@ -323,6 +323,7 @@ async function reconnectCallsIfClosed(page: Page): Promise<void> {
     await humanPause(page);
     await reconnect.click();
     await expect(reconnect).toBeHidden({ timeout: 15_000 });
+    await humanPause(page); // the next tap must be 400 ms away, or the chat locks (R3)
   }
 }
 
@@ -443,7 +444,10 @@ async function droppedCallNotice(page: Page): Promise<string | null> {
 
 async function dismissCallNotice(page: Page): Promise<void> {
   const dismiss = page.locator(".wx-srv-call").getByRole("button", { name: "Dismiss call details" });
-  if (await dismiss.isVisible()) await dismiss.click();
+  if (await dismiss.isVisible()) {
+    await dismiss.click();
+    await humanPause(page); // the next tap must be 400 ms away, or the chat locks (R3)
+  }
 }
 
 /** Audits one page in one state across the whole matrix; a ringing call is set up once for its variants. */
