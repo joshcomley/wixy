@@ -9,7 +9,11 @@ jobs:
   python:
     runs-on: ubuntu-latest
     steps:
+      # Full history: test_cookout_modes_overlap.py loads the deployed v21 code from the
+      # pinned commit 4d2b005c in git history (it fails, never skips, if absent).
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.14"

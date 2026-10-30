@@ -4,7 +4,7 @@
 
 The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21; v22 adds `cookout_rounds.mode`, workspace 00058). The game mode is
 chat content too: it erases with the round. A non-Classic round is never created while `WIXY_COOKOUT_MODES` is absent, and an
-unknown mode is read-only and never blocks a new game (decisions/00201) is
+unknown mode is read-only and never blocks a new game (decisions/00203) is
 chat content, the Inv 54 / Inv 56 pattern. `cookout_rounds` is keyed by its anchor message (`anchor_message_seq
 REFERENCES messages(seq) ON DELETE CASCADE`; `cookout_turns` and `cookout_recipes` cascade from the round), and a wipe
 issues `DELETE FROM cookout_recipes`, `cookout_turns` and `cookout_rounds` explicitly in the same transaction as every
@@ -1022,8 +1022,9 @@ unpromoted upload rows before queueing their files; completed tombstones age out
 while pending tombstones remain.
 Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
 `scrub()` runs a `PASSIVE` checkpoint first (it never takes the writer lock) and tries `TRUNCATE` only once PASSIVE has
-checkpointed the whole WAL; it still returns True only after a TRUNCATE with busy 0 and an empty -wal, so the
-guarantee is unchanged (`test_livechat_store_locking.py`, decisions/00201).
+checkpointed the whole WAL, or after five PASSIVE misses in a row (a steady writer keeps the log ahead for
+ever) when it forces one TRUNCATE with a 50 ms busy wait; it still returns True only after a TRUNCATE with busy 0 and an empty -wal, so the
+guarantee is unchanged (`test_livechat_store_locking.py`, decisions/00203).
 Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
 completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
 sheet waits until it clears. Route and background WAL scrubs serialize through

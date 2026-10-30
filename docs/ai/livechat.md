@@ -2440,7 +2440,7 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   concepts and recipe jobs: prompts, parse and validation, the runner), `livechat/cookout_images.py` (the picture
   job and scratch folder) over `ComfyImageGenerator.generate_many` in `livechat/wyr_images.py`, and the chat-spawn
   calls in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13).
-- **Game modes (schema v22, decisions/00201).** `cookout_rounds.mode` (default `'classic'`, no CHECK) selects a plan from
+- **Game modes (schema v22, decisions/00203).** `cookout_rounds.mode` (default `'classic'`, no CHECK) selects a plan from
   `livechat/cookout_modes.py`; `toastie` places starters by kind (bread turn 1, filling turn 2) and draws fillings with
   `candidates`/`facet="family"`. Creation of a non-Classic round needs `WIXY_COOKOUT_MODES` (else 503 `game_unavailable`);
   `tooling/cookout/activate_modes.py` enables it only when every spec 09c 5.6 check passes. Unknown-mode rounds are read-only (409

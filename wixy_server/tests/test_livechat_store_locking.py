@@ -166,3 +166,75 @@ def test_delete_then_scrub_leaves_no_deleted_text_in_the_wal_even_with_a_concurr
     assert secret.encode() not in store._db_path.read_bytes()
     if wal.exists():
         assert secret.encode() not in wal.read_bytes()
+
+
+class _AlwaysLagging:
+    """A connection whose PASSIVE checkpoint always reports frames left over, as it does under a
+    steady stream of commits; every other statement goes to the real connection."""
+
+    def __init__(self, conn: sqlite3.Connection) -> None:
+        self._conn = conn
+        self.statements: list[str] = []
+
+    def execute(self, sql: str, *args: object) -> sqlite3.Cursor:
+        self.statements.append(sql)
+        if sql == "PRAGMA wal_checkpoint(PASSIVE)":
+            return self._conn.execute("SELECT 0, 10, 5")
+        return self._conn.execute(sql, *args)  # type: ignore[arg-type]
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+def test_a_scrub_whose_passive_checkpoint_always_lags_still_tries_truncate(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    seed(store, 3)
+    original = store._connect
+    proxies: list[_AlwaysLagging] = []
+
+    def lagging() -> sqlite3.Connection:
+        proxy = _AlwaysLagging(original())
+        proxies.append(proxy)
+        return proxy  # type: ignore[return-value]
+
+    store._connect = lagging  # type: ignore[method-assign]
+    assert store.scrub(deadline_s=5.0) is True
+    assert "PRAGMA wal_checkpoint(TRUNCATE)" in proxies[0].statements
+    wal = tmp_path / "server" / "server.db-wal"
+    assert not wal.exists() or wal.stat().st_size == 0
+
+
+def test_a_scrub_finishes_while_a_writer_never_stops(tmp_path: Path) -> None:
+    store = make_store(tmp_path)
+    seed(store)
+    stop = threading.Event()
+    errors: list[BaseException] = []
+
+    def writer() -> None:
+        i = 0
+        while not stop.is_set():
+            i += 1
+            try:
+                store.create_message(
+                    client_id=f"steady-{i:06d}",
+                    sender="Josh",
+                    device_id="device-lock-0001",
+                    by_email=None,
+                    text="x" * 2000,
+                    attachment_ids=(),
+                    now=1000.0 + i,
+                )
+            except BaseException as exc:  # noqa: BLE001
+                errors.append(exc)
+                return
+
+    thread = threading.Thread(target=writer, daemon=True)
+    thread.start()
+    try:
+        started = time.monotonic()
+        assert store.scrub(deadline_s=10.0) is True
+        assert time.monotonic() - started < 10.0
+    finally:
+        stop.set()
+        thread.join(timeout=10)
+    assert errors == []

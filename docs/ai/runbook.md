@@ -122,8 +122,9 @@ never exist while an older process can reach the database.
 - **Then, on the hub**, from a checkout of the deployed commit, the delivery coordinator runs
   `python tooling/cookout/activate_modes.py --enable toastie --token <server token>`. It refuses
   (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
-  schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot and
-  `GET /cookout/options` answers; it prints every check, writes the setting (other `.env` lines kept
+  schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot (this check fails
+  closed: it needs `psutil` from the `dev` extra and refuses if the process list or any python/wixy process's
+  working directory cannot be read) and `GET /cookout/options` answers; it prints every check, writes the setting (other `.env` lines kept
   byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies the options now list
   the mode. `--disable toastie` removes it the same way (no checks needed).
 - **Rollback:** run `python tooling/cookout/activate_modes.py --check-rollback <commit>` FIRST. Never

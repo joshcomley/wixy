@@ -1,4 +1,4 @@
-# 00201 - Cookout game modes: schema v22, the activation barrier, the scrub fix
+# 00203 - Cookout game modes: schema v22, the activation barrier, the scrub fix
 
 **What.** A round has a game mode (`cookout_rounds.mode`, additive v22 column, default `'classic'`, no CHECK so a
 future mode id never needs a migration). Modes are data (`livechat/cookout_modes.py`, A.1); `toastie` (Toasted
@@ -21,5 +21,11 @@ unchanged: True only when TRUNCATE reports busy 0 and the -wal is empty, so the 
 stands; `test_livechat_store_locking.py` proves deleted text is absent from the db and the -wal with a concurrent
 reader. Secondary defect: `_write_txn`/`_read_txn` rolled back unconditionally, masking the real error with
 "no transaction is active"; they now roll back only `if conn.in_transaction`.
+
+**Bounded.** A steady writer keeps the log ahead of the checkpoint, so PASSIVE alone could postpone erasure for
+ever: after five PASSIVE misses in a row `scrub()` forces a TRUNCATE with a 50 ms busy wait (it holds the writer
+lock only that long if a reader pins the WAL). **Activation check (d) fails closed:** an unreadable process list, or a
+python/wixy process whose working directory cannot be read (psutil, a dev dependency), refuses; a relative-path v21
+start is caught by its cwd.
 
 **Watch for.** Never widen `scrub()`'s success condition. Never enable modes before `activate_modes.py` passes.

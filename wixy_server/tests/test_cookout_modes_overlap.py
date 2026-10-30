@@ -34,7 +34,8 @@ from wixy_server.livechat.store import LiveChatStore
 REPO_ROOT = Path(__file__).resolve().parents[2]
 V21_COMMIT = "4d2b005c"
 """The round-1 Cookout delivery on `origin/main` (schema 21): main is never rewritten, so a later
-squash of the feature branch cannot make it unreachable. CI checks out with `fetch-depth: 0`."""
+squash of the feature branch cannot make it unreachable. It needs full history: CI's `python` job
+checks out with `fetch-depth: 0` (ci.yml), and a shallow clone makes the test FAIL, never skip."""
 
 # Runs inside whichever tree is on PYTHONPATH (v21 or the current one) and prints JSON.
 RUNNER = r"""
@@ -254,7 +255,7 @@ def good_facts(**changes: Any) -> am.Facts:
         "active_slot": "blue",
         "slot_schema": {"blue": 22, "green": 21},
         "db_versions": [22],
-        "processes": [am.ProcessInfo(10, SLOTS + "\\blue\\launcher.py")],
+        "processes": [am.ProcessInfo(10, SLOTS + "\\blue\\launcher.py", SLOTS + "\\blue")],
         "options_modes": ["classic"],
     }
     base.update(changes)
@@ -319,10 +320,20 @@ class TestActivationTool:
             ({"db_versions": [21]}, "(c)"),
             ({"db_versions": []}, "(c)"),
             (
-                {"processes": [am.ProcessInfo(7, SLOTS + "\\green\\launcher.py")]},
+                {
+                    "processes": [
+                        am.ProcessInfo(7, SLOTS + "\\green\\launcher.py", SLOTS + "\\green")
+                    ]
+                },
                 "(d)",
             ),
             ({"processes": [am.ProcessInfo(8, "python x", SLOTS + "\\green\\wixy_server")]}, "(d)"),
+            # a relative-path start: the command line names no slot, only the working directory does
+            ({"processes": [am.ProcessInfo(9, "python launcher.py", SLOTS + "\\green")]}, "(d)"),
+            # fail closed: an unreadable cwd on a python/wixy process, and an unreadable list
+            ({"processes": [am.ProcessInfo(11, "python launcher.py", None)]}, "(d)"),
+            ({"processes": [am.ProcessInfo(12, "C:\\x\\python.exe -m wixy_server", None)]}, "(d)"),
+            ({"processes": None}, "(d)"),
             ({"options_modes": None}, "(e)"),
         ],
     )
@@ -392,3 +403,36 @@ class TestActivationTool:
         probe.write_env("A=1\n")
         assert probe.read_env() == "A=1\n"
         assert (root / "Storage" / ".env").read_bytes() == b"A=1\n"
+
+
+class TestCheckDFailsClosed:
+    def test_an_unrelated_process_with_an_unreadable_cwd_does_not_block(self) -> None:
+        facts = good_facts(
+            processes=[
+                am.ProcessInfo(10, SLOTS + "\\blue\\launcher.py", SLOTS + "\\blue"),
+                am.ProcessInfo(4, "System", None),
+            ]
+        )
+        assert am.evaluate_enable(facts, slots_root=SLOTS).ok
+
+    def test_the_refusal_says_why_the_cwd_is_unreadable(self) -> None:
+        facts = good_facts(processes=[am.ProcessInfo(11, "python launcher.py", None)])
+        detail = next(
+            c.detail for c in am.evaluate_enable(facts, slots_root=SLOTS).checks if "(d)" in c.label
+        )
+        assert "pid 11" in detail and "unreadable" in detail and "psutil" in detail
+
+    def test_without_psutil_cwd_of_is_none_not_an_empty_string(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import importlib
+
+        real = importlib.import_module
+
+        def fake(name: str, *a: Any, **k: Any) -> Any:
+            if name == "psutil":
+                raise ModuleNotFoundError(name)
+            return real(name, *a, **k)
+
+        monkeypatch.setattr(importlib, "import_module", fake)
+        assert am._cwd_of({"ProcessId": 1}) is None

@@ -58,7 +58,8 @@ STORE_RELPATH = "wixy_server/livechat/store.py"
 class ProcessInfo:
     pid: int
     command_line: str
-    cwd: str = ""
+    cwd: str | None = None
+    """Its working directory; None when it could not be read (access denied, gone, no psutil)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +70,8 @@ class Facts:
     active_slot: str | None
     slot_schema: Mapping[str, int | None]
     db_versions: Sequence[int]
-    processes: Sequence[ProcessInfo]
+    processes: Sequence[ProcessInfo] | None
+    """None when the process list could not be enumerated at all."""
     options_modes: Sequence[str] | None
 
 
@@ -110,6 +112,16 @@ def _under(path_text: str, slot_dir: str) -> bool:
     return bool(norm) and slot_dir.lower() in norm
 
 
+# A process that might be the v21 Wixy server: any Python, or anything whose command line names the
+# server (`wixy_server`, `launcher.py`, `uvicorn`).
+_SIGNATURES = ("python", "wixy_server", "launcher.py", "uvicorn")
+
+
+def _might_be_wixy(process: ProcessInfo) -> bool:
+    command = process.command_line.lower()
+    return any(sig in command for sig in _SIGNATURES)
+
+
 def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
     """The five `--enable` checks (spec 09c §5.6 step 3). `slots_root` is the `Slots` directory
     path as text; the other slot's directory is `<slots_root>\\<other>`."""
@@ -144,24 +156,32 @@ def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
             else "no live database found",
         )
     )
+    # (d) fails CLOSED: not knowing is a refusal. A v21 process started with a relative path shows
+    # nothing in its command line, so its working directory must be readable for every candidate.
+    d_problems: list[str] = []
+    detail_slot = "unknown"
+    if facts.processes is None:
+        d_problems.append("the process list could not be read")
     if active is None:
-        stale: list[ProcessInfo] = list(facts.processes)
-        detail_slot = "unknown"
-    else:
+        d_problems.append("the active slot is unknown")
+    elif facts.processes is not None:
         slot_dir = f"{slots_root}\\{other_slot(active)}"
-        stale = [
-            p
-            for p in facts.processes
-            if _under(p.command_line, slot_dir) or _under(p.cwd, slot_dir)
-        ]
         detail_slot = slot_dir
+        for p in facts.processes:
+            if not _might_be_wixy(p):
+                continue
+            if _under(p.command_line, slot_dir) or (p.cwd is not None and _under(p.cwd, slot_dir)):
+                d_problems.append(f"pid {p.pid} is running from {slot_dir}")
+            elif p.cwd is None:
+                d_problems.append(
+                    f"pid {p.pid}: working directory unreadable (is psutil installed, and is "
+                    "this run as the user who owns the server?)"
+                )
     checks.append(
         Check(
             "(d) no process is running from the other slot",
-            active is not None and not stale,
-            f"none under {detail_slot}"
-            if not stale
-            else "still running: " + ", ".join(f"pid {p.pid}" for p in stale),
+            not d_problems,
+            f"none under {detail_slot}" if not d_problems else "; ".join(d_problems),
         )
     )
     checks.append(
@@ -344,7 +364,7 @@ class MachineProbe:
                 conn.close()
         return versions
 
-    def _processes(self) -> list[ProcessInfo]:
+    def _processes(self) -> list[ProcessInfo] | None:
         script = (
             "Get-CimInstance Win32_Process | Select-Object ProcessId,CommandLine,ExecutablePath "
             "| ConvertTo-Json -Compress"
@@ -358,9 +378,11 @@ class MachineProbe:
             check=False,
         )
         try:
-            rows = json.loads(result.stdout or "[]")
+            rows = json.loads(result.stdout)
         except ValueError:
-            return []
+            return None  # fail closed: check (d) refuses when the list cannot be read
+        if result.returncode != 0:
+            return None
         if isinstance(rows, dict):
             rows = [rows]
         out: list[ProcessInfo] = []
@@ -432,14 +454,14 @@ class MachineProbe:
         return total
 
 
-def _cwd_of(row: Mapping[str, Any]) -> str:
-    """A process's working directory when `psutil` is installed (the command line alone misses a
-    process started with a relative path); empty otherwise."""
+def _cwd_of(row: Mapping[str, Any]) -> str | None:
+    """A process's working directory via `psutil` (a declared dev dependency; the command line alone
+    misses a process started with a relative path), or None when it cannot be read."""
     try:
         psutil: Any = importlib.import_module("psutil")
         return str(psutil.Process(int(row.get("ProcessId") or 0)).cwd())
     except Exception:  # noqa: BLE001 - best effort: access denied, gone, or psutil missing
-        return ""
+        return None
 
 
 def main(argv: Sequence[str] | None = None, probe: Probe | None = None) -> int:

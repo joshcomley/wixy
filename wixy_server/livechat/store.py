@@ -569,6 +569,12 @@ _UNKNOWN_GRANT_HASH = "0" * 64
 _LOGGER = logging.getLogger(__name__)
 
 
+_SCRUB_PASSIVE_MISSES = 5
+"""Consecutive non-caught-up PASSIVE checkpoints before `scrub()` forces a TRUNCATE attempt."""
+_SCRUB_FORCED_BUSY_MS = 50
+"""How long a forced TRUNCATE may hold the WAL writer lock waiting for readers."""
+
+
 class LiveChatStoreError(Exception):
     """Base for store-level validation failures the route layer maps to a 4xx."""
 
@@ -6184,22 +6190,34 @@ class LiveChatStore:
         """
         deadline = time.monotonic() + max(0.0, deadline_s)
         conn = self._connect()
+        passive_misses = 0
         try:
             while True:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return False
                 busy_timeout_ms = max(1, min(250, int(remaining * 1000)))
-                conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
                 # TRUNCATE takes the WAL writer lock BEFORE it waits for readers, so with a stale
                 # reader pinning the WAL it would hold off every writer for the whole busy slice,
                 # slice after slice. PASSIVE never blocks a writer; TRUNCATE is only worth trying
                 # once PASSIVE has copied every frame (no reader pins an older snapshot).
+                conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
                 passive = conn.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchone()
                 assert passive is not None
-                if int(passive[0]) != 0 or int(passive[1]) != int(passive[2]):
-                    time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
-                    continue
+                caught_up = int(passive[0]) == 0 and int(passive[1]) == int(passive[2])
+                if not caught_up:
+                    passive_misses += 1
+                    if passive_misses < _SCRUB_PASSIVE_MISSES:
+                        time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+                        continue
+                    # A steady writer keeps the log ahead of the checkpoint for ever, so PASSIVE
+                    # alone would never let erasure finish. After a few misses force TRUNCATE, but
+                    # with a SHORT busy wait: it holds the writer lock only that long when a reader
+                    # pins the WAL, so writers still get in between attempts.
+                    passive_misses = 0
+                    conn.execute(
+                        f"PRAGMA busy_timeout = {min(_SCRUB_FORCED_BUSY_MS, busy_timeout_ms)}"
+                    )
                 result_row = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
                 assert result_row is not None
                 busy = int(result_row[0])
