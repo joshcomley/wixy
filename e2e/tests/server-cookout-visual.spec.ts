@@ -54,7 +54,15 @@ interface Variant {
   readonly call: boolean;
   /** With `call`: the call has been answered (Mute and End shown) instead of ringing. */
   readonly answered?: boolean;
+  /** The wide-font stress: every glyph is stretched (see `WIDE_FONT_CSS`), as a wider system font would. */
+  readonly wide?: boolean;
 }
+
+/** A deterministic stand-in for a wider system font. CI renders with a Linux font roughly 20 % wider than the one a
+ * Windows box has (measured: the skip label's scrollWidth 237 against 197 px), so the layout must also hold with
+ * wider text. A wide-face family plus extra letter-spacing widens text on every platform, whichever fonts it has. */
+const WIDE_FONT_CSS =
+  '.wx-srv-ck, .wx-srv-ck * { font-family: Verdana, "DejaVu Sans", "Liberation Sans", sans-serif !important; letter-spacing: 0.005em !important; }';
 
 const PHONES: ReadonlyArray<readonly [number, number]> = [
   [360, 640],
@@ -78,6 +86,12 @@ const VARIANTS: readonly Variant[] = [
     { width, height, inset: 0, call: true, answered: true },
     { width, height, inset: 34, call: true, answered: true },
   ]),
+  // The wide-font stress, on every viewport with no call and each phone with the inset too.
+  ...PHONES.flatMap(([width, height]) => [
+    { width, height, inset: 0, call: false, wide: true },
+    { width, height, inset: 34, call: false, wide: true },
+  ]),
+  { width: 1280, height: 800, inset: 0, call: false, wide: true },
 ];
 
 type Expect = "cards" | "cloche" | "none";
@@ -255,6 +269,18 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
 /** Puts a page at one matrix variant: viewport, the 34 px inset, and two animation frames to settle. */
 async function applyLayout(page: Page, v: Variant): Promise<void> {
   await page.setViewportSize({ width: v.width, height: v.height });
+  await page.evaluate(
+    ([css, on]: [string, boolean]) => {
+      let style = document.getElementById("e2e-wide");
+      if (style === null) {
+        style = document.createElement("style");
+        style.id = "e2e-wide";
+        document.head.append(style);
+      }
+      style.textContent = on ? css : "";
+    },
+    [WIDE_FONT_CSS, v.wide === true] as [string, boolean],
+  );
   await page.evaluate((px: number) => {
     let style = document.getElementById("e2e-inset");
     if (style === null) {
@@ -382,13 +408,14 @@ async function sweep(measured: Page, other: Page, measuredName: string, state: s
   let audits = 0;
   const run = async (v: Variant): Promise<void> => {
     await applyLayout(measured, v);
-    const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? (v.answered === true ? " + answered call" : " + ringing call") : ""}`;
+    const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? (v.answered === true ? " + answered call" : " + ringing call") : ""}${v.wide === true ? " + wide font" : ""}`;
     await expect
       .poll(async () => (await auditTable(measured, { ...args, call: v.call, answered: v.answered })).failures, { message: where, timeout: 4_000 })
       .toEqual([]);
     audits += 1;
   };
-  for (const v of VARIANTS.filter((x) => !x.call)) await run(v);
+  for (const v of VARIANTS.filter((x) => !x.call && x.wide !== true)) await run(v);
+  for (const v of VARIANTS.filter((x) => x.wide === true)) await run(v);
   const call = await ring(measured, other, measuredName);
   for (const v of VARIANTS.filter((x) => x.call && x.answered !== true)) await run(v);
   await call.answer();
