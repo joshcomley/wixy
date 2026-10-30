@@ -776,9 +776,20 @@ test.describe("Cookout picture-first table: behaviours", () => {
       expect(offered).toHaveLength(2);
       await expect(game(watcher).locator(".wx-srv-ck-cloche")).toBeVisible();
       const html = await watcher.evaluate(() => document.documentElement.outerHTML);
+      // What the watcher can SEE or hear: the rendered text plus every attribute a screen reader or tooltip uses.
+      // A name is matched as whole words (a short name such as "Cep" is also inside "concept", which proves nothing).
+      const shown = await watcher.evaluate(() => {
+        const attrs = ["alt", "aria-label", "title", "placeholder", "value"];
+        const parts = [document.body.innerText];
+        for (const el of document.querySelectorAll("*")) for (const a of attrs) parts.push(el.getAttribute(a) ?? "");
+        return parts.join(" | ");
+      });
+      const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       for (const item of offered) {
         expect(html, `the watcher's DOM holds ${item.id}`).not.toContain(`data-ingredient="${item.id}"`);
-        expect(html.toLowerCase(), `the watcher's DOM shows ${item.name}`).not.toContain(item.name.toLowerCase());
+        expect(shown, `the watcher's DOM shows ${item.name}`).not.toMatch(
+          new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRe(item.name)}($|[^\\p{L}\\p{N}])`, "iu"),
+        );
         for (const src of item.srcs) expect(html, "a picture URL of the partner's pair").not.toContain(src);
       }
     } finally {
