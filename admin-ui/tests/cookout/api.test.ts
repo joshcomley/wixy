@@ -339,6 +339,18 @@ describe("the calls", () => {
     serverFetch.mockResolvedValueOnce(json({}, 503));
     expect((await createCookout(SESSION, { clientId: "c3", sender: "Josh", deviceId: "d", blind: false })).ok).toBe(false);
   });
+
+  it("POST /cookout: no answer at all (a timeout, a dropped connection, a gateway timeout) is \"lost\", a refusal is not", async () => {
+    const input = { clientId: "c1", sender: "Josh", deviceId: "d", blind: false };
+    serverFetch.mockRejectedValueOnce(new DOMException("The operation was aborted.", "AbortError"));
+    expect(await createCookout(SESSION, input)).toEqual({ ok: false, kind: "lost" });
+    serverFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    expect(await createCookout(SESSION, input)).toEqual({ ok: false, kind: "lost" });
+    serverFetch.mockResolvedValueOnce(json({}, 504));
+    expect(await createCookout(SESSION, input)).toEqual({ ok: false, kind: "lost" });
+    serverFetch.mockResolvedValueOnce(json({}, 500));
+    expect(await createCookout(SESSION, input)).toEqual({ ok: false, kind: "unavailable" });
+  });
 });
 
 describe("helpers", () => {

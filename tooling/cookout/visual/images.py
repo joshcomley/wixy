@@ -42,6 +42,40 @@ def queue_is_idle(queue: Mapping[str, Any]) -> bool:
     return not queue.get("queue_running") and not queue.get("queue_pending")
 
 
+def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) -> list[str]:
+    """One short signature per job in ComfyUI's queue that is not ours: `client|text|prefix`.
+    A job is ours when its first text prompt equals `own_prompt` (None: every job counts, which is
+    right at the gate, where nothing of ours is submitted yet). This is how a slow stretch gets
+    a name: the journal records what the gate and the render saw sharing the queue."""
+    out: list[str] = []
+    for kind in ("queue_running", "queue_pending"):
+        for item in queue.get(kind) or []:
+            try:
+                graph = item[2]
+                extra = (item[3] if len(item) > 3 else None) or {}
+                texts = [
+                    str(n["inputs"]["text"])
+                    for n in graph.values()
+                    if n.get("class_type") == "CLIPTextEncode"
+                    and isinstance(n.get("inputs", {}).get("text"), str)
+                ]
+                prefixes = [
+                    str(n["inputs"].get("filename_prefix", ""))
+                    for n in graph.values()
+                    if n.get("class_type") == "SaveImage"
+                ]
+            except AttributeError, IndexError, KeyError, TypeError:
+                out.append(f"{kind}|unreadable")
+                continue
+            if own_prompt is not None and texts and texts[0] == own_prompt:
+                continue
+            client = str(extra.get("client_id", ""))[:8]
+            text = (texts[0] if texts else "")[:48]
+            prefix = (prefixes[0] if prefixes else "")[:4]
+            out.append(f"{kind[6:]}|{client}|{text}|{prefix}")
+    return out
+
+
 def wait_for_idle(
     get_queue: Callable[[], Mapping[str, Any]],
     *,
@@ -470,6 +504,28 @@ def comfy_queue_getter(base_url: str) -> Callable[[], Mapping[str, Any]]:
     return get
 
 
+async def sample_foreign_jobs(
+    get_queue: Callable[[], Mapping[str, Any]],
+    own_prompt: str,
+    saw: dict[str, int],
+    stop: asyncio.Event,
+    *,
+    gap_s: float = 1.0,
+) -> None:
+    """While one of our pictures renders, note any other job in the queue (once per `gap_s`)."""
+    while not stop.is_set():
+        try:
+            queue = await asyncio.to_thread(get_queue)
+            for signature in queue_signatures(queue, own_prompt):
+                saw[signature] = saw.get(signature, 0) + 1
+        except Exception:  # noqa: BLE001 - a failed look must never fail the render
+            pass
+        try:
+            await asyncio.wait_for(stop.wait(), gap_s)
+        except TimeoutError:
+            continue
+
+
 def render_one(
     generator: Any,
     ident: str,
@@ -478,10 +534,14 @@ def render_one(
     attempt: int,
     work: WorkDir,
     scratch: Path,
-) -> None:
-    """Render one picture, keep the 1024 master, make both renditions. Synchronous (a thread)."""
+) -> dict[str, float]:
+    """Render one picture, keep the 1024 master, make both renditions. Synchronous (a thread).
+    Returns where the time went, in seconds: `comfyS` (everything inside the ComfyUI client:
+    submit, wait, download, clean-up) and `encodeS` (master + both renditions + writes)."""
     scratch.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     paths = generator.generate_many([prompt], scratch, seeds=[seed])
+    comfy_done = time.monotonic()
     png = paths[0] if paths else None
     if png is None:
         raise RuntimeError(f"ComfyUI produced no picture for {ident}")
@@ -493,6 +553,10 @@ def render_one(
     for target, data in ((work.card(ident, attempt), card), (work.thumb(ident, attempt), thumb)):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+    return {
+        "comfyS": round(comfy_done - started, 2),
+        "encodeS": round(time.monotonic() - comfy_done, 2),
+    }
 
 
 def visual_for(subject: Subject, overrides: Mapping[str, str]) -> str:
@@ -917,16 +981,38 @@ async def run_pipeline(
                 if not render_only:
                     chunk.append((ident, waiting))  # rendered before a restart: just check it
                 continue
-            if not wait_for_idle(get_queue, pause_file=work.pause, sleep=sleep):
+            picture_started = time.monotonic()
+            gate_saw: dict[str, int] = {}
+
+            def watching_queue(
+                saw: dict[str, int] = gate_saw,
+            ) -> Mapping[str, Any]:
+                queue = get_queue()
+                for signature in queue_signatures(queue):
+                    saw[signature] = saw.get(signature, 0) + 1
+                return queue
+
+            if not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
                 return totals  # PAUSE file: stop between pictures
+            gate_s = time.monotonic() - picture_started
             attempt = next_attempt(work, ident)
             visual = visual_for(subjects_by_id[ident], work.read_overrides())
             prompt = _prompts.image_prompt(visual)
             seed = random.SystemRandom().randrange(2**32)
             record_attempt(work, ident, attempt, seed, visual, prompt)
-            await asyncio.to_thread(
-                render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
+            prep_s = time.monotonic() - picture_started - gate_s
+            render_saw: dict[str, int] = {}
+            stop_sampling = asyncio.Event()
+            sampler = asyncio.create_task(
+                sample_foreign_jobs(get_queue, prompt, render_saw, stop_sampling)
             )
+            try:
+                split = await asyncio.to_thread(
+                    render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
+                )
+            finally:
+                stop_sampling.set()
+                await sampler
             rendered[ident] = work.card(ident, attempt)
             journal_append(
                 work.journal,
@@ -936,6 +1022,19 @@ async def run_pipeline(
                     "seed": seed,
                     "state": "rendered",
                     "promptHash": _prompts.prompt_hash(prompt),
+                    # where this picture's time went (the pilot ran at half the expected speed
+                    # on a CPU-saturated hub and nothing recorded why)
+                    "timing": {
+                        "gateS": round(gate_s, 2),
+                        "prepS": round(prep_s, 2),
+                        **(split or {}),
+                        "totalS": round(time.monotonic() - picture_started, 2),
+                    },
+                    # other jobs seen sharing ComfyUI: signature -> number of 1 s polls
+                    "sharedWith": {
+                        "gate": dict(sorted(gate_saw.items(), key=lambda kv: -kv[1])[:3]),
+                        "render": dict(sorted(render_saw.items(), key=lambda kv: -kv[1])[:3]),
+                    },
                 },
             )
             totals["rendered"] += 1

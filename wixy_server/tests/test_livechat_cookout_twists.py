@@ -334,7 +334,7 @@ class TestSchemaFinalShape:
             "encore_from_seq", "encore_generation", "encore_concept_id",
         ):  # fmt: skip
             assert name in cols, name
-        assert raw(db_path, "PRAGMA user_version") == [(21,)]
+        assert raw(db_path, "PRAGMA user_version") == [(22,)]
 
     def test_recipes_are_keyed_by_generation_with_both_indexes(
         self, store: LiveChatStore, db_path: Path
@@ -2163,7 +2163,7 @@ class TestErasure:
         assert "Zed" not in blob and "base-" not in blob and '"a"' not in blob
         assert set(wire) == {
             "state", "blind", "pickedCount", "concepts", "bankedCount", "rev", "generation",
-            "waiting", "swap", "dinnerDecided", "cookedCount",
+            "waiting", "swap", "dinnerDecided", "cookedCount", "mode",
         }  # fmt: skip
 
     def test_attachment_results_import_is_used(self) -> None:

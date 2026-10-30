@@ -1066,3 +1066,78 @@ def test_extend_plan_keeps_pilot_and_interleaves_new_ids(mods: dict[str, ModuleT
     assert sorted(added) == sorted(set(cats) - set(first))
     assert {cats[i] for i in added[:3]} == {"cat0", "cat1", "cat2"}  # category-interleaved
     assert im.extend_plan(grown, cats) == grown  # idempotent
+
+
+def test_every_rendered_picture_records_where_its_time_went(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, _work, _comfy, _judge, _totals = _pipeline(tmp_path, mods, {})
+    rendered = [
+        json.loads(line)
+        for line in (tmp_path / "work" / "images" / "journal.jsonl").read_text("utf-8").splitlines()
+        if '"rendered"' in line
+    ]
+    assert len(rendered) == 6
+    for entry in rendered:
+        timing = entry["timing"]
+        assert set(timing) == {"gateS", "prepS", "comfyS", "encodeS", "totalS"}
+        assert all(isinstance(v, float) and v >= 0 for v in timing.values())
+        assert timing["totalS"] >= timing["comfyS"] + timing["encodeS"] - 0.01
+
+
+def _queue_item(text: str, client: str = "abcdef12", prefix: str = "wyr_x_a") -> list[Any]:
+    graph = {
+        "1": {"class_type": "CLIPTextEncode", "inputs": {"text": text}},
+        "2": {"class_type": "SaveImage", "inputs": {"filename_prefix": prefix}},
+    }
+    return [3, "pid", graph, {"client_id": client}, []]
+
+
+def test_queue_signatures_name_foreign_jobs_and_skip_ours(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    queue = {
+        "queue_running": [_queue_item("Studio food photograph of a toastie")],
+        "queue_pending": [_queue_item("our own prompt"), "not a job", [1, "p", None]],
+    }
+    everything = im.queue_signatures(queue)
+    assert any("toastie" in s and s.startswith("running|abcdef12|") for s in everything)
+    assert sum("unreadable" in s for s in everything) == 2
+    foreign = im.queue_signatures(queue, "our own prompt")
+    assert not any("our own prompt" in s for s in foreign) and len(foreign) == 3
+    assert im.queue_signatures({}) == []
+
+
+def test_journal_records_who_shared_the_queue(mods: dict[str, ModuleType], tmp_path: Path) -> None:
+    im, c = mods["images"], mods["check"]
+    busy = {"queue_running": [_queue_item("somebody else's dish photo", "feedbeef")]}
+    calls = {"n": 0}
+
+    def get_queue() -> dict[str, Any]:
+        calls["n"] += 1
+        return busy if calls["n"] <= 3 else {}  # busy for the first polls, then idle
+
+    work = im.WorkDir(tmp_path / "work")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v toka", "whole")}
+    asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({}, {}),
+            get_queue,
+            FakeJudge({}, {}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=lambda _s: None,
+            render_only=True,
+        )
+    )
+    entry = json.loads(
+        (tmp_path / "work" / "images" / "journal.jsonl").read_text("utf-8").splitlines()[0]
+    )
+    gate = entry["sharedWith"]["gate"]
+    assert gate and next(iter(gate)).startswith("running|feedbeef|somebody else's dish photo")
+    assert entry["sharedWith"]["render"] == {} or isinstance(entry["sharedWith"]["render"], dict)

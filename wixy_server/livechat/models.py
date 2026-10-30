@@ -187,6 +187,8 @@ class CookoutSummary:
     swap: CookoutSwapState = "none"
     dinner_decided: bool = False
     cooked_count: int = 0
+    mode: str = "classic"
+    """The round's game mode (spec 09c §5.2): a setting, public like `blind`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -474,6 +476,8 @@ class CookoutRoundRow:
     encore_from_seq: int | None = None
     encore_generation: int | None = None
     encore_concept_id: str | None = None
+    mode: str = "classic"
+    """The game mode (spec 09c §5.1); every round written before schema v22 is `classic`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,6 +782,7 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
                 "swap": row.cookout.swap,
                 "dinnerDecided": row.cookout.dinner_decided,
                 "cookedCount": row.cookout.cooked_count,
+                "mode": row.cookout.mode,
             }
             if row.cookout is not None
             else None
