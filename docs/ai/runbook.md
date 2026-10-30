@@ -136,6 +136,7 @@ never exist while an older process can reach the database.
 - **Site content**: use **Restore** in the admin History panel (or `POST /api/admin/restore
   {version}`) — flips the live pointer instantly to a past version's build; nothing is
   committed until the owner next publishes. This is the owner-facing, always-available path.
+- **Cookout game modes first:** before ANY Wixy rollback (a revert, `deploy.py --rollback`, a slot swap back) run `python tooling/cookout/activate_modes.py --check-rollback <commit>` for the target (§ "Cookout game modes" above). Never roll back to a schema-21 commit while a non-Classic Cookout round exists: a v21 process mis-handles it and writes wrongly.
 - **Engine**: revert the offending merge on `main` (Slots redeploys the reverted state) — or,
   on the box, `python deploy.py --rollback` swaps `active.txt` back to the previous slot. The
   previous slot's build is still intact until the next successful deploy overwrites it.

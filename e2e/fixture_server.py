@@ -387,6 +387,10 @@ def main() -> None:
     # spec/server-chat/00-brief.md §11: exercises the chunked-upload path
     # (413/409/missing-chunk cases) without multi-megabyte fixture uploads.
     os.environ["WIXY_SERVER_UPLOAD_CHUNK_BYTES"] = "65536"
+    # spec/server-chat/09c-cookout-modes.md §5.6: the Toasted sandwich game mode ships switched
+    # off in production (only the delivery coordinator's activation tool turns it on); only this
+    # fixture enables it, so server-cookout-toastie.spec.ts can start one from the start sheet.
+    os.environ["WIXY_COOKOUT_MODES"] = "toastie"
 
     registry = load_registry(wixy_repo_root)
     _publish_initial_build(registry.get("e2e"), storage_root, "e2e")

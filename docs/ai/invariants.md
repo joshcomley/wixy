@@ -2,10 +2,15 @@
 
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 
-The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21; v22 adds `cookout_rounds.mode`, workspace 00058). The game mode is
-chat content too: it erases with the round. A non-Classic round is never created while `WIXY_COOKOUT_MODES` is absent, and an
-unknown mode is read-only and never blocks a new game (decisions/00203) is
-chat content, the Inv 54 / Inv 56 pattern. `cookout_rounds` is keyed by its anchor message (`anchor_message_seq
+The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21; v22 adds `cookout_rounds.mode`, workspace 00058) is
+chat content, the Inv 54 / Inv 56 pattern. **Game modes (spec 09c, decisions/00203) extend it without loosening it:** the game
+mode is fixed per round and public (a setting, like Open/Blind: `Message.cookout.mode` and `view.mode` carry the id, label, turn
+count and kind list, never a pick); the pools, pick kinds and plan are server-side, so a client never learns what a kind will
+offer, and the schedule of kinds stays out of a non-active Blind viewer's view exactly as the role schedule does (`current.role`
+is `null` for them); Blind hides the bread like any other pick (`🔒` in its slot until all eight are in, and `PickSnap.kind`
+rides with the pick, so it is hidden with it); and the mode's prompt text, build list, phrases and picture template are server
+constants chosen by mode id (food-free, tested), so what cmd retains stays food records plus constants. A non-Classic round is
+never created while `WIXY_COOKOUT_MODES` is absent, and an unknown mode is read-only and never blocks a new game. `cookout_rounds` is keyed by its anchor message (`anchor_message_seq
 REFERENCES messages(seq) ON DELETE CASCADE`; `cookout_turns` and `cookout_recipes` cascade from the round), and a wipe
 issues `DELETE FROM cookout_recipes`, `cookout_turns` and `cookout_rounds` explicitly in the same transaction as every
 other table. Deleting the message therefore erases everything the pair did: every offered and picked ingredient, the

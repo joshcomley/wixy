@@ -2629,8 +2629,9 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
 
 Twelve optional twists sit on top of the core game. **A round that uses none of them behaves exactly like §24**: same
 states, same draws, same prompts (the prompt builders emit no twist text at all), new view fields at their "off"
-values. There is no schema v22: the twist columns were folded into the still-undeployed `_SCHEMA_V21_COOKOUT`, so the
-single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION` stays 21.
+values. The twist columns were folded into the then-undeployed `_SCHEMA_V21_COOKOUT`, so the single v20 → v21 migration
+builds the final twist shape. v21 is now deployed and never edited: the game modes of §24.2/§24.3 are the separate, additive
+schema v22 (`cookout_rounds.mode`).
 
 | # | Twist | Where it lives |
 |---|---|---|
@@ -2743,3 +2744,45 @@ The chef and picture code is mode-aware; a mode is data (`cookout_modes.json`, `
 - **Validation.** Bread in every idea (never omitted), each idea uses ≥ F−2 fillings, one uses ≥ F−1, the union is all of them, three different known builds (no `oven-baked` under no-oven), staples within the mode's free/capped sets (cap 2). `dishType` is stored `sandwich` and `technique` comes from the build; both are ignored if the model sends them. The bread's name is never required in prose (a starred bread is exempt from the naming check). Dish words in `reviewDishWords` are **signals** only (`Parsed.signals`, counted in the log, never a violation or a repair).
 - **Pictures.** `build_image_prompt(..., mode=, bread_name=, build=)` uses the mode's template; fillings only (no bread, no staples) and the style's picture phrase becomes the setting. `concept_prompts` reads `mode`, `bread_id` and each concept's `build`; an unknown mode has no prompts.
 - **Tests.** `test_livechat_cookout_ai.py` (`TestClassicIsByteIdentical` against `fixtures/cookout_chef_classic_golden.json`, recorded before modes; `TestToastie*`), `test_livechat_cookout_images.py` (`TestToastiePictures`), `fake_cmd.py` (canned Toasted sandwich answers). The real-run trial is `tooling/cookout/chef_trial.py --mode toastie` (report `triad/cookout/modes/toastie-trial.md`).
+
+### 24.3 Cookout game modes: the framework, the Toasted sandwich draft and the UI (spec `spec/server-chat/09c-cookout-modes.md` §1-§2, §4, §6)
+
+A game mode is **data** (`livechat/cookout_modes.json`, loaded and resolved against the bank once per process by
+`livechat/cookout_modes.py`; `default_modes()` like `default_bank()`), never a code path sprinkled through the game. Classic is the
+`{"plan":{"type":"classic"}}` entry and routes to the original paths unchanged (golden-tested). Adding Pizza later is one JSON entry,
+its tile picture and its tests; the only code a mode may need is a new `facet` or plan rule.
+
+- **Plan grammar.** A `sequence` plan is `opening` (kinds of the first turns, in order) + `pairs` (kinds shuffled with
+  `secrets.SystemRandom`, each serving two consecutive turns) + `closing`. Turns must be even (`picksPerPlayer = turns / 2`);
+  turn ownership is the core rule (odd = slot 1). The resolved per-turn list of kind ids is stored in `cookout_rounds.role_schedule`.
+  Toasted sandwich: `bread` | three of `cheese`, `main`, `produce` (shuffled pairs) | `finish` = 8 turns, 4 picks each; the starter
+  picks the bread + 3 fillings and the partner 4 fillings (the finishing touch last).
+- **Kinds and pools.** Each kind has a label, a banner `prompt`, a `facet`, a `chaos` flag and a `select` (ids / categories /
+  families / roles). `kind_of` classifies every bank ingredient once: bread ids first, then `fillingRules` exclusions (categories,
+  families, role+category, ids; `includeIds` re-includes `dulce-de-leche` and `garlic-butter`), then the first matching kind in
+  `kindOrder`. Excluded items are never offered, swapped in, drawn as the wildcard or used as a starter. The eight staples are in no
+  kind. `tooling/cookout/validate_modes.py` (run by `test_cookout_modes.py`) keeps every pool honest against the bank, including a
+  2,000-round maximum-skip simulation that proves no pool can be exhausted.
+- **The draw.** One engine: `CookoutBank.draw_pair`/`draw_replacement`/`draw_wildcard` take keyword-only `candidates` (replaces the
+  role pool) and `facet`. `facet="family"` needs two different families and counts families, not categories, in the least-shown
+  tie-break; everything else (hard exclusions, one everyday option, `8:3:1` rarity, immutable snapshots) is the core's. The game reads
+  `mode.kind_for_turn(role_schedule, turn)` and passes the kind's pool and facet to every draw (skip, veto, chaos, swap, wildcard).
+- **Starters by kind.** At most one bread starter (turn 1) and one filling starter (turn 2). Fridge raid = a bread you have at home
+  (`422 invalid` for a non-bread; `GET /cookout/ingredients?mode=toastie` searches breads only). Encore is offered only from a round of
+  the same game mode. A turn-2 pair-kind starter moves that pair to the front; a `finish` starter moves the finishing touch to turn 2.
+  Turn 2 is never drawn until Slot 2 is bound.
+- **Twists.** All twelve work. Rescue swap redraws from the target's kind; the wildcard comes from the filling pools only; the chaos
+  shelf is absent on the bread turn (`canChaos=false`, `409 bad_state`); veto, lucky dip and secret star work on the bread too.
+- **Wire and view.** See contracts.md ("Cookout game modes"). `current.role` is the kind id; `PickSnap.kind` rides with the pick (so
+  Blind hides the bread's kind with it); `concepts.data[].build` is `{id,label}` or `null`.
+- **UI** (`admin-ui/src/server/cookout/modes.ts` plus the start sheet, game, card and recipe book). The start sheet's "What are we
+  making?" section shows one picture tile per mode the options list (`.wx-srv-ck-mtile`, a radio group; Classic selected by default;
+  hidden when only Classic is listed, so the sheet looks as before) and Open/Blind follows under "How do we play?". The intro's first
+  line is the mode's; the banner is `"Your turn — " + kind.prompt` ("Your turn — pick the bread"; watchers see "Cupcake is picking the
+  bread…" / "…is adding a filling…", Blind only "is choosing…"); line 2 is "Bread · then 7 fillings · 2 new pairs left", then "Filling 3
+  of 7". The progress row has 4 + 4 slots, the starter's first slot being the bread slot (🍞 mark; 🔒 when hidden; label "Secret
+  bread"). The reveal gives the bread its own first row and lists butter first, marked free. Dish cards show the build pill, "On
+  <bread>" with its thumbnail and "Uses n/7 fillings"; the chef stage header reads "🥪 Toasted sandwich"; the main-chat card has a mode
+  badge and the mode's numbers ("Picking ingredients (3/8)…", "3 toasted sandwich ideas ready"); the Recipe book shows a 🥪 badge.
+- **Activation.** The mode ships switched off (runbook: "Cookout game modes"). The e2e fixture enables it with
+  `WIXY_COOKOUT_MODES=toastie`; `e2e/tests/server-cookout-toastie.spec.ts` is the end-to-end proof.
