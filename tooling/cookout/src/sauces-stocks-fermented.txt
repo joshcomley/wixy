@@ -116,7 +116,7 @@ Tomato sauce |  | accent | pasta-sauce | everyday | Simple cooked tomato sauce
 Marinara sauce |  | accent | pasta-sauce | everyday | Quick garlic and tomato sauce
 Arrabbiata sauce |  | accent | pasta-sauce | everyday | Spicy chilli and tomato pasta sauce
 Puttanesca sauce |  | accent | pasta-sauce | uncommon | Olive, caper and anchovy tomato sauce
-Bolognese sauce | ragu | accent | pasta-sauce | everyday | Rich meaty tomato sauce for spaghetti
+Bolognese sauce | | accent | pasta-sauce | everyday | Rich meaty tomato sauce for spaghetti
 Napoletana sauce |  | accent | pasta-sauce | everyday | Classic tomato and basil sauce
 Pizza sauce |  | accent | pasta-sauce | everyday | Thick seasoned tomato sauce for pizza bases
 Carbonara sauce |  | accent | pasta-sauce | everyday | Creamy egg and bacon pasta sauce

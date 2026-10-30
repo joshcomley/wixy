@@ -57,3 +57,31 @@ describe("the Cookout styles", () => {
     expect(SOURCE).toContain(':root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck');
   });
 });
+
+
+describe("the game-mode styles (layout guards)", () => {
+  /** The declarations of the rule whose selector list is exactly `selector`. */
+  function rule(selector: string): string {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const found = new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`, "m").exec(SOURCE);
+    if (found === null) throw new Error(`no rule ${selector}`);
+    return found[1] ?? "";
+  }
+
+  it("a mode card's head wraps, and its title never does", () => {
+    expect(rule(".wx-srv-ck-mcard-head-mode")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule(".wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title")).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it("the reveal grid's columns are at least 68px and never more than one player's picks", () => {
+    const grid = rule(".wx-srv-ck-reveal-grid");
+    expect(grid).toContain("minmax(max(68px, calc((100% - (var(--ck-reveal-cols) - 1) * 3px) / var(--ck-reveal-cols))), 1fr)");
+    expect(grid).toContain("--ck-reveal-cols: 5;");
+  });
+
+  it("a reveal tile's name wraps at word breaks only, never mid-word", () => {
+    const name = rule(".wx-srv-ck-rtile-name");
+    expect(name).not.toContain("overflow-wrap: anywhere");
+    expect(name).not.toContain("word-break: break-all");
+  });
+});

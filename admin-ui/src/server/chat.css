@@ -31,8 +31,11 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* Every call control is a proper 44 px target on every screen (09b F.3: Answer, Decline, Mute and End are
+   tapped in a hurry, often mid-game) — the icon buttons the header row's height square, the dialog's and
+   the notice's 44 tall. */
 .wx-srv-call button {
-  height: 36px;
+  height: var(--wx-srv-header-control-h, 44px);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   font: inherit;
@@ -44,8 +47,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 36px;
-  padding: 7px;
+  width: var(--wx-srv-header-control-h, 44px);
+  padding: 11px;
   cursor: pointer;
 }
 .wx-srv-call button svg { width: 20px; height: 20px; }
@@ -126,6 +129,10 @@
      `.wx-main` padding is the single shared gutter (12px phone, 20px
      desktop), so all three edges line up. */
   --wx-srv-control-h: 36px;
+  /* ONE height for every button in the header row (the call controls, ⋯, the pen and its undo/redo, the
+     cog and the panic ✕): 44px at EVERY width, desktop included (09b F.3 — Answer, Decline, Mute and End
+     are tapped in a hurry, often over a game). Separate from the composer row's own height above. */
+  --wx-srv-header-control-h: 44px;
   /* `.wx-main`'s padding (20px desktop, 12px phone): the thread bleeds out to the screen edges
      by this much and pads its own messages by it, so bubbles line up with the header and
      composer buttons instead of being indented twice (card padding + shell padding). */
@@ -188,8 +195,8 @@
 .wx-srv-pen-undo,
 .wx-srv-pen-redo {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-surface);
@@ -766,8 +773,8 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-more-button {
   flex: none;
-  min-width: 36px;
-  height: 36px;
+  min-width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   padding: 0 8px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -3724,9 +3731,8 @@ dialog.wx-srv-game-pictures[open] {
 .wx-srv-pen-button {
   flex: none;
   box-sizing: border-box;
-  width: 44px;
-  height: 44px;
-  margin: -4px;
+  width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -3738,8 +3744,8 @@ dialog.wx-srv-game-pictures[open] {
 
 .wx-srv-pen-face {
   box-sizing: border-box;
-  width: 36px;
-  height: 36px;
+  width: 100%;
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7635,9 +7641,15 @@ button.wx-srv-ck-card:disabled {
   color: var(--ck-muted);
 }
 
+/* Tiles at least 68 px wide, so a bank name breaks between its words: a word only splits when it is longer
+   than the whole tile (desktop Chromium has no hyphenation dictionary, so `hyphens: auto` alone cannot help).
+   And never more columns than one player's picks (`--ck-reveal-cols`, set by the pane: 5 Classic, 4 toasted
+   sandwich), so a wide pane's rows stay full: each column is at least 1/N of the row. On a 360 px phone a
+   Classic group of five is 4 + 1, the price of never splitting a word; a toasted sandwich's four fit. */
 .wx-srv-ck-reveal-grid {
+  --ck-reveal-cols: 5;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(max(68px, calc((100% - (var(--ck-reveal-cols) - 1) * 3px) / var(--ck-reveal-cols))), 1fr));
   gap: 6px 3px;
 }
 
@@ -8920,6 +8932,256 @@ button.wx-srv-ck-rtile {
   overscroll-behavior: contain;
   margin: 0 -4px;
   padding: 0 4px 2px;
+}
+
+/* -- Game modes (spec/server-chat/09c-cookout-modes.md §6) ----------------------------------------------------
+   The start sheet's "What are we making?" tiles, the bread slot's corner mark, the dish card's "On <bread>"
+   line and build pill, the chef stage's mode header, the card's mode badge and the book's mode badge. A
+   Classic round carries none of these classes, so it looks exactly as before. */
+
+.wx-srv-ck-start-section {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-start-what {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* Two tiles fill a 360 px phone side by side, each ≥ 150 px wide: the sheet's column there is 304 px, so the
+   gap is 4 px (150 + 4 + 150). A third tile wraps to a new row. */
+.wx-srv-ck-mtiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(150px, 100%), 1fr));
+  gap: 4px;
+}
+
+.wx-srv-ck-mtile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 6px 6px 8px;
+  border: 2px solid var(--ck-line-strong);
+  border-radius: 16px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+
+.wx-srv-ck-mtile-on {
+  border-color: var(--ck-tomato);
+  box-shadow: 0 0 0 3px rgba(217, 71, 43, 0.18);
+}
+
+.wx-srv-ck-mtile:disabled {
+  cursor: default;
+}
+
+.wx-srv-ck-mtile:disabled:not(.wx-srv-ck-mtile-on) {
+  opacity: 0.5;
+}
+
+/* The picture: 1:1, at most 96 px; on a short screen it shrinks so the sheet still fits. */
+.wx-srv-ck-mtile-art {
+  display: grid;
+  place-items: center;
+  width: min(96px, 11vh);
+  aspect-ratio: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--ck-chip);
+}
+
+.wx-srv-ck-mtile-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wx-srv-ck-mtile-emoji {
+  font-size: min(3rem, 7vh);
+  line-height: 1;
+}
+
+.wx-srv-ck-mtile-label {
+  font-weight: 800;
+  font-size: 0.9375rem;
+  line-height: 1.2;
+}
+
+.wx-srv-ck-mtile-blurb {
+  font-size: 0.75rem;
+  line-height: 1.25;
+  color: var(--ck-muted);
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-ck-mtile-tick {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--ck-line-strong);
+  background: var(--ck-paper);
+  color: transparent;
+  font-size: 0.75rem;
+  font-weight: 900;
+}
+
+.wx-srv-ck-mtile-on .wx-srv-ck-mtile-tick {
+  border-color: var(--ck-tomato);
+  background: var(--ck-tomato);
+  color: #fff;
+}
+
+/* While the tiles show, "How do we play?" sits close to its two options, and those are slimmer (still ≥ 44 px
+   targets). The Classic-only sheet never has this class and is exactly as before. */
+.wx-srv-ck-start-with-modes .wx-srv-ck-start-section + .wx-srv-ck-start-modes {
+  margin-top: -6px;
+}
+
+.wx-srv-ck-start-with-modes .wx-srv-ck-mode {
+  min-height: 52px;
+  padding: 6px 12px;
+}
+
+.wx-srv-ck-start-with-modes .wx-srv-ck-mode-icon {
+  font-size: 1.375rem;
+}
+
+/* A mode encore whose game could not be loaded: the words and a "Try again". */
+.wx-srv-ck-mode-missing {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-ck-mode-missing-text {
+  flex: 1 1 auto;
+  margin: 0;
+  color: var(--wx-danger-text);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.wx-srv-ck-mode-missing-retry {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--ck-line-strong);
+  border-radius: 999px;
+  background: var(--ck-paper);
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 700;
+}
+
+/* Why an encore starter cannot be seated in this game ("Your fridge bread is the bread"). */
+.wx-srv-ck-encore-why {
+  font-size: 0.6875rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-mtiles-note {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--ck-muted);
+}
+
+/* The bread slot: a small 🍞 in its top-left corner, inside the 22 px tile (overflow there would be clipped). */
+.wx-srv-ck-prog-anchor {
+  box-shadow: 0 0 0 1.5px var(--ck-saffron);
+}
+
+.wx-srv-ck-prog-mark {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  font-size: 0.5rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.wx-srv-ck-bline-who {
+  font-size: 0.6875rem;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-staple-free-tag {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--ck-herb-tint);
+  color: var(--ck-herb);
+  font-size: 0.6875rem;
+  font-weight: 800;
+}
+
+/* The chef stage's mode header ("🥪 Toasted sandwich"). */
+.wx-srv-ck-stagehead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 0;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+/* "On Sourdough loaf" under a dish's title, with the bread's thumbnail. */
+.wx-srv-ck-dish-anchor {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.wx-srv-ck-dish-anchor-pic {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  font-size: 0.875rem;
+}
+
+.wx-srv-ck-tag-build {
+  border-color: var(--ck-tomato);
+  color: var(--wx-ink);
+}
+
+.wx-srv-ck-recipe-build {
+  margin: 0;
+  font-size: 0.8125rem;
+  font-weight: 800;
+  color: var(--ck-muted);
+}
+
+.wx-srv-ck-mcard-head-mode {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title {
+  white-space: nowrap;
+}
+
+.wx-srv-ck-mcard .wx-srv-ck-mcard-mode {
+  color: var(--wx-ink);
 }
 
 .wx-srv-ck-encore {

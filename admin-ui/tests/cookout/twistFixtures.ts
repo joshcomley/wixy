@@ -9,7 +9,7 @@ import type { Message } from "../../src/server/api/messages";
 import { createGameTabs, type GameTabs } from "../../src/server/gameTabs";
 import type { ItemChat } from "../../src/server/itemChat";
 import { createGameFloat } from "../../src/server/gameFloat";
-import { parseCookoutView, type CookoutOutcome, type CookoutView } from "../../src/server/cookout/api";
+import { parseCookoutView, type CookoutOptions, type CookoutOutcome, type CookoutView } from "../../src/server/cookout/api";
 import { createCookoutGame, type CookoutGame, type CookoutGameApi } from "../../src/server/cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "../../src/server/cookout/model";
 import {
@@ -186,6 +186,8 @@ export interface HarnessOptions {
   readonly reducedMotion?: boolean;
   /** The model's reads of a round (none by default: there is no session). */
   readonly fetchRound?: (seq: number) => Promise<CookoutOutcome>;
+  /** The pane's `GET /cookout/options` read (a mode round's intro lines); absent = the pane is given none. */
+  readonly loadOptions?: () => Promise<CookoutOptions | null>;
 }
 
 export function makeHarness(options: HarnessOptions = {}): Harness {
@@ -279,6 +281,7 @@ export function makeHarness(options: HarnessOptions = {}): Harness {
       clearInterval: (id) => clock.intervals.delete(id),
     },
     newId: () => `move-${++moveCounter}`,
+    ...(options.loadOptions === undefined ? {} : { loadOptions: options.loadOptions }),
     ...(options.reducedMotion === undefined ? {} : { reducedMotion: () => options.reducedMotion === true }),
   });
   document.body.append(game.pane, tabs.tabBar);
