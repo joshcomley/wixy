@@ -2974,6 +2974,11 @@ class TestToastieConceptsPrompt:
         assert "at most TWO of: plain flour, cooking oil, granulated sugar, milk" in prompt
         for build in TOASTIE.chef.builds:
             assert f"{build.id} ({build.label}: {build.prompt_phrase})" in prompt
+        # the Classic prompt's measured steering is carried over (found by the real-run trial)
+        assert "never name one: not what a picked sauce or spread is made of" in prompt
+        assert "not another dish you compare the sandwich to" in prompt
+        assert 'an idea that uses every filling has "omitted": []' in prompt
+        assert "must be exactly 7." in prompt
         # not the Classic opening, rules or schema
         assert "THREE distinct recipe concepts" not in prompt
         assert '"dishType"' not in prompt

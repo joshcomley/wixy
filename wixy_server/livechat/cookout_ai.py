@@ -395,7 +395,30 @@ def _single_dish_head(basket: Mapping[str, Any], mode: CookoutMode) -> str:
         best=fillings - (mode.chef.best_missing_max or 0),
         build_list=_build_list(mode),
     )
-    return f"{text}\n\n{BASKET_MARKER}{_compact(basket)}"
+    return f"{text}\n{_single_dish_rules(fillings)}\n\n{BASKET_MARKER}{_compact(basket)}"
+
+
+def _single_dish_rules(fillings: int) -> str:
+    """The Classic prompt's measured steering, carried into every single-dish mode (09c §3.2 gap,
+    found by the real-run trial: without it the chef describes a sauce by what it is made of, or
+    compares a dish to another, naming foods nobody picked, and miscounts "omitted")."""
+    return (
+        "- Ordinary cooking language is always fine (crisp, golden, melted, gooey). The check "
+        "looks for a real FOOD that is neither picked nor allowed, so never name one: not "
+        "what a picked sauce or spread is made of (no chilli, coriander, garlic, herbs or "
+        "spices unless picked), not a pickle, relish, chutney, syrup or side, and not another "
+        "dish you compare the sandwich to (no fish-finger or similar). Describe each sandwich "
+        "using only the picked items and butter. Before you answer, re-read every title, vibe "
+        "and description and delete any food word that is not the name of a picked item or a "
+        "chosen staple.\n"
+        '- "omitted" lists every filling the idea does NOT use (exactly the complement of its '
+        'fillings in "pickedIngredientIds"; the bread is never omitted), each with a short '
+        'reason, and an idea that uses every filling has "omitted": []. NEVER mention an omitted '
+        'filling anywhere except inside its own omitted "reason". Before you answer, count: '
+        f"each idea's used fillings plus its omitted fillings must be exactly {fillings}.\n"
+        '- Put ONLY picked ids in "pickedIngredientIds" (the bread included) and ONLY unpicked '
+        'cupboard staple ids in "stapleIds".'
+    )
 
 
 def build_concepts_prompt(
