@@ -647,6 +647,55 @@ async function pickTen(pages: readonly [Page, Page]): Promise<string[]> {
   return ids;
 }
 
+interface HiddenItem {
+  readonly id: string;
+  readonly name: string;
+  readonly srcs: readonly string[];
+}
+
+const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Every way a page's HTML (the watcher's whole `outerHTML`: all text including hidden nodes, every attribute, every
+ * inline script) carries one of the partner's ingredients. A name and an id are matched as whole words, so a short
+ * name ("Cep") is not found inside an unrelated word ("concept"); a picture is found by its URL or by its sha256
+ * alone (a `srcset`, a CSS `url()` or a JSON blob). Empty = nothing leaked. */
+function partnerLeaks(html: string, item: HiddenItem): string[] {
+  const leaks: string[] = [];
+  const word = (text: string, extra = ""): RegExp =>
+    new RegExp(`(^|[^\\p{L}\\p{N}${extra}])${escapeRe(text)}($|[^\\p{L}\\p{N}${extra}])`, "iu");
+  if (item.id !== "" && word(item.id, "_-").test(html)) leaks.push(`its id "${item.id}"`);
+  if (item.name !== "" && word(item.name).test(html)) leaks.push(`its name "${item.name}"`);
+  for (const src of item.srcs) {
+    if (src !== "" && html.includes(src)) leaks.push(`its picture URL ${src}`);
+    const sha = /[0-9a-f]{64}/.exec(src)?.[0];
+    if (sha !== undefined && html.includes(sha)) leaks.push(`its picture sha ${sha.slice(0, 12)}...`);
+  }
+  return leaks;
+}
+
+test.describe("Cookout picture-first table: the Blind leak check itself", () => {
+  const sha = "ab".repeat(32);
+  const item: HiddenItem = { id: "cep-mushroom", name: "Cep", srcs: [`/admin/cookout-img/${sha}.webp`] };
+  const page = (body: string): string => `<html><body><p>The concept of dinner</p>${body}</body></html>`;
+
+  test("a page that shows nothing of the pair is clean, even when the name is inside another word", () => {
+    expect(partnerLeaks(page(""), item)).toEqual([]);
+  });
+
+  for (const [what, html] of [
+    ["a hidden node", page('<span style="display:none">Cep</span>')],
+    ["a data attribute", page('<div data-note="eats Cep daily"></div>')],
+    ["a title attribute", page('<div title="Cep"></div>')],
+    ["its id in an inline JSON blob", page('<script type="application/json">{"pick":"cep-mushroom"}</script>')],
+    ["a srcset URL", page(`<img srcset="/admin/cookout-img/${sha}.webp 1x, /x.webp 2x">`)],
+    ["its sha in a CSS url()", page(`<div style="background:url(/other/${sha}.webp)"></div>`)],
+  ] as const) {
+    test(`the check goes red on ${what}`, () => {
+      expect(partnerLeaks(html, item).length, what).toBeGreaterThan(0);
+    });
+  }
+});
+
 test.describe("Cookout picture-first table: behaviours", () => {
   test("the intro shows once, dismisses and does not come back after a reload", async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
@@ -773,21 +822,10 @@ test.describe("Cookout picture-first table: behaviours", () => {
       expect(offered).toHaveLength(2);
       await expect(game(watcher).locator(".wx-srv-ck-cloche")).toBeVisible();
       const html = await watcher.evaluate(() => document.documentElement.outerHTML);
-      // What the watcher can SEE or hear: the rendered text plus every attribute a screen reader or tooltip uses.
-      // A name is matched as whole words (a short name such as "Cep" is also inside "concept", which proves nothing).
-      const shown = await watcher.evaluate(() => {
-        const attrs = ["alt", "aria-label", "title", "placeholder", "value"];
-        const parts = [document.body.innerText];
-        for (const el of document.querySelectorAll("*")) for (const a of attrs) parts.push(el.getAttribute(a) ?? "");
-        return parts.join(" | ");
-      });
-      const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      // The WHOLE DOM, not what is rendered: a hidden node, a data-* attribute, a srcset or an inline JSON blob carries
+      // the partner's ingredient just as well as visible text does (09b F.3).
       for (const item of offered) {
-        expect(html, `the watcher's DOM holds ${item.id}`).not.toContain(`data-ingredient="${item.id}"`);
-        expect(shown, `the watcher's DOM shows ${item.name}`).not.toMatch(
-          new RegExp(`(^|[^\\p{L}\\p{N}])${escapeRe(item.name)}($|[^\\p{L}\\p{N}])`, "iu"),
-        );
-        for (const src of item.srcs) expect(html, "a picture URL of the partner's pair").not.toContain(src);
+        expect(partnerLeaks(html, item), `the watcher's DOM holds the partner's ${item.name}`).toEqual([]);
       }
     } finally {
       r.stop();
