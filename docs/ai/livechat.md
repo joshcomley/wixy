@@ -2717,7 +2717,7 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,
   `test_livechat_cookout_ai.py` and `test_livechat_cookout_images.py`, and `e2e/tests/server-cookout-twists.spec.ts`.
 
-### 24.2 Cookout pictures, catalogue and the picture-first table (spec `spec/server-chat/09b-cookout-visual.md`, decisions/00201, Inv 58)
+### 24.2 Cookout pictures, catalogue and the picture-first table (spec `spec/server-chat/09b-cookout-visual.md`, decisions/00202, Inv 58)
 
 Round 2 of Cookout. Every ingredient on screen gets a studio photograph and a plain "what it is" line; the pick screen is
 rebuilt around two big picture cards that fit a phone without scrolling; the chef's waiting time shows each chosen
@@ -2738,7 +2738,7 @@ wire fields.
 - `livechat/cookout_ingredient_images.json` — the **manifest**: `{packVersion, pack, renditions:{card:512, thumb:160},
   items:{<id>:{card:<sha256>, thumb:<sha256>, attempt, acceptedBy}}}` and `pack` = `{url, sha256, bytes, objects,
   installedBytes}` of ONE immutable tar published as a GitHub Release asset. The pictures themselves live **outside
-  git** (decisions/00201). The first manifest is `{"packVersion": 0, "pack": null, "items": {}}`: valid, and every
+  git** (decisions/00202). The first manifest is `{"packVersion": 0, "pack": null, "items": {}}`: valid, and every
   ingredient falls back to its emoji tile. (At the time of writing the committed catalogue holds no entries and the
   committed manifest is that empty one; the generation run described in the [runbook](runbook.md) fills them. With either
   empty the game plays exactly as before, with `what: null` / `image: null`.)

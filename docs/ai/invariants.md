@@ -3,7 +3,7 @@
 ### Inv 58 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
 
 The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to
-any conversation (livechat.md §24.2, workspace 00058 round 2, decisions/00201). Four rules:
+any conversation (livechat.md §24.2, workspace 00058 round 2, decisions/00202). Four rules:
 
 1. **Generated from ingredient names only.** The catalogue (`livechat/cookout_catalogue.json`) and every picture are
    produced offline by `tooling/cookout/visual/` from the committed ingredient bank. No chat message, player name, basket,
@@ -35,7 +35,7 @@ gives `304`, malformed names, an unlisted sha even with a file present, and a li
 `test_cookout_catalogue.py` / `test_cookout_catalogue_data.py` (the committed catalogue passes every rule),
 `test_cookout_visual_tooling.py` (the offline tooling: prompts, decoys, neutral check file names, the gate, the ladder, pack building),
 `admin-ui/tests/cookout/apiVisual.test.ts` (URL shape vetted client-side) and `pickTable.test.ts` (Blind partner turn: no
-ingredient text or image URL in the DOM). Decision: [00201](../../decisions/00201-cookout-ingredient-pictures/decision.md).
+ingredient text or image URL in the DOM). Decision: [00201](../../decisions/00202-cookout-ingredient-pictures/decision.md).
 
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 

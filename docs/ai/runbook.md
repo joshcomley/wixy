@@ -214,7 +214,7 @@ unclaimed orphan attachments after 24 hours, removes raw upload sources for read
 retries archiving failed originals, expires an unarchived failed original after seven days, and
 prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
 
-## Cookout ingredient pictures (livechat.md §24.2, Inv 58, decisions/00201)
+## Cookout ingredient pictures (livechat.md §24.2, Inv 58, decisions/00202)
 
 The pictures are **not in git**. The repo holds only the manifest (`wixy_server/livechat/cookout_ingredient_images.json`)
 and the catalogue (`cookout_catalogue.json`); the picture bytes are content-addressed files, delivered as one immutable
@@ -321,8 +321,10 @@ Python in `pythoncore-3.14`; the modules import their siblings by plain name, so
 6. `images.py publish [--dry-run]` builds the deterministic tar (sorted members, zeroed metadata, so identical pictures
    give an identical sha256), creates release `cookout-images-v<N>` ("Cookout ingredient pictures v<N>") with the tar via
    `C:\Program Files\GitHub CLI\gh.exe`, downloads it back and compares the sha256, writes the new manifest, `install`s the
-   pack under a pending pin, and runs the history check (every manifest version ever committed must still answer its pack
-   URL with exactly its `bytes`; any failure stops the publish). Then open the PR with the new manifest (+ catalogue); after
+   pack under a pending pin, and runs two checks, either of which stops the publish: the history check (every manifest
+   version ever committed must still answer its pack URL with exactly its `bytes`) and, from v2 onward, the clean install
+   check (`clean_install_check`: a fetch and full install of the OLDEST manifest that names a pack into fresh temporary
+   storage with no cache, so a fork or old revision that still pins v1 can always get its pictures). Then open the PR with the new manifest (+ catalogue); after
    merge Slots deploys, the new slot's pin replaces the pending pin, and the old slot's objects stay for the 72-hour
    rollback window.
 

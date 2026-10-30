@@ -28,7 +28,7 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
   `/api/admin`). Idempotent; run elevated (admin gate) — reads the CF_* credentials
   install.py copies into `D:\Servers\Wixy\Storage\.env`, never Wix credentials.
 - `cookout/visual/` — Cookout ingredient-catalogue and picture tooling (spec/server-chat/09b; livechat.md §24.2;
-  decisions/00201). **Offline: it reads only the committed bank and catalogue, never chat content (Inv 58).** Python
+  decisions/00202). **Offline: it reads only the committed bank and catalogue, never chat content (Inv 58).** Python
   3.14; the modules import their siblings by plain name, so run each script by path (the unit tests put this folder on
   `sys.path`).
   - `catalogue.py {author|factcheck|build|audit|validate|report|status}` — Haiku writes `what` / `visual` /
@@ -44,7 +44,8 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
     apart), the attempt ladder 1-4 then an Opus review (`review.py`, decisions in `image_review.json`) then attempts 5-6 or
     picture-less, renditions `card` 512 / `thumb` 160, a resumable journal, and `publish` (deterministic tar, GitHub Release
     `cookout-images-v<N>` via the full `gh.exe` path, download-back verify, manifest write, `install` under a pending pin,
-    history check). `run --phase pilot|rest|all --checker haiku|luna [--limit N] [--render-only]`; `--work-dir` defaults to
+    history check, and from v2 onward the clean-install check: a fresh-storage install of the oldest pinned manifest).
+    `run --phase pilot|rest|all --checker haiku|luna [--limit N] [--render-only]`; `--work-dir` defaults to
     `%AIM_ROOT%\Servers\Wixy\Storage\cookout-images\work`. **`<work>/PAUSE` stops a run between pictures.** `run` needs
     `WIXY_COMFY_OUTPUT_DIR` (and optionally `WIXY_COMFY_URL`, default `http://127.0.0.1:8199`) in `WIXY_ENV_FILE`
     (default `D:\Servers\Wixy\Storage\.env`).
