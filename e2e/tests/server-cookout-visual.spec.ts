@@ -52,10 +52,9 @@ interface Variant {
   readonly height: number;
   readonly inset: number;
   readonly call: boolean;
+  /** With `call`: the call has been answered (Mute and End shown) instead of ringing. */
+  readonly answered?: boolean;
 }
-
-/** 44 px, no exception (09b F.3). Local debugging of the later states may lower it while the call header is 36 px. */
-const CALL_FLOOR = Number(process.env["WIXY_E2E_CALL_FLOOR"] ?? 44);
 
 const PHONES: ReadonlyArray<readonly [number, number]> = [
   [360, 640],
@@ -75,6 +74,10 @@ const VARIANTS: readonly Variant[] = [
     { width, height, inset: 0, call: true },
     { width, height, inset: 34, call: true },
   ]),
+  ...PHONES.flatMap(([width, height]) => [
+    { width, height, inset: 0, call: true, answered: true },
+    { width, height, inset: 34, call: true, answered: true },
+  ]),
 ];
 
 type Expect = "cards" | "cloche" | "none";
@@ -85,8 +88,8 @@ interface AuditArgs {
   /** The Skip button / Twists button are expected (the viewer is the one picking / a twist is usable). */
   readonly skip: boolean;
   readonly twists: boolean;
-  /** Minimum side of a call control, px (44 per 09b F.3; WIXY_E2E_CALL_FLOOR lowers it for local work only). */
-  readonly callFloor?: number;
+  /** The call has been answered: its Mute and End controls must be there too (F.3), not only Accept/Decline. */
+  readonly answered?: boolean;
 }
 
 interface AuditResult {
@@ -156,9 +159,10 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     // -- Every element in the pane, whatever its overflow --------------------------------------------------------
     const stage = pane.querySelector<HTMLElement>(".wx-srv-ck-table-stage");
     for (const node of pane.querySelectorAll<HTMLElement>("*")) {
-      // Exempt by design: a picture's own box (an image cropped to fill its tile) and the style wheel's reel
-      // (a slot-machine window that shows one face of a longer strip).
-      if (node.tagName === "IMG" || node.matches(".wx-srv-ck-pic, .wx-srv-ck-pic *, .wx-srv-ck-wheel, .wx-srv-ck-wheel *") || node.getClientRects().length === 0) continue;
+      // Exempt (F.3: "except the picture <img>s' own boxes"): the <img>s, the card picture's tile that holds one
+      // (its img is cropped to fill it), and the style wheel, a fixed-height window (22 px) over a long reel of
+      // faces (408 px) that overflows by construction.
+      if (node.tagName === "IMG" || node.matches(".wx-srv-ck-card-pic, .wx-srv-ck-card-pic .wx-srv-ck-pic, .wx-srv-ck-wheel, .wx-srv-ck-wheel *") || node.getClientRects().length === 0) continue;
       if (node.clientHeight === 0 && node.clientWidth === 0) continue; // inline boxes have no scroll box
       if (STAGE_SCROLLS && node === stage) continue; // the one thing that may scroll, below 411
       if (STAGE_SCROLLS && stage !== null && stage.contains(node)) continue;
@@ -188,8 +192,13 @@ async function auditTable(page: Page, args: AuditArgs): Promise<AuditResult> {
     if (a.call) {
       const live = [...document.querySelectorAll<HTMLElement>(".wx-srv-call button")].filter((b) => b.getClientRects().length > 0);
       if (live.length === 0) failures.push("a call is live but its controls are not shown");
-      // 44x44 with no exception (09b F.3): red until the call header's own fix merges into the feature branch.
-      for (const control of live) target(control, `call control ${label(control)}`, a.callFloor);
+      // 44x44 with no exception (09b F.3).
+      if (a.answered === true) {
+        const names = live.map((b) => `${b.getAttribute("aria-label") ?? ""} ${b.textContent ?? ""}`.toLowerCase());
+        if (!names.some((n) => n.includes("mute"))) failures.push("an answered call shows no Mute control");
+        if (!names.some((n) => /(^|\s)end(\s|$)/.test(n))) failures.push(`an answered call shows no End control (shown: ${names.join(" | ")})`);
+      }
+      for (const control of live) target(control, `call control ${label(control)}`);
     }
 
     // -- The two cards (or the cloche) ---------------------------------------------------------------------------
@@ -278,7 +287,11 @@ async function useLongText(page: Page): Promise<void> {
 
 /** Rings `measured` from `other` (the second device calls the first) and returns a hang-up. One retry:
  * a call started in the instant after the previous one ended can be dropped by the call broker. */
-async function ring(measured: Page, other: Page, measuredName: string): Promise<() => Promise<void>> {
+async function ring(
+  measured: Page,
+  other: Page,
+  measuredName: string,
+): Promise<{ answer: () => Promise<void>; end: () => Promise<void>; decline: () => Promise<void> }> {
   const chatTab = other.locator(".wx-srv-tab-chat");
   const wasInGame = await game(other).isVisible();
   if (await chatTab.isVisible()) {
@@ -308,8 +321,7 @@ async function ring(measured: Page, other: Page, measuredName: string): Promise<
     await humanPause(other);
     expect(await attempt(), "the measured device is ringing").toBe(true);
   }
-  return async () => {
-    await measured.locator(".wx-srv-call").getByRole("button", { name: "Decline", exact: true }).click();
+  const idle = async (): Promise<void> => {
     await expect(measured.locator(".wx-srv-call")).toHaveAttribute("data-state", "idle");
     await expect(callPanel).toHaveAttribute("data-state", "idle");
     await expect(callPanel.getByRole("button", { name: "Call", exact: true })).toBeEnabled();
@@ -320,6 +332,22 @@ async function ring(measured: Page, other: Page, measuredName: string): Promise<
       await gameTab.click();
       await expect(game(other)).toBeVisible();
     }
+  };
+  const live = measured.locator(".wx-srv-call");
+  return {
+    answer: async () => {
+      await humanPause(measured);
+      await live.getByRole("button", { name: "Answer", exact: true }).click();
+      await expect(live.getByRole("button", { name: /mute/i })).toBeVisible({ timeout: 15_000 });
+    },
+    end: async () => {
+      await live.getByRole("button", { name: /^end/i }).first().click();
+      await idle();
+    },
+    decline: async () => {
+      await live.getByRole("button", { name: "Decline", exact: true }).click();
+      await idle();
+    },
   };
 }
 
@@ -353,19 +381,19 @@ async function rig(browser: import("@playwright/test").Browser, long: boolean): 
 async function sweep(measured: Page, other: Page, measuredName: string, state: string, args: Omit<AuditArgs, "call">): Promise<number> {
   let audits = 0;
   const run = async (v: Variant): Promise<void> => {
-    console.log(`[matrix] ${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? " call" : ""}`);
     await applyLayout(measured, v);
-    const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? " + ringing call" : ""}`;
+    const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? (v.answered === true ? " + answered call" : " + ringing call") : ""}`;
     await expect
-      .poll(async () => (await auditTable(measured, { ...args, call: v.call, callFloor: CALL_FLOOR - 0.5 })).failures, { message: where, timeout: 4_000 })
+      .poll(async () => (await auditTable(measured, { ...args, call: v.call, answered: v.answered })).failures, { message: where, timeout: 4_000 })
       .toEqual([]);
     audits += 1;
   };
   for (const v of VARIANTS.filter((x) => !x.call)) await run(v);
-  console.log(`[matrix] ${state}: ringing`);
-  const hangUp = await ring(measured, other, measuredName);
-  for (const v of VARIANTS.filter((x) => x.call)) await run(v);
-  await hangUp();
+  const call = await ring(measured, other, measuredName);
+  for (const v of VARIANTS.filter((x) => x.call && x.answered !== true)) await run(v);
+  await call.answer();
+  for (const v of VARIANTS.filter((x) => x.answered === true)) await run(v);
+  await call.end();
   await applyLayout(measured, { width: 390, height: 844, inset: 0, call: false });
   return audits;
 }
@@ -377,11 +405,19 @@ async function playMatrix(browser: import("@playwright/test").Browser, blind: bo
   let audited = 0;
   const open = !blind;
   try {
+    // "Every twist on" = every start-sheet twist that is part of the picking table: a spun style, the one-pan
+    // challenge, the cloche, secret stars and the fridge raid (their five icons fill the Twists strip, and the
+    // fridge raid's starter shows in the basket). The leftovers ENCORE is the sixth start-sheet twist and is left
+    // out on purpose: it can only be started from a dish of an EARLIER finished round that left an ingredient out,
+    // and it changes only which ingredients are seated as starters, which the fridge raid already puts on the
+    // table (server-cookout-twists.spec.ts plays the encore end to end). The drafting twists (Lucky dip, Chaos
+    // shelf, Sweep one) are in the Twists sheet and are exercised below in every round.
     const seq = withTwists
       ? await startCookoutWithTwists(pageA, blind, { style: "spin", challenge: "one-pan", cloche: true, stars: true, fridge: "rice" })
       : (await startCookout(pageA, blind), await pageA.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq"))!;
 
     if (!withTwists) await expect(game(pageA).locator(".wx-srv-ck-pair .wx-srv-ck-card")).toHaveCount(2);
+    if (withTwists) await expect(game(pageA).locator(".wx-srv-ck-strip")).toBeVisible();
     // State: the starter, before the partner has joined ("waiting for Join").
     // With the fridge raid on, turn 1 is the starter's own pick, so no pair is due until the partner joins.
     audited += await sweep(pageA, pageB, "Alice", "before the partner joins", { expect: withTwists ? "none" : "cards", skip: !withTwists, twists: false });
@@ -394,13 +430,39 @@ async function playMatrix(browser: import("@playwright/test").Browser, blind: bo
     const theirs = first.index === 0 ? pageB : pageA;
     const theirName = first.index === 0 ? "Bob" : "Alice";
 
-    // State: my turn (normal pair, skip available), and the partner watching (Open) or the cloche (Blind).
-    audited += await sweep(mine, theirs, mineName, "my turn", { expect: "cards", skip: true, twists: false });
+    const twistsButton = (page: Page) => game(page).locator("button.wx-srv-ck-twists-btn");
+
+    // State: my turn (normal pair, skip and Twists available), and the partner watching (Open: the same pair,
+    // not tappable, with the Sweep twist in its Twists sheet) or the cloche (Blind: nothing of the pair).
+    audited += await sweep(mine, theirs, mineName, "my turn", { expect: "cards", skip: true, twists: true });
     audited += await sweep(theirs, mine, theirName, open ? "watching the partner's turn" : "Blind cloche", {
       expect: open ? "cards" : "cloche",
       skip: false,
-      twists: false,
+      twists: open,
     });
+
+    if (open) {
+      // State: a swept pair. The watcher sweeps one card off the picker's table (Twists sheet -> Sweep one -> tap);
+      // the picker's banner carries the note and the table stays whole. Blind has no watcher view of the pair.
+      await humanPause(theirs);
+      await twistsButton(theirs).click();
+      const sweepItem = game(theirs).locator(".wx-srv-ck-twist-item.wx-srv-ck-sweep");
+      await expect(sweepItem, "the watcher can sweep one").toBeEnabled();
+      await sweepItem.click();
+      await humanPause(theirs);
+      await game(theirs).locator(".wx-srv-ck-pair button.wx-srv-ck-card").first().click();
+      await expect(game(mine).locator(".wx-srv-ck-turn-sub"), "the veto note was reached").toContainText(/swept/i, { timeout: 20_000 });
+      audited += await sweep(mine, theirs, mineName, "a pair with a swept ingredient (the veto note)", { expect: "cards", skip: true, twists: true });
+    }
+
+    // State: the Twists sheet opened and closed again leaves the table exactly as it was.
+    await humanPause(mine);
+    await twistsButton(mine).click();
+    await expect(game(mine).locator('.wx-srv-ck-sheet[data-sheet="twists"]')).toBeVisible();
+    await humanPause(mine);
+    await game(mine).locator(".wx-srv-ck-sheet-close").click();
+    await expect(game(mine).locator(".wx-srv-ck-sheet")).toBeHidden();
+    audited += await sweep(mine, theirs, mineName, "the Twists sheet closed again", { expect: "cards", skip: true, twists: true });
 
     // State: the final pair (both skips used; the Skip button is the disabled "Final pair").
     const skip = game(mine).locator(".wx-srv-ck-skip");
@@ -409,29 +471,22 @@ async function playMatrix(browser: import("@playwright/test").Browser, blind: bo
       await skip.click();
       await expect(skip).toHaveText(label, { timeout: 20_000 });
     }
-    audited += await sweep(mine, theirs, mineName, "the final pair", { expect: "cards", skip: true, twists: false });
+    audited += await sweep(mine, theirs, mineName, "the final pair", { expect: "cards", skip: true, twists: true });
 
+    // State: the chaos pair (the picker's Twists sheet -> Chaos shelf; Open: the watcher sees it too).
+    await humanPause(mine);
+    await twistsButton(mine).click();
+    const chaos = game(mine).locator(".wx-srv-ck-twist-item.wx-srv-ck-chaos");
+    await expect(chaos, "the picker can use the chaos shelf").toBeEnabled();
+    await chaos.click();
+    await expect(game(mine).locator(".wx-srv-ck-pair-chaos"), "the chaos pair was reached").toHaveCount(1, { timeout: 20_000 });
+    audited += await sweep(mine, theirs, mineName, "the chaos pair", { expect: "cards", skip: false, twists: true });
     if (open) {
-      // State: a swept pair. The watcher sweeps one off the table (Twists sheet -> Sweep one); the picker's
-      // banner carries the note and the table stays whole.
-      const sheetButton = game(theirs).locator("button.wx-srv-ck-twists-btn");
-      if ((await sheetButton.count()) > 0) {
-        await humanPause(theirs);
-        await sheetButton.click();
-        const sweepItem = game(theirs).locator(".wx-srv-ck-twist-item.wx-srv-ck-sweep");
-        if ((await sweepItem.count()) > 0 && (await sweepItem.isEnabled())) {
-          await sweepItem.click();
-          await humanPause(theirs);
-          await game(theirs).locator(".wx-srv-ck-pair button.wx-srv-ck-card").first().click();
-          await expect(game(mine).locator(".wx-srv-ck-turn-sub")).toContainText(/swept/i, { timeout: 15_000 });
-          audited += await sweep(mine, theirs, mineName, "a pair with a swept ingredient", { expect: "cards", skip: true, twists: false });
-        } else {
-          await game(theirs).locator(".wx-srv-ck-sheet-close").click();
-        }
-      }
+      // The watcher's one sweep went on the swept pair above, so no Twists button is shown to it now.
+      await expect(game(theirs).locator(".wx-srv-ck-pair-chaos")).toHaveCount(1, { timeout: 20_000 });
+      await expect(twistsButton(theirs)).toHaveCount(0);
+      audited += await sweep(theirs, mine, theirName, "watching the chaos pair", { expect: "cards", skip: false, twists: false });
     }
-    // The Twists sheet closed leaves the table whole: the table is audited above with the button present
-    // whenever a drafting twist is usable; the sheet itself must close without moving anything.
     expect(audited, "audits run").toBeGreaterThan(40);
     for (const read of r.errors) expect(read()).toEqual([]);
   } finally {

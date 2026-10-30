@@ -37,6 +37,9 @@ export async function unlockServer(page: Page, name: string): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
 
+/** The product's own spacing rule: two taps less than MULTI_TAP_INTERVAL_MS (400 ms) apart lock the chat (R3), so a
+ * scripted tap sequence waits that long (+100 ms) between taps, as a person would. It waits for the product's timer,
+ * never for a state, so it is not a settle sleep. */
 export async function humanPause(page: Page): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
