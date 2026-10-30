@@ -299,6 +299,8 @@ CI installs the real `ffmpeg` binary in both the Python and e2e jobs: media-proc
 exercise actual voice/video conversion, and the e2e fixture needs it for uploaded media.
 Pillow is a core dependency; `pillow-heif` is installed by the server extra.
 
+- **Cookout modes**: `test_livechat_cookout_modes.py` (v21 -> v22 migration from the real `fixtures/livechat_v21.db`, Classic golden, Toastie, guards, HTTP gate), `test_cookout_modes_overlap.py` (v21 canary pinned to git `4d2b005c` - needs full history, fails never skips; activation tool), `test_livechat_store_locking.py` (scrub vs writers, rollback masking, WAL erasure with a reader). Regenerate the v21 fixture with `fixtures/make_livechat_v21.py` from a pre-modes tree.
+
 ### E2E under heavy load: the idle lock, and a Windows socket error (measured 2026-10-30)
 
 Running several full e2e suites at once (CI runs one; a dev box running two full suites plus a repeat run is a dozen

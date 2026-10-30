@@ -18,7 +18,6 @@ a future bank or list edit that thins a pool fails CI instead of failing a game.
 from __future__ import annotations
 
 import argparse
-import inspect
 import random
 import sys
 from collections import Counter
@@ -34,6 +33,7 @@ from wixy_server.livechat.cookout_bank import (  # noqa: E402
     CookoutExhaustedError,
     Ingredient,
     load_cookout_bank,
+    tokenise,
 )
 from wixy_server.livechat.cookout_modes import (  # noqa: E402
     MAX_PROMPT,
@@ -175,7 +175,7 @@ def _text_problems(mode: CookoutMode, bank: CookoutBank) -> list[str]:
     return problems
 
 
-def _chef_problems(mode: CookoutMode) -> list[str]:
+def _chef_problems(mode: CookoutMode, bank: CookoutBank) -> list[str]:
     problems: list[str] = []
     chef = mode.chef
     if chef.format == "classic":
@@ -191,6 +191,13 @@ def _chef_problems(mode: CookoutMode) -> list[str]:
         problems.append(f"{mode.id}: {len(chef.builds)} builds; need >= {MIN_BUILDS}")
     if sum(1 for b in chef.builds if not b.uses_oven) < 3:
         problems.append(f"{mode.id}: fewer than three builds work without an oven")
+    for word in chef.review_dish_words:
+        # The review matches these against the food-free words of a dish, so a word the bank
+        # knows as a food ("wrap", "croutons") is stripped first and can never match.
+        if bank.food_free_tokens(word) != tokenise(word):
+            problems.append(
+                f"{mode.id}: reviewDishWords {word!r} is a bank food, so it never matches"
+            )
     if not mode.fridge_kinds:
         problems.append(f"{mode.id}: fridgeKinds is empty")
     if chef.anchor_kind and chef.anchor_kind not in mode.kinds:
@@ -202,10 +209,6 @@ def _chef_problems(mode: CookoutMode) -> list[str]:
 
 
 # -- the draw simulation (§8.1) -----------------------------------------------------------------
-
-
-def _supports_kind_draw(bank: CookoutBank) -> bool:
-    return "candidates" in inspect.signature(bank.draw_pair).parameters
 
 
 def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str]:
@@ -238,13 +241,18 @@ def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str
         return item.family if kind.facet == "family" else item.category
 
     def check_pair(
-        kind: PickKind, pair: tuple[Ingredient, ...], *, exotic: bool, what: str
+        kind: PickKind,
+        pair: tuple[Ingredient, ...],
+        *,
+        exotic: bool,
+        what: str,
+        kept: str = "",
     ) -> None:
         members = {c.id for c in kind.candidates}
         for item in pair:
             if item.id not in members:
                 problems.append(f"{tag}: {what} offered {item.id}, not a {kind.id}")
-            if item.id in seen:
+            if item.id in seen and item.id != kept:
                 problems.append(f"{tag}: {what} repeated {item.id}")
             if item.family in picked_families:
                 problems.append(f"{tag}: {what} offered picked family {item.family}")
@@ -302,7 +310,9 @@ def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str
                     candidates=kind.candidates,
                     facet=kind.facet,
                 )
-                check_pair(kind, (keep, replacement), exotic=exotic, what=f"turn {turn} veto")
+                check_pair(
+                    kind, (keep, replacement), exotic=exotic, what=f"turn {turn} veto", kept=keep.id
+                )
                 seen.add(replacement.id)
                 offered_families.add(replacement.family)
                 history.append(facet_key(kind, replacement))
@@ -346,8 +356,6 @@ def bank_item(bank: CookoutBank, ingredient_id: str) -> Ingredient:
 def simulate(mode: CookoutMode, bank: CookoutBank, rounds: int = SIMULATED_ROUNDS) -> list[str]:
     if mode.plan_type == "classic":
         return []
-    if not _supports_kind_draw(bank):
-        return []  # TODO(M1 step 3): removed once cookout_bank gains candidates/facet (A.2)
     problems: list[str] = []
     for seed in range(rounds):
         problems.extend(_simulate_round(mode, bank, seed))
@@ -373,7 +381,7 @@ def validate(
         if mode.plan_type == "classic":
             continue
         problems += _pool_problems(mode, the_bank)
-        problems += _chef_problems(mode)
+        problems += _chef_problems(mode, the_bank)
         problems += _text_problems(mode, the_bank)
         problems += simulate(mode, the_bank, rounds)
     return problems

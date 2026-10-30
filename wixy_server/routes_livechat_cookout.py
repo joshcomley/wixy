@@ -17,6 +17,7 @@ Errors: 404 `not_found`, 409 `bad_state` / `not_your_turn` / `not_player` / `ski
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -47,6 +48,7 @@ from wixy_server.livechat.cookout_game import (
     cookout_view_json,
     picture_json,
 )
+from wixy_server.livechat.cookout_modes import CookoutMode, default_modes
 from wixy_server.livechat.models import CookoutRoundRow, MessageHook, MessageRow, message_json
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.reactions import reactor_key
@@ -66,6 +68,8 @@ from wixy_server.livechat.tokens import MediaSigner, ServerAuth, require_server_
 from wixy_server.routes_livechat import _SQLITE_MAX_INTEGER, _invalid, _valid_sender
 
 router = APIRouter(prefix="/api/admin/server")
+_log = logging.getLogger(__name__)
+_WARNED_MODE_IDS: set[str] = set()
 
 _NO_STORE = {"Cache-Control": "no-store"}
 _MAX_GENERATION = 1000
@@ -95,6 +99,8 @@ class CreateCookoutIn(BaseModel):
     stars: StrictBool = False
     fridgeSeedId: str | None = None
     encore: EncoreIn | None = None
+    mode: str = "classic"
+    """The game mode (spec 09c §5.4). Unknown -> 422; known but not switched on -> 503."""
 
 
 class CookoutSenderIn(BaseModel):
@@ -265,6 +271,37 @@ _STORE_ERRORS = (
 )
 
 
+def _enabled_modes(request: Request) -> list[CookoutMode]:
+    """The game modes that may be created and listed (spec 09c §5.6): Classic always, first, then
+    each loaded mode named by `WIXY_COOKOUT_MODES`. An id that is not a loaded mode is ignored
+    with a warning (once per id)."""
+    settings = getattr(request.app.state, "settings", None)
+    wanted: frozenset[str] = settings.cookout_enabled_modes if settings is not None else frozenset()
+    modes = default_modes()
+    known = {m.id for m in modes.modes}
+    for mode_id in sorted(wanted - known):
+        if mode_id not in _WARNED_MODE_IDS:
+            _WARNED_MODE_IDS.add(mode_id)
+            _log.warning("WIXY_COOKOUT_MODES names %r, which is not a Cookout game mode", mode_id)
+    return [m for m in modes.modes if m is modes.default or m.id in wanted]
+
+
+def _mode_option(mode: CookoutMode) -> JsonValue:
+    return {
+        "id": mode.id,
+        "label": mode.label,
+        "emoji": mode.emoji,
+        "blurb": mode.blurb,
+        "intro": list(mode.intro),
+        "turns": mode.turns,
+        "picksPerPlayer": mode.picks_per_player,
+        "twists": [str(t) for t in sorted(mode.twists)],
+        "fridgeKinds": (
+            [str(k) for k in sorted(mode.fridge_kinds)] if mode.fridge_kinds is not None else None
+        ),
+    }
+
+
 def _bank(request: Request) -> BankLike | None:
     bank: BankLike | None = request.app.state.livechat_cookout_bank
     return bank
@@ -340,6 +377,7 @@ async def get_cookout_options(request: Request) -> JSONResponse:
             "challenges": _catalogue_entries(cookout_twists.CHALLENGES),
             "chef": bool(runner.available),
             "pictures": bool(runner.images_available),
+            "modes": [_mode_option(m) for m in _enabled_modes(request)],
         },
         headers=_NO_STORE,
     )
@@ -356,7 +394,26 @@ async def search_cookout_ingredients(request: Request) -> JSONResponse:
     bank = _bank(request)
     if bank is None or not bank.staples:
         return _unavailable()
-    found = await anyio.to_thread.run_sync(lambda: bank.search(query, limit=20))
+    mode_id = request.query_params.get("mode", "").strip()
+    pool: tuple[Any, ...] | None = None
+    if mode_id and mode_id != default_modes().default.id:
+        mode = default_modes().mode(mode_id)
+        if mode is None:
+            return _invalid("unknown game")
+        if mode not in _enabled_modes(request):
+            return _unavailable()
+        if mode.fridge_kinds is not None:
+            pool = tuple(
+                ingredient
+                for kind_id in sorted(mode.fridge_kinds)
+                for ingredient in mode.kinds[kind_id].candidates
+            )
+    if pool is not None:
+        found = await anyio.to_thread.run_sync(
+            lambda: bank.search(query, limit=20, candidates=pool)  # type: ignore[call-arg]
+        )
+    else:
+        found = await anyio.to_thread.run_sync(lambda: bank.search(query, limit=20))
     return JSONResponse(
         status_code=200,
         content={"ingredients": [bank_ingredient_json(i) for i in found]},
@@ -420,6 +477,11 @@ async def create_cookout(body: CreateCookoutIn, request: Request) -> JSONRespons
     )
     if setup.chef_only and not _runner(request).available:
         return _invalid("those options need the chef, which is not available here")
+    game_mode = default_modes().mode(body.mode)
+    if game_mode is None:
+        return _invalid("unknown game")
+    if game_mode not in _enabled_modes(request):
+        return _unavailable()
     bank = _bank(request)
     if bank is None:
         return _unavailable()
@@ -438,6 +500,7 @@ async def create_cookout(body: CreateCookoutIn, request: Request) -> JSONRespons
             by_email=auth.email or None,
             blind=body.blind,
             bank=bank,
+            mode_id=game_mode.id,
             setup=setup,
         )
 

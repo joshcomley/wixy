@@ -295,6 +295,9 @@ real provisioning failure (decisions/00031).
   lock are one transition, once both are set on a finished round.
 - **Dinner vote** — each player secretly taps the dish they would eat tonight; both are revealed and locked together; a
   match is "Tonight's dinner!". Never banks anything.
+- **Game mode** (`cookout_rounds.mode`, schema v22) — `classic` (default) or `toastie` (Toasted sandwich: a bread on turn 1, a filling on turn 2,
+  fillings drawn from the mode's candidate pool by `family`). Data in `cookout_modes.json`; enabled per server by `WIXY_COOKOUT_MODES`.
+  An unknown mode id is read-only (409 `bad_state`, abandon allowed). Bank entries carry `kind` on each ingredient snap (null for Classic).
 - **Generation** (`cookout_rounds.generation`) — which set of three dishes is on the table. Starts at 1; a completed **rescue
   swap** (states `none` → `proposed` → `done`, once per round) archives the old set into `cookout_generations` (read-only,
   the "Earlier dishes") and starts generation 2. Concept ids `a|b|c` repeat per generation, so Bank, vote and the retries

@@ -123,7 +123,7 @@
         "bestMissingMax": 1,
         "reviewDishWords": [
           "open sandwich", "open-faced", "bruschetta", "crostini", "tartine", "bread pudding",
-          "strata", "panzanella", "croutons", "quesadilla", "wrap"
+          "strata", "panzanella", "burrito", "quesadilla", "calzone"
         ],
         "conceptText": [
           "Two friends played a cooking game and drafted the ingredients for a TOASTED SANDWICH: one bread and {n} fillings (the JSON below). Invent THREE different toasted sandwiches from them.",
