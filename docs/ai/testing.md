@@ -299,6 +299,28 @@ CI installs the real `ffmpeg` binary in both the Python and e2e jobs: media-proc
 exercise actual voice/video conversion, and the e2e fixture needs it for uploaded media.
 Pillow is a core dependency; `pillow-heif` is installed by the server extra.
 
+### E2E under heavy load: the idle lock, and a Windows socket error (measured 2026-10-30)
+
+Running several full e2e suites at once (CI runs one; a dev box running two full suites plus a repeat run is a dozen
+Chromiums) exposes two things. Neither is a reason to retry or skip a test.
+
+- **A device left untouched for 10 s locks (R7), in every state: the chat, the revealed "Open server settings" button
+  and the PIN pad.** A test that unlocks device A, then spends longer than 10 s unlocking device B (easy under load) finds A
+  back on the decoy, and the next step waits forever for an element that is gone. Every two-device spec therefore starts
+  its keep-awake (`keepAwake`: a `Shift` key press on every page every 2 s; a key press counts as activity and cannot
+  disturb a click) **before the first unlock**, not after both. Proven with an 11 s stall injected before the second
+  unlock: the old specs fail (`server-cookout-twists`, `server-drawing`, `server-goodnight`), the new ones pass.
+- **`page.goto` once failed with `net::ERR_NO_BUFFER_SPACE`** (Windows WSAENOBUFS) in `server-drawing.spec.ts` during a run of
+  two full suites plus a repeat run. It is not port-pool exhaustion and not a leak: sampling the TCP table every 3 s over a
+  14-minute run of that same load gave a peak of 4166 connections (2243 TIME_WAIT, 1102 ESTABLISHED, 816 bound, 58 CLOSE_WAIT,
+  6 SYN_SENT) against a dynamic range of 40960 ports (`netsh int ipv4 show dynamicport tcp`; `TcpTimedWaitDelay` 30 s), under 6 %
+  of the pool; the largest ESTABLISHED owner was the hub's own services, and the counts fell back between runs. It did not recur
+  in that run (0 occurrences in three suite logs). The tests do not retry it. **If it recurs, capture at the moment of failure:**
+  non-paged pool use (`Get-Counter '\Memory\Pool Nonpaged Bytes'`), per-process handle counts
+  (`Get-Process | Sort-Object HandleCount -Descending | Select-Object -First 15 Name,Id,HandleCount`) and
+  `netstat -an | find /c "TIME_WAIT"`, then compare with the figures above. Sampler used: a 3-second `Get-NetTCPConnection` loop
+  counting connections by state and by owning process.
+
 ## Named fixtures
 
 - `builder/tests/fixtures/mini-site/` — a complete tiny site (pages/partials/content/theme/
