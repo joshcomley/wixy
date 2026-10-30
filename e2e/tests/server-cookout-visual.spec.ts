@@ -315,6 +315,17 @@ async function useLongText(page: Page): Promise<void> {
   });
 }
 
+/** The call connection of a page can close on a loaded box (the widget then says "Calls disconnected" and offers
+ * "Reconnect calls", which a person taps). Do what the person would, so a ring starts from two connected devices. */
+async function reconnectCallsIfClosed(page: Page): Promise<void> {
+  const reconnect = page.locator(".wx-srv-call").getByRole("button", { name: "Reconnect calls" });
+  if (await reconnect.isVisible()) {
+    await humanPause(page);
+    await reconnect.click();
+    await expect(reconnect).toBeHidden({ timeout: 15_000 });
+  }
+}
+
 /** Rings `measured` from `other` (the second device calls the first) and returns a hang-up. One retry:
  * a call started in the instant after the previous one ended can be dropped by the call broker. */
 async function ring(
@@ -329,6 +340,8 @@ async function ring(
     await humanPause(other);
   }
   const callPanel = other.locator(".wx-srv-call");
+  await reconnectCallsIfClosed(other);
+  await reconnectCallsIfClosed(measured);
   const attempt = async (): Promise<boolean> => {
     const callButton = callPanel.getByRole("button", { name: "Call", exact: true });
     try {
