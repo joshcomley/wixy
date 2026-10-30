@@ -27,6 +27,7 @@ from wixy_server.livechat.cookout_bank import (
     CookoutExhaustedError,
     Ingredient,
     RarityKey,
+    RarityMode,
     RoleKey,
     Staple,
     load_cookout_bank,
@@ -1462,3 +1463,264 @@ def test_v3_picked_food_is_a_crisps_subject_only_in_verb_positions() -> None:
 def test_v3_allowance_words_do_not_combine_with_ring_or_other_words() -> None:
     assert _scan("crispy onion rings on top", {"stuffing-mix"})
     assert _scan("a sage and onion crumb", {"stuffing-mix"}) == []
+
+
+# -- game modes (spec 09c §2.3, A.2): `candidates` and the family facet -------------------------
+
+CLASSIC_GOLDEN = Path(__file__).parent / "fixtures" / "cookout_classic_golden.json"
+
+
+def _golden_bank() -> CookoutBank:
+    """A synthetic bank (4 roles x 4 categories x 3 families x 4 entries). The golden draws were
+    recorded from the code BEFORE `candidates`/`facet` existed; edit this only together with the
+    fixture."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "everyday", "uncommon", "exotic")
+    items = []
+    for role in ROLES:
+        for ci in range(4):
+            for fi in range(3):
+                family = f"{role}-{ci}-{fi}"
+                for e in range(4):
+                    items.append(
+                        Ingredient(
+                            id=f"{family}-{e}",
+                            name=f"{'Alpha' if e % 2 else 'Beta'} {role} {ci}{fi}{e}",
+                            aliases=(f"nick {family} {e}",),
+                            category=f"cat-{ci}",
+                            category_name=f"Cat {ci}",
+                            emoji="x",
+                            role=role,
+                            family=family,
+                            rarity=rarities[e],
+                            blurb="b",
+                        )
+                    )
+    return CookoutBank(
+        categories=tuple(Category(f"cat-{c}", f"cat-{c}", "x") for c in range(4)),
+        staples=(Staple("water", "Water", False),),
+        ingredients=tuple(items),
+    )
+
+
+def test_classic_golden_draws_are_unchanged_by_the_new_arguments() -> None:
+    golden = json.loads(CLASSIC_GOLDEN.read_text(encoding="utf-8"))
+    bank = _golden_bank()
+    modes: tuple[RarityMode, ...] = ("normal", "exotic")
+    pairs = []
+    for seed in range(6):
+        for role in ROLES:
+            for mode in modes:
+                a, b = bank.draw_pair(
+                    role=role,
+                    seen_ids={f"{role}-0-0-0"},
+                    picked_families={f"{role}-1-1"},
+                    offered_families={f"{role}-2-2"},
+                    player_offered_categories=["cat-0", "cat-1", "cat-0"],
+                    rng=random.Random(seed),
+                    rarity_mode=mode,
+                )
+                pairs.append([seed, role, mode, a.id, b.id])
+    assert pairs == golden["pairs"]
+    replacements = []
+    for seed in range(6):
+        for role in ROLES:
+            for mode in modes:
+                replacement = bank.draw_replacement(
+                    role=role,
+                    keep_id=f"{role}-0-0-{2 if mode == 'normal' else 3}",
+                    seen_ids=set(),
+                    picked_families=set(),
+                    offered_families={f"{role}-3-0"},
+                    player_offered_categories=["cat-1"],
+                    rarity_mode=mode,
+                    rng=random.Random(seed),
+                )
+                replacements.append([seed, role, mode, replacement.id])
+    assert replacements == golden["replacements"]
+    wildcards = [
+        [
+            seed,
+            bank.draw_wildcard(
+                seen_ids=set(),
+                picked_families={"base-0-0"},
+                offered_families={"protein-0-0"},
+                basket_categories={"cat-0"},
+                rng=random.Random(seed),
+            ).id,
+        ]
+        for seed in range(8)
+    ]
+    assert wildcards == golden["wildcards"]
+    searches = {
+        q: [i.id for i in bank.search(q, limit=6)]
+        for q in ("alp", "alpha base", "nick base", "zz", "1")
+    }
+    assert searches == golden["searches"]
+
+
+def _breads() -> list[Ingredient]:
+    """One category ("grains"), four families, four entries each: the shape of the bread kind."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "everyday", "uncommon", "exotic")
+    return [
+        _item(f"Loaf {family} {n}", "grains", family, rarities[n], role="base")
+        for family in ("sourdough", "bagel", "rye", "brioche")
+        for n in range(4)
+    ]
+
+
+def test_family_facet_pairs_two_families_of_one_category() -> None:
+    bank = _mini(*_breads())
+    for seed in range(60):
+        a, b = _draw(bank, seed, facet="family")
+        assert a.category == b.category == "grains"
+        assert a.family != b.family
+        assert "everyday" in (a.rarity, b.rarity)
+
+
+def test_category_facet_cannot_pair_a_single_category_pool() -> None:
+    bank = _mini(*_breads())
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1)
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1, facet="category")
+
+
+def test_family_facet_refuses_a_single_family_pool() -> None:
+    bank = _mini(*(i for i in _breads() if i.family == "rye"))
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1, facet="family")
+
+
+def test_family_facet_least_shown_tie_break_counts_families() -> None:
+    bank = _mini(*_breads())
+    shown = ["sourdough", "sourdough", "bagel"]
+    for seed in range(40):
+        a, b = _draw(bank, seed, facet="family", player_offered_categories=shown)
+        assert {a.family, b.family} == {"rye", "brioche"}
+
+
+def test_family_facet_keeps_the_hard_and_soft_rules() -> None:
+    bank = _mini(*_breads())
+    for seed in range(40):
+        a, b = _draw(
+            bank,
+            seed,
+            facet="family",
+            seen_ids={"loaf-rye-0"},
+            picked_families={"bagel"},
+            offered_families={"brioche"},
+        )
+        assert "loaf-rye-0" not in (a.id, b.id)
+        assert {a.family, b.family} == {"sourdough", "rye"}  # the offered family is avoided
+    for seed in range(20):
+        a, b = _draw(bank, seed, facet="family", picked_families={"bagel"}, rarity_mode="exotic")
+        assert a.rarity == b.rarity == "exotic"
+        assert "bagel" not in (a.family, b.family)
+
+
+def test_family_facet_replacement_allows_the_same_category() -> None:
+    bank = _mini(*_breads())
+
+    def replace(seed: int, **over: Any) -> Ingredient:
+        kwargs: dict[str, Any] = {
+            "role": "base",
+            "keep_id": "loaf-rye-0",
+            "seen_ids": set(),
+            "picked_families": set(),
+            "offered_families": set(),
+            "player_offered_categories": [],
+            "rng": random.Random(seed),
+            "facet": "family",
+        }
+        kwargs.update(over)
+        return bank.draw_replacement(**kwargs)
+
+    for seed in range(30):
+        got = replace(seed)
+        assert got.category == "grains" and got.family != "rye"
+    with pytest.raises(CookoutExhaustedError):
+        bank.draw_replacement(
+            role="base",
+            keep_id="loaf-rye-0",
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            player_offered_categories=[],
+            rng=random.Random(1),
+        )
+    # The tie-break counts families: the unseen family always wins.
+    for seed in range(30):
+        got = replace(
+            seed,
+            player_offered_categories=["sourdough", "sourdough", "bagel"],
+            rarity_mode="normal",
+        )
+        assert got.family == "brioche"
+
+
+def _accents() -> list[Ingredient]:
+    """Nine accents in three categories and three families."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "uncommon", "exotic")
+    return [
+        _item(f"Zest {family} {n}", category, family, rarity, role="accent")
+        for family, category in (("citrus", "fruit"), ("herb", "herbs"), ("chilli", "spices"))
+        for n, rarity in enumerate(rarities)
+    ]
+
+
+def test_candidates_replace_the_role_pool_in_every_draw() -> None:
+    accents = _accents()
+    bank = _mini(*_breads(), *accents)
+    pool = bank.by_role("accent")
+    for seed in range(20):
+        a, b = _draw(bank, seed, role="base", candidates=pool)
+        assert {a.id, b.id} <= {i.id for i in pool}
+    empty_role = _mini(*accents)
+    assert empty_role.by_role("base") == ()
+    a, b = _draw(empty_role, 1, role="base", candidates=empty_role.by_role("accent"))
+    assert {a.id, b.id} <= {i.id for i in accents}
+    kept = pool[0]
+    got = bank.draw_replacement(
+        role="base",
+        keep_id=kept.id,
+        seen_ids=set(),
+        picked_families=set(),
+        offered_families=set(),
+        player_offered_categories=[],
+        rng=random.Random(2),
+        candidates=pool,
+    )
+    assert got.id in {i.id for i in pool} and got.family != kept.family
+
+
+def test_candidates_narrow_the_wildcard_and_the_search() -> None:
+    accents = _accents()
+    bank = _mini(*_breads(), *accents)
+    pool = tuple(i for i in bank.ingredients if i.role == "accent")
+    for seed in range(20):
+        wild = bank.draw_wildcard(
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            basket_categories=set(),
+            rng=random.Random(seed),
+            candidates=pool,
+        )
+        assert wild.role == "accent" and wild.rarity != "everyday"
+    assert {i.role for i in bank.search("loaf", limit=40)} == {"base"}
+    assert bank.search("loaf", candidates=pool) == ()
+    assert [i.id for i in bank.search("zest cit", candidates=pool)] == [
+        "zest-citrus-0",
+        "zest-citrus-1",
+        "zest-citrus-2",
+    ]
+    assert bank.search("zest", candidates=pool, limit=2) == bank.search("zest", limit=2)[:2]
+    with pytest.raises(CookoutExhaustedError):
+        bank.draw_wildcard(
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            basket_categories=set(),
+            rng=random.Random(1),
+            candidates=(),
+        )
