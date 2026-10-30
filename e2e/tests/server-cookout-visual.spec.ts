@@ -41,6 +41,7 @@ import {
 
 // A ringing call needs the synthetic microphone Chromium offers (the same flags server-calls.spec.ts uses).
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
+test.use({ actionTimeout: 30_000 }); // a click on a hidden element fails with its name at 30 s, not at the 5-minute test timeout
 test.describe.configure({ timeout: 300_000 });
 
 /** The bank's longest name (36 characters) and a 60-character "what": the worst case for the card text. */
@@ -458,8 +459,22 @@ async function dismissCallNotice(page: Page): Promise<void> {
 }
 
 /** Audits one page in one state across the whole matrix; a ringing call is set up once for its variants. */
+/** Puts a page back on the game tab if it had been showing the game: a call moves a device to the Chat tab, and the
+ * next step's click would otherwise wait on a pane that is not shown. */
+async function backToGame(page: Page, wasInGame: boolean): Promise<void> {
+  if (!wasInGame || (await game(page).isVisible())) return;
+  const tab = page.locator(".wx-srv-tab-cookout");
+  if (await tab.isVisible()) {
+    await humanPause(page);
+    await tab.click();
+  }
+  await expect(game(page)).toBeVisible({ timeout: 15_000 });
+}
+
 async function sweep(measured: Page, other: Page, measuredName: string, state: string, args: Omit<AuditArgs, "call">): Promise<number> {
   let audits = 0;
+  const measuredWasInGame = await game(measured).isVisible();
+  const otherWasInGame = await game(other).isVisible();
   await dismissCallNotice(measured);
   await dismissCallNotice(other);
   const run = async (v: Variant): Promise<void> => {
@@ -499,6 +514,8 @@ async function sweep(measured: Page, other: Page, measuredName: string, state: s
     await dismissCallNotice(measured);
     await dismissCallNotice(other);
   }
+  await backToGame(measured, measuredWasInGame);
+  await backToGame(other, otherWasInGame);
   await applyLayout(measured, { width: 390, height: 844, inset: 0, call: false });
   return audits;
 }
