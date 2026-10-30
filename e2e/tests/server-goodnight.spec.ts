@@ -9,17 +9,39 @@ import { trackConsoleErrors } from "./helpers";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
+/** `page.goto` that survives the transient Windows socket error `net::ERR_NO_BUFFER_SPACE` (WSAENOBUFS), which a
+ * machine running several full suites at once (a dozen browsers) throws for a moment. Only that error and
+ * connection resets are retried, a bounded number of times; any other failure is the test's to see. */
+async function gotoPatient(page: Page, url: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await page.goto(url);
+      return;
+    } catch (error) {
+      if (attempt >= 4 || !/ERR_NO_BUFFER_SPACE|ERR_CONNECTION_RESET|ERR_NETWORK_CHANGED/.test(String(error))) throw error;
+      await page.waitForTimeout(500 * attempt);
+    }
+  }
+}
+
 async function unlockServer(page: Page, name: string): Promise<void> {
   const configResponse = await page.request.post("/test/server/config");
   const { pin } = (await configResponse.json()) as { pin: string };
 
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(500);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
+  await gotoPatient(page, "/admin/server");
+  await expect(page.locator(".wx-srv-decoy")).toBeVisible({ timeout: 20_000 });
+  // Reveal, then open the PIN pad. The revealed state runs the 10 s idle timer (R7), so a machine stall between the
+  // reveal and the click sends the page back to the decoy; the whole step is therefore retried from wherever the
+  // page is (a pad already open ends it) instead of failing on a pad that was never opened.
+  await expect(async () => {
+    const pad = page.locator(".wx-srv-pinpad");
+    if (await pad.isVisible()) return;
+    await page.locator(".wx-srv-panel").click();
+    await expect(page.locator(".wx-srv-affordance")).toBeVisible({ timeout: 5_000 });
+    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    await page.locator(".wx-srv-affordance").click();
+    await expect(pad).toBeVisible({ timeout: 5_000 });
+  }).toPass({ timeout: 45_000 });
   for (const digit of pin) {
     await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
   }
