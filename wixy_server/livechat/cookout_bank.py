@@ -954,10 +954,11 @@ class CookoutBank:
             if name not in found:
                 found.append(name)
 
-        text_tokens = _without_ignored(tokenise(text), covered)
         sources = self._source_token_sets(
             allowed_ids, {sid for sid in declared_staples if sid not in UNPICKABLE_STAPLES}
         )
+        picked_words = frozenset().union(*(tokens for tokens, _ in sources)) | covered
+        text_tokens = _without_ignored(tokenise(text), picked_words)
         occurrences = self._picked_occurrences(text_tokens, allowed_ids - omitted)
         consumed: set[int] = set()
         for entity, tokens, start in _spans_at(text_tokens, self._dictionary):

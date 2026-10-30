@@ -1786,3 +1786,11 @@ def test_f2_names_whose_prefix_changes_the_food_do_not_cover_the_bare_word() -> 
     assert _scan("wilted spinach", {"water-spinach"})
     assert _scan("pepperoni pizza traybake", {"frozen-pepperoni-pizza"}) == []
     assert _scan("pan-fry in dried chilli", {"dried-chillies-whole"}) == []
+
+
+def test_trial8_a_modifier_pick_word_can_be_a_crisps_subject_and_whole_chicken_is_not_breast() -> (
+    None
+):
+    assert _scan("enoki crisps up in the last few minutes", {"enoki-mushroom"}) == []
+    assert _scan("sprinkle enoki crisps over", {"enoki-mushroom"})
+    assert _scan("add whole chicken to the pot", {"chicken-breast"})
