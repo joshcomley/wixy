@@ -23,7 +23,7 @@
   gap: 6px;
 }
 .wx-srv-call[hidden], .wx-srv-call [hidden] { display: none; }
-.wx-srv-call-status, .wx-srv-call-caption {
+.wx-srv-call-status, .wx-srv-call-caption, .wx-srv-call-reason {
   position: absolute;
   width: 1px;
   height: 1px;

@@ -165,7 +165,7 @@ export function encoreSeat(mode: ModeOption, encoreKind: EncoreKind, candidate: 
 /** Thrown by the caller's `start` when the server refused the round: `kind` says why. */
 export class CookoutStartError extends Error {
   constructor(
-    readonly kind: "unsupported" | "invalid" | "game_unavailable" | "unavailable",
+    readonly kind: "unsupported" | "invalid" | "game_unavailable" | "unavailable" | "lost",
     message: string,
   ) {
     super(message);
