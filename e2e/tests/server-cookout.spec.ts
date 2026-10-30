@@ -410,6 +410,41 @@ test.describe("Cookout", () => {
     await closeAll(contextA, contextB);
   });
 
+  test("a start whose answer is lost (a slow server) still lands the starter in the round, and makes one round", async ({ browser }) => {
+    // Under load the server made the round but answered after the client's 10 s request timeout; the
+    // stream brought the round's card first. The starter must land in it, not see an error over it.
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 } });
+    const page = await context.newPage();
+    const errors = trackConsoleErrors(page);
+    await unlockServer(page, "Alice");
+    const stopAwake = keepAwake([page]);
+    let held = 0;
+    await page.route(
+      (url) => url.pathname === "/api/admin/server/cookout",
+      async (route) => {
+        if (route.request().method() !== "POST" || held > 0) return route.continue();
+        held += 1;
+        const response = await route.fetch();
+        await new Promise((resolve) => setTimeout(resolve, 11_000));
+        await route.fulfill({ response }).catch(() => {}); // the browser gave up on it already
+      },
+    );
+    const before = await page.locator(".wx-srv-bubble-ck").count();
+    await openMoreMenu(page);
+    await humanPause(page);
+    await page.locator(".wx-srv-more-cookout").click();
+    await humanPause(page);
+    await page.locator(".wx-srv-ck-start-go").click();
+    await expect(game(page)).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator(".wx-srv-ck-start")).toBeHidden();
+    await expect(page.locator(".wx-srv-ck-start-error")).toBeHidden();
+    await expect(page.locator(".wx-srv-bubble-ck")).toHaveCount(before + 1);
+    expect(held).toBe(1);
+    stopAwake();
+    expect(errors.filter((m) => !/favicon|Failed to load resource|aborted/i.test(m))).toEqual([]);
+    await context.close();
+  });
+
   test("the game fits a 360 px phone with real tap targets", async ({ browser }) => {
     const context = await browser.newContext({
       viewport: { width: 360, height: 780 },
