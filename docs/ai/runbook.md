@@ -204,8 +204,10 @@ Server-chat settings are read by `wixy_server/settings.py`:
 | `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | The folder ComfyUI writes to (its `--output-directory`); required with `WIXY_COMFY_URL` — wixy deletes its own pictures there after each run; unset means pictures stay disabled. |
 | `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` (default) or `boogu-turbo-nvfp4`. |
 | `WIXY_WYR_POOL_SIZE` | `wyr_pool_size` | How many would-you-rather questions' pictures to paint AHEAD of time (default 100, `0` = off, clamped to 1000, a malformed value falls back to 100). Only meaningful with `WIXY_COMFY_URL` + `WIXY_COMFY_OUTPUT_DIR` set. About 2.7 MB per question under `Storage/projects/<slug>/server/wyr-pool/`; filling stops when free disk drops within 1 GiB of the chat's own free-space floor. Setting `0` removes the pool at the next start. |
+| `WIXY_COOKOUT_IMAGES_DIR` | `cookout_images_dir` | Optional path. An extra Cookout picture object directory searched FIRST (layout `<2 hex>/<sha256>.webp`); tests and the e2e fixture server use it. Unset on the fleet. |
+| `WIXY_COOKOUT_IMAGES_BAKED_DIR` | `cookout_images_baked_dir` | Optional path. The read-only baked pack searched LAST; the Docker image sets it to `/app/cookout-pack/objects`. See "Cookout ingredient pictures" below. |
 
-Cookout (livechat.md §24) adds **no environment variables of its own**. Its dish pictures use the same ComfyUI pair (`WIXY_COMFY_URL` + `WIXY_COMFY_OUTPUT_DIR`), the same single-slot image limiter and the same `wyr_` output prefix as would-you-rather, so with ComfyUI unset the dishes simply have no pictures; and while a Cookout is painting, the would-you-rather background pool fill yields to it. Its AI runs use the existing cmd settings and are `unavailable` on the standalone edition. Operationally: `Storage/projects/<slug>/server/cookout-tmp/` holds in-flight picture downloads (swept at startup and every 60 s once older than 15 minutes; an empty folder is normal) and `.../server/cookout-jobs/` is the empty working folder of the hidden cmd runs. A game whose dishes show "couldn't come up with dishes" or a dish that stays "Writing recipe..." is retried from its own card; both jobs give up after 15 minutes and resume after a restart.
+Cookout (livechat.md §24) adds **no environment variables for the game itself** (round 2's two picture settings are the last two rows above, §24.2). Its dish pictures use the same ComfyUI pair (`WIXY_COMFY_URL` + `WIXY_COMFY_OUTPUT_DIR`), the same single-slot image limiter and the same `wyr_` output prefix as would-you-rather, so with ComfyUI unset the dishes simply have no pictures; and while a Cookout is painting, the would-you-rather background pool fill yields to it. Its AI runs use the existing cmd settings and are `unavailable` on the standalone edition. Operationally: `Storage/projects/<slug>/server/cookout-tmp/` holds in-flight picture downloads (swept at startup and every 60 s once older than 15 minutes; an empty folder is normal) and `.../server/cookout-jobs/` is the empty working folder of the hidden cmd runs. A game whose dishes show "couldn't come up with dishes" or a dish that stays "Writing recipe..." is retried from its own card; both jobs give up after 15 minutes and resume after a restart.
 
 The `*_MB` values are multiplied by 1,048,576. The quota and free-space floor are enforced
 when an upload is initialized. cmd must have the PIN app registered under the configured
@@ -234,6 +236,140 @@ The separate hourly janitor runs once at startup, then every hour. It removes st
 unclaimed orphan attachments after 24 hours, removes raw upload sources for ready attachments,
 retries archiving failed originals, expires an unarchived failed original after seven days, and
 prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
+
+## Cookout ingredient pictures (livechat.md §24.3, Inv 58, decisions/00202)
+
+The pictures are **not in git**. The repo holds only the manifest (`wixy_server/livechat/cookout_ingredient_images.json`)
+and the catalogue (`cookout_catalogue.json`); the picture bytes are content-addressed files, delivered as one immutable
+tar "pack" per version attached to a GitHub Release of `joshcomley/wixy` (tag and asset `cookout-images-v<N>`,
+`https://github.com/joshcomley/wixy/releases/download/cookout-images-v<N>/cookout-images-v<N>.tar`), and pinned in the
+manifest by the tar's sha256. With the empty manifest (`pack: null`) or a missing pack nothing breaks: every ingredient
+shows its emoji tile.
+
+**Where things live**
+
+| What | Where |
+|---|---|
+| Object store (shared by both blue/green slots) | `<WIXY_STORAGE_ROOT>/cookout-images/objects/<2 hex>/<sha256>.webp` (fleet: `D:\Servers\Wixy\Storage\cookout-images\objects`) |
+| Registry of every manifest ever registered | `cookout-images/registry/manifests/<manifest digest>.json` (digest = sha256 of the manifest file's bytes) |
+| Pins (who still needs which manifest) | `cookout-images/registry/pins/slot-<16 hex>.json` (a running server; `leaseUntil` = now + 900 s, refreshed every 300 s, `retiredAt` set on clean shutdown) and `pending-<digest>.json` (written by `install`, no lease) |
+| In-flight downloads and the reservation | `cookout-images/incoming/` (`<digest>.<rand>.part`, `<digest>.reserve`); anything older than 1 hour is swept at startup and on the next registration |
+| The one cross-process lock | `cookout-images/.lock` (OS file lock: every registration, pin change, install, self-heal extraction and GC takes it; downloads happen outside it) |
+| Generation work directory (journal, masters, renditions, `PAUSE`) | `%AIM_ROOT%\Servers\Wixy\Storage\cookout-images\work` by default (`--work-dir` overrides) |
+| Baked pack in the standalone image | `/app/cookout-pack/objects` (read-only, never collected) |
+
+**The two environment variables** (both optional paths, read by `settings.py`; not secrets):
+
+- `WIXY_COOKOUT_IMAGES_DIR` -> `Settings.cookout_images_dir`: an extra object directory searched FIRST (tests, the e2e
+  fixture server). Layout `<dir>/<2 hex>/<sha256>.webp`.
+- `WIXY_COOKOUT_IMAGES_BAKED_DIR` -> `Settings.cookout_images_baked_dir`: searched LAST; the Docker image sets it to
+  `/app/cookout-pack/objects` (an image layout fact, so it is baked with `ENV`, decisions/00051 #6).
+
+Search order, first hit wins: `WIXY_COOKOUT_IMAGES_DIR`, `<storage>/cookout-images/objects`, `WIXY_COOKOUT_IMAGES_BAKED_DIR`.
+A picture is served (and `image` is non-null on the wire) only when BOTH the card and thumb of an ingredient are found.
+
+**The pack CLI** (stdlib only; `--storage` is the storage ROOT, e.g. `D:\Servers\Wixy\Storage`, not the `cookout-images`
+folder; `--manifest` defaults to the committed manifest):
+
+```
+python wixy_server/livechat/cookout_pack.py status --storage D:\Servers\Wixy\Storage
+python wixy_server/livechat/cookout_pack.py gc     --storage D:\Servers\Wixy\Storage
+python wixy_server/livechat/cookout_pack.py cancel --storage D:\Servers\Wixy\Storage --digest <manifest digest>
+python wixy_server/livechat/cookout_pack.py install --storage D:\Servers\Wixy\Storage --tar <pack.tar> [--manifest M] [--min-free-bytes N]
+python wixy_server/livechat/cookout_pack.py fetch  --dest <dir> [--manifest M] [--url U]      # Docker-build style, no registry
+python wixy_server/livechat/cookout_pack.py verify --dest <dir> [--manifest M]                  # every manifest sha present and correct
+python wixy_server/livechat/cookout_pack.py placeholders --dest <dir> [--manifest M]           # e2e fixtures: one tiny valid WebP per sha
+```
+
+- `status` prints JSON: object count and bytes, every pin (`id`, `digest`, `kind`, `holder`, `createdAt`, `leaseUntil`,
+  `retiredAt`), the registered manifest digests, and `pendingOlderThan30Days` (a forgotten pending pin is made visible
+  here; it never expires on its own).
+- `cancel` removes one `pending-<digest>` pin (prints `cancelled` or `no such pending pin`). Use it when a prepared pack
+  will not be merged; the next GC then collects its objects. Only `cancel`, or a slot pin for the same digest being written
+  (the new slot starting), removes a pending pin.
+- `install` verifies the tar against the manifest (sha256, byte size, member names, per-object sha256), registers the
+  manifest, writes the pending pin, extracts into `objects/` and runs a GC, all in one locked section. It is what
+  `images.py publish` runs, so a new slot has every picture the moment it starts.
+- `gc` deletes every object that no pin holds. It keeps the objects of any manifest with a live slot pin (lease in the
+  future, not retired), any pending pin, and any slot pin retired less than 72 hours ago (rollback window); never deletes an
+  object whose mtime is under 1 hour old; then removes pin files retired 72+ hours ago and manifests nothing references.
+  It **fails closed**: if a pin or a registry copy it needs cannot be read, it deletes nothing and logs a warning. The
+  running server also runs it once a day and after a successful self-heal (only if it holds its own pin). There is no other
+  deletion path.
+- Exit status `1` with `error: ...` on stderr for a `PackError`, busy lock (`StoreBusy`), refused download (`FetchRefused`)
+  or I/O error.
+
+**Download admission and the byte ceiling** (applies to the server's self-heal and to `fetch`). Before any byte is
+downloaded: `need = bytes + (installedBytes - bytes of manifest objects already present) + 64 MiB` and
+`free_space(storage) - need >= WIXY_SERVER_MIN_FREE_MB` (the same floor chat uploads use; the Docker build uses a floor of 0 and
+`need` against free space only). This budget is separate from the chat-media quota and is never counted in it. A refusal
+(`FetchRefused`) is logged, leaves existing objects untouched and is retried at the next 6-hour tick. A reservation file
+`incoming/<digest>.reserve` is written under the lock and a second fetch, from any process, refuses (`StoreBusy`) while a
+live (under 1 hour old) reservation exists, so there is one pack download at a time per store. The download then streams to
+`incoming/<digest>.<rand>.part` with 30 s timeouts and a 15-minute deadline, aborts at the first byte over `bytes`, must end
+at exactly `bytes`, must match the pack sha256, and is scanned member by member before extraction (at most `objects` members,
+none over 2 MiB, a running total at most `installedBytes`, names exactly `objects/<2 hex>/<sha256>.webp`, regular files
+only). The `.part` file and the reservation are removed on every exit.
+
+**A missing pack self-heals.** At startup the server registers its slot pin first, then (in the background, never blocking
+boot) checks that every manifest object is on the search path. If any is missing and the manifest has a `pack.url`, it runs
+the admitted, bounded fetch above into `<storage>/cookout-images/objects`, reloads, and garbage-collects. Failure is logged
+(`Cookout picture self-heal failed` / `download refused`) and retried every 6 hours; meanwhile the affected pictures are
+emoji tiles. A busy store lock (another process installing or collecting) delays the pin or the heal to the next 300 s tick,
+never boot. So after a deploy, no manual step is needed on the fleet when the operator already ran `install`; on a fresh box
+the first start downloads ~150 MB from the GitHub Release.
+
+**Releases are never deleted.** Every `cookout-images-v<N>` release asset is kept forever: a fork, an older revision, or a
+bare server's self-heal may pin any manifest ever shipped, and content addressing cannot recover bytes from a deleted URL.
+Only the local object cache is garbage-collected. If a pack ever has to move, copy it to a durable archive whose stable URL
+every shipped manifest can reach (the `COOKOUT_PACK_URL` build arg, or a documented mirror) before touching the original;
+that is an operator decision, not a tooling step.
+
+**Regenerating pictures and publishing a new pack** (all under `tooling/cookout/visual/`; offline, hub only; use the
+Python in `pythoncore-3.14`; the modules import their siblings by plain name, so run the scripts by path):
+
+1. *Catalogue first* (only if entries change): `catalogue.py build` (or `author` / `factcheck` / `audit`), then
+   `validate_catalogue.py` (add `--allow-partial` while incomplete). The committed catalogue is rewritten whole, sorted.
+2. `images.py plan` draws the pilot once (40 random ids from each of the 15 categories, recorded seed; never redrawn) and
+   the category-interleaved rest into `<work>/images/plan.json`.
+3. `images.py run --phase pilot --render-only` renders the pilot (use `--checker haiku|luna`, `--limit N`, and drop
+   `--render-only` to check as it goes). Then `calibrate.py` runs the 100-picture spot check and writes
+   `triad/cookout/r2/image-calibration.{md,html}`; its mechanical recommendation (§24.3) picks the checker for
+   `images.py run --phase rest --checker <chosen>`. Both are resumable from the journal (`<work>/images/journal.jsonl`,
+   `runs.jsonl`); a restart skips accepted ids and checks pictures rendered before it.
+4. `images.py status` prints counts by state and a measured ETA. The render needs `WIXY_COMFY_OUTPUT_DIR` in
+   `WIXY_ENV_FILE` (default `D:\Servers\Wixy\Storage\.env`; `images.py run` exits 2 without it) and `WIXY_COMFY_URL`
+   (default `http://127.0.0.1:8199`, hub's ComfyUI).
+5. `images.py apply-overrides` writes any attempt-3 `visual` rewrites back into the committed catalogue.
+6. `images.py publish [--dry-run]` builds the deterministic tar (sorted members, zeroed metadata, so identical pictures
+   give an identical sha256), creates release `cookout-images-v<N>` ("Cookout ingredient pictures v<N>") with the tar via
+   `C:\Program Files\GitHub CLI\gh.exe`, downloads it back and compares the sha256, writes the new manifest, `install`s the
+   pack under a pending pin, and runs two checks, either of which stops the publish: the history check (every manifest
+   version ever committed must still answer its pack URL with exactly its `bytes`) and, from v2 onward, the clean install
+   check (`clean_install_check`: a fetch and full install of the OLDEST manifest that names a pack into fresh temporary
+   storage with no cache, so a fork or old revision that still pins v1 can always get its pictures). Then open the PR with the new manifest (+ catalogue); after
+   merge Slots deploys, the new slot's pin replaces the pending pin, and the old slot's objects stay for the 72-hour
+   rollback window.
+
+**The `PAUSE` file.** Create `<work>/PAUSE` (default `...\Storage\cookout-images\work\PAUSE`; note it sits in the work
+directory itself, not under `images/`) to stop a run between pictures; `images.wait_for_idle` checks it before each
+picture, so a picture already rendering finishes first. Delete the file and re-run `images.py run` to resume (the journal
+makes the restart cheap). It is the supported way to free ComfyUI for a long game session or a reboot.
+
+**Never starving live games.** The batch submits ONE picture at a time and only when ComfyUI's `/queue` has shown nothing
+running and nothing pending on three consecutive polls one second apart, so a live Cookout dish picture or would-you-rather
+picture waits behind at most one batch picture (~9-25 s); no server code is involved and the server's own image limiter is
+unaffected.
+
+**Where the pilot ran (measured, workspace 00058).** The generation pilot ran as a **scheduled task on the hub in an
+Interactive session** (never session 0), **not** as a cmd Grid task: the hub's Grid workers take CI jobs only, so a Grid
+submission for this work cannot be placed there. (The spec still says "Grid task on a hub worker"; that was the plan, the
+measured reality is the scheduled task, and the `images.py` docstring now says so. Run it the same way: Task Scheduler,
+`LogonType=Interactive`, `RunLevel=Limited`, output redirected to a log, resumable.)
+
+**Rollback / disk.** To roll back to older pictures, revert the manifest PR: the previous slot pin and its objects are kept
+for 72 hours after retirement, and the older pack is always still downloadable. `status` is the first thing to run if disk
+looks full: objects are only ever freed by `gc`, and a pending pin holds its pack until `cancel`.
 
 ## Voice-note transcription (a cmd dependency, gated by a probe)
 

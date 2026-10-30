@@ -202,6 +202,11 @@ human↔human messaging tool for admin users, disguised behind a "Server" nav ta
 | `uploads.py` | chunked upload staging/assembly, quota + free-space enforcement |
 | `media_queue.py` | lease-based background worker turning a `processing` attachment into `ready`/`failed` |
 | `janitor.py` | hourly stale-file cleanup plus the 2 s startup-resumed erasure worker for journaled media deletion, wipe sweeps, and WAL scrubbing |
+| `cookout_catalogue.py` | the Cookout ingredient catalogue loader (`what`, `visual`, `presentation`, `facts` per ingredient and seasoning) and the per-entry rules shared with the offline validator; `load_cookout_catalogue_or_empty` never raises (livechat.md §24.3) |
+| `cookout_pack.py` | stdlib-only picture-pack module and CLI: the committed manifest `cookout_ingredient_images.json` and its hard bounds, the content-addressed object store, registry + pins + the one lock, admitted bounded fetch, tar install, GC (livechat.md §24.3, runbook.md) |
+| `cookout_visuals.py` | `IngredientVisuals` (catalogue + manifest + object search path -> the `what` / `image` / `facts` a snapshot gains at read time, and the file behind a picture sha) and `CookoutVisualsService` (slot pin, lease refresh, self-heal, daily GC, retire); `app.py` serves `GET /admin/cookout-img/{sha}.webp` from it (Inv 58) |
+
+The Cookout game itself (`cookout_bank.py`, `cookout_game.py`, `cookout_ai.py`, `cookout_images.py`, `cookout_twists.py`, `routes_livechat_cookout.py`) is described in [livechat.md](livechat.md) §24-24.3; the offline tooling that builds the catalogue and the pictures is `tooling/cookout/` (`tooling/README.md`), and the client is `admin-ui/src/server/cookout/` (`pictures.ts`, `intro.ts`, `carousel.ts`, `cookoutGame.ts`, `cookoutCard.ts`).
 
 `routes_livechat.py` and `routes_livechat_media.py` (not inside the package, alongside the
 other `routes_*.py` files) wire these together — the former owns unlock/history/send/stream/
@@ -244,6 +249,11 @@ D:\Servers\Wixy\Storage\
       media\<id[:2]>\<id>\      # processed attachment renditions (P2)
       uploads\<uploadId>\       # in-progress chunked uploads (P2)
       failed\<id>\               # originals kept 7 days on processing failure (P2)
+  cookout-images\             # Cookout ingredient pictures — ENGINE data, not chat content (Inv 58); shared by both slots
+    objects\<2 hex>\<sha256>.webp   # content-addressed card/thumb renditions (the pack, installed or self-healed)
+    registry\manifests\ + registry\pins\   # every manifest ever registered; slot/pending pins decide what GC keeps
+    incoming\  .lock          # in-flight downloads/reservation; the single cross-process lock
+    work\                     # generation work dir (journal, masters, renditions, PAUSE) — tooling only
 ```
 
 The erasure-journal rows contain storage IDs, tokens, and retry state only; they are not

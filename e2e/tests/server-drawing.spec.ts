@@ -96,6 +96,17 @@ async function keepAlive(page: Page): Promise<void> {
   await page.mouse.move(3 + Math.random() * 4, 3 + Math.random() * 4);
 }
 
+/** Keeps every page awake for a whole test: R7 idle-locks a page after 10 s without activity, and a
+ * page the test is only waiting on (the second device) otherwise locks on any slow run, taking its
+ * elements out from under the next step. A key press counts as activity and, unlike a mouse move,
+ * cannot disturb a hover or click another call is making on the same page. Stop it before closing. */
+function keepAwake(pages: readonly Page[]): () => void {
+  const timer = setInterval(() => {
+    for (const page of pages) void page.keyboard.press("Shift").catch(() => undefined);
+  }, 2_000);
+  return () => clearInterval(timer);
+}
+
 /** Polls `check` while keeping `pages` from idle-locking. */
 async function eventually(pages: readonly Page[], check: () => Promise<boolean>, what: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -282,39 +293,42 @@ test.describe("server-drawing.spec.ts", () => {
     await seed(pageA, label, 12);
     await unlockServer(pageA, "Alice");
     await unlockServer(pageB, "Bob");
-    const anchor = bubbleWith(pageA, `${label} #11`);
-    await anchor.scrollIntoViewIfNeeded();
-    await turnPenOn(pageA);
-    await mouseStroke(pageA, anchor);
-    const svg = await storedOn(pageA, anchor);
-    await expect(svg).toHaveCount(1);
-    await pageA.locator(".wx-srv-pen-done").click();
-    const before = await offsetFromAnchor(svg, anchor);
+    const stopAwake = keepAwake([pageA, pageB]);
+    try {
+      const anchor = bubbleWith(pageA, `${label} #11`);
+      await anchor.scrollIntoViewIfNeeded();
+      await turnPenOn(pageA);
+      await mouseStroke(pageA, anchor);
+      const svg = await storedOn(pageA, anchor);
+      await expect(svg).toHaveCount(1);
+      await pageA.locator(".wx-srv-pen-done").click();
+      const before = await offsetFromAnchor(svg, anchor);
 
-    // Scrolling moves the drawing with its message, exactly.
-    const thread = pageA.locator(".wx-srv-thread");
-    await thread.evaluate((el) => {
-      el.scrollTop = Math.max(0, el.scrollTop - 120);
-    });
-    await pageA.waitForTimeout(100);
-    const scrolled = await offsetFromAnchor(svg, anchor);
-    expect(Math.abs(scrolled.dy - before.dy)).toBeLessThan(1);
+      // Scrolling moves the drawing with its message, exactly.
+      const thread = pageA.locator(".wx-srv-thread");
+      await thread.evaluate((el) => {
+        el.scrollTop = Math.max(0, el.scrollTop - 120);
+      });
+      await expect.poll(async () => Math.abs((await offsetFromAnchor(svg, anchor)).dy - before.dy), { message: "the drawing moves with its message" }).toBeLessThan(1);
 
-    // The message ABOVE grows (B reacts to it: a reactions row appears) — the drawing follows
-    // its anchor down instead of staying where it was painted.
-    const above = bubbleWith(pageB, `${label} #10`);
-    await above.scrollIntoViewIfNeeded();
-    const anchorTopBefore = (await anchor.boundingBox())!.y;
-    await above.hover();
-    await above.locator(".wx-srv-message-actions-trigger").click();
-    await above.getByRole("menuitemcheckbox", { name: "Thumbs up" }).click();
-    const aboveOnA = bubbleWith(pageA, `${label} #10`);
-    await eventually([pageA, pageB], async () => (await aboveOnA.locator(".wx-srv-reaction-chip").count()) === 1, "the reaction on A");
-    await eventually([pageA], async () => ((await anchor.boundingBox())!.y) > anchorTopBefore + 5, "the anchor to move down");
-    const grown = await offsetFromAnchor(svg, anchor);
-    expect(Math.abs(grown.dy - before.dy)).toBeLessThan(1);
-    expect(Math.abs(grown.dx - before.dx)).toBeLessThan(1);
-    await closeAll(contextA, contextB);
+      // The message ABOVE grows (B reacts to it: a reactions row appears) — the drawing follows
+      // its anchor down instead of staying where it was painted.
+      const above = bubbleWith(pageB, `${label} #10`);
+      await above.scrollIntoViewIfNeeded();
+      const anchorTopBefore = (await anchor.boundingBox())!.y;
+      await above.hover();
+      await above.locator(".wx-srv-message-actions-trigger").click();
+      await above.getByRole("menuitemcheckbox", { name: "Thumbs up" }).click();
+      const aboveOnA = bubbleWith(pageA, `${label} #10`);
+      await eventually([pageA, pageB], async () => (await aboveOnA.locator(".wx-srv-reaction-chip").count()) === 1, "the reaction on A");
+      await eventually([pageA], async () => ((await anchor.boundingBox())!.y) > anchorTopBefore + 5, "the anchor to move down");
+      const grown = await offsetFromAnchor(svg, anchor);
+      expect(Math.abs(grown.dy - before.dy)).toBeLessThan(1);
+      expect(Math.abs(grown.dx - before.dx)).toBeLessThan(1);
+    } finally {
+      stopAwake();
+      await closeAll(contextA, contextB);
+    }
   });
 
   test("B selects A's drawing in Select mode and deletes it: it vanishes for both", async ({ browser }) => {
