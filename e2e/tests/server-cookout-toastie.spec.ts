@@ -490,6 +490,8 @@ test.describe("Cookout: Toasted sandwich", () => {
     const checkHidden = async (when: string): Promise<void> => {
       const dom = await wholeDom(pageB);
       expect(textShows(dom.text, breadName), `${when}: "${breadName}" is on Bob's screen`).toBe(false);
+      // The full markup too: hidden nodes and every attribute (alt, aria-label, title, data-*), whole word.
+      expect(textShows(dom.html, breadName), `${when}: "${breadName}" is in Bob's markup`).toBe(false);
       for (const id of breadOffer.ids) expect(dom.html.includes(`"${id}"`), `${when}: ${id} is in Bob's DOM`).toBe(false);
       for (const src of hidden) expect(dom.html.includes(src), `${when}: ${src} is in Bob's DOM`).toBe(false);
       const bodies = bodiesB.join("\n");
