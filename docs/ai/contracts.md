@@ -396,6 +396,29 @@ working; a round that uses no twist is byte-for-byte the core):
   `dinnerPick:bool`, `style` / `challenge` (`{id,label,emoji}|null`), `ingredients:[<Ingredient>]` and
   `leftovers:[<Ingredient>]` (the dish's omitted items, which feed the Remix / Leftovers encore buttons); archived-generation
   entries resolve from `cookout_generations`.
+**Cookout pictures and catalogue text (livechat.md §24.2, spec 09b §E, Inv 58)** add read-time fields to the Cookout rows
+above. A client that predates them keeps working (it ignores unknown keys), and a server without a pack sends `null`s:
+
+- Every `<Ingredient>` / `<PickSnap>` snapshot (`players[].picks`, `starters`, `basket`, `history` offers and choices,
+  `current.options`, `current.chaosPair`, `wildcard.ingredient`, `swap.out|pair|in`, a concept's `pickedIngredients` and
+  `omitted[].ingredient`, `generations[]` snapshots, `GET server/cookout/ingredients` results and Recipe-book
+  `ingredients`/`leftovers`) gains `what:string|null` (the catalogue's plain "what it is" line, 10-60 chars, or `null`) and
+  `image:{card:string,thumb:string}|null`. `card` and `thumb` are same-origin paths `/admin/cookout-img/<64 hex>.webp`
+  (the 512 px and 160 px renditions); `image` is non-null only when the manifest names the id AND both files exist on this
+  server, so it is always both or neither. The stored snapshot is not changed: both fields are looked up by id when the view
+  is serialised, so a better picture shipped later appears on old rounds too.
+- `<PickSnap>` gains `facts:string[]|null` (2-3 fun facts, or `null` when the catalogue has none for the id) **only** on
+  `players[].picks` entries and the lifted `wildcard.ingredient`, **and only when `state != "picking"`**. During `picking`
+  the key is absent. Starters and `basket` entries never carry `facts` (the chef stage reads the revealed `players[].picks`).
+- `staples:[{id,name,image}]` and a concept's `staplesUsed:[{id,name,image}]` gain `image` (`{card,thumb}|null`), the same
+  shape; the three seasonings `water`, `salt`, `black-pepper` have catalogue entries too.
+- `GET server/cookout/options` is unchanged; only the ingredient lists above are enriched. `Message.cookout` is unchanged.
+- **Blind:** enrichment only decorates snapshots that are already in the viewer's redacted view, so it can never add a
+  partner's ingredient (id, name, `what`, `image` or picture hash); a hidden `picks` stays `null`.
+- **The picture route is not an `/api/admin/server/` route.** `GET /admin/cookout-img/{sha}.webp` (row in the `/admin` table
+  below) needs Cloudflare Access like the admin bundles but **no unlock token and no signed URL**, because it serves
+  catalogue data that is the same for everyone. It serves only content-addressed manifest shas, so the URL is immutable and
+  the browser cache is the only cache.
 `<DrawingSummary>` = `{id:int, rev:int}` — never the strokes themselves (spec/server-chat/
 07-live-drawing.md §4); a client that sees an entry it lacks, or a newer `rev` than it has,
 fetches the body with `GET server/messages/{seq}/drawings`. `<Drawing>` (that route's own
@@ -431,6 +454,7 @@ One level only: `<ReplyTo>` never nests another `<ReplyTo>`. `GET media/*`'s sig
 |---|---|---|---|---|
 | GET | `/admin/preview/{page}.html` | `routes_preview.py:get_preview_page` | CF | `HTMLResponse` (draft-merged page, **editor injected**), `Cache-Control: no-store`; 503, 404 |
 | GET | `/admin/versions/{n}/{path}` | `routes_versions.py:get_version_asset` | CF | `FileResponse` (archived build, editor **not** injected); 503, 404 |
+| GET | `/admin/cookout-img/{sha}.webp` | `app.py:get_cookout_image` | CF (no unlock token) | a Cookout ingredient picture by content hash (livechat.md §24.2, Inv 58): `200` `FileResponse` with `Content-Type: image/webp`, `Cache-Control: private, max-age=31536000, immutable`, `ETag: "<sha>"`, `X-Content-Type-Options: nosniff`; `304` (no body, same `Cache-Control`/`ETag`/`nosniff` headers, no `Content-Type`) when `If-None-Match` is `"<sha>"`, `W/"<sha>"` or the bare `<sha>`; `404` `{"detail":"Not Found"}` for a name that is not `<64 lowercase hex>.webp`, a sha that is not a card or thumb sha of the loaded manifest (even if a file with that name exists), or a manifest sha whose file is missing from this server's object search path |
 | GET | `/admin`, `/admin/` | `app.py:get_admin_shell` | CF | `HTMLResponse` (`admin_shell.html` instant-render shell, all `/admin/static` asset refs content-fingerprinted `?v=<hash>` at import), `Cache-Control: no-cache` |
 | GET | `/admin/{rest:path}` | `app.py:get_admin_shell_deep_link` | CF | same shell for every SPA panel path (`/admin/pages`, `/admin/edit/<page>`, … — decisions/00087; registered AFTER the static/guide/draft-media mounts so those win, BEFORE the public site catch-all) |
 | GET | `/uxer-style.json` | `app.py:uxer_style` | none | `FileResponse` (Uxer MCP dev tooling) |

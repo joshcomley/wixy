@@ -1,5 +1,42 @@
 # Invariants
 
+### Inv 58 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
+
+The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to
+any conversation (livechat.md §24.2, workspace 00058 round 2, decisions/00202). Four rules:
+
+1. **Generated from ingredient names only.** The catalogue (`livechat/cookout_catalogue.json`) and every picture are
+   produced offline by `tooling/cookout/visual/` from the committed ingredient bank. No chat message, player name, basket,
+   round, vote, rating or photo ever reaches a catalogue, picture, checker or calibration prompt; the picture prompt is a
+   fixed server-owned template with only the catalogue's `visual` sentence substituted.
+2. **Not erased by delete or wipe.** Nothing in them is chat-specific, so deleting the round's message or wiping the chat
+   neither has nor needs anything to erase: the catalogue is a committed file, the manifest a committed file, and the
+   pictures content-addressed files shared by every round and by both slots under `<storage>/cookout-images/objects`
+   (the Cookout tables hold no ingredient-picture reference at all; the enrichment is read-time. The three AI-drawn DISH pictures are different: those are chat content, Inv 57).
+3. **Served only by content hash from the manifest.** `GET /admin/cookout-img/{sha}.webp` answers only a 64-hex sha that is
+   a card or thumb of the loaded manifest and whose file exists here; anything else is `404`, so the route cannot probe
+   the disk. It sits under `/admin` (Cloudflare Access like the admin bundles) and needs no unlock token precisely because
+   it can serve nothing but catalogue data. Responses are `private`, immutable and `nosniff`.
+4. **Attached only to snapshots already in the viewer's redacted view.** `_snap_json` decorates a snapshot the view builder
+   has already decided to send; it never decides what is sent. Inv 57's Blind guarantee is therefore unaffected: a partner's
+   ingredient id, name, `what`, picture URL or picture hash cannot appear in a Blind viewer's response, and the client's
+   Blind "secret turn" card is drawn from counts alone.
+
+A violation looks like: a picture, `what` or fact derived from a message; a cookout wipe path that deletes anything under
+`cookout-images/` (GC is the only deleter, and it deletes only objects no manifest pin holds); a route that serves a file
+by a name not in the manifest; or enrichment that fetches an ingredient the view did not already contain.
+
+*Enforced by:* `test_cookout_visuals.py` (every snapshot carries `what`/`image`, `image` is `null` unless both
+renditions exist, `facts` only on picks and only after `picking`, staples and fridge search enriched, and the Blind
+regression: no partner id, name or picture hash enters the viewer's view),
+`test_cookout_image_route.py` (a manifest sha is served as immutable `image/webp` with no unlock token, `If-None-Match`
+gives `304`, malformed names, an unlisted sha even with a file present, and a listed sha with no file are all `404`),
+`test_cookout_pack.py` (the manifest bounds, pins and GC, so an object a pin holds is never collected),
+`test_cookout_catalogue.py` / `test_cookout_catalogue_data.py` (the committed catalogue passes every rule),
+`test_cookout_visual_tooling.py` (the offline tooling: prompts, decoys, neutral check file names, the gate, the ladder, pack building),
+`admin-ui/tests/cookout/apiVisual.test.ts` (URL shape vetted client-side) and `pickTable.test.ts` (Blind partner turn: no
+ingredient text or image URL in the DOM). Decision: [00201](../../decisions/00202-cookout-ingredient-pictures/decision.md).
+
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 
 The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21, workspace 00058) is
