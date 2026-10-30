@@ -2503,7 +2503,14 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   `butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk` (also ordinary pickable entries); a concept
   may add at most four unpicked non-seasoning staples. Eggs, garlic, onion, lemon, stock, soy, vinegar, cream and
   cheese are deliberately NOT staples. `stopWords` (generic cooking words such as `bread`, `sauce`, `pan`) never
-  contains a staple food name.
+  contains a staple food name. `culinaryWords` (round 2: ordinary cooking language such as `crisp`, `juices`,
+  `gravy`, `starch`, `stock`, `broth`) are never read as a food at all; the validator refuses a staple word, a stop
+  word or any ingredient's own exact name there.
+  Deliberate allowances of the prose scan (round 2): a picked generic pasta (a name ending in `pasta`, e.g. lentil
+  pasta) also allows the shapes in `PASTA_SHAPE_FAMILIES` (penne, fusilli, ...); an ingredient whose FAMILY is that of a
+  used pick is allowed (so "omelette" passes when an egg custard, family egg dish, is picked - the long-standing
+  family exemption); and `BARE_ONLY_WORDS` (`fish` for a fish pick, `sage`/`onion` for stuffing mix) are allowed only as
+  a lone word, never inside a longer food span such as "fish sauce" or "onion rings".
 - **Blind redaction** (`cookout_view_json`, in Python before serialisation). In Blind mode while `picking`: the
   partner's `picks` are `null` (only `pickCount`); `current.role/options/offerIndex/skipsRemaining` are filled only
   for the viewer whose turn it is (everyone else, a non-player included, sees only `turn`, `player`,
@@ -2525,12 +2532,16 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   non-seasoning staples; **each concept uses ≥ 7 of the ten, at least one ≥ 8, and the union covers all ten**; three
   distinct `(dishType, technique)` pairs and at least two dish types. Then the **lexical contraband scan** reads
   every prose field against the bank's names and aliases: *pass 1* rejects any bank food that is not one of the
-  concept's used picks (or their family), a free seasoning, a declared staple or a stop word (an omitted item may be
-  named only in its own `omitted[].reason`); *pass 2* is never softened by stop words or families and rejects any
+  concept's used picks (or their family), a free seasoning, a declared staple, a stop word or a culinary word. The scan
+  is **high-precision** (round 2): a span built only from words of the used picks'/declared staples' names and aliases
+  plus stop/culinary words is a cook's shorthand and passes (`oil` for vegetable oil, `onion` for dried onion granules,
+  `mushroom sauce` from dried mushrooms), while a distinct unpicked food (mango, salmon, cheese, `mango chutney`)
+  still fails. `omitted[].reason` is an explanation, never scanned as consumption (only the forbidden-id check
+  applies); *pass 2* is never softened by stop words or families and rejects any
   mention of an omitted basket item or of an undeclared non-seasoning staple in the consumption prose. Both passes
   tokenise once and judge the **longest whole-token span first**, so "peanut butter" is not read as "butter" when
-  peanut butter is a pick — but "peanut butter with extra butter" fails. A violation triggers at most ONE repair run
-  (same deadline) that is fed the exact violations; a second failure ends the round's `concepts` as `failed`
+  peanut butter is a pick — but "peanut butter with extra butter" fails. A violation triggers up to `MAX_REPAIRS` (3)
+  repair runs (same deadline), each fed the exact violations; the last failure ends the round's `concepts` as `failed`
   (retryable). There is NO second LLM checker — the bank is the food dictionary, which makes the scan reproducible
   and testable. **Honest limit:** a food that is not in the bank can slip through prose.
 - **Pictures** (`cookout_images.py`, `CookoutPictureJob`). Text first: when `concepts` goes `ready` it is published at
@@ -2560,7 +2571,7 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   `cookMinutes 0..480` (the server computes `totalMinutes`, 1..720), 1..24 unique ingredient lines covering the whole
   manifest and adding nothing but free seasonings, each with a quantity (≤ 80 chars) and note (≤ 120), 2..20 steps
   (≤ 600 chars, optional minutes, `uses` ⊆ the recipe's ingredients, every ingredient used by some step) and ≤ 4 tips,
-  then both contraband passes over quantity, note, steps and tips; one repair run. **The row becomes `banked` only
+  then both contraband passes over quantity, note, steps and tips; up to three repair runs. **The row becomes `banked` only
   when a valid full recipe is stored** (compare-and-set on `state = 'pending' AND run_id = ?`), and only banked
   rows appear in `GET /cookout/bank`. Each concept is independently bankable by either player; a failed or
   unavailable save is retried on its card (`…/recipe/retry`).

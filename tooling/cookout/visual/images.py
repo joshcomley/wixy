@@ -294,6 +294,8 @@ import review as _review  # noqa: E402
 
 PILOT_PER_CATEGORY = 40
 CHECK_TIMEOUT_S = 900
+RUN_RETRIES = 2
+RUN_RETRY_GAP_S = 15.0
 CALLER = "wixy-cookout-pictures"
 GH_EXE = r"C:\Program Files\GitHub CLI\gh.exe"
 GH_REPO = "joshcomley/wixy"
@@ -331,6 +333,17 @@ def make_plan(
         pilot[cat] = chosen
         rest[cat] = [i for i in ids if i not in set(chosen)]
     return {"seed": seed, "pilot": interleave(pilot), "rest": interleave(rest)}
+
+
+def extend_plan(plan: Mapping[str, Any], category_of: Mapping[str, str]) -> dict[str, Any]:
+    """Append catalogue ids the plan does not know yet to `rest`, category-interleaved. The pilot,
+    the seed and every id already planned keep their place: a plan is never redrawn."""
+    known = set(plan["pilot"]) | set(plan["rest"])
+    fresh: dict[str, list[str]] = defaultdict(list)
+    for ident in sorted(category_of):
+        if ident not in known:
+            fresh[category_of[ident]].append(ident)
+    return {**plan, "rest": [*plan["rest"], *interleave(fresh)]}
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,10 +445,17 @@ class PoolRunner:
             timeout_secs=timeout_secs,
             tool_profile=tool_profile,
         )
-        outcome = await self._pool.run(key, f"image-{tool_profile}", [], spec)
-        if not outcome.ok or outcome.text is None:
-            raise _check.VerdictError(f"run {outcome.status}: {outcome.error}")
-        return str(outcome.text)
+        outcome = None
+        for attempt in range(1 + RUN_RETRIES):
+            outcome = await self._pool.run(key, f"image-{tool_profile}", [], spec)
+            if outcome.ok and outcome.text is not None:
+                return str(outcome.text)
+            # a run that died (`process exited before end_turn`, a timeout, a failed spawn) is
+            # journalled as not resumable, so the same key spawns a fresh one
+            if attempt < RUN_RETRIES:
+                await asyncio.sleep(RUN_RETRY_GAP_S)
+        assert outcome is not None
+        raise _check.VerdictError(f"run {outcome.status}: {outcome.error}")
 
 
 def comfy_queue_getter(base_url: str) -> Callable[[], Mapping[str, Any]]:
@@ -984,6 +1004,11 @@ def _parser() -> Any:
     sub = p.add_subparsers(dest="cmd", required=True)
     plan = sub.add_parser("plan", help="draw the pilot (once) and write plan.json")
     plan.add_argument("--seed", type=int, default=None)
+    plan.add_argument(
+        "--extend",
+        action="store_true",
+        help="append catalogue ids that are not planned yet (the pilot never changes)",
+    )
     run = sub.add_parser("run", help="render and check; resumable")
     run.add_argument("--phase", choices=["pilot", "rest", "all"], default="pilot")
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
@@ -1015,6 +1040,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         plan = json.loads(work.plan.read_text("utf-8")) if work.plan.exists() else {}
         total = len(plan.get("pilot", [])) + len(plan.get("rest", []))
         print(json.dumps(build_status(work, total), indent=1))
+        return 0
+    if args.cmd == "plan" and args.extend:
+        subs = load_subjects(catalogue)
+        old = json.loads(work.plan.read_text("utf-8"))
+        grown = extend_plan(old, {i: s.category for i, s in subs.items()})
+        work.plan.write_text(json.dumps(grown, indent=1) + "\n", encoding="utf-8")
+        print(
+            f"pilot {len(grown['pilot'])} (unchanged), "
+            f"rest {len(old['rest'])} -> {len(grown['rest'])}"
+        )
         return 0
     if args.cmd == "plan":
         if work.plan.exists():
