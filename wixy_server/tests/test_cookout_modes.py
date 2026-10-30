@@ -271,7 +271,7 @@ def test_chef_format(modes: CookoutModes, toastie: CookoutMode) -> None:
     ]  # fmt: skip
     assert {b.id for b in chef.builds if b.uses_oven} == {"oven-baked"}
     assert all(b.technique in cookout_ai.TECHNIQUES for b in chef.builds)
-    assert "open sandwich" in chef.review_dish_words and "wrap" in chef.review_dish_words
+    assert "open sandwich" in chef.review_dish_words and "burrito" in chef.review_dish_words
     assert chef.concept_text is not None and "{build_list}" in chef.concept_text
     assert chef.recipe_text is not None and "{build_label}" in chef.recipe_text
     classic = modes.default
@@ -602,6 +602,26 @@ def test_validator_flags_a_thin_bread_list(
     problems = _validator().validate(path, rounds=0)
     assert any("toastie.bread" in p and "items" in p for p in problems)
     assert any("families" in p for p in problems)
+
+
+def test_validator_flags_a_review_dish_word_the_bank_knows_as_a_food(
+    raw: dict[str, Any], tmp_path: Path
+) -> None:
+    dead = _mutated(raw, lambda m: m["chef"]["reviewDishWords"].extend(["wrap", "croutons"]))
+    path = tmp_path / "dead.json"
+    path.write_text(json.dumps(dead), encoding="utf-8")
+    problems = _validator().validate(path, rounds=0)
+    assert any("reviewDishWords 'wrap'" in p for p in problems)
+    assert any("reviewDishWords 'croutons'" in p for p in problems)
+
+
+def test_every_committed_review_dish_word_survives_the_food_scan(
+    toastie: CookoutMode, bank: CookoutBank
+) -> None:
+    from wixy_server.livechat.cookout_bank import tokenise
+
+    for word in toastie.chef.review_dish_words:
+        assert bank.food_free_tokens(word) == tokenise(word), word
 
 
 def test_validator_flags_a_food_in_the_template(raw: dict[str, Any], tmp_path: Path) -> None:
