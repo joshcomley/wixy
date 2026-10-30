@@ -23,6 +23,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;
@@ -156,8 +157,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const helloText = `${tag}: hello from Josh`;
     const replyText = `${tag}: reply from Purdy`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
 
     await pageA.locator(".wx-srv-thread-view textarea").fill(helloText);
     await pageA.locator(".wx-srv-thread-view .wx-chat-send-button").click();
@@ -232,8 +232,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const tag = `no-unread-signal-${Date.now()}`;
     try {
-      await unlockServer(pageA, "Signal A");
-      await unlockServer(pageB, "Signal B");
+      await unlockTogether(unlockServer, [[pageA, "Signal A"], [pageB, "Signal B"]]);
       await pageA.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
       await expect(pageA.locator(".wx-srv-decoy")).toBeVisible();
       const lockedSignals = await browserSignals(pageA);
@@ -418,8 +417,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const tag = `delete-wipe-${Date.now()}`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     await pageA.request.post("/test/server/seed-photo", {
       data: { sender: "Purdy", text: `${tag}: photo from Purdy` },
     });
@@ -514,8 +512,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const label = `mobile-message-actions-${Date.now()}`;
     await seed(pageA, { count: 2, label, sender: "Purdy" });
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     const deletedBubbleA = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
     const deletedBubbleB = pageB.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
     const lockBubble = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #2` });
@@ -554,6 +551,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     await pageA.locator(".wx-srv-sheet-wipe-confirm-button").click();
     await expect(pageB.locator(".wx-srv-thread-empty")).toBeVisible({ timeout: 3000 });
 
+    stopAwake();
     await contextA.close();
     await contextB.close();
   });

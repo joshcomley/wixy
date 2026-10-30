@@ -17,6 +17,7 @@ import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } fr
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { trackConsoleErrors } from "./helpers";
+import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -67,13 +68,6 @@ async function keepAlive(page: Page): Promise<void> {
 }
 
 /** Keeps every page awake for the whole of a test (stop it before closing the contexts). */
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void keepAlive(page);
-  }, 2500);
-  return () => clearInterval(timer);
-}
-
 async function eventually(
   pages: readonly Page[],
   check: () => Promise<boolean>,
@@ -337,10 +331,9 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
 
     // The game is a tab of its own, the thread is out of the way.
     await expect(a.locator(".wx-srv-tabs")).toBeHidden();
@@ -594,10 +587,9 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     const { place } = await playToChosen(a, b);
 
     // Bob passes: the question is asked once, "Keep it" backs out, "Never show again" confirms.
@@ -725,8 +717,7 @@ test.describe("Adventure Time", () => {
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
     const b = await contextB.newPage();
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     await startAdventure(a);
     await expect(adv(a)).toBeVisible();
 
@@ -769,10 +760,9 @@ test.describe("Adventure Time", () => {
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
     const b = await contextB.newPage();
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     await playToChosen(a, b);
     await waitFact(pages, "pack-state", "ready", 60_000);
     const dishes = a.locator(".wx-srv-adv-dishes");

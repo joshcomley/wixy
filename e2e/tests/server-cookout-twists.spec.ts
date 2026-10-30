@@ -24,6 +24,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { trackConsoleErrors } from "./helpers";
+import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
 
 test.describe.configure({ timeout: 360_000 });
 
@@ -71,13 +72,6 @@ async function keepAlive(page: Page): Promise<void> {
   } catch {
     // the page is closing
   }
-}
-
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void keepAlive(page);
-  }, 2500);
-  return () => clearInterval(timer);
 }
 
 async function eventually(
@@ -335,11 +329,9 @@ test.describe("Cookout twists", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const bodiesA = recordBodies(pageA);
     const bodiesB = recordBodies(pageB);
-    const stopAwake = keepAwake([pageA, pageB]);
     const pages = [pageA, pageB] as const;
 
     // -- Start sheet: a spun style, the one-pan challenge, stars, the cloche and a fridge raid -----------------
@@ -593,10 +585,8 @@ test.describe("Cookout twists", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const bodiesA = recordBodies(pageA);
-    const stopAwake = keepAwake([pageA, pageB]);
     const pages = [pageA, pageB] as const;
 
     const { seq } = await startCookout(pageA, { blind: true, stars: true });

@@ -11,6 +11,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -102,8 +103,7 @@ test.describe("Would you rather", () => {
     const pageB = await contextB.newPage();
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     // Full screen: the shell's status bar, top bar and navigation are all gone, and the chat
     // reaches the top of the window.
@@ -217,8 +217,7 @@ test.describe("Would you rather", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     const seq = await startRound(pageA);
     await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bob sees the round");
@@ -241,8 +240,7 @@ test.describe("Would you rather", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     async function say(page: Page, text: string): Promise<void> {
       await page.locator(".wx-chat-composer-input").fill(text);
@@ -399,8 +397,7 @@ test.describe("Would you rather", () => {
     const contextB = await browser.newContext(phone);
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
-    await unlockServer(pageA, "Cupcake");
-    await unlockServer(pageB, "Bubble");
+    await unlockTogether(unlockServer, [[pageA, "Cupcake"], [pageB, "Bubble"]]);
 
     const seq = await startRound(pageA);
     await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bubble sees the round");

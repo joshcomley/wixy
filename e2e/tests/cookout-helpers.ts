@@ -58,12 +58,8 @@ export async function keepAlive(page: Page): Promise<void> {
 }
 
 /** Keeps every page awake for the whole of a test (stop it before closing the contexts). */
-export function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void keepAlive(page);
-  }, 2500);
-  return () => clearInterval(timer);
-}
+/** Keeps every page awake (see two-devices.ts, the one implementation). */
+export { keepPagesAwake as keepAwake } from "./two-devices";
 
 export async function eventually(
   pages: readonly Page[],
