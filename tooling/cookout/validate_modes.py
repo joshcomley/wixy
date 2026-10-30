@@ -33,6 +33,7 @@ from wixy_server.livechat.cookout_bank import (  # noqa: E402
     CookoutExhaustedError,
     Ingredient,
     load_cookout_bank,
+    tokenise,
 )
 from wixy_server.livechat.cookout_modes import (  # noqa: E402
     MAX_PROMPT,
@@ -174,7 +175,7 @@ def _text_problems(mode: CookoutMode, bank: CookoutBank) -> list[str]:
     return problems
 
 
-def _chef_problems(mode: CookoutMode) -> list[str]:
+def _chef_problems(mode: CookoutMode, bank: CookoutBank) -> list[str]:
     problems: list[str] = []
     chef = mode.chef
     if chef.format == "classic":
@@ -190,6 +191,13 @@ def _chef_problems(mode: CookoutMode) -> list[str]:
         problems.append(f"{mode.id}: {len(chef.builds)} builds; need >= {MIN_BUILDS}")
     if sum(1 for b in chef.builds if not b.uses_oven) < 3:
         problems.append(f"{mode.id}: fewer than three builds work without an oven")
+    for word in chef.review_dish_words:
+        # The review matches these against the food-free words of a dish, so a word the bank
+        # knows as a food ("wrap", "croutons") is stripped first and can never match.
+        if bank.food_free_tokens(word) != tokenise(word):
+            problems.append(
+                f"{mode.id}: reviewDishWords {word!r} is a bank food, so it never matches"
+            )
     if not mode.fridge_kinds:
         problems.append(f"{mode.id}: fridgeKinds is empty")
     if chef.anchor_kind and chef.anchor_kind not in mode.kinds:
@@ -373,7 +381,7 @@ def validate(
         if mode.plan_type == "classic":
             continue
         problems += _pool_problems(mode, the_bank)
-        problems += _chef_problems(mode)
+        problems += _chef_problems(mode, the_bank)
         problems += _text_problems(mode, the_bank)
         problems += simulate(mode, the_bank, rounds)
     return problems
