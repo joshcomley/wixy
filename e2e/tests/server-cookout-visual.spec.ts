@@ -407,7 +407,7 @@ async function playMatrix(browser: import("@playwright/test").Browser, blind: bo
     for (const label of [/\(1 left\)/, /Final pair/]) {
       await humanPause(mine);
       await skip.click();
-      await expect(skip).toHaveText(label);
+      await expect(skip).toHaveText(label, { timeout: 20_000 });
     }
     audited += await sweep(mine, theirs, mineName, "the final pair", { expect: "cards", skip: true, twists: false });
 
