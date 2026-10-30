@@ -36,6 +36,7 @@ import type { Message } from "./api/messages";
 import { createDrawGesture, type DrawGestureEffect } from "./drawGesture";
 import {
   chooseAnchor,
+  cssZoom,
   declaredColumnWidth,
   drawScale,
   hitTestDrawings,
@@ -63,6 +64,7 @@ import {
   LIVE_STROKE_TIMEOUT_MS,
   MAX_DRAWINGS_PER_ANCHOR,
   MAX_STROKES_PER_DRAWING,
+  SELECT_HIT_RADIUS_PX,
   type DrawingColor,
   type DrawingWidth,
 } from "./drawings";
@@ -160,10 +162,14 @@ export interface DrawingLayer {
   abandon(): void;
 }
 
+/** Content px are the thread content's own LAYOUT px — what `left`/`top`/`width` are written in.
+ * Client px are what boxes and pointers are measured in. They differ by `zoom` (cssZoom). */
 interface Frame {
   /** The content wrapper's box, in client px. */
   readonly contentLeft: number;
   readonly contentTop: number;
+  /** Client px per content px: 1 unless CSS `zoom` applies (the admin's zoom control). */
+  readonly zoom: number;
   /** The column's left edge and width, in content px. */
   readonly columnLeft: number;
   readonly columnWidth: number;
@@ -514,7 +520,8 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       change();
       const delta = toolbarHeight() - before;
       if (delta !== 0) {
-        thread.scrollTop += delta;
+        // Measured in client px; `scrollTop` is the thread's layout px.
+        thread.scrollTop += delta / zoomOf(thread);
         deps.adoptScrollPosition?.();
       }
     } finally {
@@ -563,20 +570,38 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // -- Measuring and positioning ---------------------------------------------------------------
 
+  /** Client px per layout px of `element` (cssZoom): its measured border box over its layout one. */
+  function zoomOf(element: HTMLElement, box: DOMRect = element.getBoundingClientRect()): number {
+    const current = (element as { currentCSSZoom?: number }).currentCSSZoom;
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+    if (style === undefined) return cssZoom(current, NaN, NaN);
+    let layoutWidth = Number.parseFloat(style.width);
+    if (style.boxSizing !== "border-box") {
+      for (const side of [style.paddingLeft, style.paddingRight, style.borderLeftWidth, style.borderRightWidth]) {
+        layoutWidth += Number.parseFloat(side) || 0;
+      }
+    }
+    return cssZoom(current, box.width, layoutWidth);
+  }
+
   function measureFrame(): Frame | null {
     const columnWidth = column.clientWidth;
     if (!(columnWidth > 0)) return null;
     const contentRect = content.getBoundingClientRect();
     const columnRect = column.getBoundingClientRect();
     const threadRect = thread.getBoundingClientRect();
-    const threadInnerLeft = threadRect.left + thread.clientLeft;
+    // Measured client distances are divided by `zoom` into content px; `clientLeft`/`clientWidth`
+    // are already layout px.
+    const zoom = zoomOf(content, contentRect);
+    const clipLeft = (threadRect.left - contentRect.left) / zoom + thread.clientLeft;
     return {
       contentLeft: contentRect.left,
       contentTop: contentRect.top,
-      columnLeft: columnRect.left - contentRect.left,
+      zoom,
+      columnLeft: (columnRect.left - contentRect.left) / zoom,
       columnWidth,
-      clipLeft: threadInnerLeft - contentRect.left,
-      clipRight: threadInnerLeft + thread.clientWidth - contentRect.left,
+      clipLeft,
+      clipRight: clipLeft + thread.clientWidth,
     };
   }
 
@@ -584,7 +609,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   function anchorTop(seq: number, frame: Frame): number | null {
     const element = deps.anchorElement(seq);
     if (element === null) return null;
-    return element.getBoundingClientRect().top - frame.contentTop;
+    return (element.getBoundingClientRect().top - frame.contentTop) / frame.zoom;
   }
 
   function applyBox(view: SvgView, box: SvgBox | null): void {
@@ -840,15 +865,17 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // -- Drawing a stroke ----------------------------------------------------------------------
 
-  /** The draw-space origin of `drawing` in CLIENT px right now, and its scale, or null. */
+  /** The draw-space origin of `drawing` in CLIENT px right now, and its scale in client px per
+   * draw px (so a pointer's client position maps straight into draw space, zoom included), or
+   * null. */
   function originOf(drawing: ModelDrawing): { x: number; y: number; scale: number } | null {
     const frame = measureFrame();
     const anchor = deps.anchorElement(drawing.anchorSeq);
     if (frame === null || anchor === null) return null;
     return {
-      x: frame.contentLeft + frame.columnLeft,
+      x: frame.contentLeft + frame.columnLeft * frame.zoom,
       y: anchor.getBoundingClientRect().top,
-      scale: drawScale(frame.columnWidth, drawing.columnWidth),
+      scale: drawScale(frame.columnWidth, drawing.columnWidth) * frame.zoom,
     };
   }
 
@@ -1173,7 +1200,8 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
         case "panEnd":
           break;
         case "panBy":
-          thread.scrollTop += effect.dy;
+          // The fingers moved `dy` client px; `scrollTop` is the thread's layout px.
+          thread.scrollTop += effect.dy / zoomOf(thread);
           break;
       }
     }
@@ -1318,7 +1346,13 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     if (now() - tap.at > TAP_MAX_MS) return;
     const frame = measureFrame();
     if (frame === null) return;
-    const hit = hitTestDrawings(tap.x - frame.contentLeft, tap.y - frame.contentTop, hitCandidates(frame));
+    // In content px, like the candidates; the reach stays SELECT_HIT_RADIUS_PX on screen.
+    const hit = hitTestDrawings(
+      (tap.x - frame.contentLeft) / frame.zoom,
+      (tap.y - frame.contentTop) / frame.zoom,
+      hitCandidates(frame),
+      SELECT_HIT_RADIUS_PX / frame.zoom,
+    );
     if (hit !== null) {
       select(hit);
       swallowClickUntil = now() + SWALLOW_CLICK_MS;

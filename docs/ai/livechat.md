@@ -1714,6 +1714,21 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   uniformly and a circle stays a circle. The box is clipped to the thread's visible width, so
   there is never a sideways scrollbar. Vertically it is never clipped, so a drawing below the
   last bubble grows the scroll area.
+- **Two kinds of pixel, kept apart (decisions/00205).** The admin's own zoom control
+  (`admin-ui/src/zoom.ts`, Settings → zoom; Ctrl +/−) puts CSS `zoom` on `<html>`. Under it,
+  `getBoundingClientRect` and pointer `clientX/Y` are CLIENT px (0.9× at 90%), while
+  `clientWidth`, `scrollTop` and the svg's `left`/`top`/`width` are LAYOUT px. `measureFrame`
+  reads the factor once (`cssZoom`: `Element.currentCSSZoom` where the browser has it,
+  otherwise the content's box width over its unrounded computed width — WebKit has no
+  `currentCSSZoom`) and every measured distance is divided by it before it is written back or
+  compared with a layout value; `originOf`'s scale is client px per draw px, so pointer
+  positions still map straight into honest draw space; Select's tap and its 12 px reach, the
+  two-finger pan and the toolbar's scroll compensation are converted the same way. Mixing the
+  two placed every drawing `zoom` × its distance from the top of the whole thread — at 90% in a
+  long chat, thousands of px off screen — so the person using zoom saw canvases and never any
+  ink, while the other screen saw her strokes ~10% small. Drawings stored before the fix by a
+  zoomed screen keep that ~10% shrink (it cannot be told apart afterwards); they stay on the
+  right message.
 - **Positions are always read from the live DOM**, never copied. They are re-read on every
   `renderThreadList` (`drawingLayer.syncMessages`, called before the stick-to-bottom
   decision), by a ResizeObserver on the column and the thread (images loading, rotation, the
@@ -1854,7 +1869,10 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   message above grows. B selects and deletes it and it vanishes for both. Deleting the anchor
   message removes it. Rapid dots never lock, and Escape mid-stroke locks at once and B's
   preview goes. At phone widths every control is hit-tested with `elementFromPoint`, one
-  finger draws, and two fingers scroll without drawing. The fixture runs ONE chat per worker
+  finger draws, and two fingers scroll without drawing. At the admin's 90% zoom on a canvas
+  under a long thread, the drawer's ink is under the pen mid-stroke and once stored, the other
+  (unzoomed) screen shows it at the same place and size on the canvas, and a Select tap on it
+  selects it (decisions/00205). The fixture runs ONE chat per worker
   with no reset, so assertions are scoped per anchor
   (`svg.wx-srv-drawing[data-anchor-seq="N"]`).
 
