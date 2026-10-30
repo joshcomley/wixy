@@ -346,7 +346,14 @@ async function ring(
   const attempt = async (): Promise<boolean> => {
     const callButton = callPanel.getByRole("button", { name: "Call", exact: true });
     try {
-      await expect(callButton).toBeEnabled({ timeout: 15_000 });
+      // The Call button is disabled while the other device is not in this device's peer list, which is exactly
+      // what a device whose call connection closed ("Calls disconnected", the 6 s no-message watchdog) looks like
+      // from the other side. Either device may be the one that dropped, so each poll reconnects whichever shows it.
+      await expect(async () => {
+        await reconnectCallsIfClosed(other);
+        await reconnectCallsIfClosed(measured);
+        await expect(callButton).toBeEnabled({ timeout: 1_000 });
+      }).toPass({ timeout: 30_000 });
     } catch (error) {
       const state = async (page: Page): Promise<string> =>
         await page.locator(".wx-srv-call").evaluate((el) => `${el.getAttribute("data-state")} | ${(el.textContent ?? "").replace(/\s+/g, " ").trim()}`).catch(() => "no call widget");
