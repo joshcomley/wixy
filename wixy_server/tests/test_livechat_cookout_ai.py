@@ -714,12 +714,11 @@ class TestParseConcepts:
 
         assert self._mutated(edit).value is not None
 
-    def test_an_omitted_reason_may_not_name_a_non_pick(self) -> None:
+    def test_an_omitted_reason_is_an_explanation_never_scanned_as_consumption(self) -> None:
         def edit(c: list[dict[str, Any]]) -> None:
-            c[0]["omitted"][0]["reason"] = "Mango would be sweeter."
+            c[0]["omitted"][0]["reason"] = "Mango would be sweeter, and starch would clash."
 
-        parsed = self._mutated(edit)
-        assert any("omitted reason mentions 'Mango'" in v for v in parsed.violations)
+        assert self._mutated(edit).value is not None
 
     def test_an_undeclared_staple_in_prose_is_rejected(self) -> None:
         parsed = self._mutated(
@@ -952,7 +951,7 @@ class TestConceptsJob:
         assert "Mango" in str(runs[1].body["prompt"])
         assert store.rounds[1]["concepts_run_id"] == runs[1].run_id
 
-    def test_a_second_failure_ends_the_job_failed(self, tmp_path: Path) -> None:
+    def test_the_last_failure_ends_the_job_failed(self, tmp_path: Path) -> None:
         bad = json.dumps({"concepts": []})
         state = FakeCmdState(cookout_response_text=bad)
         store = FakeStore()
@@ -960,7 +959,24 @@ class TestConceptsJob:
         _drive_concepts(_runner(store, _client(state), tmp_path))
         assert store.rounds[1]["concepts"] == "failed"
         assert store.rounds[1]["concepts_error"]
-        assert len(state.chat_spawn_runs) == 2  # the run and ONE repair, never a third
+        # the run and THREE repairs (MAX_REPAIRS), never a fifth
+        assert len(state.chat_spawn_runs) == 4
+
+    def test_a_third_repair_can_still_succeed(self, tmp_path: Path) -> None:
+        bad = json.dumps({"concepts": []})
+        state = FakeCmdState(
+            chat_spawn_plans=[
+                FakeSpawnPlan(response_text=bad),
+                FakeSpawnPlan(response_text=bad),
+                FakeSpawnPlan(response_text=bad),
+                FakeSpawnPlan(response_text=canned_concepts_text()),
+            ]
+        )
+        store = FakeStore()
+        store.add_round()
+        _drive_concepts(_runner(store, _client(state), tmp_path))
+        assert store.rounds[1]["concepts"] == "ready"
+        assert len(state.chat_spawn_runs) == 4
 
     def test_cmd_refusing_the_run_fails_the_job(self, tmp_path: Path) -> None:
         state = FakeCmdState(chat_spawn_status_code=500)
@@ -1025,7 +1041,14 @@ class TestConceptsJob:
         store.add_round()
 
         async def retry_meanwhile() -> None:
-            await anyio.sleep(0.1)
+            # Wait (bounded) until the runner has spawned its run AND recorded it on the round,
+            # then flip the run id: a fixed sleep raced the runner under load.
+            with anyio.fail_after(30):
+                while not (
+                    state.chat_spawn_runs
+                    and store.rounds[1]["concepts_run_id"] in state.chat_spawn_runs
+                ):
+                    await anyio.sleep(0.01)
             store.rounds[1]["concepts_run_id"] = "a-newer-run"
 
         _drive_concepts(_runner(store, _client(state), tmp_path), extra=retry_meanwhile)
@@ -1204,7 +1227,7 @@ class TestRecipeJob:
         _drive_recipe(_runner(store, _client(state), tmp_path))
         slot = store.rounds[1]["recipes"]["a"]
         assert slot["state"] == "failed" and slot["recipe_json"] is None
-        assert len(state.chat_spawn_runs) == 2
+        assert len(state.chat_spawn_runs) == 4  # the run and MAX_REPAIRS repairs
 
     def test_a_recipe_for_a_vanished_round_is_a_no_op(self, tmp_path: Path) -> None:
         state = FakeCmdState()
@@ -1398,9 +1421,11 @@ class TestFoldIns:
         )
         assert any("must not repeat" in v for v in _parse(obj).violations)
 
-    def test_m1_a_rejected_resumed_run_is_failed_not_repaired_again(self, tmp_path: Path) -> None:
+    def test_m1_a_rejected_resumed_run_counts_as_a_repair_already_used(
+        self, tmp_path: Path
+    ) -> None:
         bad = json.dumps({"concepts": []})
-        state = FakeCmdState(chat_spawn_plans=[FakeSpawnPlan(response_text=bad)])
+        state = FakeCmdState(cookout_response_text=bad)
         client = _client(state)
         store = FakeStore()
 
@@ -1419,7 +1444,8 @@ class TestFoldIns:
 
         anyio.run(go)
         assert store.rounds[1]["concepts"] == "failed"
-        assert len(state.chat_spawn_runs) == 1  # no second repair spawned
+        # the resumed run (counted as a repair already) and the two repairs it leaves
+        assert len(state.chat_spawn_runs) == 3
 
     def test_m4_no_early_retry_after_a_repair_was_issued(self, tmp_path: Path) -> None:
         bad = json.dumps({"concepts": []})
@@ -1512,20 +1538,26 @@ class TestRealBankLexicalCases:
         ]
         for sentence, ok in (
             ("Peanut butter and Beef ribeye steak with salt.", True),
-            ("Peanut butter with extra butter and Beef ribeye steak.", False),
+            # round 2: bare "butter" is shorthand for the used peanut butter...
+            ("Peanut butter with extra butter and Beef ribeye steak.", True),
+            # ...but another undeclared staple is still contraband
+            ("Peanut butter with extra flour and Beef ribeye steak.", False),
         ):
             concept["description"] = sentence
             parsed = _real_parse(real_bank, obj)
             banned = [v for v in parsed.violations if "concept a description" in v]
             assert (banned == []) is ok, (sentence, parsed.violations)
 
-    def test_coconut_milk_is_fine_but_an_extra_bare_milk_is_not(self, real_bank: Any) -> None:
+    def test_coconut_milk_is_fine_but_an_extra_staple_is_not(self, real_bank: Any) -> None:
         obj = _real_concepts(real_bank)
         concept = obj["concepts"][0]
         assert "coconut-milk" in concept["pickedIngredientIds"]
         for sentence, ok in (
             ("Coconut milk curry with Beef ribeye steak and salt.", True),
-            ("Coconut milk plus milk with Beef ribeye steak.", False),
+            # "milk" is shorthand for the picked coconut milk (round 2: a bare word matches a pick
+            # whose name contains it); a staple the dish does not have is still contraband.
+            ("Coconut milk plus a little milk with Beef ribeye steak.", True),
+            ("Coconut milk plus sugar with Beef ribeye steak.", False),
         ):
             concept["description"] = sentence
             parsed = _real_parse(real_bank, obj)
@@ -1533,9 +1565,9 @@ class TestRealBankLexicalCases:
             assert (bad == []) is ok, (sentence, parsed.violations)
 
     def test_a_fifth_undeclared_staple_in_prose_is_rejected(self, real_bank: Any) -> None:
-        four = ["butter", "plain-flour", "cooking-oil", "granulated-sugar"]
-        parsed = self._with_description(real_bank, "Finished with a splash of milk.", staples=four)
-        assert any("'Milk'" in v for v in parsed.violations)
+        four = ["butter", "plain-flour", "cooking-oil", "milk"]
+        parsed = self._with_description(real_bank, "Finished with a pinch of sugar.", staples=four)
+        assert any("'Granulated sugar'" in v for v in parsed.violations)
 
     def test_an_omitted_pick_in_prose_is_rejected_but_allowed_in_its_reason(
         self, real_bank: Any
@@ -1568,8 +1600,8 @@ class TestRealBankLexicalCases:
 # the generation-fenced runner
 # =================================================================================================
 
-GOLDEN_CONCEPTS_PROMPT_SHA256 = "5740892f1080aae66bc7de154e65789fd7ed35e016c504e6ccc5e310702a0618"
-GOLDEN_RECIPE_PROMPT_SHA256 = "d7b4a8a90821a0dd6b9deb9b2de7c5646d523d4894c060acf6adf43c5d744716"
+GOLDEN_CONCEPTS_PROMPT_SHA256 = "fa9bc21a928b64b8fdec5c3501e40637b1d0200ae83ac1e90bdf45e177d5b49e"
+GOLDEN_RECIPE_PROMPT_SHA256 = "4572e54187b1d913cfd87e0556656cadfc2e92977e5465c7931a09955449cd54"
 """sha256 of the twist-free prompts exactly as the shipped core builds them (taken from the code
 before the twists existed): a twist-free round must stay byte-for-byte the core."""
 
@@ -1670,7 +1702,7 @@ class TestTwistPrompts:
         ]
         assert positions == sorted(positions)
         assert prompt.index("WILDCARD") < prompt.index("Your FINAL message")
-        assert '"challengeNote": string (1-140 chars)' in prompt
+        assert '"challengeNote": a string (1-140 chars)' in prompt
         assert "totalMinutes" not in prompt
 
     def test_the_thirty_minute_challenge_asks_for_total_minutes(self) -> None:
@@ -1898,7 +1930,7 @@ class TestParseConceptsWithTwists:
         assert "concept b dishType may not be traybake, pie or bake" in text
         assert "concept c technique may not be roast or bake" in text
 
-    @pytest.mark.parametrize("field", ["title", "vibe", "description", "challengeNote"])
+    @pytest.mark.parametrize("field", ["title", "vibe", "description"])
     @pytest.mark.parametrize("word", ["oven", "preheat", "roasted", "baking"])
     def test_no_oven_rejects_an_oven_word_in_prose(self, field: str, word: str) -> None:
         twists = ConceptTwists(challenge="no-oven")
@@ -2770,3 +2802,12 @@ class TestRemovedPickableStaplesRealBank:
             assert "removed and may not appear anywhere" in _violations(
                 parse_recipe(json.dumps(text_recipe), bank=real_bank, concept=concept, twists=rt)
             ), (staple, spelling)
+
+
+def test_the_concepts_schema_lists_challenge_note_only_for_a_challenge() -> None:
+    plain = _twist_prompt(ConceptTwists())
+    assert '"challengeNote": string' not in plain
+    for challenge in ("no-oven", "thirty-minutes"):
+        prompt = _twist_prompt(ConceptTwists(challenge=challenge))
+        assert '\n   "challengeNote": string (1-140 chars),' in prompt
+        assert ('"totalMinutes": integer (5-30),' in prompt) is (challenge == "thirty-minutes")
