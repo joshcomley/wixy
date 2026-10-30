@@ -6665,13 +6665,14 @@ video.wx-srv-gallery-media {
   min-height: 0;
   box-sizing: border-box;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: 44px 44px minmax(0, 1fr) 44px;
+  /* The banner's row is 44 px, or taller when a wider font wraps its line: the stage gives up the space. */
+  grid-template-rows: minmax(44px, auto) 44px minmax(0, 1fr) 44px;
   row-gap: 6px;
   padding: 2px 8px 4px;
 }
 
 .wx-srv-ck-table:has(> .wx-srv-ck-strip:not([hidden])) {
-  grid-template-rows: 24px 44px 44px minmax(0, 1fr) 44px;
+  grid-template-rows: 24px minmax(44px, auto) 44px minmax(0, 1fr) 44px;
 }
 
 /* The twists strip: "Twists" and one icon per start-sheet twist. Not a target. */
@@ -7082,7 +7083,9 @@ button.wx-srv-ck-card:disabled {
   line-height: 1.5;
 }
 
-/* The actions: the skip and the 🎲 Twists button (or, sweeping, Cancel). */
+/* The actions: the skip and the 🎲 Twists button (or, sweeping, Cancel), side by side in the 44 px row. A label
+   wider than its button (a phone's font is often wider than the one this was drawn with) wraps to a second
+   line inside the same 44 px, never clipped: two lines of 1.15 are 35 px, inside the 2 px border. */
 .wx-srv-ck-actions {
   display: flex;
   align-items: center;
@@ -7094,7 +7097,7 @@ button.wx-srv-ck-card:disabled {
 .wx-srv-ck-twists-btn,
 .wx-srv-ck-sweep-cancel {
   min-height: 44px;
-  padding: 0 14px;
+  padding: 0 12px;
   border: 2px solid var(--ck-line-strong);
   border-radius: 14px;
   background: var(--ck-paper);
@@ -7102,18 +7105,24 @@ button.wx-srv-ck-card:disabled {
   font: inherit;
   font-size: 0.9375rem;
   font-weight: 700;
-  white-space: nowrap;
+  line-height: 1.15;
+  white-space: normal;
+  overflow-wrap: normal;
+  text-wrap: balance;
   cursor: pointer;
 }
 
+/* The skip takes the rest of the row (at least 180 px); the Twists button is as wide as its label (at least
+   96 px), and never so wide that the skip loses its 180. */
 .wx-srv-ck-skip {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 180px;
 }
 
 .wx-srv-ck-twists-btn {
   flex: none;
   min-width: 96px;
+  max-width: calc(100% - 188px);
   margin-left: auto;
 }
 
@@ -7155,11 +7164,11 @@ button.wx-srv-ck-card:disabled {
 @container ck (max-height: 505.98px) {
   .wx-srv-ck-table,
   .wx-srv-ck-table:has(> .wx-srv-ck-strip:not([hidden])) {
-    grid-template-rows: 36px 44px minmax(0, 1fr) 44px;
+    grid-template-rows: minmax(36px, auto) 44px minmax(0, 1fr) 44px;
     row-gap: 4px;
   }
   .wx-srv-ck-table:has(> .wx-srv-ck-banner-join) {
-    grid-template-rows: 44px 44px minmax(0, 1fr) 44px;
+    grid-template-rows: minmax(44px, auto) 44px minmax(0, 1fr) 44px;
   }
   .wx-srv-ck-table > .wx-srv-ck-strip {
     display: none;

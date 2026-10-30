@@ -18,7 +18,6 @@ a future bank or list edit that thins a pool fails CI instead of failing a game.
 from __future__ import annotations
 
 import argparse
-import inspect
 import random
 import sys
 from collections import Counter
@@ -204,10 +203,6 @@ def _chef_problems(mode: CookoutMode) -> list[str]:
 # -- the draw simulation (§8.1) -----------------------------------------------------------------
 
 
-def _supports_kind_draw(bank: CookoutBank) -> bool:
-    return "candidates" in inspect.signature(bank.draw_pair).parameters
-
-
 def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str]:
     """One maximum-skip round: every turn offers, skips twice, and picks; each player uses the chaos
     shelf on a random filling turn; one offer is vetoed; a wildcard and a rescue swap are drawn.
@@ -238,13 +233,18 @@ def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str
         return item.family if kind.facet == "family" else item.category
 
     def check_pair(
-        kind: PickKind, pair: tuple[Ingredient, ...], *, exotic: bool, what: str
+        kind: PickKind,
+        pair: tuple[Ingredient, ...],
+        *,
+        exotic: bool,
+        what: str,
+        kept: str = "",
     ) -> None:
         members = {c.id for c in kind.candidates}
         for item in pair:
             if item.id not in members:
                 problems.append(f"{tag}: {what} offered {item.id}, not a {kind.id}")
-            if item.id in seen:
+            if item.id in seen and item.id != kept:
                 problems.append(f"{tag}: {what} repeated {item.id}")
             if item.family in picked_families:
                 problems.append(f"{tag}: {what} offered picked family {item.family}")
@@ -302,7 +302,9 @@ def _simulate_round(mode: CookoutMode, bank: CookoutBank, seed: int) -> list[str
                     candidates=kind.candidates,
                     facet=kind.facet,
                 )
-                check_pair(kind, (keep, replacement), exotic=exotic, what=f"turn {turn} veto")
+                check_pair(
+                    kind, (keep, replacement), exotic=exotic, what=f"turn {turn} veto", kept=keep.id
+                )
                 seen.add(replacement.id)
                 offered_families.add(replacement.family)
                 history.append(facet_key(kind, replacement))
@@ -346,8 +348,6 @@ def bank_item(bank: CookoutBank, ingredient_id: str) -> Ingredient:
 def simulate(mode: CookoutMode, bank: CookoutBank, rounds: int = SIMULATED_ROUNDS) -> list[str]:
     if mode.plan_type == "classic":
         return []
-    if not _supports_kind_draw(bank):
-        return []  # TODO(M1 step 3): removed once cookout_bank gains candidates/facet (A.2)
     problems: list[str] = []
     for seed in range(rounds):
         problems.extend(_simulate_round(mode, bank, seed))

@@ -2848,7 +2848,7 @@ def _toastie_mode() -> CookoutMode:
 
 TOASTIE = _toastie_mode()
 GOLDEN = json.loads(
-    (Path(__file__).parent / "fixtures" / "cookout_classic_golden.json").read_text("utf-8")
+    (Path(__file__).parent / "fixtures" / "cookout_chef_classic_golden.json").read_text("utf-8")
 )
 T_BREAD = "sliced-white-bread"
 T_FILLINGS = [

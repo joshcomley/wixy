@@ -68,6 +68,23 @@ describe("the game-mode styles (layout guards)", () => {
     return found[1] ?? "";
   }
 
+  it("the table's skip and Twists labels wrap inside their 44 px buttons, never clipped (09b §D.3: any font)", () => {
+    const buttons = rule(".wx-srv-ck-skip,\n.wx-srv-ck-twists-btn,\n.wx-srv-ck-sweep-cancel");
+    expect(buttons).toMatch(/white-space:\s*normal/);
+    expect(buttons).not.toMatch(/nowrap/);
+    expect(buttons).toMatch(/min-height:\s*44px/);
+    // Two lines of 1.15 at 15 px (34.5 px) and the 2 px borders stay inside 44 px.
+    expect(buttons).toMatch(/line-height:\s*1\.15/);
+    expect(rule(".wx-srv-ck-skip")).toMatch(/min-width:\s*180px/);
+    expect(rule(".wx-srv-ck-twists-btn")).toMatch(/max-width:\s*calc\(100% - 188px\)/);
+  });
+
+  it("the turn banner's row grows when a wider font wraps its line, in every table layout", () => {
+    const rows = [...SOURCE.matchAll(/\.wx-srv-ck-table[^{]*\{[^}]*grid-template-rows:\s*([^;]+);/g)].map((m) => m[1] ?? "");
+    expect(rows).toHaveLength(4);
+    for (const r of rows) expect(r).toMatch(/^(24px )?minmax\((36|44)px, auto\) 44px minmax\(0, 1fr\) 44px$/);
+  });
+
   it("a mode card's head wraps, and its title never does", () => {
     expect(rule(".wx-srv-ck-mcard-head-mode")).toMatch(/flex-wrap:\s*wrap/);
     expect(rule(".wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title")).toMatch(/white-space:\s*nowrap/);
