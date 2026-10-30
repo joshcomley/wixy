@@ -338,8 +338,8 @@ unaffected.
 
 **Where the pilot ran (measured, workspace 00058).** The generation pilot ran as a **scheduled task on the hub in an
 Interactive session** (never session 0), **not** as a cmd Grid task: the hub's Grid workers take CI jobs only, so a Grid
-submission for this work cannot be placed there. (The module docstring of `images.py` and the spec still say "Grid task on
-a hub worker"; that was the plan, the measured reality is the scheduled task. Run it the same way: Task Scheduler,
+submission for this work cannot be placed there. (The spec still says "Grid task on a hub worker"; that was the plan, the
+measured reality is the scheduled task, and the `images.py` docstring now says so. Run it the same way: Task Scheduler,
 `LogonType=Interactive`, `RunLevel=Limited`, output redirected to a log, resumable.)
 
 **Rollback / disk.** To roll back to older pictures, revert the manifest PR: the previous slot pin and its objects are kept

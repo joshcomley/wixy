@@ -99,6 +99,6 @@ standalone Docker edition and on a fork, must not bloat git history, and must ne
 - Keep the picture prompt server-owned and the tooling offline: nothing from chat (names, baskets, votes) may ever reach a
   catalogue, picture or checker prompt (Inv 58).
 - The pilot ran as a hub scheduled task in an Interactive session, not on the Grid (the hub's Grid workers take CI jobs
-  only); the `images.py` docstring still says Grid.
-- The history check in code only confirms each URL answers its byte count; the spec's extra "clean-environment fetch of the v1
-  manifest from v2 onward" is not implemented in `images.py publish` and should be added when v2 is first published.
+  only); the spec still says Grid, the `images.py` docstring now says scheduled task.
+- `images.py publish` runs two checks: the history check (every manifest ever committed still answers its byte count) and, from
+  v2 onward, `clean_install_check` (a clean-environment fetch and full install of the oldest manifest that names a pack).

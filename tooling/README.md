@@ -53,6 +53,6 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
     recommendation rule, report under `triad/cookout/r2/`).
   - **Where to run it.** On the hub, as a Task Scheduler task with `LogonType=Interactive`, `RunLevel=Limited` (never session
     0), output to a log. The pilot ran this way: the hub's Grid workers take CI jobs only, so it was not a Grid task (the
-    `images.py` module docstring still says "Grid task"; that was the plan). Operations (the pack, pins, GC, publishing):
+    spec still says "Grid task"; that was the plan). Operations (the pack, pins, GC, publishing):
     `docs/ai/runbook.md` "Cookout ingredient pictures". Unit tests: `wixy_server/tests/test_cookout_visual_tooling.py`,
     `test_cookout_catalogue_tooling.py`, `test_cookout_catalogue*.py`.
