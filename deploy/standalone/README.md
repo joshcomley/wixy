@@ -69,7 +69,7 @@ paste each printed deploy-key public key at the GitHub URL it names when asked.
   `:rollback` image exists yet (nothing to undo).
 - **`logs.sh`** — `docker compose logs`, forwarding any args (`logs.sh -f`,
   `logs.sh cloudflared`).
-- **The baked Cookout picture pack** (livechat.md §24.2, Inv 58). The Cookout game's ingredient pictures are not in git:
+- **The baked Cookout picture pack** (livechat.md §24.3, Inv 58). The Cookout game's ingredient pictures are not in git:
   `wixy_server/livechat/cookout_ingredient_images.json` (the committed manifest) pins ONE immutable tar by sha256, published
   as a GitHub Release asset of the public upstream repo (`cookout-images-v<N>`). The `Dockerfile` copies ONLY the stdlib-only
   `cookout_pack.py` and that manifest (nothing else from `wixy_server/`) and runs `cookout_pack.py fetch` before

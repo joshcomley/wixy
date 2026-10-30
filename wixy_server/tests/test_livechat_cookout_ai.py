@@ -23,6 +23,7 @@ import pytest
 
 from wixy_server.background import BackgroundTaskHealth, ContainedTaskGroup
 from wixy_server.cmdchat import CmdChatClient
+from wixy_server.livechat import cookout_ai as real_ai
 from wixy_server.livechat.cookout_ai import (
     BASKET_MARKER,
     CONCEPTS_CALLER,
@@ -33,16 +34,14 @@ from wixy_server.livechat.cookout_ai import (
     CookoutTiming,
     RecipeTwists,
     basket_payload,
-    build_concepts_prompt,
     build_cookout_runner,
-    build_recipe_prompt,
     build_repair_suffix,
     concept_manifest,
     display_name,
     known_forbidden,
-    parse_concepts,
-    parse_recipe,
 )
+from wixy_server.livechat.cookout_images import build_image_prompt
+from wixy_server.livechat.cookout_modes import CookoutMode, default_modes
 from wixy_server.livechat.cookout_twists import challenge_by_id, style_by_id
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.tests.fake_cmd import (
@@ -52,6 +51,31 @@ from wixy_server.tests.fake_cmd import (
     canned_cookout_recipe,
     create_fake_cmd_app,
 )
+
+CLASSIC = default_modes().default
+"""Every pre-existing test is a Classic test: the AI functions take the game mode without a
+default (so production call sites state it), and these wrappers state it for the tests."""
+
+
+def build_concepts_prompt(*args: Any, **kwargs: Any) -> str:
+    kwargs.setdefault("mode", CLASSIC)
+    return real_ai.build_concepts_prompt(*args, **kwargs)
+
+
+def build_recipe_prompt(*args: Any, **kwargs: Any) -> str:
+    kwargs.setdefault("mode", CLASSIC)
+    return real_ai.build_recipe_prompt(*args, **kwargs)
+
+
+def parse_concepts(*args: Any, **kwargs: Any) -> Any:
+    kwargs.setdefault("mode", CLASSIC)
+    return real_ai.parse_concepts(*args, **kwargs)
+
+
+def parse_recipe(*args: Any, **kwargs: Any) -> Any:
+    kwargs.setdefault("mode", CLASSIC)
+    return real_ai.parse_recipe(*args, **kwargs)
+
 
 # -- the bank double --------------------------------------------------------------------------
 
@@ -2811,3 +2835,566 @@ def test_the_concepts_schema_lists_challenge_note_only_for_a_challenge() -> None
         prompt = _twist_prompt(ConceptTwists(challenge=challenge))
         assert '\n   "challengeNote": string (1-140 chars),' in prompt
         assert ('"totalMinutes": integer (5-30),' in prompt) is (challenge == "thirty-minutes")
+
+
+# -- game modes: Toasted sandwich (spec/server-chat/09c-cookout-modes.md §3, §8.3) -------------
+
+
+def _toastie_mode() -> CookoutMode:
+    mode = default_modes().mode("toastie")
+    assert mode is not None
+    return mode
+
+
+TOASTIE = _toastie_mode()
+GOLDEN = json.loads(
+    (Path(__file__).parent / "fixtures" / "cookout_chef_classic_golden.json").read_text("utf-8")
+)
+T_BREAD = "sliced-white-bread"
+T_FILLINGS = [
+    "mature-cheddar",
+    "red-leicester",
+    "cooked-ham",
+    "streaky-bacon",
+    "tomato",
+    "spinach",
+    "wholegrain-mustard",
+]
+T_IDS = [T_BREAD, *T_FILLINGS]
+T_WILDCARD = "avocado"
+
+
+def _t_prompt(bank: Any, ids: list[str], twists: ConceptTwists = ConceptTwists()) -> str:  # noqa: B008
+    payload = basket_payload(bank, ids, twists=twists)
+    assert payload is not None
+    names = [display_name(bank, i) for i in known_forbidden(bank, twists.forbidden_ids)]
+    return build_concepts_prompt(payload, mode=TOASTIE, forbidden_names=names)
+
+
+def _t_answer(
+    bank: Any,
+    ids: list[str] | None = None,
+    twists: ConceptTwists = ConceptTwists(),  # noqa: B008
+) -> dict[str, Any]:
+    value = canned_cookout_concepts(_t_prompt(bank, ids or T_IDS, twists))
+    assert value is not None
+    return value
+
+
+def _t_parse(
+    bank: Any,
+    obj: dict[str, Any],
+    ids: list[str] | None = None,
+    twists: ConceptTwists = ConceptTwists(),  # noqa: B008
+    bread_id: str | None = None,
+) -> Any:
+    return parse_concepts(
+        json.dumps(obj),
+        bank=bank,
+        picked_ids=ids or T_IDS,
+        mode=TOASTIE,
+        bread_id=bread_id,
+        twists=twists,
+    )
+
+
+def _set_used(concept: dict[str, Any], ids: list[str], used: list[str]) -> None:
+    """Make `concept` use exactly `used` (bread included by the caller) and omit the rest."""
+    concept["pickedIngredientIds"] = list(used)
+    concept["omitted"] = [{"id": i, "reason": "Saved for later."} for i in ids if i not in used]
+
+
+class TestClassicIsByteIdentical:
+    """The golden file was recorded from the code at e17ed304 (the chef fix, before modes)."""
+
+    VARIANTS: dict[str, tuple[str, ConceptTwists]] = {
+        "plain": ("basket10", ConceptTwists()),
+        "wildcard": ("basket11", ConceptTwists(wildcard_id=GOLDEN["basket11"][10])),
+        "styled": ("basket10", ConceptTwists(style="posh-tasting")),
+        "no-oven-stars": (
+            "basket10",
+            ConceptTwists(challenge="no-oven", star_ids=frozenset(GOLDEN["basket10"][:2])),
+        ),
+        "thirty": ("basket10", ConceptTwists(challenge="thirty-minutes")),
+        "forbidden": ("basket10", ConceptTwists(forbidden_ids=frozenset({"milk"}))),
+    }
+
+    @pytest.mark.parametrize("name", sorted(VARIANTS))
+    def test_the_concepts_prompt(self, real_bank: Any, name: str) -> None:
+        key, twists = self.VARIANTS[name]
+        payload = basket_payload(real_bank, GOLDEN[key], twists=twists)
+        assert payload is not None
+        names = [
+            display_name(real_bank, i) for i in known_forbidden(real_bank, twists.forbidden_ids)
+        ]
+        prompt = build_concepts_prompt(payload, mode=CLASSIC, forbidden_names=names)
+        assert prompt == GOLDEN["prompts"][f"concepts:{name}"]
+
+    @pytest.mark.parametrize("name", ["plain", "styled", "challenge", "forbidden"])
+    def test_the_recipe_prompt_and_manifest(self, real_bank: Any, name: str) -> None:
+        basket10 = GOLDEN["basket10"]
+        rt = {
+            "plain": RecipeTwists(),
+            "styled": RecipeTwists(style="posh-tasting", star_ids=frozenset(basket10[:2])),
+            "challenge": RecipeTwists(challenge="thirty-minutes"),
+            "forbidden": RecipeTwists(forbidden_ids=frozenset({"milk"})),
+        }[name]
+        concept = GOLDEN["concept"]
+        manifest = concept_manifest(concept, real_bank, forbidden_ids=rt.forbidden_ids)
+        assert json.dumps(manifest, sort_keys=True) == GOLDEN["prompts"][f"manifest:{name}"]
+        assert (
+            build_recipe_prompt(concept, manifest, mode=CLASSIC, twists=rt)
+            == GOLDEN["prompts"][f"recipe:{name}"]
+        )
+
+    def test_the_picture_prompts(self, real_bank: Any) -> None:
+        names = [real_bank.ingredient(i).name for i in GOLDEN["basket10"][:4]]
+        assert build_image_prompt("Golden Steak Toast", names) == GOLDEN["prompts"]["image:plain"]
+        assert (
+            build_image_prompt("Golden Steak Toast", names, style="posh-tasting")
+            == GOLDEN["prompts"]["image:styled"]
+        )
+        # stating the Classic mode changes nothing either
+        assert (
+            build_image_prompt("Golden Steak Toast", names, mode=CLASSIC)
+            == GOLDEN["prompts"]["image:plain"]
+        )
+
+
+class TestToastieConceptsPrompt:
+    def test_it_names_the_bread_by_name_and_id_and_the_rules(self, real_bank: Any) -> None:
+        prompt = _t_prompt(real_bank, T_IDS)
+        assert "a TOASTED SANDWICH: one bread and 7 fillings" in prompt
+        assert 'the chosen bread (Sliced white bread, id "sliced-white-bread")' in prompt
+        assert "Use the bread in all three ideas and name it" in prompt
+        assert "at least 5 of the 7 fillings" in prompt
+        assert "at least one idea must use 6 or more" in prompt
+        assert "between them the three ideas must use all 7" in prompt
+        assert "Butter is always allowed" in prompt
+        assert "at most TWO of: plain flour, cooking oil, granulated sugar, milk" in prompt
+        for build in TOASTIE.chef.builds:
+            assert f"{build.id} ({build.label}: {build.prompt_phrase})" in prompt
+        # the Classic prompt's measured steering is carried over (found by the real-run trial)
+        assert "never name one: not what a picked sauce or spread is made of" in prompt
+        assert "not another dish you compare the sandwich to" in prompt
+        assert 'an idea that uses every filling has "omitted": []' in prompt
+        assert "must be exactly 7." in prompt
+        # not the Classic opening, rules or schema
+        assert "THREE distinct recipe concepts" not in prompt
+        assert '"dishType"' not in prompt
+        assert '"build": one of "pressed"' in prompt
+
+    def test_the_numbers_follow_the_wildcard_basket(self, real_bank: Any) -> None:
+        prompt = _t_prompt(real_bank, [*T_IDS, T_WILDCARD], ConceptTwists(wildcard_id=T_WILDCARD))
+        assert "one bread and 8 fillings" in prompt
+        assert "at least 6 of the 8 fillings" in prompt
+        assert "at least one idea must use 7 or more" in prompt
+        assert "must use all 8" in prompt
+        assert "WILDCARD ingredient (id avocado)" in prompt
+
+    def test_the_basket_marker_line_carries_the_food_only_payload(self, real_bank: Any) -> None:
+        prompt = _t_prompt(real_bank, T_IDS)
+        line = next(x for x in prompt.splitlines() if x.startswith(BASKET_MARKER))
+        payload = json.loads(line[len(BASKET_MARKER) :])
+        assert [i["id"] for i in payload["ingredients"]] == sorted(T_IDS)
+        assert "twists" not in payload
+
+    def test_a_style_line_follows_the_style_and_a_challenge_adds_its_note(
+        self, real_bank: Any
+    ) -> None:
+        plain = _t_prompt(real_bank, T_IDS)
+        assert "STYLE:" not in plain
+        assert "still a closed toasted sandwich" not in plain
+        styled = _t_prompt(real_bank, T_IDS, ConceptTwists(style="posh-tasting"))
+        style_line = next(x for x in styled.splitlines() if x.startswith("STYLE:"))
+        assert style_line.endswith(
+            "The style flavours the toasted sandwiches; every idea is still a closed toasted "
+            "sandwich."
+        )
+        challenged = _t_prompt(real_bank, T_IDS, ConceptTwists(challenge="no-oven"))
+        assert '"challengeNote": string' in challenged
+
+    def test_a_basket_without_exactly_one_bread_cannot_be_prompted(self, real_bank: Any) -> None:
+        payload = basket_payload(real_bank, T_FILLINGS + ["tomato-ketchup"])
+        assert payload is not None
+        with pytest.raises(ValueError, match="exactly one"):
+            build_concepts_prompt(payload, mode=TOASTIE)
+
+
+class TestToastieParseConcepts:
+    def test_the_canned_answer_is_accepted_and_stores_the_dish_fields(self, real_bank: Any) -> None:
+        parsed = _t_parse(real_bank, _t_answer(real_bank))
+        assert parsed.violations == ()
+        assert parsed.signals == ()
+        concepts = parsed.value["concepts"]
+        assert [c["build"] for c in concepts] == ["pressed", "skillet", "grill-toasted"]
+        assert {c["dishType"] for c in concepts} == {"sandwich"}
+        assert [c["technique"] for c in concepts] == ["grill", "pan-fry", "grill"]
+        assert all(T_BREAD in c["pickedIngredientIds"] for c in concepts)
+
+    def test_dish_type_and_technique_the_model_sent_are_ignored(self, real_bank: Any) -> None:
+        obj = _t_answer(real_bank)
+        for concept in obj["concepts"]:
+            concept["dishType"] = "volcano"
+            concept["technique"] = "teleport"
+        parsed = _t_parse(real_bank, obj)
+        assert parsed.violations == ()
+        assert {c["dishType"] for c in parsed.value["concepts"]} == {"sandwich"}
+
+    def test_a_wildcard_basket_with_eight_fillings(self, real_bank: Any) -> None:
+        ids = [*T_IDS, T_WILDCARD]
+        twists = ConceptTwists(wildcard_id=T_WILDCARD)
+        parsed = _t_parse(real_bank, _t_answer(real_bank, ids, twists), ids, twists)
+        assert parsed.violations == ()
+
+    def test_the_bread_id_may_be_given_or_derived(self, real_bank: Any) -> None:
+        obj = _t_answer(real_bank)
+        assert _t_parse(real_bank, obj, bread_id=T_BREAD).value is not None
+        assert _t_parse(real_bank, obj, bread_id=None).value is not None
+
+    # -- rejections
+
+    def _violations(
+        self, bank: Any, edit: Callable[[list[dict[str, Any]]], None], **kw: Any
+    ) -> str:
+        obj = _t_answer(bank, kw.get("ids"), kw.get("twists", ConceptTwists()))
+        edit(obj["concepts"])
+        parsed = _t_parse(bank, obj, kw.get("ids"), kw.get("twists", ConceptTwists()))
+        assert parsed.value is None
+        return " | ".join(parsed.violations)
+
+    def test_a_concept_without_the_bread(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            _set_used(c[1], T_IDS, T_FILLINGS)
+
+        assert "concept b leaves out the bread 'sliced-white-bread'" in self._violations(
+            real_bank, edit
+        )
+
+    def test_a_different_bread_is_not_in_the_basket(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["pickedIngredientIds"][c[0]["pickedIngredientIds"].index(T_BREAD)] = (
+                "ciabatta-roll"
+            )
+
+        assert "'ciabatta-roll', which is not one of the 8 picks" in self._violations(
+            real_bank, edit
+        )
+
+    def test_the_bread_may_not_be_omitted(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[2]["omitted"].append({"id": T_BREAD, "reason": "Not needed."})
+
+        assert "omitted must be exactly" in self._violations(real_bank, edit)
+
+    def test_each_idea_needs_f_minus_two_fillings(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            _set_used(c[2], T_IDS, [T_BREAD, *T_FILLINGS[:4]])
+
+        assert "concept c uses only 4 fillings; each idea needs 5+ of the 7" in self._violations(
+            real_bank, edit
+        )
+
+    def test_one_idea_must_use_f_minus_one(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            _set_used(c[0], T_IDS, [T_BREAD, *T_FILLINGS[0:5]])
+            _set_used(c[1], T_IDS, [T_BREAD, *T_FILLINGS[2:7]])
+            _set_used(c[2], T_IDS, [T_BREAD, *T_FILLINGS[1:6]])
+
+        assert "at least one idea must use 6+ of the 7 fillings" in self._violations(
+            real_bank, edit
+        )
+
+    def test_every_filling_must_be_used_somewhere(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            _set_used(c[0], T_IDS, [T_BREAD, *T_FILLINGS[:6]])
+            _set_used(c[1], T_IDS, [T_BREAD, *T_FILLINGS[:6]])
+            _set_used(c[2], T_IDS, [T_BREAD, *T_FILLINGS[:5]])
+
+        assert "no concept uses these picks: wholegrain-mustard" in self._violations(
+            real_bank, edit
+        )
+
+    def test_builds_must_be_known_and_different(self, real_bank: Any) -> None:
+        text = self._violations(real_bank, lambda c: c[1].__setitem__("build", c[0]["build"]))
+        assert "concepts a and b share the build 'pressed'" in text
+        text = self._violations(real_bank, lambda c: c[1].__setitem__("build", "microwaved"))
+        assert "concept b build must be one of pressed, skillet" in text
+        text = self._violations(real_bank, lambda c: c[1].pop("build"))
+        assert "concept b build must be one of" in text
+
+    def test_the_oven_build_is_refused_under_no_oven(self, real_bank: Any) -> None:
+        twists = ConceptTwists(challenge="no-oven")
+        text = self._violations(
+            real_bank, lambda c: c[2].__setitem__("build", "oven-baked"), twists=twists
+        )
+        assert "build 'oven-baked' needs the oven (no oven)" in text
+        # outside the challenge the same build is fine
+        obj = _t_answer(real_bank)
+        obj["concepts"][2]["build"] = "oven-baked"
+        assert _t_parse(real_bank, obj).value is not None
+
+    def test_a_third_capped_staple_breaks_the_cap_of_two(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[1]["stapleIds"] = ["butter", "plain-flour", "cooking-oil", "milk"]
+
+        assert "concept b uses more than 2 extra staples" in self._violations(real_bank, edit)
+
+    def test_two_capped_staples_and_butter_are_fine(self, real_bank: Any) -> None:
+        obj = _t_answer(real_bank)
+        obj["concepts"][1]["stapleIds"] = ["butter", "plain-flour", "milk", "salt"]
+        assert _t_parse(real_bank, obj).value is not None
+
+    def test_a_genuine_unpicked_food_in_prose(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["description"] += " Served with a slice of mango."
+
+        assert "mentions 'Mango'" in self._violations(real_bank, edit)
+
+    def test_a_swapped_out_bread_may_not_be_named(self, real_bank: Any) -> None:
+        twists = ConceptTwists(forbidden_ids=frozenset({"sourdough-loaf"}))
+
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["description"] += " Not the usual sourdough loaf."
+
+        assert "removed and may not appear anywhere" in self._violations(
+            real_bank, edit, twists=twists
+        )
+
+    # -- acceptance regressions: correct answers must never be rejected (09c §3.4, §7)
+
+    def _accept(
+        self,
+        bank: Any,
+        *,
+        ids: list[str] | None = None,
+        twists: ConceptTwists = ConceptTwists(),  # noqa: B008
+        edit: Callable[[list[dict[str, Any]]], None],
+    ) -> Any:
+        obj = _t_answer(bank, ids, twists)
+        edit(obj["concepts"])
+        parsed = _t_parse(bank, obj, ids, twists)
+        assert parsed.violations == ()
+        assert parsed.value is not None
+        return parsed
+
+    @pytest.mark.parametrize(
+        ("bread", "title"),
+        [
+            ("sliced-white-bread", "White bread toastie"),
+            ("ciabatta-roll", "Ciabatta toastie"),
+            ("brioche-burger-bun", "Brioche toastie"),
+        ],
+    )
+    def test_a_short_form_of_the_bread_name_is_accepted(
+        self, real_bank: Any, bread: str, title: str
+    ) -> None:
+        ids = [bread, *T_FILLINGS]
+
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["title"] = title
+
+        self._accept(real_bank, ids=ids, edit=edit)
+
+    def test_a_description_that_never_names_the_bread_is_accepted(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["title"] = "Melting Cheddar Toastie"
+            c[0]["description"] = (
+                "A golden, melting toastie for two with mature cheddar, red leicester, "
+                "cooked ham, streaky bacon and tomato, finished with a little butter."
+            )
+
+        self._accept(real_bank, edit=edit)
+
+    def test_never_an_open_sandwich_is_accepted_with_a_signal(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["description"] = "A closed sliced white bread toastie, never an open sandwich."
+
+        parsed = self._accept(real_bank, edit=edit)
+        assert parsed.signals == ("concept a: 'open sandwich'",)
+
+    def test_a_bruschetta_inspired_filling_is_accepted_with_a_signal(self, real_bank: Any) -> None:
+        ids = ["ciabatta-roll", *T_FILLINGS]
+
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[1]["description"] = (
+                "A closed ciabatta roll toastie with bruschetta-inspired tomato filling."
+            )
+
+        parsed = self._accept(real_bank, ids=ids, edit=edit)
+        assert parsed.signals == ("concept b: 'bruschetta'",)
+
+    def test_butter_may_be_named_without_being_declared(self, real_bank: Any) -> None:
+        def edit(c: list[dict[str, Any]]) -> None:
+            c[0]["stapleIds"] = []
+            c[0]["description"] += " Everything is fried in butter."
+
+        self._accept(real_bank, edit=edit)
+
+    def test_a_starred_bread_needs_no_name_in_the_prose(self, real_bank: Any) -> None:
+        twists = ConceptTwists(star_ids=frozenset({T_BREAD, "tomato"}))
+
+        def edit(c: list[dict[str, Any]]) -> None:
+            for concept in c:
+                concept["title"] = f"Hero {concept['build']} tomato toastie"
+                concept["description"] = (
+                    "A crisp toastie for two with tomato and red leicester, finished with butter."
+                )
+
+        self._accept(real_bank, twists=twists, edit=edit)
+
+    def test_a_missing_star_is_still_a_violation(self, real_bank: Any) -> None:
+        twists = ConceptTwists(star_ids=frozenset({"spinach"}))
+        obj = _t_answer(real_bank, twists=twists)
+        _set_used(obj["concepts"][2], T_IDS, [T_BREAD, *T_FILLINGS[:5]])
+        parsed = _t_parse(real_bank, obj, twists=twists)
+        assert any("must use star 'spinach'" in v for v in parsed.violations)
+
+    def test_signals_never_stop_an_answer_or_start_a_repair(self, real_bank: Any) -> None:
+        obj = _t_answer(real_bank)
+        for concept in obj["concepts"]:
+            concept["description"] = (
+                "A closed toastie for two with red leicester, never an open "
+                "sandwich or an open-faced bake, finished with butter."
+            )
+        parsed = _t_parse(real_bank, obj)
+        assert parsed.value is not None
+        assert parsed.violations == ()
+        assert len(parsed.signals) == 6  # 'open sandwich' and 'open-faced' in each of the three
+
+    def test_classic_never_reports_signals_or_a_build(self) -> None:
+        parsed = _parse(canned_concepts_obj())
+        assert parsed.signals == ()
+        assert all("build" not in c for c in parsed.value["concepts"])
+
+    def test_the_fake_chef_answers_every_random_basket_acceptably(self, real_bank: Any) -> None:
+        import random
+
+        rng = random.Random(7)
+        accepted = 0
+        for _ in range(40):
+
+            def pick(kind: str) -> str:
+                return rng.choice(TOASTIE.kinds[kind].candidates).id
+
+            ids = [
+                pick("bread"),
+                *(pick("cheese") for _ in range(2)),
+                *(pick("main") for _ in range(2)),
+                *(pick("produce") for _ in range(2)),
+                pick("finish"),
+            ]
+            if len(set(ids)) != 8:
+                continue
+            parsed = _t_parse(real_bank, _t_answer(real_bank, ids), ids)
+            assert parsed.value is not None, (ids, parsed.violations)
+            accepted += 1
+        assert accepted >= 30
+
+
+class TestToastieRecipe:
+    @staticmethod
+    def _concept(bank: Any, **edit: Any) -> dict[str, Any]:
+        parsed = _t_parse(bank, _t_answer(bank))
+        concept = dict(parsed.value["concepts"][1])  # the skillet idea
+        concept.update(edit)
+        return concept
+
+    def test_the_prompt_carries_the_build_and_butter_is_free(self, real_bank: Any) -> None:
+        concept = self._concept(real_bank, stapleIds=[])
+        manifest = concept_manifest(concept, real_bank, mode=TOASTIE)
+        assert "butter" in [s["id"] for s in manifest["staples"]]
+        prompt = build_recipe_prompt(concept, manifest, mode=TOASTIE)
+        assert (
+            "This is the full recipe for one toasted sandwich idea, for two people (two "
+            'sandwiches). Keep the bread on the outside and make it the "Skillet-fried" way: '
+            "fried in a pan under a weight, turned once. Butter is always allowed."
+        ) in prompt
+        assert "Water, salt, black pepper and butter are always free too." in prompt
+        assert "(no plain flour, cooking oil, granulated sugar or milk unless" in prompt
+        assert '"build":"skillet"' in prompt
+        # Classic's manifest never lists butter unless declared
+        classic = concept_manifest(concept, real_bank)
+        assert "butter" not in [s["id"] for s in classic["staples"]]
+
+    def test_butter_is_accepted_undeclared_but_only_in_this_mode(self, real_bank: Any) -> None:
+        concept = self._concept(real_bank, stapleIds=[])
+        manifest = concept_manifest(concept, real_bank, mode=TOASTIE)
+        recipe = canned_cookout_recipe(build_recipe_prompt(concept, manifest, mode=TOASTIE))
+        assert recipe is not None
+        recipe["steps"][0]["text"] += " Butter the outside of every slice."
+        parsed = parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept, mode=TOASTIE)
+        assert parsed.violations == ()
+        assert parsed.value is not None
+        # the same recipe is refused by Classic's rules (butter is a capped, declared staple there)
+        classic = parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept, mode=CLASSIC)
+        assert classic.value is None
+
+    def test_a_capped_staple_must_still_be_declared(self, real_bank: Any) -> None:
+        concept = self._concept(real_bank, stapleIds=["butter"])
+        manifest = concept_manifest(concept, real_bank, mode=TOASTIE)
+        recipe = canned_cookout_recipe(build_recipe_prompt(concept, manifest, mode=TOASTIE))
+        assert recipe is not None
+        recipe["ingredients"].append({"id": "plain-flour", "quantity": "1 tbsp", "note": ""})
+        parsed = parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept, mode=TOASTIE)
+        assert any("not in this dish's manifest" in v for v in parsed.violations)
+
+    def test_the_fake_chef_recipe_is_accepted(self, real_bank: Any) -> None:
+        concept = self._concept(real_bank)
+        manifest = concept_manifest(concept, real_bank, mode=TOASTIE)
+        recipe = canned_cookout_recipe(build_recipe_prompt(concept, manifest, mode=TOASTIE))
+        parsed = parse_recipe(json.dumps(recipe), bank=real_bank, concept=concept, mode=TOASTIE)
+        assert parsed.violations == (), parsed.violations
+        assert parsed.value is not None
+
+
+class TestUnknownModeAbortsWithoutWriting:
+    def test_a_round_of_a_mode_this_server_lacks_is_never_touched(self, tmp_path: Path) -> None:
+        store = FakeStore()
+        row = store.add_round(1)
+        row["mode"] = "pizza"
+        row["state"] = "finished"
+        store.add_recipe(1, "a")
+        for client in (None, _client_unused()):
+            runner = _runner(store, client, tmp_path)
+
+            async def go(r: CmdCookoutRunner = runner) -> None:
+                await r.run_concepts(1, 1)
+                await r.run_recipe(1, 1, "a")
+
+            anyio.run(go)
+        assert store.finished == []
+        assert store.claims == []
+        assert store.rounds[1]["concepts"] == "pending"
+
+
+def _client_unused() -> CmdChatClient:
+    """A client that is never called (the job aborts before it would spawn): any request fails."""
+    return CmdChatClient(
+        transport=httpx.MockTransport(lambda request: httpx.Response(500)), max_attempts=1
+    )
+
+
+class TestToastieBasketWithoutABread:
+    def test_the_concepts_job_fails_cleanly_instead_of_raising(
+        self, real_bank: Any, tmp_path: Path
+    ) -> None:
+        """A single-dish basket with no (or two) bread items must end `failed`, not crash the
+        prompt builder (review L1)."""
+        for basket in (
+            T_FILLINGS + ["tomato-ketchup"],
+            [T_BREAD, "ciabatta-roll", *T_FILLINGS[:6]],
+        ):
+            store = FakeStore()
+            row = store.add_round(picked=basket)
+            row["mode"] = "toastie"
+            runner = CmdCookoutRunner(
+                store=store,
+                bank=real_bank,
+                client=_client_unused(),
+                notifier=_notifier(),
+                cwd=tmp_path / "cookout-jobs",
+                timing=FAST,
+            )
+            anyio.run(runner.run_concepts, 1, 1)
+            assert store.rounds[1]["concepts"] == "failed", basket

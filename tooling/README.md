@@ -27,7 +27,7 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
   CNAME, tunnel ingress, a path-scoped Access app covering only `/admin` +
   `/api/admin`). Idempotent; run elevated (admin gate) — reads the CF_* credentials
   install.py copies into `D:\Servers\Wixy\Storage\.env`, never Wix credentials.
-- `cookout/visual/` — Cookout ingredient-catalogue and picture tooling (spec/server-chat/09b; livechat.md §24.2;
+- `cookout/visual/` — Cookout ingredient-catalogue and picture tooling (spec/server-chat/09b; livechat.md §24.3;
   decisions/00202). **Offline: it reads only the committed bank and catalogue, never chat content (Inv 58).** Python
   3.14; the modules import their siblings by plain name, so run each script by path (the unit tests put this folder on
   `sys.path`).

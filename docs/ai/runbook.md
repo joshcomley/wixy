@@ -237,7 +237,7 @@ unclaimed orphan attachments after 24 hours, removes raw upload sources for read
 retries archiving failed originals, expires an unarchived failed original after seven days, and
 prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
 
-## Cookout ingredient pictures (livechat.md §24.2, Inv 58, decisions/00202)
+## Cookout ingredient pictures (livechat.md §24.3, Inv 58, decisions/00202)
 
 The pictures are **not in git**. The repo holds only the manifest (`wixy_server/livechat/cookout_ingredient_images.json`)
 and the catalogue (`cookout_catalogue.json`); the picture bytes are content-addressed files, delivered as one immutable
@@ -334,7 +334,7 @@ Python in `pythoncore-3.14`; the modules import their siblings by plain name, so
    the category-interleaved rest into `<work>/images/plan.json`.
 3. `images.py run --phase pilot --render-only` renders the pilot (use `--checker haiku|luna`, `--limit N`, and drop
    `--render-only` to check as it goes). Then `calibrate.py` runs the 100-picture spot check and writes
-   `triad/cookout/r2/image-calibration.{md,html}`; its mechanical recommendation (§24.2) picks the checker for
+   `triad/cookout/r2/image-calibration.{md,html}`; its mechanical recommendation (§24.3) picks the checker for
    `images.py run --phase rest --checker <chosen>`. Both are resumable from the journal (`<work>/images/journal.jsonl`,
    `runs.jsonl`); a restart skips accepted ids and checks pictures rendered before it.
 4. `images.py status` prints counts by state and a measured ETA. The render needs `WIXY_COMFY_OUTPUT_DIR` in

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
@@ -209,6 +210,63 @@ _CHALLENGE_NOTES = {
 food word and no oven word, so it passes every deterministic check)."""
 
 
+_BREAD_ID_RE = re.compile(r'TOASTED SANDWICH.*?\(.*?, id "([a-z0-9-]+)"\)', re.DOTALL)
+_TOASTIE_BUILDS = ("pressed", "skillet", "grill-toasted")
+"""Three builds none of which needs the oven, so the fake's answer also keeps the no-oven rule
+(duplicated from the mode data on purpose, like the markers)."""
+
+
+def _canned_toastie_concepts(basket: dict[str, Any], bread_id: str) -> dict[str, Any] | None:
+    """A valid single-dish (toasted sandwich) answer: the bread in every idea, three different
+    builds, ideas using F-1, F-1 and F-2 of the F fillings (so every filling is used, one idea uses
+    F-1, each F-2+), honouring the prompt's stars, wildcard and challenge like the Classic fake."""
+    records = [r for r in basket.get("ingredients") or [] if isinstance(r, dict)]
+    ids = [str(r["id"]) for r in records]
+    names = {str(r["id"]): str(r["name"]) for r in records}
+    if bread_id not in ids:
+        return None
+    fillings = [i for i in ids if i != bread_id]
+    twists = basket.get("twists")
+    twists = twists if isinstance(twists, dict) else {}
+    stars = [str(i) for i in twists.get("stars") or []]
+    wildcard = twists.get("wildcard")
+    challenge = twists.get("challenge")
+    f = len(fillings)
+    windows = [fillings[: f - 1], fillings[1:], fillings[: f - 2]]
+    adjectives = ("Golden", "Crisp", "Melting")
+    vibes = ("Cosy", "Bold", "Quick")
+    concepts: list[dict[str, Any]] = []
+    for position, cid in enumerate(("a", "b", "c")):
+        wanted = set(windows[position]) | set(stars) | {bread_id}
+        if isinstance(wildcard, str) and position < 2:
+            wanted.add(wildcard)
+        used = [i for i in ids if i in wanted]
+        omitted = [i for i in ids if i not in used]
+        lead = [names[i] for i in used if i != bread_id][:2]
+        concept: dict[str, Any] = {
+            "id": cid,
+            "title": f"{adjectives[position]} {_join_names(lead)} Toastie",
+            "vibe": vibes[position],
+            "build": _TOASTIE_BUILDS[position],
+            "description": (
+                f"A closed toastie for two made with {_join_names([names[i] for i in used])}"
+                ", finished with a little butter."
+            ),
+            "pickedIngredientIds": list(used),
+            "stapleIds": ["butter"],
+            "omitted": [
+                {"id": i, "reason": "Saved for another night so this toastie stays focused."}
+                for i in omitted
+            ],
+        }
+        if isinstance(challenge, str):
+            concept["challengeNote"] = _CHALLENGE_NOTES.get(challenge, "Keeps to the rule.")
+            if challenge == "thirty-minutes":
+                concept["totalMinutes"] = 25
+        concepts.append(concept)
+    return {"concepts": concepts}
+
+
 def canned_cookout_concepts(prompt: str) -> dict[str, Any] | None:
     """A valid Stage-1 answer for the ten- or eleven-ingredient basket in `prompt`: three concepts
     using ids[0:8], ids[N-8:N] and ids[0:7] (so every pick is used, one concept uses 8, each uses
@@ -219,6 +277,9 @@ def canned_cookout_concepts(prompt: str) -> dict[str, Any] | None:
     if basket is None:
         return None
     raw = basket.get("ingredients")
+    bread_match = _BREAD_ID_RE.search(prompt)
+    if bread_match is not None and isinstance(raw, list) and len(raw) in (8, 9):
+        return _canned_toastie_concepts(basket, bread_match.group(1))
     if not isinstance(raw, list) or len(raw) not in (10, 11):
         return None
     records = [r for r in raw if isinstance(r, dict)]

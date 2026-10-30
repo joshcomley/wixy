@@ -51,6 +51,7 @@ from tooling.cookout.visual.cmdruns import (  # noqa: E402
     HAIKU,
     READ_ONLY_DISALLOWED,
     SOL,
+    SONNET,
     Journal,
     RunPool,
     RunSpec,
@@ -220,6 +221,13 @@ For EACH ingredient below return:
   famous (at most one number in a fact; a year is fine). No "the world's most/only/first/oldest"
   claims unless iconic. No invented anecdotes, no "legend says" presented as fact, nothing about
   living people. If you are not sure a fact is true, leave it out.
+  A strict reviewer will check every fact, so write facts that stay true for EVERY common version of
+  the ingredient. AVOID: botanical or scientific classification (family, genus), narrow geographic
+  limits ("only", "mainly", "found in X"), step-by-step preparation or "how it is made" unless it is
+  true of all common methods, word origins unless you are certain of the exact source word and its
+  meaning, comparisons, and exact definitions of dishes. PREFER: the well-known country or region of
+  origin, a famous traditional use, a widely known historical fact. Soften with "often", "usually"
+  or "traditionally" rather than stating absolutes.
 - "concern": null, or a note of at most 160 characters if this does not look like a real or sensible
   ingredient.
 """
@@ -241,9 +249,18 @@ CHECK_PROMPT = """\
 You are a careful food fact-checker for a cooking game. Below are short "fun facts" about
 ingredients. For EACH fact decide: "true" (accurate and widely documented), "doubtful" (you cannot
 confirm it, it is vague, or it is probably exaggerated), or "false" (wrong). Search the web for any
-fact you are not certain of; judge only the fact as written. Also mark "doubtful" any fact that is a
+fact you are not certain of; judge only the fact as written, and judge it as a STRICT reviewer who
+looks up each claim would. Mark "doubtful" any fact that: names a botanical family or genus; limits
+where something is found ("only", "mainly", "found in"); describes how it is made or prepared in a
+way that is not true of every common version; gives the origin or exact meaning of its name without
+solid support; confuses a cut, ingredient or type with a dish or another type; or states something
+true only of some varieties as if it held for all. Also mark "doubtful" any fact that is a
 health or nutrition claim, an invented-sounding anecdote, or an unqualified "most/only/first/oldest"
-superlative that is not iconic. Give a one-line reason (at most 200 characters) for every verdict.
+superlative that is not iconic. Rules, applied without exception: a claim true of only some versions, brands or varieties is
+"doubtful" unless it is hedged ("often", "usually", "traditionally"); a claim tying a food to one
+region, country or use is "doubtful" unless the food is defined by it; a name origin, meaning or
+botanical classification is "true" only if a dictionary or encyclopedia states exactly that.
+Give a one-line reason (at most 200 characters) for every verdict.
 
 Your FINAL message must be exactly one JSON object and nothing else, covering every id and every
 fact index given, in this shape:
@@ -299,7 +316,7 @@ def check_prompt(
         )
     extra = ""
     if examples:
-        shown = "\n".join(f"- {e}" for e in examples[:12])
+        shown = "\n".join(f"- {e}" for e in examples[:20])
         extra = (
             "\nA stricter reviewer recently rejected facts like these, so be tougher on the same "
             f"kind of claim:\n{shown}\n"
@@ -366,7 +383,7 @@ def _author_item_problem(
         "presentation": raw["presentation"],
         "facts": facts,
         "nameKey": name_key(bank_item),
-        "source": {"author": HAIKU.model, "factCheck": HAIKU.model, "at": now},
+        "source": {"author": HAIKU.model, "factCheck": SONNET.model, "at": now},
     }
     problems = vc.item_problems(bank_item.id, candidate, bank_item, names)
     if problems:
@@ -500,7 +517,7 @@ class Builder:
             "presentation": draft.get("presentation"),
             "facts": draft.get("facts"),
             "nameKey": name_key(bank_item),
-            "source": {"author": HAIKU.model, "factCheck": HAIKU.model, "at": 0},
+            "source": {"author": HAIKU.model, "factCheck": SONNET.model, "at": 0},
         }
         return vc.item_problems(item_id, candidate, bank_item, self.names)
 
@@ -622,8 +639,15 @@ class Builder:
             state.failures += 1
             state.error = problem
             if state.failures >= MAX_FAILURES:
-                state.stage = STAGE_FAILED
-                self.log(f"author: {item_id} FAILED after {state.failures} attempts: {problem}")
+                current = self.committed.get(item_id, {}).get("nameKey") == name_key(
+                    self.bank[item_id]
+                )
+                if current:
+                    self._finish(item_id)  # a re-check that cannot be re-authored keeps its facts
+                    self.log(f"author: {item_id} could not be re-authored; kept its facts")
+                else:
+                    state.stage = STAGE_FAILED
+                    self.log(f"author: {item_id} FAILED after {state.failures} attempts: {problem}")
         self.save_state()
         self.log(f"author: batch of {len(ids)}: {len(accepted)} accepted, {len(problems)} to retry")
 
@@ -637,7 +661,7 @@ class Builder:
         examples: Sequence[str] = (),
     ) -> int:
         if not examples:
-            examples = self._load_examples()
+            examples = self._recent_examples()
         batches = self.plan("factcheck", STAGE_CHECK, limit, only)
         self.log(f"factcheck: {len(batches)} batch(es)")
         await self._gather(self._check_batch(b, examples) for b in batches)
@@ -661,11 +685,11 @@ class Builder:
         for i in ids:
             drafts[i] = {"facts": self._facts_of(i)}
         audits = len(list(self.dir.glob("audit-*.json")))
-        key = batch_key("factcheck", ids, self.items, tag=f"x{len(examples)}a{audits}")
+        key = batch_key("factcheck", ids, self.items, tag=f"sonnet-x{len(examples)}a{audits}")
         spec = RunSpec(
             caller=CALLER,
             prompt=check_prompt([(self.bank[i], drafts[i]) for i in ids], examples),
-            model=HAIKU,
+            model=SONNET,
             effort="high",
             cwd=self.cwd.as_posix(),
             timeout_secs=CHECK_TIMEOUT_S,
@@ -700,6 +724,9 @@ class Builder:
         value = json.loads(path.read_text(encoding="utf-8"))
         return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
 
+    def _recent_examples(self) -> list[str]:
+        return self._load_examples()[-20:]
+
     def _all_committed_facts(self, except_id: str) -> set[str]:
         return {f for i, e in self.committed.items() if i != except_id for f in facts_of(e)}
 
@@ -724,7 +751,7 @@ class Builder:
         state.kept = merged
         state.error = None
         state.failures = 0
-        if len(merged) >= MIN_FACTS or state.draft is None or state.round >= MAX_AUTHOR_ROUNDS:
+        if len(merged) >= MIN_FACTS or state.round >= MAX_AUTHOR_ROUNDS:
             self._finish(item_id)
         else:
             state.stage = STAGE_AUTHOR  # back to the author with the rejected facts listed
@@ -733,7 +760,11 @@ class Builder:
         """Write the entry as it stands: survivors only, possibly fewer than two (or none)."""
         state = self.items[item_id]
         bank_item = self.bank[item_id]
-        base = state.draft or self.committed.get(item_id)
+        old = self.committed.get(item_id, {})
+        keep_old = bool(old) and old.get("nameKey") == name_key(bank_item)
+        # A re-check keeps the entry's picture description and caption (pictures may already be
+        # made from them); only the facts change. A new or stale entry takes the fresh draft.
+        base = old if keep_old else state.draft
         if base is None:
             state.stage = STAGE_FAILED
             return
@@ -745,15 +776,14 @@ class Builder:
             "nameKey": name_key(bank_item),
             "source": {
                 "author": HAIKU.model,
-                "factCheck": HAIKU.model,
+                "factCheck": SONNET.model,
                 "at": int(self.now()),
             },
         }
-        old = self.committed.get(item_id, {})
         old_source = old.get("source")
-        if isinstance(old_source, dict):
+        if isinstance(old_source, dict) and keep_old:
             for extra in ("visualBy", "visualAt"):
-                if extra in old_source and state.draft is None:
+                if extra in old_source:
                     source = entry["source"]
                     assert isinstance(source, dict)
                     source[extra] = old_source[extra]
@@ -873,20 +903,36 @@ class Builder:
     def _requeue_categories(self, failures: Sequence[Mapping[str, object]]) -> None:
         """Categories with a failed fact go back through the fact-check pass, failures as examples."""
         bad_categories = {self.bank[str(f["id"])].category for f in failures}
-        for item_id, state in self.items.items():
-            if state.stage == STAGE_DONE and self.bank[item_id].category in bad_categories:
-                has_facts = bool(facts_of(self.committed.get(item_id, {})))
-                state.stage = STAGE_CHECK
-                state.draft = None
-                state.kept = []
-                state.round = MAX_AUTHOR_ROUNDS
-                state.failures = 0
-                if not has_facts:
-                    state.stage = STAGE_DONE
-        self.save_state()
-        quoted = [str(f["fact"]) for f in failures]
-        atomic_write(self.dir / "examples.json", dump_json(quoted))
+        self.requeue(bad_categories)
+        self._add_examples([str(f["fact"]) for f in failures])
         self.log(f"audit: re-queued categories {sorted(bad_categories)} for the fact-check pass")
+
+    def requeue(self, categories: set[str] | None = None) -> int:
+        """Send finished entries (all, or those of the given categories) back through the
+        fact-check pass; one more author round is allowed for any left with fewer than two facts."""
+        count = 0
+        for item_id, state in self.items.items():
+            is_recheck = state.stage == STAGE_CHECK and state.draft is None
+            if state.stage != STAGE_DONE and not is_recheck:
+                continue
+            if categories is not None and self.bank[item_id].category not in categories:
+                continue
+            state.stage = STAGE_CHECK
+            state.draft = None
+            state.kept = []
+            state.rejected = []
+            state.round = MAX_AUTHOR_ROUNDS - 1
+            state.failures = 0
+            count += 1
+            if not facts_of(self.committed.get(item_id, {})):
+                state.stage = STAGE_AUTHOR  # nothing to check: write fresh facts
+        self.save_state()
+        return count
+
+    def _add_examples(self, facts: Sequence[str]) -> None:
+        seen = self._load_examples()
+        merged = seen + [f for f in facts if f not in seen]
+        atomic_write(self.dir / "examples.json", dump_json(merged[-60:]))
 
 
 # ---------------------------------------------------------------- the public API for parcel 2
@@ -984,6 +1030,28 @@ def report_markdown(
             + [f"- `{i}`: {r}" for i, r in sorted(waivers.items())]
             + [""]
         )
+    lines += [
+        "## Declared deviation from 09b A.2",
+        "",
+        "Spec A.2 has Haiku fact-check the facts. Audits 1 and 2 (144 and 142 of 150) showed it was too",
+        "lenient: the 14 failures above are almost all subtle overclaims (a usage or region stated too",
+        "narrowly, a preparation true of only some versions, a cut confused with a dish, a loose name",
+        "origin or botanical class), none an invented number or date. By ruling of the Architect the",
+        "pass-2 fact-check was re-run over every entry with Sonnet 5.5 (web allowed, the same",
+        "true/doubtful/false contract) and three added rules: nothing true of only some versions or",
+        "brands unless hedged, no single-region or single-use claim unless the food is defined by it,",
+        "and name origins and botany only if a dictionary or encyclopedia states them. Authoring stays",
+        "Haiku; each entry's `source.factCheck` records the model that last checked it.",
+        "",
+        "## Corrections after audit 3",
+        "",
+        "Audit 3 (147 of 150) still named three facts that are wrong or unsupported. They were removed",
+        "from the catalogue by hand rather than left in: the claim that chocolate was first prepared as",
+        "a drink in Mesoamerica (`chocolate-shavings`), the claim about how washing makes the rind",
+        "orange (`washed-rind-cheese`) and the claim that lasagne, tagliatelle and ravioli are made",
+        "from sfoglia sheets (`pasta-sfoglia`). The first two entries now have one fact.",
+        "",
+    ]
     if concerns:
         lines += ["## Haiku's concerns about bank entries (not acted on here)", ""]
         lines += [f"- `{i}`: {c}" for i, c in concerns.items()] + [""]
@@ -1036,6 +1104,12 @@ async def run_command(args: argparse.Namespace) -> int:
             await builder.factcheck(limit=args.limit, only=only_ids(args))
         elif command == "build":
             await builder.build(limit=args.limit)
+        elif command == "recheck":
+            for audit_file in sorted(builder.dir.glob("audit-*.json")):
+                audited = json.loads(audit_file.read_text(encoding="utf-8"))
+                builder._add_examples([str(f["fact"]) for f in audited.get("failures", [])])
+            print(f"re-queued {builder.requeue()} entries")
+            await builder.build()
         elif command == "audit":
             outcome = await builder.audit(seed=args.seed)
             print(json.dumps({k: v for k, v in outcome.items() if k != "failures"}))
@@ -1071,7 +1145,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, help="audit sample seed (default: random, recorded)")
     parser.add_argument("--allow-partial", action="store_true")
     parser.add_argument(
-        "command", choices=["author", "factcheck", "build", "audit", "validate", "report", "status"]
+        "command",
+        choices=[
+            "author",
+            "factcheck",
+            "build",
+            "recheck",
+            "audit",
+            "validate",
+            "report",
+            "status",
+        ],
     )
     args = parser.parse_args(argv)
     return asyncio.run(run_command(args))

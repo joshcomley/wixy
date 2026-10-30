@@ -3,7 +3,7 @@
 ### Inv 58 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
 
 The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to
-any conversation (livechat.md §24.2, workspace 00058 round 2, decisions/00202). Four rules:
+any conversation (livechat.md §24.3, workspace 00058 round 2, decisions/00202). Four rules:
 
 1. **Generated from ingredient names only.** The catalogue (`livechat/cookout_catalogue.json`) and every picture are
    produced offline by `tooling/cookout/visual/` from the committed ingredient bank. No chat message, player name, basket,

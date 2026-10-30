@@ -452,8 +452,8 @@ recipe view through the concept.
 
 ```text
 Photorealistic appetising food photograph of "{title}": one closed toasted sandwich made with
-{bread}, {build_phrase}, cut in half with the two halves stacked slightly apart so the hot, melted
-filling of {fillings} shows in the cross-section. Golden, crisp, evenly toasted bread. {presentation},
+{bread}, {build_phrase}, cut in half with the two halves stacked slightly apart, the cut faces turned
+toward the camera so the hot, melted filling of {fillings} shows in the cross-section. Golden, crunchy, evenly toasted bread. {presentation},
 shallow depth of field, no people, no hands, no raw-ingredient collage, no open sandwich, no unlisted
 side dishes, no text, labels, logos, or watermark.
 ```

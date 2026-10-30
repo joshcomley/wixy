@@ -398,7 +398,7 @@ working; a round that uses no twist is byte-for-byte the core):
   `dinnerPick:bool`, `style` / `challenge` (`{id,label,emoji}|null`), `ingredients:[<Ingredient>]` and
   `leftovers:[<Ingredient>]` (the dish's omitted items, which feed the Remix / Leftovers encore buttons); archived-generation
   entries resolve from `cookout_generations`.
-**Cookout pictures and catalogue text (livechat.md §24.2, spec 09b §E, Inv 58)** add read-time fields to the Cookout rows
+**Cookout pictures and catalogue text (livechat.md §24.3, spec 09b §E, Inv 58)** add read-time fields to the Cookout rows
 above. A client that predates them keeps working (it ignores unknown keys), and a server without a pack sends `null`s:
 
 - Every `<Ingredient>` / `<PickSnap>` snapshot (`players[].picks`, `starters`, `basket`, `history` offers and choices,
@@ -456,7 +456,7 @@ One level only: `<ReplyTo>` never nests another `<ReplyTo>`. `GET media/*`'s sig
 |---|---|---|---|---|
 | GET | `/admin/preview/{page}.html` | `routes_preview.py:get_preview_page` | CF | `HTMLResponse` (draft-merged page, **editor injected**), `Cache-Control: no-store`; 503, 404 |
 | GET | `/admin/versions/{n}/{path}` | `routes_versions.py:get_version_asset` | CF | `FileResponse` (archived build, editor **not** injected); 503, 404 |
-| GET | `/admin/cookout-img/{sha}.webp` | `app.py:get_cookout_image` | CF (no unlock token) | a Cookout ingredient picture by content hash (livechat.md §24.2, Inv 58): `200` `FileResponse` with `Content-Type: image/webp`, `Cache-Control: private, max-age=31536000, immutable`, `ETag: "<sha>"`, `X-Content-Type-Options: nosniff`; `304` (no body, same `Cache-Control`/`ETag`/`nosniff` headers, no `Content-Type`) when `If-None-Match` is `"<sha>"`, `W/"<sha>"` or the bare `<sha>`; `404` `{"detail":"Not Found"}` for a name that is not `<64 lowercase hex>.webp`, a sha that is not a card or thumb sha of the loaded manifest (even if a file with that name exists), or a manifest sha whose file is missing from this server's object search path |
+| GET | `/admin/cookout-img/{sha}.webp` | `app.py:get_cookout_image` | CF (no unlock token) | a Cookout ingredient picture by content hash (livechat.md §24.3, Inv 58): `200` `FileResponse` with `Content-Type: image/webp`, `Cache-Control: private, max-age=31536000, immutable`, `ETag: "<sha>"`, `X-Content-Type-Options: nosniff`; `304` (no body, same `Cache-Control`/`ETag`/`nosniff` headers, no `Content-Type`) when `If-None-Match` is `"<sha>"`, `W/"<sha>"` or the bare `<sha>`; `404` `{"detail":"Not Found"}` for a name that is not `<64 lowercase hex>.webp`, a sha that is not a card or thumb sha of the loaded manifest (even if a file with that name exists), or a manifest sha whose file is missing from this server's object search path |
 | GET | `/admin`, `/admin/` | `app.py:get_admin_shell` | CF | `HTMLResponse` (`admin_shell.html` instant-render shell, all `/admin/static` asset refs content-fingerprinted `?v=<hash>` at import), `Cache-Control: no-cache` |
 | GET | `/admin/{rest:path}` | `app.py:get_admin_shell_deep_link` | CF | same shell for every SPA panel path (`/admin/pages`, `/admin/edit/<page>`, … — decisions/00087; registered AFTER the static/guide/draft-media mounts so those win, BEFORE the public site catch-all) |
 | GET | `/uxer-style.json` | `app.py:uxer_style` | none | `FileResponse` (Uxer MCP dev tooling) |

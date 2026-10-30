@@ -20,6 +20,7 @@ import pytest
 
 from wixy_server.livechat import store as store_module
 from wixy_server.livechat.cookout_bank import CookoutBank, load_cookout_bank_or_empty
+from wixy_server.livechat.cookout_catalogue import Catalogue
 from wixy_server.livechat.cookout_game import (
     CookoutSetup,
     EncoreSpec,
@@ -27,6 +28,11 @@ from wixy_server.livechat.cookout_game import (
     current_turn,
 )
 from wixy_server.livechat.cookout_modes import CookoutModes, default_modes
+from wixy_server.livechat.cookout_visuals import (
+    IngredientVisuals,
+    empty_manifest,
+    set_default_visuals,
+)
 from wixy_server.livechat.reactions import reactor_key
 from wixy_server.livechat.store import (
     CookoutBadStateError,
@@ -203,6 +209,14 @@ def _strip_mode_fields(node: Any, *, top: bool = True) -> Any:
 
 
 class TestMigrationFromRealV21:
+    @pytest.fixture(autouse=True)
+    def _no_catalogue(self) -> Iterator[None]:
+        """The golden views predate the ingredient catalogue (`what`, `facts`, pictures), so they
+        are compared with no catalogue loaded, whatever the packaged one holds."""
+        set_default_visuals(IngredientVisuals(Catalogue(), empty_manifest(), []))
+        yield
+        set_default_visuals(None)
+
     def test_the_fixture_really_is_a_v21_database_with_every_round_state(self) -> None:
         conn = sqlite3.connect(FIXTURES / "livechat_v21.db")
         try:

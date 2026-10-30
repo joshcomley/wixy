@@ -30,6 +30,7 @@ from wixy_server.livechat.cookout_images import (
     concept_prompts,
     scratch_dir,
 )
+from wixy_server.livechat.cookout_modes import default_modes
 from wixy_server.livechat.cookout_twists import STYLE_IDS, style_by_id
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.wyr_game import WyrDemand
@@ -766,3 +767,143 @@ class TestPicturesAcrossASwap:
         anyio.run(h.job().run, 1)
         assert row["images"] == "done" and set(row["pictures"]) == {"a", "b", "c"}
         assert len(h.generator.calls) == 1 and len(h.generator.calls[0]) == 3
+
+
+# -- game modes: Toasted sandwich pictures (spec/server-chat/09c-cookout-modes.md §3.6, §8.3) ---
+
+
+@pytest.fixture(scope="module")
+def real_bank() -> Any:
+    from wixy_server.livechat.cookout_bank import load_cookout_bank
+
+    return load_cookout_bank()
+
+
+def _toastie() -> Any:
+    mode = default_modes().mode("toastie")
+    assert mode is not None
+    return mode
+
+
+class TestToastiePictures:
+    BREAD = "sliced-white-bread"
+    FILLINGS = ["mature-cheddar", "cooked-ham", "tomato"]
+
+    def _concept(self, **extra: Any) -> dict[str, Any]:
+        return {
+            "id": "a",
+            "title": "Golden Ham And Cheddar Toastie",
+            "build": "skillet",
+            "pickedIngredientIds": [self.BREAD, *self.FILLINGS],
+            "stapleIds": ["butter", "milk"],
+            **extra,
+        }
+
+    def test_the_prompt_has_the_bread_the_fillings_the_build_and_the_default_setting(self) -> None:
+        mode = _toastie()
+        build = next(b for b in mode.chef.builds if b.id == "skillet")
+        text = build_image_prompt(
+            "Golden Ham And Cheddar Toastie",
+            ["Mature cheddar", "Cooked ham", "Tomato"],
+            mode=mode,
+            bread_name="Sliced white bread",
+            build=build,
+        )
+        assert text.startswith(
+            'Photorealistic appetising food photograph of "Golden Ham And Cheddar Toastie": '
+            "one closed toasted sandwich made with Sliced white bread, pan-fried until deep "
+            "golden and crunchy, cut in half with the two halves stacked slightly apart, the cut "
+            "faces turned toward the camera so the hot, melted filling of Mature cheddar, Cooked "
+            "ham, Tomato shows in the cross-section."
+        )
+        assert mode.picture.default_presentation is not None
+        assert mode.picture.default_presentation in text
+        assert "no open sandwich" in text and text.endswith("no text, labels, logos, or watermark.")
+
+    def test_a_chefs_style_becomes_the_setting_and_the_subject_stays_a_toastie(self) -> None:
+        mode = _toastie()
+        style = style_by_id("campfire")
+        assert style is not None
+        text = build_image_prompt(
+            "T", ["Tomato"], style="campfire", mode=mode, bread_name="Ciabatta roll", build=None
+        )
+        assert style.picture_phrase[1:] in text
+        assert mode.picture.default_presentation not in text
+        assert "one closed toasted sandwich made with Ciabatta roll" in text
+
+    def test_the_round_prompts_name_fillings_only_never_staples_or_the_bread_twice(
+        self, real_bank: Any
+    ) -> None:
+        from wixy_server.livechat.cookout_ai import BankNamer
+
+        row = {
+            "mode": "toastie",
+            "bread_id": self.BREAD,
+            "concepts_json": json.dumps(
+                {
+                    "concepts": [
+                        self._concept(id="a"),
+                        self._concept(id="b", build="pressed"),
+                        self._concept(id="c", build="jaffle", title="Jaffle Special"),
+                    ]
+                }
+            ),
+        }
+        prompts = concept_prompts(row, BankNamer(real_bank))
+        assert prompts is not None and set(prompts) == {"a", "b", "c"}
+        a = prompts["a"]
+        assert "made with Sliced white bread, pan-fried" in a
+        assert "filling of Mature Cheddar, Cooked ham, Tomato shows" in a
+        assert "Butter" not in a and "Milk" not in a
+        assert a.count("Sliced white bread") == 1
+        assert "with the ridged marks of a sandwich press" in prompts["b"]
+        assert "sealed at the edges in a rounded jaffle shape" in prompts["c"]
+
+    def test_the_round_style_reaches_every_toastie_prompt(self, real_bank: Any) -> None:
+        from wixy_server.livechat.cookout_ai import BankNamer
+
+        concepts = [
+            self._concept(id=i, build=b)
+            for i, b in zip("abc", ("pressed", "skillet", "jaffle"), strict=True)
+        ]
+        row = {
+            "mode": "toastie",
+            "style": "campfire",
+            "concepts_json": json.dumps({"concepts": concepts}),
+        }
+        prompts = concept_prompts(row, BankNamer(real_bank))
+        assert prompts is not None
+        style = style_by_id("campfire")
+        assert style is not None
+        assert all(style.picture_phrase[1:] in p for p in prompts.values())
+
+    def test_the_bread_is_found_when_the_round_row_does_not_say_which(self, real_bank: Any) -> None:
+        from wixy_server.livechat.cookout_ai import BankNamer
+
+        concepts = [
+            self._concept(id=i, build=b)
+            for i, b in zip("abc", ("pressed", "skillet", "jaffle"), strict=True)
+        ]
+        row = {"mode": "toastie", "concepts_json": json.dumps({"concepts": concepts})}
+        prompts = concept_prompts(row, BankNamer(real_bank))
+        assert prompts is not None and "made with Sliced white bread" in prompts["a"]
+
+    def test_an_unknown_mode_has_no_prompts(self, real_bank: Any) -> None:
+        from wixy_server.livechat.cookout_ai import BankNamer
+
+        row = {"mode": "pizza", "concepts_json": canned_concepts_text()}
+        assert concept_prompts(row, BankNamer(real_bank)) is None
+
+    def test_the_template_and_phrases_name_no_bank_food(self, real_bank: Any) -> None:
+        mode = _toastie()
+        free = {i for i in ("water", "salt", "black-pepper", "butter")}
+        assert mode.picture.template is not None
+        texts = [mode.picture.template, mode.picture.default_presentation or ""]
+        texts += [b.picture_phrase for b in mode.chef.builds]
+        for text in texts:
+            found = real_bank.find_contraband_ingredients(
+                text,
+                allowed_ingredient_ids=set(),
+                allowed_staple_ids=free,
+            )
+            assert found == [], (text, found)

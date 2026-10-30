@@ -2,7 +2,7 @@
 Playing Cookout, the ingredient cards were an emoji and a name: the operator could not tell what half the 3,500 ingredients
 were, the pick screen scrolled on a phone, and the wait for the chef was dead time. He asked for an actual picture of every
 ingredient, a plain "what it is" line, fun facts while the chef thinks, and a pick screen that fits a phone. The spec is
-`spec/server-chat/09b-cookout-visual.md`; docs are livechat.md §24.2, contracts.md, runbook.md "Cookout ingredient
+`spec/server-chat/09b-cookout-visual.md`; docs are livechat.md §24.3, contracts.md, runbook.md "Cookout ingredient
 pictures", Inv 58.
 
 # The need
