@@ -11,6 +11,7 @@ import { createCookoutModel } from "../../src/server/cookout/model";
 function summary(patch: Partial<CookoutSummary>): CookoutSummary {
   return {
     state: "finished",
+    mode: "classic",
     blind: false,
     pickedCount: 10,
     concepts: "none",

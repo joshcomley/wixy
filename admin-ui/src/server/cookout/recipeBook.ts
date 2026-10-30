@@ -14,11 +14,23 @@
 // filter sits above the list; and every entry carries Remix (start a new game seeded with this dish's own
 // ingredients) and — when the dish left something out — Leftovers encore. Both open the start sheet
 // with an Encore banner preset; nothing starts until the players press Start.
+//
+// GAME MODES (spec/server-chat/09c-cookout-modes.md §6.4): a dish from a non-Classic round carries a small
+// badge with its mode's emoji (🥪), and its Remix and Leftovers start the same game mode.
 
 import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
 import type { LockHooks, ServerSession } from "../types";
-import { formatMinutes, getRecipeBook, MAX_RATING, type BookRecipe, type BookResult, type ConceptId, type Picture } from "./api";
+import {
+  CLASSIC_MODE_ID,
+  formatMinutes,
+  getRecipeBook,
+  MAX_RATING,
+  type BookRecipe,
+  type BookResult,
+  type ConceptId,
+  type Picture,
+} from "./api";
 import type { EncorePreset } from "./startSheet";
 
 export interface RecipeBookDeps {
@@ -196,6 +208,7 @@ export function createRecipeBook(deps: RecipeBookDeps): RecipeBook {
         kind,
         title: recipe.title,
         candidates,
+        mode: recipe.mode.id,
       });
     });
     return b;
@@ -220,6 +233,13 @@ export function createRecipeBook(deps: RecipeBookDeps): RecipeBook {
     const name = el("span", "wx-srv-ck-book-name", recipe.title);
     words.append(name);
     const badges = el("span", "wx-srv-ck-book-badges");
+    if (recipe.mode.id !== CLASSIC_MODE_ID) {
+      const badge = el("span", "wx-srv-ck-book-badge wx-srv-ck-book-mode", recipe.mode.emoji !== "" ? recipe.mode.emoji : recipe.mode.label);
+      badge.dataset["gameMode"] = recipe.mode.id;
+      badge.title = recipe.mode.label;
+      badge.setAttribute("aria-label", recipe.mode.label);
+      badges.append(badge);
+    }
     if (recipe.cooked !== null) badges.append(el("span", "wx-srv-ck-book-badge wx-srv-ck-book-cooked", "✓ Cooked"));
     if (recipe.dinnerPick) badges.append(el("span", "wx-srv-ck-book-badge wx-srv-ck-book-dinner", "🎯 Dinner pick"));
     if (recipe.style !== null) badges.append(el("span", "wx-srv-ck-book-badge", `${recipe.style.emoji} ${recipe.style.label}`.trim()));

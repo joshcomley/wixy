@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CookoutOptions, IngredientSnap, SearchResult } from "../../src/server/cookout/api";
-import { parseSnap } from "../../src/server/cookout/api";
+import { CLASSIC_OPTION, parseSnap } from "../../src/server/cookout/api";
 import { createCookoutStartSheet, type EncorePreset, type StartChoices, type StartPreset } from "../../src/server/cookout/startSheet";
 import { BEANS, MISO, PARSLEY, RIBEYE, SALMON, TOAST } from "./fixtures";
 import { TOMATOES, flush, q, qa, visible, type Json } from "./twistFixtures";
@@ -26,6 +26,7 @@ const OPTIONS: CookoutOptions = {
   ],
   chef: true,
   pictures: true,
+  modes: [CLASSIC_OPTION],
 };
 const NO_CHEF: CookoutOptions = { ...OPTIONS, chef: false };
 
@@ -210,7 +211,7 @@ describe("the chef-only rows", () => {
     q<HTMLButtonElement>(m.sheet.element, ".wx-srv-ck-twist-cloche").click();
     q<HTMLButtonElement>(m.sheet.element, ".wx-srv-ck-twist-stars").click();
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: false, style: "cosy-pub", challenge: "no-oven", wildcard: true, stars: true, fridgeSeedId: null, encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: false, style: "cosy-pub", challenge: "no-oven", wildcard: true, stars: true, fridgeSeedId: null, encore: null });
   });
 
   it("are NOT sent when there is no chef, even if a preset had them on; the fridge raid still is", async () => {
@@ -219,6 +220,7 @@ describe("the chef-only rows", () => {
       await openWith(m, { style: "cosy-pub", challenge: "one-pan", wildcard: true, stars: true, fridge: ingredient(TOMATOES) });
       go(m).click();
       expect(m.starts()[0], String(options?.chef)).toEqual({
+        mode: "classic",
         blind: false,
         style: null,
         challenge: null,
@@ -235,7 +237,7 @@ describe("the chef-only rows", () => {
     const m = make(OPTIONS);
     await openWith(m, { blind: true });
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: true, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: null, encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: true, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: null, encore: null });
   });
 });
 
@@ -258,7 +260,7 @@ describe("the fridge raid's search", () => {
     m.fire();
     await flush();
     expect(m.search).toHaveBeenCalledTimes(1);
-    expect(m.search).toHaveBeenCalledWith("tom");
+    expect(m.search).toHaveBeenCalledWith("tom", "classic");
     expect(qa(m.sheet.element, ".wx-srv-ck-fridge-option").map((o) => o.dataset["ingredient"])).toEqual(["cherry-tomatoes", "salmon-fillet"]);
   });
 
@@ -443,7 +445,7 @@ describe("the 'New' preset", () => {
     expect(q(m.sheet.element, ".wx-srv-ck-fridge-chip-name").textContent).toBe("Cherry tomatoes");
     expect(q(m.sheet.element, ".wx-srv-ck-twists-count").textContent).toBe("5 on");
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: true, style: "spin", challenge: "one-pan", wildcard: true, stars: true, fridgeSeedId: "cherry-tomatoes", encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: true, style: "spin", challenge: "one-pan", wildcard: true, stars: true, fridgeSeedId: "cherry-tomatoes", encore: null });
   });
 
   it("Start waits for the twist options, so a preselected chef twist is never silently dropped", async () => {
@@ -457,7 +459,7 @@ describe("the 'New' preset", () => {
     await flush();
     expect(go(m).disabled).toBe(false);
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: false, style: "cosy-pub", challenge: null, wildcard: false, stars: true, fridgeSeedId: null, encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: false, style: "cosy-pub", challenge: null, wildcard: false, stars: true, fridgeSeedId: null, encore: null });
   });
 
   it("an options read that fails still lets the round start, without the chef twists and saying why", async () => {
@@ -470,7 +472,7 @@ describe("the 'New' preset", () => {
     expect(go(m).disabled).toBe(false);
     expect(visible(m.sheet.element, ".wx-srv-ck-twists-note")).toBe(true);
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: false, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: "cherry-tomatoes", encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: false, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: "cherry-tomatoes", encore: null });
   });
 
   it("a twist-free New leaves the disclosure folded", async () => {
@@ -486,7 +488,7 @@ describe("the 'New' preset", () => {
     await openWith(m);
     expect(q(m.sheet.element, ".wx-srv-ck-twists-body").hidden).toBe(true);
     go(m).click();
-    expect(m.starts()[0]).toEqual({ blind: false, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: null, encore: null });
+    expect(m.starts()[0]).toEqual({ mode: "classic", blind: false, style: null, challenge: null, wildcard: false, stars: false, fridgeSeedId: null, encore: null });
   });
 });
 
