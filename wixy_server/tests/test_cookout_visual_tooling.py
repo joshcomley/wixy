@@ -517,11 +517,20 @@ def test_report_opens_with_the_answer(mods: dict[str, ModuleType]) -> None:
     cal, c = mods["calibrate"], mods["check"]
     h, lu = _fifty(cal, c, []), _fifty(cal, c, [("wrong", "correct", ())] * 2)
     h.label, lu.label = "haiku", "luna"
-    text = cal.render_report(7, [h, lu], "haiku", ["Lime: checker said wrong."], {"agreed on": 100})
+    text = cal.render_report(
+        7,
+        [h, lu],
+        "haiku",
+        ["Lime: checker said wrong."],
+        {"total": 100, "blind": 97, "final": 100},
+        {"haiku": {"sol": 50, "opus": 49}},
+    )
     first = text.split("\n\n")[1]
     assert "Haiku got 50 of 50" in first and "using Haiku" in first
     assert "Random seed" in text and "Lime" in text
-    none = cal.render_report(7, [h, lu], None, [], {"agreed on": 1})
+    assert "97 of 100 pictures before seeing any checker" in text
+    assert "50 of 50 against Sol" in text and "| Checker said |" in text
+    none = cal.render_report(7, [h, lu], None, [], {"total": 1, "blind": 1, "final": 1})
     assert "paused" in none
 
 
