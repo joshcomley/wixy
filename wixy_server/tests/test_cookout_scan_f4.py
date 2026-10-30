@@ -257,7 +257,11 @@ def test_structural_invariant_on_a_stride_of_the_bank() -> None:
         trimmed = words
         while len(trimmed) > 1 and trimmed[-1] in CONTAINER_WORDS:
             trimmed = trimmed[:-1]
-        if trimmed in BANK._byproduct_lookup or ing.family in PASTA_SHAPE_FAMILIES:
+        if (
+            trimmed in BANK._byproduct_lookup
+            or tokenise(ing.name) in BANK._byproduct_lookup
+            or ing.family in PASTA_SHAPE_FAMILIES
+        ):
             continue
         others = set().union(*(by_word.get(w, set()) for w in words)) - {ing.id}
         for pid in sorted(others)[:12]:
@@ -280,3 +284,9 @@ def test_review_follow_ups_nut_butters_and_cooked_eggs_are_not_the_raw_food() ->
     assert _scan("top with a poached egg", ["century-egg"])
     assert _scan("top with a poached egg", ["free-range-egg"]) == []
     assert _scan("serve with a boiled egg", ["soy-marinated-egg"])
+
+
+def test_trial9_follow_ups_spice_pick_written_short_and_an_alias_of_a_listed_byproduct() -> None:
+    assert _scan("ground ginger and honey", ["ground-ginger-spice", "manuka-honey"]) == []
+    assert _scan("a garlic dip", ["fresh-garlic"]) == []
+    assert _scan("a garlic dip", ["lamb-mince"])

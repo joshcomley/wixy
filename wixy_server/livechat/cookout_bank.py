@@ -209,7 +209,7 @@ CUT_FORM_WORDS = frozenset(
         "ribeye", "brisket", "neck", "cheek", "cheeks", "liver", "livers", "kidney", "kidneys",
         "heart", "tail", "tails", "puree", "purée", "mash", "halves", "quarters", "florets",
         "cloves", "clove", "dough", "sprigs", "sprig", "stalks", "stalk", "stems", "bulbs", "bulb",
-        "heads", "pods",
+        "heads", "pods", "spice", "spices",
     }
 )  # fmt: skip
 """Cut and form words at the end of a name: the food behind them ("onion" in dried onion granules,
@@ -793,6 +793,7 @@ class CookoutBank:
         kind: str,
         names: list[tuple[str, Ingredient | None]],
         animals: AbstractSet[str],
+        canonical: tuple[str, ...] = (),
     ) -> str | None:
         """Why a multi-word span is not contraband, or None. Rule A (the pick written short, a
         trailing ring/rings shape allowed) or rule B (a curated by-product whose sources the dish
@@ -803,12 +804,15 @@ class CookoutBank:
             if run is not None:
                 return f"ring-shape({run})" if judged != tokens else f"pick-run({run})"
         if kind == "ingredient":
-            key = tokens
-            while len(key) > 1 and key[-1] in CONTAINER_WORDS:
-                key = key[:-1]
-            by = self._byproduct_satisfied(key, names, animals)
-            if by is not None:
-                return f"byproduct({' '.join(key)}, {by})"
+            # The span as written, then the bank's own name for the product it is an alias of
+            # ("garlic dip" is the listed "garlic sauce").
+            for written in (tokens, canonical):
+                key = written
+                while len(key) > 1 and key[-1] in CONTAINER_WORDS:
+                    key = key[:-1]
+                by = self._byproduct_satisfied(key, names, animals) if key else None
+                if by is not None:
+                    return f"byproduct({' '.join(key)}, {by})"
         return None
 
     def _picked_occurrences(
@@ -1068,7 +1072,8 @@ class CookoutBank:
                         why(tokens, "covered-word")
                         continue
                 else:
-                    passed = self._multi_word_pass(tokens, kind, used_names, animals)
+                    canonical = tokenise(self._by_id[key].name) if kind == "ingredient" else ()
+                    passed = self._multi_word_pass(tokens, kind, used_names, animals, canonical)
                     if passed is not None:
                         why(tokens, passed)
                         continue

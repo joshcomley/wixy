@@ -169,8 +169,9 @@ def invariant() -> None:
             trimmed = words
             while len(trimmed) > 1 and trimmed[-1] in CONTAINER_WORDS:
                 trimmed = trimmed[:-1]
-            if trimmed in bank._byproduct_lookup:
-                continue
+            canonical = tokenise(ing.name)
+            if trimmed in bank._byproduct_lookup or canonical in bank._byproduct_lookup:
+                continue  # a listed by-product, or an alias of one (garlic dip = garlic sauce)
             others = set().union(*(by_word[w] for w in set(words))) - {ing.id}
             for pid in sorted(others):
                 pick = bank.ingredient(pid)
