@@ -486,7 +486,7 @@ export type CookoutOutcome =
 
 export type CreateCookoutResult =
   | { readonly ok: true; readonly message: Message }
-  | { readonly ok: false; readonly kind: "unsupported" | "invalid" | "game_unavailable" | "unavailable" };
+  | { readonly ok: false; readonly kind: "unsupported" | "invalid" | "game_unavailable" | "unavailable" | "lost" };
 
 // -- Primitive readers ---------------------------------------------------------------------------------
 
@@ -1415,7 +1415,8 @@ export async function createCookout(session: ServerSession, input: CreateCookout
     response = await serverFetch("/cookout", postInit(input), session);
   } catch (error) {
     if (error instanceof ServerLockedError) throw error;
-    return { ok: false, kind: "unavailable" };
+    // No answer at all (the request timed out or the connection dropped): the server may have made the round.
+    return { ok: false, kind: "lost" };
   }
   if (response.status === 201 || response.status === 200) {
     const message = asRecord(await readJson(response))?.["message"];
@@ -1427,6 +1428,8 @@ export async function createCookout(session: ServerSession, input: CreateCookout
   // A twist the server will not take (the chef went away, an encore's source changed).
   if (response.status === 422) return { ok: false, kind: "invalid" };
   if (response.status === 503) return { ok: false, kind: "game_unavailable" };
+  // A gateway that gave up waiting is no answer from the server either.
+  if (response.status === 504) return { ok: false, kind: "lost" };
   return { ok: false, kind: "unavailable" };
 }
 

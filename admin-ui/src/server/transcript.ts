@@ -140,7 +140,20 @@ export function renderTranscriptBlock(
     });
   }
 
+  // What the block last drew. A repaint that would draw the same thing leaves the elements alone, so
+  // a repeated stream update, an availability refresh or a stale reply never swaps the text out from
+  // under a reader (or a selection, or a test holding it).
+  let painted: string | null = null;
+
   function paint(): void {
+    const key = JSON.stringify([
+      requesting,
+      server,
+      notice,
+      context.isHidden(attachment.id),
+    ]);
+    if (key === painted) return;
+    painted = key;
     const children: HTMLElement[] = [];
     let state: string;
     if (requesting || server?.status === "pending") {
