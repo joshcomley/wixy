@@ -337,10 +337,11 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
     const stopAwake = keepAwake(pages);
+    await unlockServer(a, "Alice");
+    await unlockServer(b, "Bob");
 
     // The game is a tab of its own, the thread is out of the way.
     await expect(a.locator(".wx-srv-tabs")).toBeHidden();
@@ -594,10 +595,11 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
     const stopAwake = keepAwake(pages);
+    await unlockServer(a, "Alice");
+    await unlockServer(b, "Bob");
     const { place } = await playToChosen(a, b);
 
     // Bob passes: the question is asked once, "Keep it" backs out, "Never show again" confirms.
@@ -769,10 +771,11 @@ test.describe("Adventure Time", () => {
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
     const b = await contextB.newPage();
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
     const stopAwake = keepAwake(pages);
+    await unlockServer(a, "Alice");
+    await unlockServer(b, "Bob");
     await playToChosen(a, b);
     await waitFact(pages, "pack-state", "ready", 60_000);
     const dishes = a.locator(".wx-srv-adv-dishes");

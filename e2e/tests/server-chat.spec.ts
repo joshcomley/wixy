@@ -513,6 +513,10 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const label = `mobile-message-actions-${Date.now()}`;
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
+    const stopAwake = setInterval(() => {
+      for (const page of [pageA, pageB]) void page.keyboard.press("Shift").catch(() => undefined);
+    }, 2_000);
     await seed(pageA, { count: 2, label, sender: "Purdy" });
     await unlockServer(pageA, "Josh");
     await unlockServer(pageB, "Purdy");
@@ -554,6 +558,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     await pageA.locator(".wx-srv-sheet-wipe-confirm-button").click();
     await expect(pageB.locator(".wx-srv-thread-empty")).toBeVisible({ timeout: 3000 });
 
+    clearInterval(stopAwake);
     await contextA.close();
     await contextB.close();
   });
