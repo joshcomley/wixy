@@ -24,11 +24,16 @@ from check import (
     Verdict,
     VerdictError,
     check_images,
-    check_verdict_rules,
     strip_json,
     vision_proof,
 )
-from prompts import PROBLEMS, check_prompt, reconcile_prompt, review_stage_prompt
+from prompts import (
+    PROBLEMS,
+    check_prompt,
+    parse_error_retry_prompt,
+    reconcile_prompt,
+    review_stage_prompt,
+)
 
 SAMPLE_SIZE = 100
 PER_CHECKER = 50
@@ -102,7 +107,11 @@ def check_judge_final(where: str, verdict: str, problems: tuple[str, ...], reaso
         if problems:
             raise VerdictError(f"{where}: 'correct' needs empty finalProblems")
         return
-    check_verdict_rules(where, verdict, problems, reason if reason else "x" * 10)
+    if verdict not in ("wrong", "unclear"):
+        raise VerdictError(f"{where}: finalVerdict must be correct, wrong or unclear")
+    if verdict == "wrong" and not problems:
+        raise VerdictError(f"{where}: 'wrong' needs at least one finalProblems entry")
+    # The judge's `reason` is free text (the 10-200 character rule is the checker's, §C.1).
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,7 +281,19 @@ async def run_stage(
         tool_profile="replay_probe",
         timeout_secs=1800,
     )
-    return parse_judge_final(text, numbers, with_checker_right=with_checker_right)
+    try:
+        return parse_judge_final(text, numbers, with_checker_right=with_checker_right)
+    except VerdictError as first:  # one retry quoting the error, like the checker runs
+        retry = await runner.run(
+            prompt=parse_error_retry_prompt(prompt, str(first)),
+            model=model.model,
+            provider=model.provider,
+            effort=model.effort,
+            cwd=cwd,
+            tool_profile="replay_probe",
+            timeout_secs=1800,
+        )
+        return parse_judge_final(retry, numbers, with_checker_right=with_checker_right)
 
 
 def stage2_rows(
@@ -617,10 +638,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         attempts = work.read_attempts(ident)
         if attempts and attempts[0]["attempt"] == 1 and work.card(ident, 1).exists():
             first.append(ident)
-    seed = secrets.randbits(32)
-    for_luna, for_haiku = draw_sample(first, seed)
     cal_dir = work.root / "calibration"
-    save_json(cal_dir / "sample.json", {"seed": seed, "luna": for_luna, "haiku": for_haiku})
+    saved = cal_dir / "sample.json"
+    if (
+        saved.exists()
+    ):  # a restarted run reuses its sample (never redrawn) so journalled runs resume
+        record = json.loads(saved.read_text("utf-8"))
+        seed, for_luna, for_haiku = int(record["seed"]), record["luna"], record["haiku"]
+    else:
+        seed = secrets.randbits(32)
+        for_luna, for_haiku = draw_sample(first, seed)
+        save_json(saved, {"seed": seed, "luna": for_luna, "haiku": for_haiku})
 
     def to_image(ident: str) -> CheckImage:
         s = subjects[ident]

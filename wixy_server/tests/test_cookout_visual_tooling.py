@@ -891,3 +891,42 @@ def test_images_docstring_matches_the_code(mods: dict[str, ModuleType]) -> None:
     doc = mods["images"].__doc__ or ""
     assert "scheduled task" in doc and "nothing here claims a CLI" not in doc
     assert "Run as a Grid task" not in doc
+
+
+def test_judge_reason_is_free_text_and_stage_retries_once(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    cal, c = mods["calibrate"], mods["check"]
+
+    def answer(reason: str, verdict: str = "unclear", problems: list[str] | None = None) -> str:
+        item = {
+            "image": "01",
+            "checkerRight": True,
+            "finalVerdict": verdict,
+            "finalProblems": problems or [],
+            "reason": reason,
+        }
+        return json.dumps({"items": [item]})
+
+    # a short or empty reason is fine for a judge's final answer
+    got = cal.parse_judge_final(answer("ok"), ["01"], with_checker_right=True)
+    assert got["01"][0].verdict == "unclear"
+    assert cal.parse_judge_final(answer(""), ["01"], with_checker_right=True)
+    with pytest.raises(c.VerdictError):  # but `wrong` still needs a problem
+        cal.parse_judge_final(answer("x", "wrong"), ["01"], with_checker_right=True)
+    with pytest.raises(c.VerdictError):
+        cal.parse_judge_final(answer("x", "maybe"), ["01"], with_checker_right=True)
+
+    calls: list[str] = []
+
+    def flaky(prompt: str, cwd: Path) -> str:
+        calls.append(prompt)
+        return "not json" if len(calls) == 1 else answer("fine", "wrong", ["wrong_food"])
+
+    out = asyncio.run(
+        cal.run_stage(
+            FakeRunner(flaky), c.SOL, "judge these", tmp_path, ["01"], with_checker_right=True
+        )
+    )
+    assert out["01"][0].problems == ("wrong_food",) and len(calls) == 2
+    assert "could not be accepted" in calls[1]
