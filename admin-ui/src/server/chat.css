@@ -31,8 +31,11 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* Every call control is a proper 44 px target on every screen (09b F.3: Answer, Decline, Mute and End are
+   tapped in a hurry, often mid-game) — the icon buttons the header row's height square, the dialog's and
+   the notice's 44 tall. */
 .wx-srv-call button {
-  height: 36px;
+  height: var(--wx-srv-header-control-h, 44px);
   border: 1px solid var(--wx-border);
   border-radius: var(--wx-radius);
   font: inherit;
@@ -44,8 +47,8 @@
   align-items: center;
   justify-content: center;
   flex: none;
-  width: 36px;
-  padding: 7px;
+  width: var(--wx-srv-header-control-h, 44px);
+  padding: 11px;
   cursor: pointer;
 }
 .wx-srv-call button svg { width: 20px; height: 20px; }
@@ -126,6 +129,10 @@
      `.wx-main` padding is the single shared gutter (12px phone, 20px
      desktop), so all three edges line up. */
   --wx-srv-control-h: 36px;
+  /* ONE height for every button in the header row (the call controls, ⋯, the pen and its undo/redo, the
+     cog and the panic ✕): 44px at EVERY width, desktop included (09b F.3 — Answer, Decline, Mute and End
+     are tapped in a hurry, often over a game). Separate from the composer row's own height above. */
+  --wx-srv-header-control-h: 44px;
   /* `.wx-main`'s padding (20px desktop, 12px phone): the thread bleeds out to the screen edges
      by this much and pads its own messages by it, so bubbles line up with the header and
      composer buttons instead of being indented twice (card padding + shell padding). */
@@ -188,8 +195,8 @@
 .wx-srv-pen-undo,
 .wx-srv-pen-redo {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
   background: var(--wx-surface);
@@ -766,8 +773,8 @@ button.wx-srv-quote:focus-visible {
 
 .wx-srv-more-button {
   flex: none;
-  min-width: 36px;
-  height: 36px;
+  min-width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   padding: 0 8px;
   border-radius: var(--wx-radius);
   border: 1px solid var(--wx-border);
@@ -3724,9 +3731,8 @@ dialog.wx-srv-game-pictures[open] {
 .wx-srv-pen-button {
   flex: none;
   box-sizing: border-box;
-  width: 44px;
-  height: 44px;
-  margin: -4px;
+  width: var(--wx-srv-header-control-h, 44px);
+  height: var(--wx-srv-header-control-h, 44px);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -3738,8 +3744,8 @@ dialog.wx-srv-game-pictures[open] {
 
 .wx-srv-pen-face {
   box-sizing: border-box;
-  width: 36px;
-  height: 36px;
+  width: 100%;
+  height: 100%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
