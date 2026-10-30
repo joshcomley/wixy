@@ -1624,8 +1624,8 @@ class TestRealBankLexicalCases:
 # the generation-fenced runner
 # =================================================================================================
 
-GOLDEN_CONCEPTS_PROMPT_SHA256 = "fa9bc21a928b64b8fdec5c3501e40637b1d0200ae83ac1e90bdf45e177d5b49e"
-GOLDEN_RECIPE_PROMPT_SHA256 = "4572e54187b1d913cfd87e0556656cadfc2e92977e5465c7931a09955449cd54"
+GOLDEN_CONCEPTS_PROMPT_SHA256 = "70704b29e88824b9d3ffbb8a83dd3042a30f238a0b8b110237b97d848f68f356"
+GOLDEN_RECIPE_PROMPT_SHA256 = "21d18ae1602f9efc43d7f92b2756c7ce0090d809f529c4fedd1bee24f1646105"
 """sha256 of the twist-free prompts exactly as the shipped core builds them (taken from the code
 before the twists existed): a twist-free round must stay byte-for-byte the core."""
 

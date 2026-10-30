@@ -403,7 +403,10 @@ def _single_dish_rules(fillings: int) -> str:
     found by the real-run trial: without it the chef describes a sauce by what it is made of, or
     compares a dish to another, naming foods nobody picked, and miscounts "omitted")."""
     return (
-        "- Ordinary cooking language is always fine (crisp, golden, melted, gooey). The check "
+        "- Ordinary cooking language is always fine (crisp, golden, melted, gooey). "
+        "Write a picked item by its full name or its last word ('peanut flour' or 'flour', "
+        "never 'peanut'; 'date syrup', never 'date'): the first word of a picked name on its "
+        "own names a different food. The check "
         "looks for a real FOOD that is neither picked nor allowed, so never name one: not "
         "what a picked sauce or spread is made of (no chilli, coriander, garlic, herbs or "
         "spices unless picked), not a pickle, relish, chutney, syrup or side, and not another "
@@ -470,7 +473,10 @@ anything else, anywhere in any text. Water, salt and black-pepper are always fre
 {MAX_EXTRA_STAPLES} of {pickable_staples} may be used \
 in one concept, and only when they are not already picked.
 - Ordinary cooking language is always fine ("crisp", "golden", "juices", "gravy" or "broth" made \
-from the dish's own picks, "oil" or "onion" when a picked item is that). The check only looks for \
+from the dish's own picks, "oil" or "onion" when a picked item is that). Write a picked item \
+by its full name or its last word ("peanut flour" or "flour", never "peanut"; "date \
+syrup", never "date"): the first word of a picked name on its own names a different \
+food. The check only looks for \
 a real FOOD that is neither picked nor a staple, so never name one. Sides and components count: \
 no flatbread, pastry, scone, croutons, crisps, salsa, relish, cream, custard, syrup, caramel, \
 dumplings, noodles, cabbage, bechamel, pickle, wafer, crackers, curd or sugar unless that exact \
@@ -626,7 +632,10 @@ dish uses and "staples" the cupboard staples it uses. {free_words} Use every man
 nothing else: never add any other food, and never mention any other food in any text \
 ({capped_words} unless it is in the manifest).
 - Ordinary cooking language is always fine ("crisp", "juices", "gravy" made from the dish's own \
-items); only avoid naming a real food that is not in the manifest. That includes tips and \
+items). Write a picked item by its full name or its last word ("peanut flour" or "flour", \
+never "peanut"; "date syrup", never "date"): the first word of a picked name on its own \
+names a different food. Only avoid naming a real food that is not in the manifest. That \
+includes tips and \
 serving suggestions: no rice, crisps, syrup, eggs, ale, stock or any other side, swap or \
 substitute. Before you answer, re-read every note, step and tip and delete any food word that \
 is not the name of a manifest item.
@@ -725,6 +734,21 @@ def _normal(title: str) -> str:
     return _WHITESPACE_RE.sub(" ", title).casefold()
 
 
+def _full_name_hint(bank: AiBank, name: str, used_ids: Set[str]) -> str:
+    """A repair hint when the flagged food shares a word with a picked item: the chef most likely
+    wrote the first word of that name ("peanut" for peanut flour), which names another food."""
+    words = {w for w in re.findall(r"[a-z]+", name.lower()) if len(w) > 2}
+    names = [
+        ing.name
+        for pick_id in sorted(used_ids)
+        if (ing := bank.ingredient(pick_id)) is not None
+        and words & set(re.findall(r"[a-z]+", ing.name.lower()))
+    ]
+    if not names:
+        return ""
+    return f" (if you meant a picked item, write its full name: {', '.join(names[:2])})"
+
+
 def _scan(
     bank: AiBank,
     text: str,
@@ -747,7 +771,8 @@ def _scan(
         allow_omitted_mentions=False,
     )
     for name in found:
-        problems.append(f"{where} mentions '{name}', which this dish does not use")
+        hint = _full_name_hint(bank, name, used_ids)
+        problems.append(f"{where} mentions '{name}', which this dish does not use{hint}")
 
 
 def _forbidden_prose(
