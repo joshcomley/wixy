@@ -5,9 +5,9 @@
 ## What was measured
 
 - Entries written: 3494 of 3494 (the 3491 pickable ingredients plus the three free seasonings).
-- Fun facts per entry: 1 fact(s): 23, 2 fact(s): 1913, 3 fact(s): 1558.
+- Fun facts per entry: 1 fact(s): 25, 2 fact(s): 1912, 3 fact(s): 1557.
 - Model runs started (by pass): audit 15, author 231, factcheck 780.
-- Entries with only one surviving fact: 23.
+- Entries with only one surviving fact: 25.
 - Entries with no fact at all (waived in `facts_waivers.json`): 0.
 
 ## Sol fact audit
@@ -35,7 +35,7 @@
 
 ## Only one surviving fact
 
-`black-seed-oil`, `chicken-goujons`, `cokelek`, `cooked-prawns`, `dark-liquid-seasoning`, `greenland-halibut`, `individual-meat-and-potato-pie`, `jelly-babies`, `kluski`, `lesser-galangal`, `muscatel-raisin`, `mustard-fruits`, `nut-brittle`, `red-peppercorns`, `sandwich-spread`, `sarsaparilla`, `spider-crab`, `timut-pepper`, `tin-loaf`, `tinned-oxtail-soup`, `white-turmeric`, `whitefish`, `yu-choy`
+`black-seed-oil`, `chicken-goujons`, `chocolate-shavings`, `cokelek`, `cooked-prawns`, `dark-liquid-seasoning`, `greenland-halibut`, `individual-meat-and-potato-pie`, `jelly-babies`, `kluski`, `lesser-galangal`, `muscatel-raisin`, `mustard-fruits`, `nut-brittle`, `red-peppercorns`, `sandwich-spread`, `sarsaparilla`, `spider-crab`, `timut-pepper`, `tin-loaf`, `tinned-oxtail-soup`, `washed-rind-cheese`, `white-turmeric`, `whitefish`, `yu-choy`
 
 ## Declared deviation from 09b A.2
 
@@ -48,3 +48,11 @@ true/doubtful/false contract) and three added rules: nothing true of only some v
 brands unless hedged, no single-region or single-use claim unless the food is defined by it,
 and name origins and botany only if a dictionary or encyclopedia states them. Authoring stays
 Haiku; each entry's `source.factCheck` records the model that last checked it.
+
+## Corrections after audit 3
+
+Audit 3 (147 of 150) still named three facts that are wrong or unsupported. They were removed
+from the catalogue by hand rather than left in: the claim that chocolate was first prepared as
+a drink in Mesoamerica (`chocolate-shavings`), the claim about how washing makes the rind
+orange (`washed-rind-cheese`) and the claim that lasagne, tagliatelle and ravioli are made
+from sfoglia sheets (`pasta-sfoglia`). The first two entries now have one fact.

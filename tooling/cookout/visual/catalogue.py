@@ -1043,6 +1043,14 @@ def report_markdown(
         "and name origins and botany only if a dictionary or encyclopedia states them. Authoring stays",
         "Haiku; each entry's `source.factCheck` records the model that last checked it.",
         "",
+        "## Corrections after audit 3",
+        "",
+        "Audit 3 (147 of 150) still named three facts that are wrong or unsupported. They were removed",
+        "from the catalogue by hand rather than left in: the claim that chocolate was first prepared as",
+        "a drink in Mesoamerica (`chocolate-shavings`), the claim about how washing makes the rind",
+        "orange (`washed-rind-cheese`) and the claim that lasagne, tagliatelle and ravioli are made",
+        "from sfoglia sheets (`pasta-sfoglia`). The first two entries now have one fact.",
+        "",
     ]
     if concerns:
         lines += ["## Haiku's concerns about bank entries (not acted on here)", ""]

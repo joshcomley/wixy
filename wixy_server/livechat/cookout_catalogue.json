@@ -10220,8 +10220,7 @@
   },
   "chocolate-shavings": {
    "facts": [
-    "Chocolate is made from the seeds of the cacao tree, which grows in hot, humid tropical regions.",
-    "Chocolate was first prepared as a drink in Mesoamerica, long before solid chocolate was made."
+    "Chocolate is made from the seeds of the cacao tree, which grows in hot, humid tropical regions."
    ],
    "nameKey": "4bb071a936af56d6",
    "presentation": "heap",
@@ -33755,7 +33754,6 @@
   "pasta-sfoglia": {
    "facts": [
     "Fresh egg pasta is made by rolling a dough of flour and eggs until it is very thin.",
-    "Lasagne, tagliatelle and ravioli are typically made from sheets like this.",
     "In Emilia-Romagna, hand-rolled egg pasta is a long-standing local tradition."
    ],
    "nameKey": "be4ad850e40f9bf3",
@@ -51689,8 +51687,7 @@
   },
   "washed-rind-cheese": {
    "facts": [
-    "Many famous examples come from France, Italy and Switzerland, such as Epoisses and Taleggio.",
-    "The washing encourages bacteria and moulds that give the cheese its strong smell and sticky orange rind."
+    "Many famous examples come from France, Italy and Switzerland, such as Epoisses and Taleggio."
    ],
    "nameKey": "5962501e3ad1d368",
    "presentation": "cut",
