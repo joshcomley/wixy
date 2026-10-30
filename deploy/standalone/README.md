@@ -69,6 +69,19 @@ paste each printed deploy-key public key at the GitHub URL it names when asked.
   `:rollback` image exists yet (nothing to undo).
 - **`logs.sh`** — `docker compose logs`, forwarding any args (`logs.sh -f`,
   `logs.sh cloudflared`).
+- **The baked Cookout picture pack** (livechat.md §24.3, Inv 58). The Cookout game's ingredient pictures are not in git:
+  `wixy_server/livechat/cookout_ingredient_images.json` (the committed manifest) pins ONE immutable tar by sha256, published
+  as a GitHub Release asset of the public upstream repo (`cookout-images-v<N>`). The `Dockerfile` copies ONLY the stdlib-only
+  `cookout_pack.py` and that manifest (nothing else from `wixy_server/`) and runs `cookout_pack.py fetch` before
+  `pip install`, so the ~150 MB layer stays cached until either file changes. The release is public, so a build, including a
+  fork's, needs no token. The fetch fails the build on any size or sha256 mismatch; an empty manifest (`pack: null`) makes it
+  a no-op and the game shows emoji tiles. The build arg `COOKOUT_PACK_URL` overrides the download URL only (for a mirror; the
+  sha256 still pins the content). The pictures land in `/app/cookout-pack/objects`, and the Dockerfile sets
+  `WIXY_COOKOUT_IMAGES_BAKED_DIR=/app/cookout-pack/objects` with `ENV` (an image layout fact, not an edition setting, so it
+  does not break the rule above that edition settings are never baked). The directory is read-only at runtime and is never
+  garbage-collected (GC only touches the storage volume's `cookout-images/objects`). The standalone edition therefore serves
+  pictures, "what it is" lines and fun facts with no AI and no network at runtime. A self-built image from a manifest with
+  `pack: null` simply has emoji fallbacks.
 
 ## GitHub repo protections
 
@@ -110,3 +123,16 @@ it twice on every PR + `main` push — once `WIXY_EDITION=standalone`, once
 asserting `/healthz` and `/api/version`'s `edition` field both times. The hub has no
 Docker (Slots deploys the fleet edition from source); this CI job is the only place
 the image itself is ever proven to boot.
+
+The same job also proves the image **serves a baked Cookout picture**
+(`deploy/standalone/ci/cookout_image_proof.sh <image> <manifest.json>`), because `/healthz` says nothing about it. It builds a
+second image `wixy:ci-pack` from a copy of the workspace whose manifest is replaced by the committed two-ingredient test pack
+(`deploy/standalone/ci/cookout-test-pack/`: `manifest.json`, `pack.tar`, and `generate.py` which rebuilds both
+deterministically), with `COOKOUT_PACK_URL` pointing at a throwaway local HTTP server on the runner, so the identical
+Dockerfile path runs. The script boots that image with `--network none`, an empty `/data` and no `WIXY_COOKOUT_IMAGES_DIR`
+(so the baked directory is the only possible source) and, from inside the container, asserts: a card and a thumb sha from the
+manifest give `200`, `Content-Type: image/webp` and a body whose sha256 equals the sha; an unknown sha gives `404`;
+`default_visuals().snap_extras(id)["image"]` is non-null; and the packaged catalogue has the same number of entries as the
+committed one. A second, real-pack run (the real image and manifest, one card and one thumb chosen by a seeded draw) happens
+in `ci.yml` only on PRs that change a manifest which names a pack (a path filter, so ordinary PRs do not download ~150 MB) and on every `main`
+build in `publish-image.yml` (both skip an empty `pack: null` manifest: nothing to prove).
