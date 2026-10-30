@@ -15,13 +15,22 @@
 // wide-font stress and the 34 px bottom inset (spec/server-chat/09b §F.3).
 
 import { expect, test } from "../fixtures";
-import type { BrowserContext, Locator, Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import {
+  closeAll,
+  eventually,
+  game,
+  humanPause,
+  openMoreMenu,
+  partnerLeaks,
+  pickable,
+  unlockServer,
+  whoseTurn,
+} from "./cookout-helpers";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 test.describe.configure({ timeout: 240_000 });
-
-/** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
-const MULTI_TAP_INTERVAL_MS = 400;
 
 /** The same stress as server-cookout.spec.ts: every glyph of the pane is widened by a fixed letter-spacing. */
 const WIDE_FONT_STRESS = ".wx-srv-ck, .wx-srv-ck * { letter-spacing: 0.15em !important; }";
@@ -29,68 +38,6 @@ const WIDE_FONT_STRESS = ".wx-srv-ck, .wx-srv-ck * { letter-spacing: 0.15em !imp
 const PHONE = { width: 360, height: 640 } as const;
 
 const FILLING_PROMPTS = ["add a cheese", "add a main filling", "add veg or fruit"] as const;
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
-
-async function humanPause(page: Page): Promise<void> {
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
-
-/** A light touch so R7's 10s idle lock never fires on a page a test is only watching. */
-async function keepAlive(page: Page): Promise<void> {
-  try {
-    await page.keyboard.press("Shift");
-  } catch {
-    // the page is closing
-  }
-}
-
-/** Keeps every page awake for the whole of a test (stop it before closing the contexts). */
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void keepAlive(page);
-  }, 2500);
-  return () => clearInterval(timer);
-}
-
-async function eventually(pages: readonly Page[], check: () => Promise<boolean>, what: string, timeoutMs = 20_000): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (await check()) return;
-    for (const page of pages) await keepAlive(page);
-    await pages[0]!.waitForTimeout(120);
-  }
-  throw new Error(`timed out waiting for: ${what}`);
-}
-
-async function closeAll(...contexts: BrowserContext[]): Promise<void> {
-  for (const context of contexts) await context.close();
-}
 
 async function setStyle(page: Page, id: string, css: string): Promise<void> {
   await page.evaluate(
@@ -107,15 +54,6 @@ async function setStyle(page: Page, id: string, css: string): Promise<void> {
   );
 }
 
-function game(page: Page): Locator {
-  return page.locator('.wx-srv-ck[data-game="cookout"]');
-}
-
-/** The two picture cards the active player may tap (a watcher's cards are plain divs, not buttons). */
-function pickable(page: Page): Locator {
-  return game(page).locator(".wx-srv-ck-pair button.wx-srv-ck-card:not([disabled])");
-}
-
 async function dismissIntro(page: Page): Promise<string[]> {
   const intro = game(page).locator(".wx-srv-ck-intro:not([hidden])");
   await expect(intro).toBeVisible();
@@ -125,15 +63,6 @@ async function dismissIntro(page: Page): Promise<string[]> {
   await expect(intro).toHaveCount(0);
   await humanPause(page);
   return lines.map((line) => line.trim());
-}
-
-async function openMoreMenu(page: Page): Promise<void> {
-  const chatTab = page.locator(".wx-srv-tab-chat");
-  if (await chatTab.isVisible()) {
-    await chatTab.click();
-    await humanPause(page);
-  }
-  await page.locator(".wx-srv-more-button").click();
 }
 
 /** Starts a Toasted sandwich Cookout from the ... menu: opens the start sheet, picks the mode's tile (and
@@ -180,23 +109,6 @@ async function joinCookout(page: Page, seq: string): Promise<string[]> {
   return intro;
 }
 
-async function whoseTurn(pages: readonly Page[]): Promise<{ page: Page; index: number }> {
-  let found = -1;
-  await eventually(
-    pages,
-    async () => {
-      const counts = await Promise.all(pages.map(async (p) => await pickable(p).count()));
-      const active = counts.flatMap((c, i) => (c === 2 ? [i] : []));
-      if (active.length !== 1) return false;
-      found = active[0]!;
-      return true;
-    },
-    "someone's turn to pick",
-    30_000,
-  );
-  return { page: pages[found]!, index: found };
-}
-
 interface Offer {
   readonly ids: string[];
   readonly names: string[];
@@ -235,21 +147,6 @@ function recordBodies(page: Page): string[] {
     );
   });
   return bodies;
-}
-
-/** True when the screen text shows this name as whole words. */
-function textShows(text: string, name: string): boolean {
-  const lower = text.toLowerCase();
-  const needle = name.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(needle, from);
-    if (at < 0) return false;
-    const before = at === 0 ? " " : lower.charAt(at - 1);
-    const after = lower.charAt(at + needle.length) || " ";
-    if (!/[a-z0-9]/.test(before) && !/[a-z0-9]/.test(after)) return true;
-    from = at + 1;
-  }
 }
 
 interface PaneFit {
@@ -294,11 +191,6 @@ async function banner(page: Page): Promise<{ line1: string; line2: string }> {
   return { line1, line2 };
 }
 
-/** Page-wide text and markup, for "never in the DOM" checks. */
-async function wholeDom(page: Page): Promise<{ text: string; html: string }> {
-  return await page.evaluate(() => ({ text: document.body.innerText, html: document.documentElement.outerHTML }));
-}
-
 test.describe("Cookout: Toasted sandwich", () => {
   for (const stress of [false, true]) {
     test(`Open play${stress ? " with the wide-font stress and a 34 px inset" : ""}: bread, seven fillings, three toasted sandwiches, Bank this and the Recipe book`, async ({
@@ -309,9 +201,10 @@ test.describe("Cookout: Toasted sandwich", () => {
       const pageA = await contextA.newPage();
       const pageB = await contextB.newPage();
       const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-      const stopAwake = keepAwake([pageA, pageB]);
-      await unlockServer(pageA, "Alice");
-      await unlockServer(pageB, "Bob");
+      const stopAwake = await unlockTogether(unlockServer, [
+        [pageA, "Alice"],
+        [pageB, "Bob"],
+      ]);
       const pages = [pageA, pageB] as const;
       const applyStress = async (): Promise<void> => {
         if (!stress) return;
@@ -463,9 +356,10 @@ test.describe("Cookout: Toasted sandwich", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    const stopAwake = keepAwake([pageA, pageB]);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [
+      [pageA, "Alice"],
+      [pageB, "Bob"],
+    ]);
     const bodiesB = recordBodies(pageB);
     const pages = [pageA, pageB] as const;
 
@@ -488,12 +382,13 @@ test.describe("Cookout: Toasted sandwich", () => {
     const hidden = [...breadOffer.pictures];
 
     const checkHidden = async (when: string): Promise<void> => {
-      const dom = await wholeDom(pageB);
-      expect(textShows(dom.text, breadName), `${when}: "${breadName}" is on Bob's screen`).toBe(false);
-      // The full markup too: hidden nodes and every attribute (alt, aria-label, title, data-*), whole word.
-      expect(textShows(dom.html, breadName), `${when}: "${breadName}" is in Bob's markup`).toBe(false);
-      for (const id of breadOffer.ids) expect(dom.html.includes(`"${id}"`), `${when}: ${id} is in Bob's DOM`).toBe(false);
-      for (const src of hidden) expect(dom.html.includes(src), `${when}: ${src} is in Bob's DOM`).toBe(false);
+      // The shared full-DOM check: the watcher's whole outerHTML (hidden nodes, every attribute), whole-word names and
+      // ids, picture URLs and shas, for BOTH breads Alice was offered (the unpicked one is secret too).
+      const html = await pageB.evaluate(() => document.documentElement.outerHTML);
+      breadOffer.ids.forEach((id, i) => {
+        const item = { id, name: breadOffer.names[i] ?? "", srcs: hidden };
+        expect(partnerLeaks(html, item), `${when}: Bob's DOM holds Alice's offered bread ${item.name}`).toEqual([]);
+      });
       const bodies = bodiesB.join("\n");
       for (const id of breadOffer.ids) expect(bodies.includes(`"${id}"`), `${when}: ${id} is in Bob's responses`).toBe(false);
       for (const src of hidden) expect(bodies.includes(src), `${when}: ${src} is in Bob's responses`).toBe(false);

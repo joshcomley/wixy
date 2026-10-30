@@ -250,3 +250,29 @@ export async function startCookoutWithTwists(page: Page, blind: boolean, twists:
   await dismissIntro(page);
   return seq!;
 }
+
+export interface HiddenItem {
+  readonly id: string;
+  readonly name: string;
+  readonly srcs: readonly string[];
+}
+
+const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** Every way a page's HTML (the watcher's whole `outerHTML`: all text including hidden nodes, every attribute, every
+ * inline script) carries one of the partner's ingredients. A name and an id are matched as whole words, so a short
+ * name ("Cep") is not found inside an unrelated word ("concept"); a picture is found by its URL or by its sha256
+ * alone (a `srcset`, a CSS `url()` or a JSON blob). Empty = nothing leaked. */
+export function partnerLeaks(html: string, item: HiddenItem): string[] {
+  const leaks: string[] = [];
+  const word = (text: string, extra = ""): RegExp =>
+    new RegExp(`(^|[^\\p{L}\\p{N}${extra}])${escapeRe(text)}($|[^\\p{L}\\p{N}${extra}])`, "iu");
+  if (item.id !== "" && word(item.id, "_-").test(html)) leaks.push(`its id "${item.id}"`);
+  if (item.name !== "" && word(item.name).test(html)) leaks.push(`its name "${item.name}"`);
+  for (const src of item.srcs) {
+    if (src !== "" && html.includes(src)) leaks.push(`its picture URL ${src}`);
+    const sha = /[0-9a-f]{64}/.exec(src)?.[0];
+    if (sha !== undefined && html.includes(sha)) leaks.push(`its picture sha ${sha.slice(0, 12)}...`);
+  }
+  return leaks;
+}
