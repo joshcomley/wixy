@@ -512,3 +512,49 @@ def test_report_opens_with_the_answer(tmp_path: Path) -> None:
     assert text.startswith("# Cookout ingredient catalogue: build report")
     assert "5 of 3494 ingredients have a finished catalogue entry" in text
     assert "The Sol fact audit has not been run yet." in text
+
+
+def test_a_recheck_that_cannot_be_reauthored_keeps_only_facts_marked_true(tmp_path: Path) -> None:
+    client = FakeClient(good_handler)
+    builder = make_builder(tmp_path, client)
+    run(builder.build(limit=2))
+    path = tmp_path / "catalogue.json"
+    before = json.loads(path.read_text(encoding="utf-8"))["items"]
+    first_facts = {i: e["facts"][0] for i, e in before.items()}
+
+    def handler(kwargs: dict[str, Any]) -> str:
+        prompt: str = kwargs["prompt"]
+        if "fact-checker" not in prompt:
+            return "this is not json"  # re-authoring always fails
+        items = [
+            {
+                "id": r["id"],
+                "facts": [
+                    {
+                        "index": f["index"],
+                        "verdict": "doubtful" if f["index"] == 0 else "true",
+                        "reason": "r",
+                    }
+                    for f in r["facts"]
+                ],
+            }
+            for r in prompt_records(prompt)
+        ]
+        return json.dumps({"items": items})
+
+    client.handler = handler
+    rechecker = make_builder(tmp_path, client)
+    rechecker._add_examples(["An example fact that changes the batch key."])
+    assert rechecker.requeue() == 2
+    only = set(first_facts)
+
+    async def settle() -> None:
+        while await rechecker.author(only=only) or await rechecker.factcheck(only=only):
+            pass
+
+    run(settle())
+    rechecker.save_committed()
+    after = json.loads(path.read_text(encoding="utf-8"))["items"]
+    for item_id, entry in after.items():
+        assert first_facts[item_id] not in entry["facts"]
+        assert entry["facts"] == before[item_id]["facts"][1:]
