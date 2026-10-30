@@ -138,6 +138,9 @@ const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
 const SCROLL_TO_ORIGINAL_PAGE_SIZE = 100;
 /** §(4): "highlights it for about 1.5 s." */
 const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
+/** Longest a jump to a message (a quote's original, an unheard note) holds the thread still while
+ * it scrolls, if the browser never says the scroll ended (`scrollend` is missing, or nothing moved). */
+const REVEAL_HOLD_MAX_MS = 1_200;
 /** Audit F2: when a sibling load owns the single history-load slot, retry
  * after a real macrotask, not just `await Promise.resolve()` — a microtask-only
  * yield never lets the in-flight fetch (a network macrotask) get a turn to
@@ -1651,6 +1654,37 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   unheardTab.hidden = true;
   threadWrap.appendChild(unheardTab);
 
+  // Going to each unheard note IN the chat (its context: what "thank you" was thanking): "Go to
+  // message" in the list closes it and scrolls there, and this bar, floating at the bottom of the
+  // thread just above the composer, steps to the previous / next unheard note in place. Its buttons
+  // are tapped in quick succession on purpose, so they never count toward the double-tap lock (R3);
+  // Escape and the ✕ panic button still lock at once.
+  const unheardNav = documentRef.createElement("div");
+  unheardNav.className = "wx-srv-unheard-nav";
+  unheardNav.hidden = true;
+  unheardNav.setAttribute("role", "toolbar");
+  unheardNav.setAttribute("aria-label", "Unread voice notes");
+  unheardNav.setAttribute("data-srv-gesture-exempt", "");
+  function unheardNavButton(className: string, text: string, label: string): HTMLButtonElement {
+    const button = documentRef.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    return button;
+  }
+  const unheardPrev = unheardNavButton("wx-srv-unheard-prev", "\u2039 Previous", "Previous unread voice note");
+  const unheardPos = documentRef.createElement("span");
+  unheardPos.className = "wx-srv-unheard-pos";
+  unheardPos.setAttribute("aria-live", "polite");
+  const unheardNext = unheardNavButton("wx-srv-unheard-next", "Next \u203a", "Next unread voice note");
+  // Never just "Close": to a screen reader that is the panic \u2715, which locks the chat.
+  const unheardNavClose = unheardNavButton("wx-srv-unheard-nav-close", "\u2715", "Close the voice notes bar");
+  unheardNav.append(unheardPrev, unheardPos, unheardNext, unheardNavClose);
+  threadWrap.appendChild(unheardNav);
+  /** The unheard note the bar is at (it may have been listened to since), or null: no bar. */
+  let unheardNavSeq: number | null = null;
+
   const unheardView = documentRef.createElement("div");
   unheardView.className = "wx-srv-unheard-view";
   unheardView.hidden = true;
@@ -1762,7 +1796,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       removeUnheardItem(message.seq);
       updateUnheard();
     });
-    item.append(bubble, dismiss);
+    const goto = documentRef.createElement("button");
+    goto.type = "button";
+    goto.className = "wx-srv-unheard-goto";
+    goto.textContent = "Go to message";
+    goto.title = "Close this list and show this voice note in the chat";
+    // It closes this view and moves the chat under the finger.
+    goto.setAttribute("data-srv-gesture-boundary", "");
+    goto.addEventListener("click", () => goToUnheard(message.seq));
+    const actions = documentRef.createElement("div");
+    actions.className = "wx-srv-unheard-actions";
+    actions.append(goto, dismiss);
+    item.append(bubble, actions);
     return item;
   }
 
@@ -1819,11 +1864,62 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const element = renderedMessages.get(message.seq)?.element;
       return element !== undefined && element.getBoundingClientRect().bottom < topY;
     });
-    unheardTab.hidden = unheardOpen || !scrolledOff;
+    unheardTab.hidden = unheardOpen || unheardNavSeq !== null || !scrolledOff;
     if (!unheardTab.hidden) {
       unheardTab.textContent = `${unheard.length} unread voice note${unheard.length === 1 ? "" : "s"}`;
     }
     syncUnheardView(unheard);
+    syncUnheardNav(unheard);
+  }
+
+  /** The unheard notes before and after `seq`, oldest first (`seq` itself may be heard by now). */
+  function unheardNeighbours(unheard: readonly Message[], seq: number): { prev: number | null; next: number | null } {
+    let prev: number | null = null;
+    let next: number | null = null;
+    for (const message of unheard) {
+      if (message.seq < seq) prev = message.seq;
+      else if (message.seq > seq && next === null) next = message.seq;
+    }
+    return { prev, next };
+  }
+
+  /** Redraws the bar: where it is among the unheard notes, and Previous / Next only where there is
+   * one to go to. It goes once nothing is left unheard. */
+  function syncUnheardNav(unheard: readonly Message[]): void {
+    if (unheardNavSeq !== null && unheard.length === 0) unheardNavSeq = null;
+    const at = unheardNavSeq;
+    if (at === null) {
+      unheardNav.hidden = true;
+      return;
+    }
+    const { prev, next } = unheardNeighbours(unheard, at);
+    const index = unheard.findIndex((message) => message.seq === at);
+    const plural = unheard.length === 1 ? "" : "s";
+    unheardPos.textContent =
+      index >= 0 ? `${index + 1} of ${unheard.length} unread voice note${plural}` : `${unheard.length} more unread voice note${plural}`;
+    unheardPrev.hidden = prev === null;
+    unheardNext.hidden = next === null;
+    unheardNav.hidden = false;
+  }
+
+  /** Shows the unheard note `seq` in the chat, in context: scrolled to and highlighted. */
+  function goToUnheard(seq: number): void {
+    closeUnheardView();
+    unheardNavSeq = seq;
+    const rendered = renderedMessages.get(seq);
+    if (rendered !== undefined) revealMessage(rendered.element);
+    updateUnheard();
+  }
+
+  function stepUnheard(direction: "prev" | "next"): void {
+    if (unheardNavSeq === null) return;
+    const target = unheardNeighbours(unheardMessages(), unheardNavSeq)[direction];
+    if (target !== null) goToUnheard(target);
+  }
+
+  function closeUnheardNav(): void {
+    unheardNavSeq = null;
+    unheardNav.hidden = true;
   }
 
   function openUnheardView(): void {
@@ -1848,6 +1944,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   unheardTab.addEventListener("click", openUnheardView);
   unheardClose.addEventListener("click", closeUnheardView);
+  unheardPrev.addEventListener("click", () => stepUnheard("prev"));
+  unheardNext.addEventListener("click", () => stepUnheard("next"));
+  unheardNavClose.addEventListener("click", () => {
+    closeUnheardNav();
+    updateUnheard();
+  });
   thread.addEventListener("scroll", updateUnheard, { passive: true });
 
   // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
@@ -3358,21 +3460,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         if (genuinelyNotFound) removeQuotesTargeting(seq);
         return;
       }
-      const targetElement = rendered.element;
-      const prefersReducedMotion =
-        win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
-      targetElement.scrollIntoView({
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "center",
-      });
-      targetElement.classList.add("wx-srv-bubble-highlighted");
-      win.setTimeout(() => {
-        targetElement.classList.remove("wx-srv-bubble-highlighted");
-      }, SCROLL_TO_ORIGINAL_HIGHLIGHT_MS);
+      revealMessage(rendered.element);
     } finally {
       button.classList.remove("wx-srv-quote-busy");
       button.removeAttribute("aria-busy");
     }
+  }
+
+  /** Scrolls a bubble to the middle of the thread and highlights it for a moment (§(4)): a quote's
+   * original, or an unheard voice note gone to from its list. */
+  function revealMessage(targetElement: HTMLElement): void {
+    const prefersReducedMotion =
+      win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
+    // Hold the thread while the jump scrolls: until it ends, the thread still reads as stuck to the
+    // bottom, and a message arriving meanwhile snapped it straight back there, undoing the jump
+    // (measured: 3 of 10 runs of the unheard-notes e2e). The scroll's own events then leave it
+    // un-stuck where it landed.
+    const release = threadScroll.hold();
+    let timer: number | null = null;
+    const done = (): void => {
+      thread.removeEventListener("scrollend", done);
+      if (timer !== null) win.clearTimeout(timer);
+      timer = null;
+      release();
+    };
+    thread.addEventListener("scrollend", done);
+    timer = win.setTimeout(done, REVEAL_HOLD_MAX_MS);
+    targetElement.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+    targetElement.classList.add("wx-srv-bubble-highlighted");
+    win.setTimeout(() => {
+      targetElement.classList.remove("wx-srv-bubble-highlighted");
+    }, SCROLL_TO_ORIGINAL_HIGHLIGHT_MS);
   }
 
   function ensureObserver(): void {
@@ -3832,6 +3953,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       cookoutModel.reset();
       resetGames();
       closeUnheardView();
+      closeUnheardNav();
       closeMoreMenu();
       gallery.close();
       links.close();
@@ -3961,6 +4083,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       voiceRecorder?.detach();
       voiceRecorder = null;
       closeUnheardView();
+      closeUnheardNav();
       closeMoreMenu();
       gallery.close();
       links.close();
