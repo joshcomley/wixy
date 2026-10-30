@@ -7,6 +7,7 @@
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
@@ -68,8 +69,7 @@ test.describe("server-reply.spec.ts (round 2 ruling item 10)", () => {
     const originalText = `${tag}: original message from Josh`;
     const replyText = `${tag}: reply from Purdy`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
 
     await pageA.locator(".wx-srv-thread-view textarea").fill(originalText);
     await pageA.locator(".wx-srv-thread-view .wx-chat-send-button").click();
@@ -184,8 +184,7 @@ test.describe("server-reply.spec.ts (round 2 ruling item 10)", () => {
     const originalText = `${tag}: doomed original`;
     const replyText = `${tag}: quoting the doomed one`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
 
     await pageA.locator(".wx-srv-thread-view textarea").fill(originalText);
     await pageA.locator(".wx-srv-thread-view .wx-chat-send-button").click();

@@ -5,6 +5,7 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { unlockTogether } from "./two-devices";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
@@ -56,8 +57,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     const pageAlice = await contextAlice.newPage();
     const pageBob = await contextBob.newPage();
 
-    await unlockServer(pageAlice, "Alice");
-    await unlockServer(pageBob, "Bob");
+    await unlockTogether(unlockServer, [[pageAlice, "Alice"], [pageBob, "Bob"]]);
 
     // Alice uploads photo via fixture helper (simulating normal upload route)
     const uploadRes = await pageAlice.request.post("/test/server/upload-photo");
@@ -138,8 +138,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     const pageAlice = await contextAlice.newPage();
     const pageBob1 = await contextBob.newPage();
 
-    await unlockServer(pageAlice, "Alice");
-    await unlockServer(pageBob1, "Bob");
+    await unlockTogether(unlockServer, [[pageAlice, "Alice"], [pageBob1, "Bob"]]);
 
     // Seed a 30s view-once photo
     const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
@@ -213,8 +212,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
     const pageAlice = await contextAlice.newPage();
     const pageBob = await contextBobMobile.newPage();
 
-    await unlockServer(pageAlice, "Alice");
-    await unlockServer(pageBob, "Bob");
+    await unlockTogether(unlockServer, [[pageAlice, "Alice"], [pageBob, "Bob"]]);
 
     // Seed a 30s tease photo
     const seedRes = await pageAlice.request.post("/test/server/seed-photo", {
@@ -387,8 +385,7 @@ test.describe("server-view-once.spec.ts (spec/06-view-once-media)", () => {
       const pageAlice = await contextAlice.newPage();
       const pageBob = await contextBob.newPage();
 
-      await unlockServer(pageAlice, "Alice");
-      await unlockServer(pageBob, "Bob");
+      await unlockTogether(unlockServer, [[pageAlice, "Alice"], [pageBob, "Bob"]]);
 
       const viewOnceButton = pageAlice.locator(".wx-srv-view-once-toggle-button");
       const draftBox = pageAlice.locator(".wx-chat-composer textarea");

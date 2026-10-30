@@ -6,6 +6,7 @@
 import { expect, test } from "../fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
@@ -54,12 +55,12 @@ async function pair(
   const b = await browser.newContext(opts.cupcake ?? {});
   const bubble = await a.newPage();
   const cupcake = await b.newPage();
-  await unlockServer(bubble, "Bubble");
-  await unlockServer(cupcake, "Cupcake");
+  const stopAwake = await unlockTogether(unlockServer, [[bubble, "Bubble"], [cupcake, "Cupcake"]]);
   return {
     bubble,
     cupcake,
     close: async () => {
+      stopAwake();
       await a.close();
       await b.close();
     },

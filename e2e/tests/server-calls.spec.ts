@@ -3,6 +3,7 @@
 import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 test.describe.configure({ timeout: 90_000 });
@@ -280,8 +281,7 @@ test("microphone rejection explains setup failure on both devices with safe copy
       navigator.mediaDevices.getUserMedia = async () => { throw new DOMException("private-error-content", "NotAllowedError"); };
       Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true });
     });
-    await unlock(a, "Caller");
-    await unlock(b, "Receiver");
+    await unlockTogether(unlock, [[a, "Caller"], [b, "Receiver"]], { keepAwakeAfter: false });
     await a.getByRole("button", { name: "Call", exact: true }).click();
     await a.getByRole("button", { name: "Confirm call", exact: true }).click();
     await b.getByRole("button", { name: "Answer", exact: true }).click();
@@ -308,8 +308,7 @@ test("a ringing call keeps both chats unlocked, then the idle countdown restarts
   try {
     const pa = await a.newPage();
     const pb = await b.newPage();
-    await unlock(pa, "Caller");
-    await unlock(pb, "Receiver");
+    await unlockTogether(unlock, [[pa, "Caller"], [pb, "Receiver"]], { keepAwakeAfter: false });
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
     await pa.getByRole("radio", { name: /Receiver/ }).check();
     await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
@@ -333,8 +332,7 @@ test("Escape during a ring still locks at once and ends the call", async ({ brow
   try {
     const pa = await a.newPage();
     const pb = await b.newPage();
-    await unlock(pa, "Caller");
-    await unlock(pb, "Receiver");
+    await unlockTogether(unlock, [[pa, "Caller"], [pb, "Receiver"]], { keepAwakeAfter: false });
     await pa.locator(".wx-srv-call").getByRole("button", { name: "Call", exact: true }).click();
     await pa.getByRole("radio", { name: /Receiver/ }).check();
     await pa.getByRole("button", { name: "Confirm call", exact: true }).click();
@@ -354,8 +352,7 @@ test("a page frozen mid-ring locks the moment it returns, and gets no fresh idle
     const pa = await a.newPage();
     const pb = await b.newPage();
     await pa.clock.install();
-    await unlock(pa, "Caller");
-    await unlock(pb, "Receiver");
+    await unlockTogether(unlock, [[pa, "Caller"], [pb, "Receiver"]], { keepAwakeAfter: false });
     // The exposed setting: neither "lock when I leave" box ticked, so only the idle lock guards the chat.
     await pa.evaluate(() => {
       localStorage.setItem("wx-srv-lock-on-tab", "0");
