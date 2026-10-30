@@ -87,6 +87,7 @@ HAIKU = Model("claude", "claude-haiku-5-5")
 LUNA = Model("codex", "gpt-6-luna")
 SOL = Model("codex", "gpt-6.1-sol")
 OPUS = Model("claude", "claude-opus-5-5")
+SONNET = Model("claude", "claude-sonnet-5-5")
 
 
 @dataclass(frozen=True, slots=True)
