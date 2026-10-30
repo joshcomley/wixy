@@ -18,6 +18,7 @@ import { expect, test } from "../fixtures";
 import type { Locator, Page } from "@playwright/test";
 import {
   closeAll,
+  dismissIntro,
   eventually,
   game,
   humanPause,
@@ -54,15 +55,11 @@ async function setStyle(page: Page, id: string, css: string): Promise<void> {
   );
 }
 
-async function dismissIntro(page: Page): Promise<string[]> {
+/** The intro card's lines, read before the shared `dismissIntro` closes it. */
+async function introLines(page: Page): Promise<string[]> {
   const intro = game(page).locator(".wx-srv-ck-intro:not([hidden])");
   await expect(intro).toBeVisible();
-  const lines = await intro.locator(".wx-srv-ck-intro-line").allInnerTexts();
-  await humanPause(page);
-  await intro.locator(".wx-srv-ck-intro-go").click();
-  await expect(intro).toHaveCount(0);
-  await humanPause(page);
-  return lines.map((line) => line.trim());
+  return (await intro.locator(".wx-srv-ck-intro-line").allInnerTexts()).map((line) => line.trim());
 }
 
 /** Starts a Toasted sandwich Cookout from the ... menu: opens the start sheet, picks the mode's tile (and
@@ -92,7 +89,9 @@ async function startToastie(page: Page, blind: boolean): Promise<{ seq: string; 
   await expect(game(page)).toBeVisible();
   const seq = await page.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq");
   expect(seq).not.toBeNull();
-  return { seq: seq!, intro: await dismissIntro(page) };
+  const intro = await introLines(page);
+  await dismissIntro(page);
+  return { seq: seq!, intro };
 }
 
 async function joinCookout(page: Page, seq: string): Promise<string[]> {
@@ -100,7 +99,8 @@ async function joinCookout(page: Page, seq: string): Promise<string[]> {
   await eventually([page], async () => await card.isVisible(), "the partner sees the Cookout card");
   await card.locator(".wx-srv-ck-mcard-open").click();
   await expect(game(page)).toBeVisible();
-  const intro = await dismissIntro(page);
+  const intro = await introLines(page);
+  await dismissIntro(page);
   const join = game(page).locator(".wx-srv-ck-banner .wx-srv-ck-join");
   await expect(join).toBeVisible();
   await humanPause(page);
@@ -109,10 +109,15 @@ async function joinCookout(page: Page, seq: string): Promise<string[]> {
   return intro;
 }
 
+/** How many of these picture boxes show something: an `img` or, as the fallback, an emoji. */
+async function picturesShown(boxes: Locator): Promise<number> {
+  return await boxes.evaluateAll((els) => els.filter((e) => e.querySelector("img") !== null || (e.textContent ?? "").trim() !== "").length);
+}
+
 interface Offer {
   readonly ids: string[];
   readonly names: string[];
-  /** Every `src` of a picture on the cards (empty in the fixture, which has no ComfyUI). */
+  /** Every `src` of a picture on the cards (the fixture ships placeholder pictures, so never empty). */
   readonly pictures: string[];
 }
 
@@ -290,6 +295,7 @@ test.describe("Cookout: Toasted sandwich", () => {
       for (const page of pages) {
         const reveal = game(page).locator(".wx-srv-ck-reveal");
         await expect(reveal.locator(".wx-srv-ck-rtile")).toHaveCount(8);
+        expect(await picturesShown(reveal.locator(".wx-srv-ck-rtile-pic")), "every reveal tile shows a picture or its emoji").toBe(8);
         // The bread has its own first row; the fillings follow.
         const groups = reveal.locator(".wx-srv-ck-rgroup");
         await expect(groups.first()).toHaveAttribute("data-group", "anchor");
@@ -316,6 +322,7 @@ test.describe("Cookout: Toasted sandwich", () => {
           await expect(dish.locator(".wx-srv-ck-dish-anchor-name")).toHaveText(`On ${breadName}`);
           await expect(dish.locator(".wx-srv-ck-uses-count")).toHaveText(/^Uses [5-7]\/7 fillings$/);
           await expect(dish.locator(".wx-srv-ck-dish-pic")).toHaveCount(1);
+          expect(await picturesShown(dish.locator(".wx-srv-ck-dish-pic")), "the dish shows a picture or its emoji").toBe(1);
         }
       }
       await expect(chatCard(pageA, seq).locator(".wx-srv-ck-mcard-status")).toContainText("3 toasted sandwich ideas ready");
@@ -380,6 +387,7 @@ test.describe("Cookout: Toasted sandwich", () => {
     const breadId = bread.picked;
     const breadName = bread.pickedName;
     const hidden = [...breadOffer.pictures];
+    expect(hidden.length, "the bread cards carry pictures, so the picture-URL check is not vacuous").toBeGreaterThan(0);
 
     const checkHidden = async (when: string): Promise<void> => {
       // The shared full-DOM check: the watcher's whole outerHTML (hidden nodes, every attribute), whole-word names and
