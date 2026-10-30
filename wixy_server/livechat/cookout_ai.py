@@ -1751,7 +1751,16 @@ class CmdCookoutRunner:
         bread_id = row.get("bread_id")
         if bread_id is not None and not isinstance(bread_id, str):
             bread_id = None
-        if basket is None or len(set(basket_ids)) not in mode.basket_sizes:
+        if (
+            basket is None
+            or len(set(basket_ids)) not in mode.basket_sizes
+            # a single-dish prompt needs exactly one anchor (bread) item: a basket without one
+            # fails the job cleanly instead of raising out of the prompt builder
+            or (
+                mode.chef.format == "single-dish"
+                and (bread_id if bread_id in basket_ids else anchor_of(mode, basket_ids)) is None
+            )
+        ):
             await self._finish_concepts(
                 anchor_seq,
                 generation,

@@ -3373,3 +3373,28 @@ def _client_unused() -> CmdChatClient:
     return CmdChatClient(
         transport=httpx.MockTransport(lambda request: httpx.Response(500)), max_attempts=1
     )
+
+
+class TestToastieBasketWithoutABread:
+    def test_the_concepts_job_fails_cleanly_instead_of_raising(
+        self, real_bank: Any, tmp_path: Path
+    ) -> None:
+        """A single-dish basket with no (or two) bread items must end `failed`, not crash the
+        prompt builder (review L1)."""
+        for basket in (
+            T_FILLINGS + ["tomato-ketchup"],
+            [T_BREAD, "ciabatta-roll", *T_FILLINGS[:6]],
+        ):
+            store = FakeStore()
+            row = store.add_round(picked=basket)
+            row["mode"] = "toastie"
+            runner = CmdCookoutRunner(
+                store=store,
+                bank=real_bank,
+                client=_client_unused(),
+                notifier=_notifier(),
+                cwd=tmp_path / "cookout-jobs",
+                timing=FAST,
+            )
+            anyio.run(runner.run_concepts, 1, 1)
+            assert store.rounds[1]["concepts"] == "failed", basket
