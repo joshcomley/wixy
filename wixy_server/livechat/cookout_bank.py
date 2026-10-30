@@ -102,10 +102,88 @@ FORBIDDEN_STOP_WORDS = frozenset(
     }
 )  # fmt: skip
 
+FORBIDDEN_CULINARY_WORDS = frozenset(
+    {"butter", "flour", "milk", "oil", "sugar", "salt", "pepper", "water"}
+)
+"""A culinary word is ordinary cooking language ("crisp", "juices", "gravy"), never a food the
+operator would call 'added'; a staple word or an ingredient's own exact name can never be one."""
+
+IGNORED_PHRASES: tuple[tuple[str, ...], ...] = (
+    ("date", "night"),
+    ("dab", "of"),
+    ("dabs", "of"),
+    ("a", "dab"),
+    ("wafer", "thin"),
+    ("grit",),
+    ("tea", "towel"),
+)
+"""Fixed phrases the scan never reads as a food: "date night" is an evening out, not the fruit;
+"a dab of", "wafer-thin" and a bare "grit" are a measure, an adjective and a speck, not the
+fish, the biscuit or grits."""
+
+HEAD_MODIFIERS = frozenset(
+    {
+        "dried", "frozen", "tinned", "smoked", "cured", "salted", "whole", "fresh", "ground",
+        "minced", "sliced", "diced", "cooked", "roast", "roasted", "raw", "mixed", "wild", "baby",
+        "sea", "salt", "ready", "canned", "pickled", "baked", "fried", "grilled", "breaded",
+        "battered",
+        "potted", "jellied", "spiced", "marinated", "sweet", "sour", "hot", "cold", "red", "white",
+        "black", "green", "yellow", "brown", "dark", "light", "king", "giant", "great", "large",
+        "small", "streaky", "back", "lean", "free", "organic", "british", "scottish", "cut",
+    }
+)  # fmt: skip
+"""Leading words of meat and fish names that are modifiers, not the food."""
+
+NOT_RAW_EGG_WORDS = frozenset(
+    {
+        "custard", "boiled", "hard", "pickled", "scotch", "mayonnaise", "nog", "noodle",
+        "noodles", "pasta", "tart", "cake", "roll", "white", "whites", "yolk", "yolks", "powder",
+        "substitute", "fried", "poached", "scrambled",
+    }
+)  # fmt: skip
+"""Egg names that are not a raw/whole egg: they do not make "omelette" shorthand."""
+
+# Words that make a bare culinary by-product word the cook's own shorthand for a pick
+# ("pastry" for a pie, pasty, quiche, tart, samosa or wellington that was picked).
+IMPLIED_WORDS: Mapping[str, frozenset[str]] = {
+    "pie": frozenset({"pastry"}),
+    "pies": frozenset({"pastry"}),
+    "pasty": frozenset({"pastry"}),
+    "pasties": frozenset({"pastry"}),
+    "quiche": frozenset({"pastry"}),
+    "tart": frozenset({"pastry"}),
+    "tartlet": frozenset({"pastry"}),
+    "samosa": frozenset({"pastry"}),
+    "samosas": frozenset({"pastry"}),
+    "wellington": frozenset({"pastry"}),
+    "turnover": frozenset({"pastry"}),
+}
+
+RAW_EGG_FORMS = frozenset(
+    {
+        "omelette", "frittata", "beaten", "poached", "scrambled", "boiled", "fried",
+        "yolk", "yolks", "white", "whites", "soft", "hard",
+    }
+)  # fmt: skip
+"""Forms of a raw or whole egg pick that a cook names bare ("a poached egg", "the yolk")."""
+
+PASTA_SHAPE_FAMILIES = frozenset(
+    {"tube-pasta", "spiral-pasta", "elbow-pasta", "long-pasta", "thin-long-pasta", "soup-pasta"}
+)
+"""Pasta-shape families that a generic picked pasta ("lentil pasta") may be shaped as."""
+
+BARE_ONLY_WORDS = frozenset({"fish", "sage", "onion"})
+"""Words a pick allows only when they stand alone ("the fish juices", "a sage and onion crumb"):
+never inside a longer food span ("fish sauce", "onion rings") and never as a shorthand source."""
+
+SHAPE_WORDS = frozenset({"ring", "rings"})
+"""Cut or shape words ("pineapple rings") that never make a second food of a picked one."""
+
 MIN_INGREDIENTS = 2500
 MAX_INGREDIENTS = 4000
 MIN_PER_ROLE = 200
 MAX_STOP_WORDS = 200
+MAX_CULINARY_WORDS = 120
 
 _ID_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -216,10 +294,12 @@ class CookoutBank:
     staples: tuple[Staple, ...]
     ingredients: tuple[Ingredient, ...]
     stop_words: frozenset[str] = frozenset()
+    culinary_words: frozenset[str] = frozenset()
     _by_id: Mapping[str, Ingredient] = field(init=False, repr=False, compare=False)
     _staples_by_id: Mapping[str, Staple] = field(init=False, repr=False, compare=False)
     _by_role: Mapping[str, tuple[Ingredient, ...]] = field(init=False, repr=False, compare=False)
     _dictionary: Mapping[tuple[str, ...], _Entity] = field(init=False, repr=False, compare=False)
+    _food_heads: frozenset[str] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "_by_id", {i.id: i for i in self.ingredients})
@@ -253,6 +333,12 @@ class CookoutBank:
             dictionary.setdefault(key, entity)
         for short, staple_id in STAPLE_SHORT_FORMS.items():
             dictionary.setdefault((short,), ("staple", staple_id))
+        # "brown sugar" for "Light soft brown sugar": the last two words of a longer name that
+        # ends in a staple word are a food phrase of their own (review L3).
+        for ingredient in self.ingredients:
+            words = tokenise(ingredient.name)
+            if len(words) >= 3 and words[-1] in STAPLE_SHORT_FORMS and len(words[-2]) >= 3:
+                dictionary.setdefault(words[-2:], ("ingredient", ingredient.id))
         # A family word ("bacon" for "Streaky bacon") is a food word only when it is the tail of
         # a member's own name; slug artefacts ("baked", "beef-aged") are never read from prose.
         for family in sorted({i.family for i in self.ingredients}):
@@ -267,6 +353,21 @@ class CookoutBank:
                 for variant in _plural_variants(tokens):
                     dictionary.setdefault(variant, ("family", family))
         object.__setattr__(self, "_dictionary", dictionary)
+        object.__setattr__(self, "_food_heads", self._meat_fish_heads())
+
+    def _meat_fish_heads(self) -> frozenset[str]:
+        """The leading word of three or more meat, poultry or fish names that is not a modifier
+        ("chicken", "beef", "pork", "salmon"): the foods a chef names bare before a culinary word
+        ("chicken broth") without the dictionary ever seeing a one-word entry for them."""
+        counts: Counter[str] = Counter()
+        for ingredient in self.ingredients:
+            if ingredient.category in ("meat-poultry", "fish-seafood"):
+                words = tokenise(ingredient.name)
+                if words:
+                    counts[words[0]] += 1
+        heads = {w for w, n in counts.items() if n >= 3 and len(w) >= 3} - HEAD_MODIFIERS
+        heads.update(v[0] for w in list(heads) for v in _plural_variants((w,)))
+        return frozenset(heads)
 
     @staticmethod
     def empty() -> CookoutBank:
@@ -501,35 +602,152 @@ class CookoutBank:
         ranked.sort(key=lambda r: r[:4])
         return tuple(r[4] for r in ranked[:limit])
 
+    def _source_token_sets(
+        self, ingredient_ids: AbstractSet[str], staple_ids: AbstractSet[str]
+    ) -> list[frozenset[str]]:
+        """One token set per name or alias of the given picks and staples (with singular/plural
+        forms): a multi-word phrase is shorthand only when ONE of them supplies all its food
+        words ("pork mince" is not shorthand for a pork chop plus a chicken mince)."""
+        sets: list[frozenset[str]] = []
+        for name, entry in self._pick_names(ingredient_ids, staple_ids):
+            tokens = set(tokenise(name))
+            for token in list(tokens):
+                tokens.update(v[0] for v in _plural_variants((token,)))
+            tokens.update(self._implied_words(name, entry) - BARE_ONLY_WORDS)
+            sets.append(frozenset(tokens))
+        return sets
+
+    def _picked_occurrences(
+        self, tokens: tuple[str, ...], ingredient_ids: AbstractSet[str]
+    ) -> list[tuple[int, int]]:
+        """Where the used picks' own multi-word names/aliases (and plurals) stand in `tokens`."""
+        wanted: set[tuple[str, ...]] = set()
+        for ingredient_id in ingredient_ids:
+            entry = self._by_id.get(ingredient_id)
+            if entry is None:
+                continue
+            for name in (entry.name, *entry.aliases):
+                words = tokenise(name)
+                if len(words) > 1:
+                    wanted.add(words)
+                    wanted.update(_plural_variants(words))
+        found: list[tuple[int, int]] = []
+        for words in wanted:
+            for start in range(len(tokens) - len(words) + 1):
+                if tokens[start : start + len(words)] == words:
+                    found.append((start, start + len(words)))
+        return found
+
+    def _covered_tokens(
+        self, ingredient_ids: AbstractSet[str], staple_ids: AbstractSet[str]
+    ) -> frozenset[str]:
+        """Every word (and its simple singular/plural) in the names and aliases of the given picks
+        and staples: the words a cook may use bare for something the dish does use ("oil" for
+        vegetable oil, "mushroom" for dried mixed mushrooms)."""
+        names = self._pick_names(ingredient_ids, staple_ids)
+        words: set[str] = set()
+        for name, extra in names:
+            for token in tokenise(name):
+                words.add(token)
+                words.update(v[0] for v in _plural_variants((token,)))
+            words.update(self._implied_words(name, extra))
+        return frozenset(words)
+
+    def _pick_names(
+        self, ingredient_ids: AbstractSet[str], staple_ids: AbstractSet[str]
+    ) -> list[tuple[str, Ingredient | None]]:
+        names: list[tuple[str, Ingredient | None]] = []
+        for ingredient_id in ingredient_ids:
+            entry = self._by_id.get(ingredient_id)
+            if entry is not None:
+                names.extend((n, entry) for n in (entry.name, *entry.aliases))
+        for staple_id in staple_ids:
+            staple = self._staples_by_id.get(staple_id)
+            if staple is not None:
+                names.append((staple.name, None))
+        return names
+
+    @staticmethod
+    def _implied_words(name: str, entry: Ingredient | None) -> set[str]:
+        """Words a cook uses bare for a pick without them being a second food: pastry for a pie,
+        omelette or a poached egg for a raw egg, "sage and onion" for stuffing mix, "fish" for a
+        pick the bank describes as a fish."""
+        parts = tokenise(name)
+        words: set[str] = set()
+        for token in parts:
+            words.update(IMPLIED_WORDS.get(token, ()))
+        if parts[-2:] in (("sausage", "roll"), ("sausage", "rolls")):
+            words.add("pastry")
+        if ("egg" in parts or "eggs" in parts) and not set(parts) & NOT_RAW_EGG_WORDS:
+            words.update(RAW_EGG_FORMS)
+        if entry is not None:
+            if entry.family == "stuffing":
+                words.update({"sage", "onion"})
+            if entry.category == "fish-seafood" and "fish" in tokenise(entry.blurb):
+                words.add("fish")
+        return words
+
     def mentions(self, text: str, ingredient_id: str) -> bool:
         """True when `text` names that ingredient by name, alias or plural, its bare family word or
         (for a pickable staple) the staple's bare short form. Longest-first span recognition; no
         stop word, family exemption or declared-staple allowance applies."""
         ingredient = self._by_id.get(ingredient_id)
-        for (kind, key), _span in _spans(tokenise(text), self._dictionary):
-            if key == ingredient_id and kind in ("ingredient", "staple"):
-                return True
-            if kind == "family" and ingredient is not None and key == ingredient.family:
-                return True
+        for clause in _clauses(text):
+            for (kind, key), span in _spans(_without_ignored(tokenise(clause)), self._dictionary):
+                if key == ingredient_id and kind in ("ingredient", "staple"):
+                    return True
+                if (
+                    kind == "family"
+                    and ingredient is not None
+                    and key == ingredient.family
+                    and not (len(span) == 1 and span[0] in self.culinary_words)
+                ):
+                    return True
         return False
 
     def food_free_tokens(self, text: str) -> tuple[str, ...]:
         """The folded tokens of `text` left after removing every recognised food span, so a food
         such as "baking powder" is never read as a technique or vessel word."""
-        tokens = tokenise(text)
         kept: list[str] = []
-        i = 0
-        for _entity, span in _spans(tokens, self._dictionary):
-            while tokens[i : i + len(span)] != span:
-                kept.append(tokens[i])
-                i += 1
-            i += len(span)
-        kept.extend(tokens[i:])
+        for clause in _clauses(text):
+            tokens = tokenise(clause)
+            i = 0
+            for _entity, span in _spans(tokens, self._dictionary):
+                while tokens[i : i + len(span)] != span:
+                    kept.append(tokens[i])
+                    i += 1
+                i += len(span)
+            kept.extend(tokens[i:])
         return tuple(kept)
 
     # -- the contraband scan (spec §3.2) --------------------------------------------------------
 
     def find_contraband_ingredients(
+        self,
+        text: str,
+        *,
+        allowed_ingredient_ids: AbstractSet[str],
+        allowed_staple_ids: AbstractSet[str],
+        omitted_ingredient_ids: AbstractSet[str] = frozenset(),
+        allow_omitted_mentions: bool = False,
+    ) -> list[str]:
+        """The contraband scan (see `_find_in_clause`), run clause by clause: a food span never
+        crosses a comma, full stop, semicolon, colon, bracket or spaced dash ("Prepare the Lemon,
+        Salt and Black pepper" is three foods, not "Lemon salt")."""
+        found: list[str] = []
+        for clause in _clauses(text):
+            for name in self._find_in_clause(
+                clause,
+                allowed_ingredient_ids=allowed_ingredient_ids,
+                allowed_staple_ids=allowed_staple_ids,
+                omitted_ingredient_ids=omitted_ingredient_ids,
+                allow_omitted_mentions=allow_omitted_mentions,
+            ):
+                if name not in found:
+                    found.append(name)
+        return found
+
+    def _find_in_clause(
         self,
         text: str,
         *,
@@ -546,6 +764,11 @@ class CookoutBank:
         before anything is judged ("peanut butter" is one food, not "butter"). A span is judged
         once and consumes its words; an allowed compound protects only its own interior.
 
+        A span whose words all come from the names and aliases of the used picks and declared
+        staples, or from stop/culinary words (at least one from the former), is a cook's shorthand
+        or a by-product of what the dish uses and is never contraband; a bare culinary word
+        ("crisp", "juices", "gravy") is never read as a food at all.
+
         Pass 1 (dictionary): a hit is allowed when it is a used pick (`allowed_ingredient_ids`) or
         shares a family with one, a free seasoning, a declared staple (`allowed_staple_ids`), or a
         bare stop word. Pass 2 (manifest, never softened by stop words or families): any mention of
@@ -561,7 +784,23 @@ class CookoutBank:
         }
         declared_staples = set(allowed_staple_ids) | UNPICKABLE_STAPLES
         omitted = set(omitted_ingredient_ids)
+        covered = self._covered_tokens(
+            allowed_ids, {sid for sid in declared_staples if sid not in UNPICKABLE_STAPLES}
+        )
+        plain = self.stop_words | self.culinary_words | SHAPE_WORDS
+        generic_pasta = any(
+            (entry := self._by_id.get(i)) is not None and tokenise(entry.name)[-1:] == ("pasta",)
+            for i in allowed_ids - omitted
+        )
         found: list[str] = []
+
+        def is_exact_omitted(entity: _Entity, tokens: tuple[str, ...]) -> bool:
+            """An omitted pick named in full (its own multi-word name or alias) is never
+            shorthand; a bare shared word is."""
+            kind, key = entity
+            if allow_omitted_mentions or kind != "ingredient" or key not in omitted:
+                return False
+            return len(tokens) > 1 and key not in allowed_ids
 
         def report(entity: _Entity) -> None:
             kind, key = entity
@@ -575,10 +814,56 @@ class CookoutBank:
             if name not in found:
                 found.append(name)
 
-        for entity, tokens in _spans(tokenise(text), self._dictionary):
+        text_tokens = _without_ignored(tokenise(text), covered)
+        sources = self._source_token_sets(
+            allowed_ids, {sid for sid in declared_staples if sid not in UNPICKABLE_STAPLES}
+        )
+        occurrences = self._picked_occurrences(text_tokens, allowed_ids - omitted)
+        consumed: set[int] = set()
+        for entity, tokens, start in _spans_at(text_tokens, self._dictionary):
+            consumed.update(range(start, start + len(tokens)))
             kind, key = entity
+            end = start + len(tokens)
+            if any(
+                start < pe
+                and ps < end
+                and not (start <= ps and pe <= end)
+                and not (ps <= start and end <= pe)
+                for ps, pe in occurrences
+            ):
+                # A prep word that shares a word with a used pick's name ("diced pork" in "diced
+                # pork loin chop"): the span is the pick's own name plus a modifier.
+                continue
             is_omitted_hit = kind == "ingredient" and key in omitted and not allow_omitted_mentions
+            if kind == "ingredient" and generic_pasta and not is_omitted_hit:
+                hit = self._by_id.get(key)
+                if hit is not None and hit.family in PASTA_SHAPE_FAMILIES:
+                    # A shape named for a picked generic pasta ("small shapes such as penne").
+                    continue
             if len(tokens) == 1 and tokens[0] in self.stop_words and not is_omitted_hit:
+                continue
+            if len(tokens) == 1 and tokens[0] in self.culinary_words:
+                continue
+            food_words = [t for t in tokens if t not in plain]
+            if not is_exact_omitted(entity, tokens) and (
+                (len(tokens) == 1 and tokens[0] in covered)
+                or (
+                    len(tokens) > 1
+                    and food_words
+                    and (
+                        any(all(t in src for t in food_words) for src in sources)
+                        or (
+                            len(food_words) > 1
+                            and all(
+                                (t,) in self._dictionary and any(t in src for src in sources)
+                                for t in food_words
+                            )
+                        )
+                    )
+                )
+            ):
+                # Built only from words of what the dish uses and ordinary cooking language
+                # ("oil" for vegetable oil, "mushroom sauce" from dried mushrooms).
                 continue
             if kind == "ingredient":
                 is_staple = key in NON_SEASONING_STAPLES
@@ -596,27 +881,105 @@ class CookoutBank:
                         report(entity)
             elif key not in allowed_families:
                 report(entity)
+        # A food word straight before a culinary word ("chicken broth") must itself be a pick.
+        for index, token in enumerate(text_tokens):
+            if index == 0 or token not in self.culinary_words or index - 1 in consumed:
+                continue
+            head = text_tokens[index - 1]
+            if head in self._food_heads and head not in covered and head not in plain:
+                if head not in found:
+                    found.append(head)
         return found
 
 
-def _spans(
+_CRISPS_SUBJECTS = frozenset(
+    {
+        "it", "they", "skin", "skins", "edges", "edge", "fat", "top", "crust", "surface",
+        "exterior", "which", "that", "this", "outside", "base", "bottom",
+    }
+)  # fmt: skip
+_CRISPS_VERB_AFTER = frozenset({"up", "until", "well"})
+_CRISPS_CONJUNCTIONS = frozenset(
+    {"until", "till", "as", "once", "when", "so", "that", "and", "then"}
+)
+
+
+def _crisps_is_verb(
+    tokens: tuple[str, ...], index: int, picked_words: AbstractSet[str] = frozenset()
+) -> bool:
+    """ "the skin crisps", "it crisps up", "so it catches and crisps" read the verb; everything
+    else ("with crisps", "sprinkle crisps over", "crisps on top") reads the food. A verb needs a
+    subject just before it, or is followed by up/until/well after one (round 2, review M1)."""
+    before = tokens[index - 1] if index > 0 else ""
+    after = tokens[index + 1] if index + 1 < len(tokens) else ""
+    if before in _CRISPS_SUBJECTS:
+        return True
+    if before in picked_words and (
+        after == "up"
+        or (
+            (after in _CRISPS_VERB_AFTER or after == "" or after.endswith("ly"))
+            and any(t in _CRISPS_CONJUNCTIONS for t in tokens[max(0, index - 3) : index])
+        )
+    ):
+        return True  # a picked food as the subject: "until the chicken crisps"
+    if before in ("and", "then") and any(t in _CRISPS_SUBJECTS for t in tokens[:index]):
+        return True
+    return before in ("so", "that", "until", "till", "as", "once", "when") and after in (
+        _CRISPS_VERB_AFTER | {""}
+    )
+
+
+_CLAUSE_BREAK_RE = re.compile(r"[,.;:!?()\[\]{}—–\n]|\s[-‐-‒]+\s")
+
+
+def _clauses(text: str) -> list[str]:
+    """`text` split at punctuation a food name never spans (hyphens inside words stay)."""
+    return [part for part in _CLAUSE_BREAK_RE.split(text) if part.strip()]
+
+
+def _without_ignored(
+    tokens: tuple[str, ...], picked_words: AbstractSet[str] = frozenset()
+) -> tuple[str, ...]:
+    kept: list[str] = []
+    i = 0
+    while i < len(tokens):
+        if tokens[i] == "crisps" and _crisps_is_verb(tokens, i, picked_words):
+            i += 1
+            continue
+        for phrase in IGNORED_PHRASES:
+            if tokens[i : i + len(phrase)] == phrase:
+                i += len(phrase)
+                break
+        else:
+            kept.append(tokens[i])
+            i += 1
+    return tuple(kept)
+
+
+def _spans_at(
     tokens: tuple[str, ...], dictionary: Mapping[tuple[str, ...], _Entity]
-) -> list[tuple[_Entity, tuple[str, ...]]]:
-    """Left-to-right longest-first recognition: each hit consumes its tokens."""
+) -> list[tuple[_Entity, tuple[str, ...], int]]:
+    """Left-to-right longest-first recognition: each hit consumes its tokens (with its start)."""
     longest = max((len(k) for k in dictionary), default=0)
-    hits: list[tuple[_Entity, tuple[str, ...]]] = []
+    hits: list[tuple[_Entity, tuple[str, ...], int]] = []
     i = 0
     while i < len(tokens):
         for length in range(min(longest, len(tokens) - i), 0, -1):
             span = tokens[i : i + length]
             entity = dictionary.get(span)
             if entity is not None:
-                hits.append((entity, span))
+                hits.append((entity, span, i))
                 i += length
                 break
         else:
             i += 1
     return hits
+
+
+def _spans(
+    tokens: tuple[str, ...], dictionary: Mapping[tuple[str, ...], _Entity]
+) -> list[tuple[_Entity, tuple[str, ...]]]:
+    return [(entity, span) for entity, span, _start in _spans_at(tokens, dictionary)]
 
 
 def _group(pool: Sequence[Ingredient]) -> dict[str, dict[str, list[Ingredient]]]:
@@ -764,12 +1127,40 @@ def _stop_words(raw: object) -> frozenset[str]:
     return frozenset(words)
 
 
+def _culinary_words(raw: object, stop_words: frozenset[str]) -> frozenset[str]:
+    if not isinstance(raw, list) or len(raw) > MAX_CULINARY_WORDS:
+        raise CookoutBankError(f"culinaryWords must be a list of at most {MAX_CULINARY_WORDS}")
+    words: list[str] = []
+    for index, word in enumerate(raw):
+        text = _text(f"culinaryWord #{index + 1}", word, maximum=30)
+        if text != fold(text) or len(tokenise(text)) != 1:
+            raise CookoutBankError(f"culinaryWord {text!r}: must be one lowercase word")
+        if text in FORBIDDEN_CULINARY_WORDS:
+            raise CookoutBankError(f"culinaryWord {text!r}: a staple is never a culinary word")
+        if text in stop_words:
+            raise CookoutBankError(f"culinaryWord {text!r}: already a stop word")
+        words.append(text)
+    if len(set(words)) != len(words):
+        raise CookoutBankError("culinaryWords: duplicates")
+    return frozenset(words)
+
+
 def parse_cookout_bank(raw: object) -> CookoutBank:
     """Validate an already-decoded bank document and build the typed bank."""
     if not isinstance(raw, dict):
         raise CookoutBankError("the bank must be a JSON object")
     _expect_keys(
-        "bank", raw, {"version", "generated", "categories", "staples", "stopWords", "ingredients"}
+        "bank",
+        raw,
+        {
+            "version",
+            "generated",
+            "categories",
+            "staples",
+            "stopWords",
+            "culinaryWords",
+            "ingredients",
+        },
     )
     if raw["version"] != BANK_VERSION or isinstance(raw["version"], bool):
         raise CookoutBankError(f"bank version must be {BANK_VERSION}")
@@ -798,6 +1189,7 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
         if staple.pickable == (staple.id in UNPICKABLE_STAPLES):
             raise CookoutBankError(f"staple {staple.id}: wrong pickable flag")
     stop_words = _stop_words(raw["stopWords"])
+    culinary_words = _culinary_words(raw["culinaryWords"], stop_words)
 
     if not (MIN_INGREDIENTS <= len(ingredients_raw) <= MAX_INGREDIENTS):
         raise CookoutBankError(
@@ -839,6 +1231,8 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
     food_words = {
         t[0] for i in ingredients for n in (i.name, *i.aliases) if len(t := tokenise(n)) == 1
     }
+    for word in sorted(culinary_words & food_words):
+        raise CookoutBankError(f"culinaryWord {word!r} is a food word (an ingredient's own name)")
     food_words |= {i.family for i in ingredients}
     for word in sorted(stop_words & food_words):
         raise CookoutBankError(f"stopWord {word!r} is a food word (an ingredient name or family)")
@@ -846,7 +1240,11 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
         if sum(1 for i in ingredients if i.role == role) < MIN_PER_ROLE:
             raise CookoutBankError(f"role {role} has fewer than {MIN_PER_ROLE} ingredients")
     return CookoutBank(
-        categories=categories, staples=staples, ingredients=ingredients, stop_words=stop_words
+        categories=categories,
+        staples=staples,
+        ingredients=ingredients,
+        stop_words=stop_words,
+        culinary_words=culinary_words,
     )
 
 
