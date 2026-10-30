@@ -1066,3 +1066,20 @@ def test_extend_plan_keeps_pilot_and_interleaves_new_ids(mods: dict[str, ModuleT
     assert sorted(added) == sorted(set(cats) - set(first))
     assert {cats[i] for i in added[:3]} == {"cat0", "cat1", "cat2"}  # category-interleaved
     assert im.extend_plan(grown, cats) == grown  # idempotent
+
+
+def test_every_rendered_picture_records_where_its_time_went(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, _work, _comfy, _judge, _totals = _pipeline(tmp_path, mods, {})
+    rendered = [
+        json.loads(line)
+        for line in (tmp_path / "work" / "images" / "journal.jsonl").read_text("utf-8").splitlines()
+        if '"rendered"' in line
+    ]
+    assert len(rendered) == 6
+    for entry in rendered:
+        timing = entry["timing"]
+        assert set(timing) == {"gateS", "prepS", "comfyS", "encodeS", "totalS"}
+        assert all(isinstance(v, float) and v >= 0 for v in timing.values())
+        assert timing["totalS"] >= timing["comfyS"] + timing["encodeS"] - 0.01

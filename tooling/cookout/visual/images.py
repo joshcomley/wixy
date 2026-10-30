@@ -478,10 +478,14 @@ def render_one(
     attempt: int,
     work: WorkDir,
     scratch: Path,
-) -> None:
-    """Render one picture, keep the 1024 master, make both renditions. Synchronous (a thread)."""
+) -> dict[str, float]:
+    """Render one picture, keep the 1024 master, make both renditions. Synchronous (a thread).
+    Returns where the time went, in seconds: `comfyS` (everything inside the ComfyUI client:
+    submit, wait, download, clean-up) and `encodeS` (master + both renditions + writes)."""
     scratch.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
     paths = generator.generate_many([prompt], scratch, seeds=[seed])
+    comfy_done = time.monotonic()
     png = paths[0] if paths else None
     if png is None:
         raise RuntimeError(f"ComfyUI produced no picture for {ident}")
@@ -493,6 +497,10 @@ def render_one(
     for target, data in ((work.card(ident, attempt), card), (work.thumb(ident, attempt), thumb)):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+    return {
+        "comfyS": round(comfy_done - started, 2),
+        "encodeS": round(time.monotonic() - comfy_done, 2),
+    }
 
 
 def visual_for(subject: Subject, overrides: Mapping[str, str]) -> str:
@@ -917,14 +925,17 @@ async def run_pipeline(
                 if not render_only:
                     chunk.append((ident, waiting))  # rendered before a restart: just check it
                 continue
+            picture_started = time.monotonic()
             if not wait_for_idle(get_queue, pause_file=work.pause, sleep=sleep):
                 return totals  # PAUSE file: stop between pictures
+            gate_s = time.monotonic() - picture_started
             attempt = next_attempt(work, ident)
             visual = visual_for(subjects_by_id[ident], work.read_overrides())
             prompt = _prompts.image_prompt(visual)
             seed = random.SystemRandom().randrange(2**32)
             record_attempt(work, ident, attempt, seed, visual, prompt)
-            await asyncio.to_thread(
+            prep_s = time.monotonic() - picture_started - gate_s
+            split = await asyncio.to_thread(
                 render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
             )
             rendered[ident] = work.card(ident, attempt)
@@ -936,6 +947,14 @@ async def run_pipeline(
                     "seed": seed,
                     "state": "rendered",
                     "promptHash": _prompts.prompt_hash(prompt),
+                    # where this picture's time went (the pilot ran at half the expected speed
+                    # on a CPU-saturated hub and nothing recorded why)
+                    "timing": {
+                        "gateS": round(gate_s, 2),
+                        "prepS": round(prep_s, 2),
+                        **(split or {}),
+                        "totalS": round(time.monotonic() - picture_started, 2),
+                    },
                 },
             )
             totals["rendered"] += 1
