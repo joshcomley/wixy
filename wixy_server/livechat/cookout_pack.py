@@ -70,6 +70,12 @@ class PackError(ValueError):
     """A manifest, pack or pack member broke a rule. Never clamped: always refused."""
 
 
+class UnknownPin(PackError):
+    """A pin id the registry does not hold (it was collected after a long stall, or never
+    written). A `PackError`, so older callers still catch it; a server that sees it must
+    `register_slot` again, because nothing is protecting its objects any more."""
+
+
 class StoreBusy(Exception):
     """The lock was not acquired within the timeout, or a live download reservation exists."""
 
@@ -474,7 +480,7 @@ class PackStore:
             raise PackError(f"bad pin id {pin_id!r}")
         pin = _read_json(self._pins / f"{pin_id}.json")
         if pin is None:
-            raise PackError(f"unknown pin {pin_id!r}")
+            raise UnknownPin(f"unknown pin {pin_id!r}")
         return pin
 
     def _sweep_incoming(self) -> None:
@@ -507,8 +513,8 @@ class PackStore:
             return pin_id
 
     def refresh_slot(self, pin_id: str) -> None:
-        """Extend a slot pin's lease. Raises `PackError` for an unknown pin (e.g. GC'd after a long
-        stall): the caller should log it and `register_slot` again."""
+        """Extend a slot pin's lease. Raises `UnknownPin` (a `PackError`) for a pin that is gone,
+        e.g. collected after a long stall: the caller must `register_slot` again."""
         with self._locked():
             pin = self._read_pin(pin_id)
             if pin.get("retiredAt") is None:

@@ -355,6 +355,94 @@ class TestServiceLifecycle:
         assert anyio.run(scenario) < 2.0
 
 
+class TestServicePinSurvivesBeingCollected:
+    """Audit finding F3: a pin the registry no longer knows must be re-registered, not logged
+    forever while the server's pictures lose their protection."""
+
+    def test_an_unknown_pin_is_registered_again_in_the_same_sweep(self, images: Path) -> None:
+        from wixy_server.livechat.cookout_pack import UnknownPin
+
+        class Collected(FakeStore):
+            def __init__(self) -> None:
+                super().__init__()
+                self.pins = 0
+
+            def register_slot(self, manifest: object) -> str:
+                self.calls.append("register")
+                self.pins += 1
+                return f"slot-{self.pins}"
+
+            def refresh_slot(self, pin_id: str) -> None:
+                self.calls.append(f"refresh:{pin_id}")
+                if pin_id == "slot-1":
+                    raise UnknownPin(f"unknown pin {pin_id!r}")
+
+        store = Collected()
+        service = CookoutVisualsService(packed_visuals(images), lambda: store)  # type: ignore[arg-type,return-value]
+        service.tick()  # registers slot-1
+        service.tick()  # slot-1 is gone: refresh fails, registers slot-2 at once
+        assert store.calls == ["register", "refresh:slot-1", "register"]
+        assert service.pin_id == "slot-2"
+        service.tick()
+        assert store.calls[-1] == "refresh:slot-2"  # and it is refreshed normally from now on
+
+    def test_a_transient_refresh_failure_keeps_the_pin(self, images: Path) -> None:
+        class Busy(FakeStore):
+            def refresh_slot(self, pin_id: str) -> None:
+                self.calls.append("refresh")
+                raise StoreBusy("held")
+
+        store = Busy()
+        service = CookoutVisualsService(packed_visuals(images), lambda: store)  # type: ignore[arg-type,return-value]
+        service.tick()
+        service.tick()
+        assert service.pin_id == "slot-fake"  # not thrown away: the pin file is still there
+        assert store.calls.count("register") == 1
+
+    def test_no_gc_runs_while_the_server_holds_no_pin(self, images: Path) -> None:
+        class NoPin(FakeStore):
+            def register_slot(self, manifest: object) -> str:
+                self.calls.append("register")
+                raise StoreBusy("held")
+
+        store = NoPin()
+        service = CookoutVisualsService(packed_visuals(images), lambda: store, gc_s=0.0)  # type: ignore[arg-type,return-value]
+        service.tick()
+        service.tick()  # the daily GC is due now, but there is no pin
+        assert "gc" not in store.calls
+
+    def test_a_collected_pin_does_not_cost_the_objects_with_a_real_store(
+        self, tmp_path: Path
+    ) -> None:
+        from wixy_server.livechat import cookout_pack as cp
+
+        manifest = manifest_for(["a"])
+        root = tmp_path / "store"
+        real = PackStore(root, min_free_bytes=0)
+        ref = manifest.items["a"]
+        for sha in (ref.card, ref.thumb):
+            write_object(real.objects_dir, sha)
+        visuals = IngredientVisuals(FakeCatalogue({}), manifest, [real.objects_dir])  # type: ignore[arg-type]
+        service = CookoutVisualsService(visuals, real, gc_s=0.0)
+        service.tick()
+        first = service.pin_id
+        assert first is not None
+        # a long stall: the pin file is collected out from under the running server
+        (root / "registry" / "pins" / f"{first}.json").unlink()
+        service.tick()
+        assert service.pin_id is not None and service.pin_id != first
+        assert (root / "registry" / "pins" / f"{service.pin_id}.json").exists()
+        # the very next collection keeps the pictures: the new pin protects them
+        old = time.time() - 7 * 24 * 3600
+        for path in real.objects_dir.glob("*/*.webp"):
+            import os
+
+            os.utime(path, (old, old))
+        assert real.gc() == 0
+        assert all((real.objects_dir / object_relpath(s)).is_file() for s in (ref.card, ref.thumb))
+        assert issubclass(cp.UnknownPin, cp.PackError)
+
+
 class TestBootNeverWaitsOnTheStore:
     def test_boot_completes_while_another_process_holds_the_store_lock(
         self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier, images: Path
