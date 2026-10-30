@@ -1750,3 +1750,39 @@ def test_f2_followups_crisps_flavours_pooled_phrases_and_specific_pastas() -> No
     assert _scan("a custard apple", {"egg-custard", "bramley-apple"})
     assert _scan("rice milk", {"basmati-rice", "whole-milk"})
     assert _scan("a pat of garlic butter", {"fresh-garlic", "salted-butter"}) == []
+
+
+# -- audit F2, class A: a bare word must be the pick's head noun --------------------------------
+
+
+def test_f2_a_leading_modifier_is_not_a_bare_word_for_the_pick() -> None:
+    assert _scan("sliced banana", {"banana-shallot"})
+    assert _scan("toasted bagel", {"everything-bagel-seasoning"})
+    assert _scan("a splash of bourbon", {"bourbon-biscuits"})
+    assert _scan("burgundy truffle shavings", {"burgundy-truffle"}) == []  # its own full name
+    assert _scan("chopped celery", {"celery-seeds"})
+    assert _scan("grated carrot", {"carrot-juice"})
+    assert _scan("an apricot glaze", {"apricot-glaze"}) == []  # the full phrase is the pick
+
+
+def test_f2_the_head_noun_or_cut_still_covers_the_pick() -> None:
+    assert _scan("slice the shallot", {"banana-shallot"}) == []
+    assert _scan("toss the squash", {"butternut-squash"}) == []
+    assert _scan("fry the onion", {"dried-onion-granules"}) == []
+    assert _scan("sear the chicken", {"chicken-breast"}) == []
+    assert _scan("add the butter", {"cultured-butter"}) == []
+
+
+def test_f2_sauce_glaze_and_salted_egg_picks_do_not_cover_the_bare_food() -> None:
+    assert _scan("fresh apricot", {"apricot-glaze"})
+    assert _scan("sliced strawberry", {"strawberry-sauce"})
+    assert _scan("a plain omelette", {"salted-duck-egg"})
+    assert _scan("an omelette", {"free-range-egg"}) == []
+
+
+def test_f2_names_whose_prefix_changes_the_food_do_not_cover_the_bare_word() -> None:
+    assert _scan("sliced cucumber", {"sea-cucumber"})
+    assert _scan("rich marrow", {"bone-marrow"})
+    assert _scan("wilted spinach", {"water-spinach"})
+    assert _scan("pepperoni pizza traybake", {"frozen-pepperoni-pizza"}) == []
+    assert _scan("pan-fry in dried chilli", {"dried-chillies-whole"}) == []
