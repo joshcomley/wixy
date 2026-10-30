@@ -1211,6 +1211,18 @@ def test_a_dab_of_and_wafer_thin_are_not_read_as_foods() -> None:
     )
 
 
+def test_bitter_as_a_taste_word_is_not_real_ale() -> None:
+    # Trial 7, basket 15: "a bitter finish" / "bitter crunch" were read as the beer alias.
+    bank = load_cookout_bank()
+    for prose in ("scatter over for a bitter finish", "a bitter crunch"):
+        assert not bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "simmer in real ale", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
+
+
 def test_a_tea_towel_and_a_crisping_salami_are_not_foods() -> None:
     bank = load_cookout_bank()
     for prose in ("keep a tea towel nearby", "dice it small so the skin crisps quickly"):
@@ -1396,3 +1408,35 @@ def test_l3_chicken_fond_and_brown_sugar_need_their_own_picks() -> None:
         )
         == []
     )
+
+
+# -- trial 7 (seed 6) false positives ----------------------------------------------------------
+
+
+def test_trial7_picked_foods_named_in_ordinary_ways_pass() -> None:
+    cases = [
+        ("with the fish juices soaking into the base", {"opah"}),
+        ("topped with a sage and onion crumb of stuffing mix", {"stuffing-mix"}),
+        ("tinned pineapple rings sit under the cake", {"tinned-pineapple"}),
+        ("a rich ragu-style gravy over pasta", {"lentil-pasta"}),
+        ("top each bowl with a poached egg", {"free-range-egg"}),
+        ("brush with the beaten egg", {"free-range-egg"}),
+        ("break the egg yolk into the soup", {"free-range-egg"}),
+    ]
+    for prose, picks in cases:
+        assert _scan(prose, picks) == [], prose
+
+
+def test_trial7_the_new_allowances_do_not_hide_smuggling() -> None:
+    assert _scan("flaked salmon with sage and onion", {"stuffing-mix"}) == ["salmon"]
+    assert _scan("a poached egg on top", {"opah"})
+    assert _scan("sage and onion", set())
+    assert _scan("a bolognese sauce base", {"lentil-pasta"})
+    assert _scan("chicken broth", {"opah"})
+
+
+def test_trial7_pasta_shapes_and_soft_boiled_eggs() -> None:
+    assert _scan("small shapes such as penne or fusilli", {"lentil-pasta"}) == []
+    assert _scan("top with a soft-boiled egg", {"free-range-egg"}) == []
+    assert _scan("small shapes such as penne", {"opah"})
+    assert _scan("serve with squid ink pasta", {"lentil-pasta"})

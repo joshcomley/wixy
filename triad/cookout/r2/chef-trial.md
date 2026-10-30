@@ -1,4 +1,60 @@
-# Cookout chef trial (round 2)
+# Cookout chef trial - final report (round 2)
+
+Real cmd runs (claude-sonnet-5-5, production prompts and validators, up to 3 repairs). The tables below the summary are the LAST full run (run 7, seed 6, on the final code, apart from the fixes listed under "Trial 7 findings", which were re-run).
+
+| run | what it tested | concepts accepted | on attempt 1/2/3/4 | recipes accepted |
+|---|---|---|---|---|
+| 2 (seed 1) | first fixes | 40/40 | 27/9/3/1 | 8/10 |
+| 3 (seed 2) | + self-check prompts | 39/40 | 26/8/4/1 | 10/10 |
+| 4 (seed 3) | + challengeNote schema field | 39/40 | 30/7/1/1 | 9/10 |
+| 5 (seed 4) | + review fixes H1,H2,H8,M3,M4 | 39/40 | 26/7/4/2 | 18/20 (11 first) |
+| 6 (seed 5) | + dip/tart/pastry fixes, prompt count rules | 40/40 | 32/7/1/0 | 20/20 (16 first) |
+| **7 (seed 6)** | + v2 review fixes M1, M2, M5, L1-L3 (fresh seed) | **39/40** (basket 15 was a defect, fixed, re-run accepted first try) | **33/6/0/0** | **20/20 (15 first)** |
+| re-run (seed 6, baskets 3,4,6,9,11,18,24 + 15) | scan fixes from trial 7 | 8/8 | 7 first | 8/8 |
+| re-run (seed 6, baskets 6, 18) | pasta shapes / soft-boiled egg fixes | 2/2 (first) | - | 2/2 (first) |
+
+Bar met: concepts 39/40 (>= 38) and 33 first-attempt (>= 30); recipes 20/20 (>= 19). With the one defect fixed, the same basket is accepted first time.
+
+## Trial 7 findings (every rejection read by hand)
+
+Concepts:
+- basket 3 attempt 1: "fish" in "the fish juices" with an opah (a fish) picked - DEFECT (fixed: a bank "fish" blurb implies the bare word "fish"). Also title "flatbread" with no flatbread picked - genuine.
+- basket 4 attempt 1: "sage and onion" for a picked stuffing mix (dried sage and onion crumbs) - DEFECT (fixed: stuffing picks imply sage and onion).
+- basket 9, 16 attempt 1: "at least one concept must use 8+ of the ten picks" - genuine structural rule.
+- basket 11 attempt 1: "Tinned pineapple rings" with tinned pineapple picked (its alias is "pineapple rings") - DEFECT (fixed: "ring/rings" is a shape word).
+- basket 15, all four attempts: "bitter" (as a taste: "a bitter finish", "bitter crunch") read as the alias of Real ale - DEFECT, the one failed basket (fixed: the alias "bitter" was removed from the bank; "real ale" still matches). Re-run on the final code: accepted on attempt 1.
+- basket 24 attempt 1: "ragu-style gravy" read as Bolognese sauce - DEFECT (fixed: alias "ragu" removed; "bolognese sauce" still matches).
+
+Recipes:
+- basket 0: cookware count - genuine structural rule.
+- basket 4: "Beat the egg" / "beaten, for glazing" with a free-range egg picked - DEFECT (fixed: raw-egg picks imply beaten, poached, boiled, fried, scrambled, soft/hard, yolk, white, omelette, frittata).
+- basket 6: "poach the egg", "poached egg", "egg yolk" with an egg picked - DEFECT (same fix). A "soft-boiled egg" in the re-run - DEFECT (same family, "soft"/"hard" added).
+- basket 9 attempt 1 and basket 18: "bitter" (white pith, bitter bites) read as Real ale - DEFECT (same fix as basket 15).
+- basket 18: "small shapes such as macaroni / penne / fusilli" note on a picked lentil pasta - DEFECT (fixed: shapes of a picked generic pasta pass; a named different pasta such as squid ink pasta still fails).
+
+Seven of the eight concept rejections and nearly all recipe rejections were defects of the scan, not smuggling; all are fixed with regression tests, and a replay of 621 earlier accepted no-twist dishes through the final scan flags none of them.
+
+## Correction to the earlier report
+
+Basket 2 of seed 3 was NOT a genuine smuggling failure: "Pan-fry diced pork loin chop" with the pork loin chop picked was read as the unpicked food "Diced pork" (review finding H2, prep word before a picked name). Fixed and tested; the basket is now accepted first time. The `bun` alias on "Bun noodles" (folded to "bun", so choux "buns" read as noodles) was removed from the bank.
+
+Run 6 (seed 5): "garlic butter" (x2) was labelled genuine earlier; it was a DEFECT (garlic and butter both picked, from different sources) and is fixed by the v2 review fix M2 (two standalone picked foods may form a phrase). "pork mince" from a pork pick plus a mince pick is still flagged.
+
+## v2 review fixes (all tested)
+
+- M1 crisps: the verb reading needs a subject just before ("the skin crisps", "so it catches and crisps"); "sprinkle crisps over", "crisps on top" are flagged as the food.
+- M2 pooled coverage for phrases built from two standalone picked foods ("garlic butter").
+- M5 the flaky "retried round" test now waits, bounded, for the runner to record its run.
+- L1 "roll" no longer implies pastry (only "sausage roll" does). L2 only raw or whole egg picks imply omelette. L3 "fond" is a culinary word again, so "chicken fond" flags "chicken"; "brown sugar" is flagged when only granulated sugar is picked.
+
+## Design notes for the reviewer
+
+- A multi-word phrase is shorthand only when ONE pick's name supplies all its food words (H1), or when every food word is itself a standalone picked food (M2). "cheese sauce" built from two picks still passes by design: "sauce" is a stop word and cannot be told apart from the production "mushroom sauce" case (deliberate, accepted in review).
+- Family exemption (a long-standing spec rule, not changed here): an ingredient whose family is that of a used pick is allowed. So "omelette" passes when an egg custard (same family, egg dish) is picked.
+- A food head (chicken, beef, pork, salmon...) directly before a culinary word must itself be picked ("chicken broth" is flagged). Other bare foods in front of a culinary word, and a bare "chicken" elsewhere, rely on the dictionary: a recall limit of the scan.
+- Food spans never cross punctuation (H8). `crisps` is read as a verb or a food by a token rule (M1).
+
+---
 
 Seed 6. Real cmd runs: model `claude-sonnet-5-5`, effort `medium`, production prompts and validators, up to 3 repairs per job.
 

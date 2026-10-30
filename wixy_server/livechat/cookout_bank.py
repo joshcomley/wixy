@@ -159,6 +159,22 @@ IMPLIED_WORDS: Mapping[str, frozenset[str]] = {
     "turnover": frozenset({"pastry"}),
 }
 
+RAW_EGG_FORMS = frozenset(
+    {
+        "omelette", "frittata", "beaten", "poached", "scrambled", "boiled", "fried",
+        "yolk", "yolks", "white", "whites", "soft", "hard",
+    }
+)  # fmt: skip
+"""Forms of a raw or whole egg pick that a cook names bare ("a poached egg", "the yolk")."""
+
+PASTA_SHAPE_FAMILIES = frozenset(
+    {"tube-pasta", "spiral-pasta", "elbow-pasta", "long-pasta", "thin-long-pasta", "soup-pasta"}
+)
+"""Pasta-shape families that a generic picked pasta ("lentil pasta") may be shaped as."""
+
+SHAPE_WORDS = frozenset({"ring", "rings"})
+"""Cut or shape words ("pineapple rings") that never make a second food of a picked one."""
+
 MIN_INGREDIENTS = 2500
 MAX_INGREDIENTS = 4000
 MIN_PER_ROLE = 200
@@ -588,20 +604,12 @@ class CookoutBank:
         """One token set per name or alias of the given picks and staples (with singular/plural
         forms): a multi-word phrase is shorthand only when ONE of them supplies all its food
         words ("pork mince" is not shorthand for a pork chop plus a chicken mince)."""
-        names: list[str] = []
-        for ingredient_id in ingredient_ids:
-            entry = self._by_id.get(ingredient_id)
-            if entry is not None:
-                names.extend((entry.name, *entry.aliases))
-        for staple_id in staple_ids:
-            staple = self._staples_by_id.get(staple_id)
-            if staple is not None:
-                names.append(staple.name)
         sets: list[frozenset[str]] = []
-        for name in names:
+        for name, entry in self._pick_names(ingredient_ids, staple_ids):
             tokens = set(tokenise(name))
             for token in list(tokens):
                 tokens.update(v[0] for v in _plural_variants((token,)))
+            tokens.update(self._implied_words(name, entry))
             sets.append(frozenset(tokens))
         return sets
 
@@ -632,27 +640,48 @@ class CookoutBank:
         """Every word (and its simple singular/plural) in the names and aliases of the given picks
         and staples: the words a cook may use bare for something the dish does use ("oil" for
         vegetable oil, "mushroom" for dried mixed mushrooms)."""
-        names: list[str] = []
-        for ingredient_id in ingredient_ids:
-            entry = self._by_id.get(ingredient_id)
-            if entry is not None:
-                names.extend((entry.name, *entry.aliases))
-        for staple_id in staple_ids:
-            staple = self._staples_by_id.get(staple_id)
-            if staple is not None:
-                names.append(staple.name)
+        names = self._pick_names(ingredient_ids, staple_ids)
         words: set[str] = set()
-        for name in names:
+        for name, extra in names:
             for token in tokenise(name):
                 words.add(token)
                 words.update(v[0] for v in _plural_variants((token,)))
-                words.update(IMPLIED_WORDS.get(token, ()))
-            parts = tokenise(name)
-            if parts[-2:] in (("sausage", "roll"), ("sausage", "rolls")):
-                words.add("pastry")
-            if ("egg" in parts or "eggs" in parts) and not set(parts) & NOT_RAW_EGG_WORDS:
-                words.update({"omelette", "frittata"})
+            words.update(self._implied_words(name, extra))
         return frozenset(words)
+
+    def _pick_names(
+        self, ingredient_ids: AbstractSet[str], staple_ids: AbstractSet[str]
+    ) -> list[tuple[str, Ingredient | None]]:
+        names: list[tuple[str, Ingredient | None]] = []
+        for ingredient_id in ingredient_ids:
+            entry = self._by_id.get(ingredient_id)
+            if entry is not None:
+                names.extend((n, entry) for n in (entry.name, *entry.aliases))
+        for staple_id in staple_ids:
+            staple = self._staples_by_id.get(staple_id)
+            if staple is not None:
+                names.append((staple.name, None))
+        return names
+
+    @staticmethod
+    def _implied_words(name: str, entry: Ingredient | None) -> set[str]:
+        """Words a cook uses bare for a pick without them being a second food: pastry for a pie,
+        omelette or a poached egg for a raw egg, "sage and onion" for stuffing mix, "fish" for a
+        pick the bank describes as a fish."""
+        parts = tokenise(name)
+        words: set[str] = set()
+        for token in parts:
+            words.update(IMPLIED_WORDS.get(token, ()))
+        if parts[-2:] in (("sausage", "roll"), ("sausage", "rolls")):
+            words.add("pastry")
+        if ("egg" in parts or "eggs" in parts) and not set(parts) & NOT_RAW_EGG_WORDS:
+            words.update(RAW_EGG_FORMS)
+        if entry is not None:
+            if entry.family == "stuffing":
+                words.update({"sage", "onion"})
+            if "fish" in tokenise(entry.blurb):
+                words.add("fish")
+        return words
 
     def mentions(self, text: str, ingredient_id: str) -> bool:
         """True when `text` names that ingredient by name, alias or plural, its bare family word or
@@ -754,7 +783,11 @@ class CookoutBank:
         covered = self._covered_tokens(
             allowed_ids, {sid for sid in declared_staples if sid not in UNPICKABLE_STAPLES}
         )
-        plain = self.stop_words | self.culinary_words
+        plain = self.stop_words | self.culinary_words | SHAPE_WORDS
+        generic_pasta = any(
+            (entry := self._by_id.get(i)) is not None and tokenise(entry.name)[-1:] == ("pasta",)
+            for i in allowed_ids - omitted
+        )
         found: list[str] = []
 
         def is_exact_omitted(entity: _Entity, tokens: tuple[str, ...]) -> bool:
@@ -798,6 +831,11 @@ class CookoutBank:
                 # pork loin chop"): the span is the pick's own name plus a modifier.
                 continue
             is_omitted_hit = kind == "ingredient" and key in omitted and not allow_omitted_mentions
+            if kind == "ingredient" and generic_pasta and not is_omitted_hit:
+                hit = self._by_id.get(key)
+                if hit is not None and hit.family in PASTA_SHAPE_FAMILIES:
+                    # A shape named for a picked generic pasta ("small shapes such as penne").
+                    continue
             if len(tokens) == 1 and tokens[0] in self.stop_words and not is_omitted_hit:
                 continue
             if len(tokens) == 1 and tokens[0] in self.culinary_words:

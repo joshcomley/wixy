@@ -27024,9 +27024,7 @@
   {
    "id": "bolognese-sauce",
    "name": "Bolognese sauce",
-   "aliases": [
-    "ragu"
-   ],
+   "aliases": [],
    "category": "sauces-stocks-fermented",
    "role": "accent",
    "family": "pasta-sauce",
@@ -36745,9 +36743,7 @@
   {
    "id": "real-ale",
    "name": "Real ale",
-   "aliases": [
-    "bitter"
-   ],
+   "aliases": [],
    "category": "drinks-alcohol",
    "role": "accent",
    "family": "beer",
