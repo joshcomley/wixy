@@ -4,6 +4,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  canvasColumnWidth,
+  canvasPlacement,
   chooseAnchor,
   cssZoom,
   declaredColumnWidth,
@@ -20,7 +22,7 @@ import {
   wirePoint,
   type DrawPoint,
 } from "../../src/server/drawingGeometry";
-import { MAX_POINTS_PER_STROKE, SELECT_HIT_RADIUS_PX } from "../../src/server/drawings";
+import { CANVAS_INSET_PX, MAX_POINTS_PER_STROKE, SELECT_HIT_RADIUS_PX } from "../../src/server/drawings";
 
 describe("cssZoom: client px per layout px (decisions/00205)", () => {
   it("uses the browser's own currentCSSZoom when it has one", () => {
@@ -39,6 +41,45 @@ describe("cssZoom: client px per layout px (decisions/00205)", () => {
     expect(cssZoom(undefined, 300, NaN)).toBe(1);
     expect(cssZoom(0, 300, 300)).toBe(1);
     expect(cssZoom(-1, 270, 300)).toBeCloseTo(0.9, 9);
+  });
+});
+
+describe("a canvas's drawings are placed by its surface (decisions/00206)", () => {
+  /** Where draw point (x, y) of a drawing declared at `columnWidth` lands, as a share of a surface of
+   * width `surface` at (left, top). */
+  function share(x: number, y: number, columnWidth: number, left: number, top: number, surface: number): [number, number] {
+    const p = canvasPlacement(left, top, surface, columnWidth);
+    return [(p.originX + x * p.scale - left) / surface, (p.originY + y * p.scale - top) / surface];
+  }
+
+  it("a point lands on the same share of the surface wherever and however large the surface is drawn", () => {
+    const columnWidth = canvasColumnWidth(346); // drawn in a 346 px tab canvas: declared 360
+    expect(columnWidth).toBe(346 + 2 * CANVAS_INSET_PX);
+    const inTab = share(180, 220, columnWidth, 12, 80, 346);
+    const inlineWide = share(180, 220, columnWidth, 27, 5000, 946);
+    const inlineNarrow = share(180, 220, columnWidth, 19, -300, 332);
+    for (const other of [inlineWide, inlineNarrow]) {
+      expect(other[0]).toBeCloseTo(inTab[0], 9);
+      expect(other[1]).toBeCloseTo(inTab[1], 9);
+    }
+    // The surface's own corner is draw point (INSET, INSET) at any size.
+    expect(share(CANVAS_INSET_PX, CANVAS_INSET_PX, columnWidth, 27, 5000, 946)).toEqual([0, 0]);
+  });
+
+  it("a drawing made inline before the tab existed (bubble-relative, surface INSET inside) stays exactly where it was", () => {
+    // Inline at 464 px: the bubble's left/top were the column's left and the bubble's top, and its surface
+    // sat INSET inside, (464 - 14) px wide. The old mapping: viewer = bubble + point * 1.
+    const bubbleLeft = 10;
+    const bubbleTop = 700;
+    const p = canvasPlacement(bubbleLeft + CANVAS_INSET_PX, bubbleTop + CANVAS_INSET_PX, 464 - 2 * CANVAS_INSET_PX, 464);
+    expect(p.scale).toBe(1);
+    expect(p.originX).toBe(bubbleLeft);
+    expect(p.originY).toBe(bubbleTop);
+  });
+
+  it("never divides by zero: a degenerate surface or column is scale 1", () => {
+    expect(canvasPlacement(0, 0, 0, 300).scale).toBe(1);
+    expect(canvasPlacement(0, 0, 300, 2 * CANVAS_INSET_PX).scale).toBe(1);
   });
 });
 

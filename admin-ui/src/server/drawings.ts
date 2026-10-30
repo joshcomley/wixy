@@ -70,6 +70,12 @@ export const SECOND_FINGER_WINDOW_MS = 150;
 export const SECOND_FINGER_SLOP_PX = 12;
 /** §5: Select mode picks a drawing tapped within this many viewer px of one of its strokes. */
 export const SELECT_HIT_RADIUS_PX = 12;
+/** A canvas message's drawing surface sits this far inside its bubble (chat.css: the canvas
+ * bubble's 1 px border + 6 px padding). Draw space on a canvas is the bubble a canvas would be at
+ * the drawing's `columnWidth`, so the surface is `[INSET, columnWidth - INSET]` wide — which keeps
+ * every drawing made inline on a canvas before the canvas tab existed exactly where it was
+ * (decisions/00206). */
+export const CANVAS_INSET_PX = 7;
 /** A new stroke further than this from its drawing's anchor (draw space) starts a new drawing,
  * so no point of it can cross the server's ±`MAX_POINT_Y_ABS` bound. */
 export const DRAWING_Y_SPLIT_PX = MAX_POINT_Y_ABS - 4_000;

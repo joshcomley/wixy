@@ -10,6 +10,7 @@
 //   applied to x, y and the stroke width alike: a circle stays a circle on every screen.
 
 import {
+  CANVAS_INSET_PX,
   MAX_COLUMN_WIDTH,
   MAX_POINT_X_PAD,
   MAX_POINT_Y_ABS,
@@ -65,6 +66,40 @@ export function cssZoom(currentZoom: number | undefined, boxWidth: number, compu
     return boxWidth / computedWidth;
   }
   return 1;
+}
+
+/** Where one drawing's draw-space origin sits on this screen, and its uniform scale. */
+export interface Placement {
+  readonly originX: number;
+  readonly originY: number;
+  readonly scale: number;
+}
+
+/** A drawing on a CANVAS message, placed by the canvas's surface rather than by the thread column
+ * (decisions/00206): draw space is the canvas bubble at the drawing's `columnWidth`, whose surface
+ * spans `[CANVAS_INSET_PX, columnWidth - CANVAS_INSET_PX]`. So the same drawing lands on the same
+ * spot of the surface wherever that surface is drawn — the inline canvas in the chat (whatever sits
+ * above it in the bubble) or the full-screen canvas in the Canvas tab — and on every width. All
+ * arguments are in one coordinate space; the result is in that space. */
+export function canvasPlacement(
+  surfaceLeft: number,
+  surfaceTop: number,
+  surfaceWidth: number,
+  drawingColumnWidth: number,
+): Placement {
+  const inner = drawingColumnWidth - 2 * CANVAS_INSET_PX;
+  const scale = inner > 0 && surfaceWidth > 0 ? surfaceWidth / inner : 1;
+  return {
+    originX: surfaceLeft - CANVAS_INSET_PX * scale,
+    originY: surfaceTop - CANVAS_INSET_PX * scale,
+    scale,
+  };
+}
+
+/** The `columnWidth` a new drawing on a canvas declares: the canvas bubble its surface belongs to,
+ * clamped into the server's range like any other (`declaredColumnWidth`). */
+export function canvasColumnWidth(surfaceWidth: number): number {
+  return declaredColumnWidth(surfaceWidth + 2 * CANVAS_INSET_PX);
 }
 
 /** Viewer -> draw space for one point. `originX`/`originY` are where the draw-space origin

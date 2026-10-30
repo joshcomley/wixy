@@ -338,21 +338,22 @@ test.describe("server-drawing.spec.ts", () => {
     await unlockServer(pageB, "Josh");
     expect(await pageA.evaluate(() => document.documentElement.style.zoom)).toBe("0.9");
 
+    // A starts a canvas: it opens in the Canvas tab (decisions/00206), where A draws.
     await pageA.locator(".wx-srv-more-button").click();
     await humanPause(pageA);
     await pageA.locator(".wx-srv-more-canvas").click();
-    const canvasA = pageA.locator(".wx-srv-bubble-canvas").last();
-    await expect(canvasA).toBeVisible();
-    const seq = await seqOf(canvasA);
+    const paneA = pageA.locator(".wx-srv-canvas-pane");
+    await expect(paneA).toBeVisible();
+    const surfaceA = paneA.locator(".wx-srv-canvas-surface");
+    const seq = (await pageA.locator(".wx-srv-bubble-canvas").last().getAttribute("data-message-seq"))!;
     const canvasB = pageB.locator(`.wx-srv-bubble-canvas[data-message-seq="${seq}"]`);
     await expect(canvasB).toBeVisible();
     await humanPause(pageA);
 
-    await turnPenOn(pageA);
-    const box = (await canvasA.boundingBox())!;
-    const view = pageA.viewportSize()!;
-    const start = { x: box.x + 60, y: Math.min(box.y + box.height, view.height) - 200 };
-    const end = { x: start.x + 160, y: start.y - 40 };
+    const box = (await surfaceA.boundingBox())!;
+    const start = { x: box.x + box.width * 0.2, y: box.y + box.height * 0.6 };
+    const end = { x: box.x + box.width * 0.7, y: box.y + box.height * 0.5 };
+    const inPane = paneA.locator(`svg.wx-srv-drawing:not(.wx-srv-drawing-live)[data-anchor-seq="${seq}"]`);
     await pageA.mouse.move(start.x, start.y);
     await pageA.mouse.down();
     for (let i = 1; i <= 16; i++) {
@@ -360,9 +361,8 @@ test.describe("server-drawing.spec.ts", () => {
       await pageA.waitForTimeout(16);
     }
     // Mid-stroke, the drawer's own ink is already under the pen.
-    const ownA = await storedOn(pageA, canvasA);
-    await eventually([pageA], async () => (await ownA.count()) === 1, "A's ink while drawing");
-    const midBox = (await ownA.boundingBox())!;
+    await eventually([pageA], async () => (await inPane.count()) === 1, "A's ink while drawing");
+    const midBox = (await inPane.boundingBox())!;
     for (const point of [start, end]) {
       expect(point.x, "ink box covers the pen (x) mid-stroke").toBeGreaterThanOrEqual(midBox.x - 1);
       expect(point.x, "ink box covers the pen (x) mid-stroke").toBeLessThanOrEqual(midBox.x + midBox.width + 1);
@@ -372,39 +372,56 @@ test.describe("server-drawing.spec.ts", () => {
     await pageA.mouse.up();
 
     // Stored, still under the pen on A: the box hugs the stroke (half the 4px pen + 1px pad).
-    const storedPostsOk = await storedOn(pageA, canvasA);
-    await expect(storedPostsOk).toHaveCount(1);
-    const inkA = (await storedPostsOk.boundingBox())!;
+    await expect(inPane).toHaveCount(1);
+    const inkA = (await inPane.boundingBox())!;
     expect(Math.abs(inkA.x - start.x)).toBeLessThan(6);
     expect(Math.abs(inkA.x + inkA.width - end.x)).toBeLessThan(6);
     expect(Math.abs(inkA.y - end.y)).toBeLessThan(6);
     expect(Math.abs(inkA.y + inkA.height - start.y)).toBeLessThan(6);
 
-    // B (no zoom) sees it at the same place ON THE CANVAS, as a share of the canvas's width, and
-    // at the same size relative to it: the stored points are honest draw-space px.
-    const inkB = await storedOn(pageB, canvasB);
+    // B (no zoom) sees it on the inline canvas at the same place ON THE CANVAS, as a share of the
+    // canvas's width, and at the same size relative to it: the stored points are honest draw space.
+    const inkB = pageB.locator(`.wx-srv-thread svg.wx-srv-drawing:not(.wx-srv-drawing-live)[data-anchor-seq="${seq}"]`);
     await eventually([pageA, pageB], async () => (await inkB.count()) === 1, "B's copy of the ink");
     await canvasB.scrollIntoViewIfNeeded();
-    const cA = (await canvasA.boundingBox())!;
-    const cB = (await canvasB.boundingBox())!;
+    const sB = (await canvasB.locator(".wx-srv-canvas-surface").boundingBox())!;
     const bInk = (await inkB.boundingBox())!;
-    const share = (ink: { x: number; y: number; width: number }, canvas: { x: number; y: number; width: number }) => ({
-      x: (ink.x - canvas.x) / canvas.width,
-      y: (ink.y - canvas.y) / canvas.width,
-      w: ink.width / canvas.width,
+    const share = (ink: { x: number; y: number; width: number }, surface: { x: number; y: number; width: number }) => ({
+      x: (ink.x - surface.x) / surface.width,
+      y: (ink.y - surface.y) / surface.width,
+      w: ink.width / surface.width,
     });
-    const onA = share(inkA, cA);
-    const onB = share(bInk, cB);
+    const onA = share(inkA, box);
+    const onB = share(bInk, sB);
     expect(Math.abs(onA.x - onB.x), "same left on the canvas").toBeLessThan(0.02);
     expect(Math.abs(onA.y - onB.y), "same top on the canvas").toBeLessThan(0.02);
     expect(Math.abs(onA.w - onB.w), "same size on the canvas").toBeLessThan(0.02);
 
     // Select mode at 90% zoom: a tap ON the stroke selects it.
     await humanPause(pageA);
-    await pageA.locator('.wx-srv-pen-mode[data-mode="select"]').click();
+    await paneA.locator('.wx-srv-pen-mode[data-mode="select"]').click();
     await humanPause(pageA);
     await pageA.mouse.click((start.x + end.x) / 2, (start.y + end.y) / 2);
-    await expect(pageA.locator(".wx-srv-drawing-selection")).toBeVisible();
+    await expect(paneA.locator(".wx-srv-drawing-selection")).toBeVisible();
+
+    // The chat's own pen at 90% zoom, on an ordinary message far down a long thread: under the pen.
+    // (The canvas's tab is closed first: it has a pen of its own.)
+    await humanPause(pageA);
+    await paneA.locator(".wx-srv-canvas-close").click();
+    await expect(pageA.locator(".wx-srv-thread")).toBeVisible();
+    await expect(paneA).toHaveCount(0);
+    const message = bubbleWith(pageA, `${label} #40`);
+    await turnPenOn(pageA);
+    // Into the middle of the thread, clear of the toolbar that the pen just put above it.
+    await message.evaluate((el) => el.scrollIntoView({ block: "center" }));
+    await humanPause(pageA);
+    const at = await mouseStroke(pageA, message);
+    const onMessage = await storedOn(pageA, message);
+    await expect(onMessage).toHaveCount(1);
+    const inkOnMessage = (await onMessage.boundingBox())!;
+    expect(Math.abs(inkOnMessage.x - at.x), "chat pen: ink starts under the pen (x)").toBeLessThan(6);
+    expect(at.y, "chat pen: ink under the pen (y)").toBeGreaterThanOrEqual(inkOnMessage.y - 1);
+    expect(at.y, "chat pen: ink under the pen (y)").toBeLessThanOrEqual(inkOnMessage.y + inkOnMessage.height + 1);
 
     expect(errorsA).toEqual([]);
     await closeAll(contextA, contextB);

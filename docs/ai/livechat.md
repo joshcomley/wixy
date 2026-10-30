@@ -850,13 +850,32 @@ above) under the tap that caused it, so a double-tap on a message or a tap on a 
 Attach/mic stay at the left and Send keeps its place at
 the right edge (`margin-left: auto` in the promoted row), so no button moves when the box jumps up.
 The header's `⋯` button (`.wx-srv-more-button`, first of the right-hand buttons) opens
-`.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and scrolls to the new
-message. A **canvas message** (schema v14, `messages.canvas INTEGER NOT NULL DEFAULT 0`; wire
-`canvas: true`; no text, no attachments) renders as a full-width bubble holding
-`.wx-srv-canvas-surface`, a muted theme-coloured surface at a fixed 4:5 aspect ratio (a ratio, not a
-pixel height, so the pen's uniform draw-space scale stays right at every width — spec 07 §1). It
-exists so the pen, whose drawings anchor to a message, has reserved space instead of drawing over
-other text. The pen is still turned on with its own button. Quoting a canvas shows only the sender.
+`.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and opens the new
+canvas in the **Canvas tab** (below; decisions/00206). A **canvas message** (schema v14,
+`messages.canvas INTEGER NOT NULL DEFAULT 0`; wire `canvas: true`; no text, no attachments) renders in
+the thread as a full-width bubble: a head row (`.wx-srv-canvas-bubble-head`) with an **Open** button
+(`.wx-srv-canvas-open`, a gesture boundary) and `.wx-srv-canvas-surface`, a muted theme-coloured
+surface at a fixed 4:5 aspect ratio, carrying the canvas's drawing. The thread keeps it as the record
+of when the canvas was started; it is drawn on in the tab. Quoting a canvas shows only the sender.
+
+**The Canvas tab** (`canvasPane.ts`, decisions/00206). A canvas takes the chat's ONE second tab —
+`gameTabs.ts` `GameKey` includes `"canvas"` — so opening one replaces whatever game held it (still only
+Chat plus one tab), and a game started later replaces the canvas the same way. Starting a canvas opens
+its tab on the starter's screen; a canvas started on another screen (the other person's, or the same
+person's other device) is OFFERED (the tab with a dot) — never one already in the chat when it loads
+(`canvasBaseline`, set from the first fully loaded history), and never over a game that is on screen
+right now (it waits in the chat, where Open opens it). Open on any canvas, an older one too, shows it in
+the tab and drawing carries on there. The pane is full screen like a game's (the chat header and
+composer hide): a head with "Your canvas" / "<name>'s canvas", the pen's Undo, Redo and Pen buttons and
+✕ (closes the tab; the canvas stays in the chat), the pen toolbar, and the largest 4:5 canvas that fits
+(`.wx-srv-canvas-frame`, width set by a ResizeObserver; never scrolled). It runs its OWN
+`mountDrawingLayer` whose only anchor is the canvas shown (`threadWrap` = the frame, so a stroke can
+only start on the canvas); the pen comes on when the tab shows and goes off (session ended, strokes
+stored) when it hides. The thread forwards every pen event to it (`attach`, `detach`, `teardown`,
+`sync` after each render, `handleLive` for that canvas only, `messageDeleted`, `wiped`). The canvas has
+no chat of its own: its registration says `itemChat: false`, so `chatTarget()` is the main chat while
+it shows; its FAB (`OverlayOptions.onFab`) goes back to the Chat tab, and a new message floats in as
+over a game. A deleted canvas closes its tab.
 
 **Extend auto-lock to 1 minute** is a per-device checkbox in the chat's settings sheet
 (`settingsSheet.ts`: a real `<label for>` row, at least 44px tall, default off). It stores `"1"`
@@ -1729,6 +1748,16 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   ink, while the other screen saw her strokes ~10% small. Drawings stored before the fix by a
   zoomed screen keep that ~10% shrink (it cannot be told apart afterwards); they stay on the
   right message.
+- **A drawing on a canvas is placed by the canvas's surface (decisions/00206),** not by the column
+  and the bubble's top: draw space is the canvas bubble at the drawing's `columnWidth`, whose surface
+  spans `[CANVAS_INSET_PX, columnWidth - CANVAS_INSET_PX]` (7 px: the canvas bubble's border plus
+  padding). `canvasPlacement` maps it onto any surface box, so the inline canvas (whatever sits above
+  its surface in the bubble, such as the Open row) and the Canvas tab's full-screen canvas show the same
+  drawing on the same spot at any width; `deps.canvasSurface(seq)` hands the layer the surface, and a new
+  drawing on a canvas declares `canvasColumnWidth(surface width)`. Drawings made inline before the tab
+  were bubble-relative with the surface 7 px inside, so they keep their place exactly — except ones
+  drawn on the OTHER person's canvas, which then had a name label above the surface: they now sit that
+  label's height (about 20 px) higher.
 - **Positions are always read from the live DOM**, never copied. They are re-read on every
   `renderThreadList` (`drawingLayer.syncMessages`, called before the stick-to-bottom
   decision), by a ResizeObserver on the column and the thread (images loading, rotation, the
