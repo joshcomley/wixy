@@ -52,7 +52,32 @@ STAPLES = [
 GENERATED = "2026-10-28"
 # Ordinary cooking language the contraband scan never reads as an added food (spec 09 section 3.2
 # as amended by round 2): none may be an ingredient's own exact name or a staple word.
-CULINARY_WORDS = ["juice", "juices", "jus", "gravy", "starch", "starches", "stock", "stocks", "broth", "crumb", "crumbs", "dressing", "dressings", "batter", "crisp", "drippings", "stuffing", "fat", "fats", "fond", "dip", "dips", "spread", "spreads"]
+CULINARY_WORDS = [
+    "juice",
+    "juices",
+    "jus",
+    "gravy",
+    "starch",
+    "starches",
+    "stock",
+    "stocks",
+    "broth",
+    "crumb",
+    "crumbs",
+    "dressing",
+    "dressings",
+    "batter",
+    "crisp",
+    "drippings",
+    "stuffing",
+    "fat",
+    "fats",
+    "fond",
+    "dip",
+    "dips",
+    "spread",
+    "spreads",
+]
 
 STOP_WORDS = [
     "bake", "board", "bowl", "crust", "dish", "dough", "filling", "garnish",
@@ -181,6 +206,7 @@ def main() -> int:
         "staples": [{"id": i, "name": n, "pickable": p} for i, n, p in STAPLES],
         "stopWords": STOP_WORDS,
         "culinaryWords": CULINARY_WORDS,
+        "byproducts": json.loads((SRC / "byproducts.json").read_text(encoding="utf-8")),
         "ingredients": rows,
     }
     OUT.write_text(json.dumps(doc, ensure_ascii=False, indent=1) + "\n", encoding="utf-8")

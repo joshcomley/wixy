@@ -114,6 +114,7 @@ def validate(path: Path = BANK) -> list[str]:
         "staples",
         "stopWords",
         "culinaryWords",
+        "byproducts",
         "ingredients",
     }
     if not isinstance(doc, dict) or set(doc) != keys:
@@ -248,6 +249,14 @@ def validate(path: Path = BANK) -> list[str]:
             problems.append(f"category {cat}: empty")
         if cats[cat] / total > MAX_CATEGORY_SHARE:
             problems.append(f"category {cat}: more than {MAX_CATEGORY_SHARE:.0%} of the bank")
+    # The curated by-product list (audit F4) is checked by the loader's own closed validator.
+    try:
+        from wixy_server.livechat.cookout_bank import parse_cookout_bank
+
+        parse_cookout_bank(doc)
+    except Exception as exc:  # noqa: BLE001 - report whatever the strict loader refuses
+        if "byproduct" in str(exc):
+            problems.append(str(exc))
     culinary = doc["culinaryWords"]
     if not isinstance(culinary, list) or not all(
         isinstance(w, str) and w == fold(w) and re.fullmatch(r"[a-z0-9]+", w) for w in culinary
