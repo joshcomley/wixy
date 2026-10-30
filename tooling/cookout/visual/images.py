@@ -335,6 +335,17 @@ def make_plan(
     return {"seed": seed, "pilot": interleave(pilot), "rest": interleave(rest)}
 
 
+def extend_plan(plan: Mapping[str, Any], category_of: Mapping[str, str]) -> dict[str, Any]:
+    """Append catalogue ids the plan does not know yet to `rest`, category-interleaved. The pilot,
+    the seed and every id already planned keep their place: a plan is never redrawn."""
+    known = set(plan["pilot"]) | set(plan["rest"])
+    fresh: dict[str, list[str]] = defaultdict(list)
+    for ident in sorted(category_of):
+        if ident not in known:
+            fresh[category_of[ident]].append(ident)
+    return {**plan, "rest": [*plan["rest"], *interleave(fresh)]}
+
+
 @dataclass(frozen=True, slots=True)
 class Subject:
     ident: str
@@ -993,6 +1004,11 @@ def _parser() -> Any:
     sub = p.add_subparsers(dest="cmd", required=True)
     plan = sub.add_parser("plan", help="draw the pilot (once) and write plan.json")
     plan.add_argument("--seed", type=int, default=None)
+    plan.add_argument(
+        "--extend",
+        action="store_true",
+        help="append catalogue ids that are not planned yet (the pilot never changes)",
+    )
     run = sub.add_parser("run", help="render and check; resumable")
     run.add_argument("--phase", choices=["pilot", "rest", "all"], default="pilot")
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
@@ -1024,6 +1040,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         plan = json.loads(work.plan.read_text("utf-8")) if work.plan.exists() else {}
         total = len(plan.get("pilot", [])) + len(plan.get("rest", []))
         print(json.dumps(build_status(work, total), indent=1))
+        return 0
+    if args.cmd == "plan" and args.extend:
+        subs = load_subjects(catalogue)
+        old = json.loads(work.plan.read_text("utf-8"))
+        grown = extend_plan(old, {i: s.category for i, s in subs.items()})
+        work.plan.write_text(json.dumps(grown, indent=1) + "\n", encoding="utf-8")
+        print(
+            f"pilot {len(grown['pilot'])} (unchanged), "
+            f"rest {len(old['rest'])} -> {len(grown['rest'])}"
+        )
         return 0
     if args.cmd == "plan":
         if work.plan.exists():
