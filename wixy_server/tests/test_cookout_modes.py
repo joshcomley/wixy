@@ -88,6 +88,14 @@ def test_committed_modes_pass_the_validator() -> None:
     assert _validator().validate(rounds=20) == []
 
 
+def test_toastie_draw_simulation_runs_the_spec_size_without_a_problem(
+    toastie: CookoutMode, bank: CookoutBank
+) -> None:
+    """Spec 09c §8.1: 2,000 seeded maximum-skip rounds with chaos, a veto, a wildcard and a rescue
+    swap; every emitted pair obeys the kind, the facet rule and the draw rules; no exhaustion."""
+    assert _validator().simulate(toastie, bank, rounds=2000) == []
+
+
 def test_modes_load_classic_first_and_default(modes: CookoutModes) -> None:
     assert [m.id for m in modes.modes] == ["classic", "toastie"]
     assert modes.default.id == "classic"
