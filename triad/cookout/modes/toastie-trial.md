@@ -14,8 +14,12 @@ swap). Tool: `tooling/cookout/chef_trial.py --mode toastie`.
 2. **Picture judge (§8.4 said Haiku).** Haiku was the wrong instrument (table below), so on the
    coordinator's ruling the 12 pictures were judged by **Sol and Opus** through cmd with the
    unchanged spec question and the unchanged spec template.
-3. **Result against the picture bar: NOT MET on one cell.** Bar is ≥11/12 from each judge on each
-   set. Existing set: Sol 12/12, Opus 12/12. Fresh set: Opus 12/12, **Sol 10/12**. See Pictures.
+3. **Picture template (one edit, ruled by the coordinator).** After Sol read one fresh picture
+   (`f21-a`: crust on every visible side, cut face away from the camera) as two sandwiches, I added
+   "the cut faces turned toward the camera" to `picture.template` in `cookout_modes.json` (spec
+   09c §3.6 updated to match; "stacked halves" kept). Judged on 12 NEW fresh renders (baskets 24-35,
+   new seeds): **Sol 12/12, Opus 12/12**. Bar (>=11/12 each) met. Before the edit: existing 12:
+   Sol 12/12, Opus 12/12; fresh 12: Opus 12/12, Sol 10/12.
 
 ## Chef concepts
 
@@ -120,8 +124,12 @@ picture (a wrongly failed good picture is a checker defect, as for Haiku). Opus 
 Honestly this is one picture short of the bar for Sol on the fresh set; I have changed nothing
 further and am reporting it.
 
-Picture files: `triad/cookout/modes/toastie-pictures/` (`f21-a`, `f23-c` rejected by Sol;
-`f12-b`, `04-basket3-b` accepted by both).
+**After the template edit** (new fresh set, camera-facing cut): Sol and Opus both answered yes to
+all 12 (f24-b ... f35-b; raw verdicts in the run's `judges2.json`, kept out of the repo).
+
+Picture files: `triad/cookout/modes/toastie-pictures/` (`f21-a`, `f23-c` rejected by Sol before the
+edit; `f12-b`, `04-basket3-b` accepted by both; `f24-b`, `f29-b`, `f33-c` are new-template renders
+accepted by both).
 
 ## Baskets
 

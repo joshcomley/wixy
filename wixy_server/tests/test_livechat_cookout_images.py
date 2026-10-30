@@ -812,9 +812,9 @@ class TestToastiePictures:
         assert text.startswith(
             'Photorealistic appetising food photograph of "Golden Ham And Cheddar Toastie": '
             "one closed toasted sandwich made with Sliced white bread, pan-fried until deep "
-            "golden and crunchy, cut in half with the two halves stacked slightly apart so the "
-            "hot, melted filling of Mature cheddar, Cooked ham, Tomato shows in the "
-            "cross-section."
+            "golden and crunchy, cut in half with the two halves stacked slightly apart, the cut "
+            "faces turned toward the camera so the hot, melted filling of Mature cheddar, Cooked "
+            "ham, Tomato shows in the cross-section."
         )
         assert mode.picture.default_presentation is not None
         assert mode.picture.default_presentation in text
