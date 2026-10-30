@@ -35,6 +35,8 @@ import { ServerLockedError } from "./api/http";
 import type { Message } from "./api/messages";
 import { createDrawGesture, type DrawGestureEffect } from "./drawGesture";
 import {
+  canvasColumnWidth,
+  canvasPlacement,
   chooseAnchor,
   cssZoom,
   declaredColumnWidth,
@@ -49,6 +51,7 @@ import {
   wirePoint,
   type Bounds,
   type HitCandidate,
+  type Placement,
   type SvgBox,
 } from "./drawingGeometry";
 import { createLiveReceiver, createLiveSender, type LiveStroke, type OutgoingLiveFrame } from "./drawingLive";
@@ -114,6 +117,9 @@ export interface DrawingLayerDeps {
   anchors(): readonly DrawingAnchor[];
   /** A confirmed, on-screen bubble by `seq`, or null. */
   anchorElement(seq: number): HTMLElement | null;
+  /** The drawing surface of `seq` when it is a CANVAS message on screen, else null: drawings on it
+   * are placed by that surface, not by the column (decisions/00206). */
+  canvasSurface?(seq: number): HTMLElement | null;
   /** Holds the thread where it is (no stick-to-bottom) until the returned release runs. */
   holdScroll(): () => void;
   /** The toolbar just changed the thread's height and this layer already kept the content in
@@ -160,6 +166,9 @@ export interface DrawingLayer {
   redo(): void;
   /** Immediately exits draw mode and abandons this session's drawings. */
   abandon(): void;
+  /** Turns the pen on (Draw mode, toolbar shown) or off (the session ends; every stored stroke
+   * stays), as the Pen button and Done do. Turning it on needs a session. */
+  setPen(on: boolean): void;
 }
 
 /** Content px are the thread content's own LAYOUT px — what `left`/`top`/`width` are written in.
@@ -627,18 +636,41 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     view.svg.setAttribute("viewBox", `${vb.minX} ${vb.minY} ${vb.maxX - vb.minX} ${vb.maxY - vb.minY}`);
   }
 
+  /** The canvas surface of the message `seq` on this screen (`deps.canvasSurface`), or null. */
+  function canvasSurfaceOf(seq: number): HTMLElement | null {
+    return deps.canvasSurface?.(seq) ?? null;
+  }
+
+  /** Where drawings anchored to `seq` (declared at `columnWidth`) sit right now, in content px: by
+   * the canvas's surface for a canvas message (decisions/00206), else by the column's left edge and
+   * the anchor's top (§1). Null when the anchor is not on screen. */
+  function placementOf(seq: number, columnWidth: number, frame: Frame): Placement | null {
+    const surface = canvasSurfaceOf(seq);
+    if (surface !== null) {
+      const box = surface.getBoundingClientRect();
+      if (!(box.width > 0)) return null;
+      return canvasPlacement(
+        (box.left - frame.contentLeft) / frame.zoom,
+        (box.top - frame.contentTop) / frame.zoom,
+        box.width / frame.zoom,
+        columnWidth,
+      );
+    }
+    const top = anchorTop(seq, frame);
+    if (top === null) return null;
+    return { originX: frame.columnLeft, originY: top, scale: drawScale(frame.columnWidth, columnWidth) };
+  }
+
   function positionView(view: SvgView, anchorSeq: number, columnWidth: number, frame: Frame | null): void {
-    if (frame === null || view.bounds === null) {
+    const placement = frame === null || view.bounds === null ? null : placementOf(anchorSeq, columnWidth, frame);
+    if (frame === null || view.bounds === null || placement === null) {
       applyBox(view, null);
       return;
     }
-    const top = anchorTop(anchorSeq, frame);
-    if (top === null) {
-      applyBox(view, null);
-      return;
-    }
-    const scale = drawScale(frame.columnWidth, columnWidth);
-    applyBox(view, svgBox(view.bounds, frame.columnLeft, top, scale, frame.clipLeft, frame.clipRight));
+    applyBox(
+      view,
+      svgBox(view.bounds, placement.originX, placement.originY, placement.scale, frame.clipLeft, frame.clipRight),
+    );
   }
 
   function positionSelection(): void {
@@ -870,12 +902,13 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
    * null. */
   function originOf(drawing: ModelDrawing): { x: number; y: number; scale: number } | null {
     const frame = measureFrame();
-    const anchor = deps.anchorElement(drawing.anchorSeq);
-    if (frame === null || anchor === null) return null;
+    if (frame === null || deps.anchorElement(drawing.anchorSeq) === null) return null;
+    const placement = placementOf(drawing.anchorSeq, drawing.columnWidth, frame);
+    if (placement === null) return null;
     return {
-      x: frame.contentLeft + frame.columnLeft * frame.zoom,
-      y: anchor.getBoundingClientRect().top,
-      scale: drawScale(frame.columnWidth, drawing.columnWidth) * frame.zoom,
+      x: frame.contentLeft + placement.originX * frame.zoom,
+      y: frame.contentTop + placement.originY * frame.zoom,
+      scale: placement.scale * frame.zoom,
     };
   }
 
@@ -908,12 +941,15 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       setStatus(`That message already has ${MAX_DRAWINGS_PER_ANCHOR} drawings. Delete one to draw there.`);
       return null;
     }
+    // On a canvas, draw space is the canvas bubble its surface belongs to (decisions/00206).
+    const surface = canvasSurfaceOf(anchor.seq);
+    const surfaceWidth = surface === null ? 0 : surface.getBoundingClientRect().width / frame.zoom;
     const clientId = newId(win);
     ownClientIds.add(clientId);
     const drawing = model.addOwn({
       clientId,
       anchorSeq: anchor.seq,
-      columnWidth: declaredColumnWidth(frame.columnWidth),
+      columnWidth: surfaceWidth > 0 ? canvasColumnWidth(surfaceWidth) : declaredColumnWidth(frame.columnWidth),
       sender: identity.getName() ?? "",
     });
     sessionDrawingKey = drawing.key;
@@ -1310,15 +1346,9 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     for (const [key, view] of drawingViews) {
       const drawing = model.get(key);
       if (drawing === undefined || view.box === null) continue;
-      const top = anchorTop(drawing.anchorSeq, frame);
-      if (top === null) continue;
-      candidates.push({
-        key,
-        originX: frame.columnLeft,
-        originY: top,
-        scale: drawScale(frame.columnWidth, drawing.columnWidth),
-        strokes: drawing.strokes,
-      });
+      const placement = placementOf(drawing.anchorSeq, drawing.columnWidth, frame);
+      if (placement === null) continue;
+      candidates.push({ key, ...placement, strokes: drawing.strokes });
     }
     return candidates;
   }
@@ -1697,6 +1727,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     undo,
     redo,
     abandon,
+    setPen,
   };
 }
 

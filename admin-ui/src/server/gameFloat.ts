@@ -47,6 +47,9 @@ export interface OverlayOptions {
   readonly popupTitle: string;
   /** The item this game has open, or null. */
   item(): number | null;
+  /** What the FAB does instead of opening the item's pop-up chat — for an item with no chat of its
+   * own (a canvas, decisions/00206), going back to the Chat tab. */
+  readonly onFab?: () => void;
 }
 
 export interface GameFloat {
@@ -220,6 +223,10 @@ export function createGameFloat(deps: GameFloatDeps): GameFloat {
     dot.hidden = true;
     fab.append(dot);
     fab.addEventListener("click", () => {
+      if (options.onFab !== undefined) {
+        options.onFab();
+        return;
+      }
       const item = options.item();
       if (item === null) return;
       // The pop-up takes the composer from the quick reply cleanly: one move, no stop at home.

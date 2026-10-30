@@ -22,3 +22,6 @@ canvas, and cannot see canvases Josh (Bubble) starts. Josh sees her canvases and
 
 ## Next
 - On #2151's answer, reproduce on that exact browser/mode, find root cause, red/green test, fix.
+
+## Outcome
+Merged as pull request 406 (commit 9a943527), live 2026-10-30.

@@ -99,6 +99,7 @@ import {
 } from "./cookout/api";
 import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
+import { createCanvasPane, type CanvasPane } from "./canvasPane";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
 import { createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
@@ -559,6 +560,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     column: messageList,
     anchors: () => drawingAnchors(),
     anchorElement: (seq) => drawingAnchorElement(seq),
+    canvasSurface: (seq) => drawingAnchorElement(seq)?.querySelector<HTMLElement>(".wx-srv-canvas-surface") ?? null,
     holdScroll: () => threadScroll.hold(),
     adoptScrollPosition: () => threadScroll.adoptPosition(),
     onRemoteContent: () => threadScroll.afterContentChange(false),
@@ -595,6 +597,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // (the pop-up item chat re-parents it). Earlier code only calls into the tabs after that.
   let gameTabs: GameTabs;
   let gameFloat: GameFloat;
+  /** The Canvas tab (decisions/00206): a canvas is drawn on there, full screen, with its own pen. */
+  let canvasPane: CanvasPane;
   let gameMounted = false;
   /** The chat a message sent right now belongs to: the quick reply's while it is open, else the frame's
    * (the open game's item, the pop-up's item, or null for the main chat). */
@@ -1326,10 +1330,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (open && cookoutGame.pane.parentElement === null) game.pane.after(cookoutGame.pane);
     else if (!open && cookoutGame.pane.parentElement !== null) cookoutGame.pane.remove();
   }
+  /** The Canvas pane follows the same rule: in the chat only while a canvas is open in its tab. */
+  function syncCanvasPane(): void {
+    const open = gameTabs.seqOf("canvas") !== null;
+    if (open && canvasPane.pane.parentElement === null) game.pane.after(canvasPane.pane);
+    else if (!open && canvasPane.pane.parentElement !== null) canvasPane.pane.remove();
+  }
   function applyGameLayout(): void {
     if (gameMounted) {
       syncAdventurePane();
       syncCookoutPane();
+      syncCanvasPane();
     }
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
@@ -1384,6 +1395,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     isRecording: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
     tabBar: gameTabs.tabBar,
     host: element,
+  });
+  canvasPane = createCanvasPane({
+    document: documentRef,
+    win,
+    hooks,
+    identity,
+    tabs: gameTabs,
+    float: gameFloat,
+    canvasMessage: (seq) => {
+      const message = confirmedBySeq.get(seq);
+      return message !== undefined && message.canvas === true ? message : undefined;
+    },
   });
   const game: WyrGame = createWyrGame({
     document: documentRef,
@@ -1535,6 +1558,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     seenAnchor.wyr = 0;
     seenAnchor.adventure = 0;
     seenAnchor.cookout = 0;
+    seenAnchor.canvas = 0;
+    canvasBaseline = false;
   }
 
   /** The other person's display name, as the latest message from anyone else shows it (the two
@@ -1544,7 +1569,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   /** The newest game anchor of each game this tab has already considered offering: a game tab is
    * offered once per NEW round, never again for one already seen — with one game at a time, an
    * older unfinished round of one game must not keep pushing out the other game's tab. */
-  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0, cookout: 0 };
+  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0, cookout: 0, canvas: 0 };
+  /** False until the first message batch after an unlock has been seen: the canvases already in the
+   * chat then are history, not new, and none of them is offered as a tab (decisions/00206). */
+  let canvasBaseline = false;
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
@@ -2318,8 +2346,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return button;
   }
 
-  /** Adds a canvas message: a big blank surface in the thread, with space of its own so the pen
-   * has somewhere to draw that is not on top of anyone's words. */
+  /** Adds a canvas message and opens it in the Canvas tab, where it is drawn on full screen; the
+   * thread keeps it as the record of when it was started (decisions/00206). */
   async function addCanvas(): Promise<void> {
     const session = currentSession;
     if (session === null) return;
@@ -2347,6 +2375,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     addConfirmed(result.message);
     renderThreadList();
     threadScroll.scrollToBottom();
+    // It is drawn on in its own tab (decisions/00206); the chat keeps it as the record.
+    gameTabs.open("canvas", result.message.seq);
   }
 
   /** Starts a would-you-rather round: the server picks the question and paints the two
@@ -2548,6 +2578,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         offers.push({ key: "cookout", seq: newestCookout.seq });
       }
     }
+    // A canvas started on another screen (the other person's, or this person's other device) is
+    // offered as the Canvas tab (decisions/00206). The canvases already in the chat when it loads
+    // are history and are never offered, and a canvas never pushes out a game that is on screen right
+    // now: it waits in the chat, where its Open button opens it.
+    let newestCanvas = 0;
+    for (const m of messages) if (m.canvas === true && m.seq > newestCanvas) newestCanvas = m.seq;
+    if (!canvasBaseline) {
+      if (historyLoaded) {
+        seenAnchor.canvas = Math.max(seenAnchor.canvas, newestCanvas);
+        canvasBaseline = true;
+      }
+    } else if (newestCanvas > seenAnchor.canvas) {
+      seenAnchor.canvas = newestCanvas;
+      const showing = gameTabs.activeTab();
+      if (newestCanvas !== gameTabs.seqOf("canvas") && (showing === "chat" || showing === "canvas")) {
+        offers.push({ key: "canvas", seq: newestCanvas });
+      }
+    }
     const newest = offers.reduce<(typeof offers)[number] | undefined>((a, b) => (a === undefined || b.seq > a.seq ? b : a), undefined);
     if (newest !== undefined) gameTabs.offer(newest.key, newest.seq);
     gameTabs.refresh();
@@ -2646,11 +2694,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       bubble.appendChild(cookoutCards.create(message));
     } else if (message.canvas === true) {
       bubble.classList.add("wx-srv-bubble-canvas");
+      // The chat keeps the canvas as the record of when it was started, drawing and all; it is drawn
+      // on in the Canvas tab, which Open brings up (decisions/00206). The drawing is placed by the
+      // surface, so this row above it never moves it.
+      const head = documentRef.createElement("div");
+      head.className = "wx-srv-canvas-bubble-head";
+      const open = documentRef.createElement("button");
+      open.type = "button";
+      open.className = "wx-srv-canvas-open";
+      open.textContent = "Open";
+      open.setAttribute("aria-label", "Open this canvas");
+      open.setAttribute("data-srv-gesture-boundary", "");
+      const seq = message.seq;
+      open.addEventListener("click", () => gameTabs.open("canvas", seq));
+      head.appendChild(open);
       const surface = documentRef.createElement("div");
       surface.className = "wx-srv-canvas-surface";
       surface.setAttribute("role", "img");
-      surface.setAttribute("aria-label", "Blank canvas to draw on");
-      bubble.appendChild(surface);
+      surface.setAttribute("aria-label", "Canvas");
+      bubble.append(head, surface);
     } else if (message.viewOnce) {
       const isVideo = message.attachments[0]?.kind === "video";
       const kindLabel = isVideo ? "video" : "photo";
@@ -2916,6 +2978,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // decision below, which must see a drawing that extends past the last bubble), fetch
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
     drawingLayer.syncMessages(messages);
+    canvasPane.sync();
     wyrModel.observe(messages);
     adventureModel.observe(messages);
     cookoutModel.observe(messages);
@@ -2937,6 +3000,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // spec 07 §6: its drawings go with it at once, in place (a failed delete restores the
     // message, and its summary brings them back).
     drawingLayer.messageDeleted(message.seq);
+    canvasPane.messageDeleted(message.seq);
     const bubble = messageList.querySelector<HTMLElement>(
       `[data-message-seq="${message.seq}"]`,
     );
@@ -2992,6 +3056,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
+    canvasPane.wiped();
     wyrModel.reset();
     adventureModel.reset();
     cookoutModel.reset();
@@ -3665,6 +3730,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     gallery.refreshSession();
     // Strokes a lock left waiting to be stored resume with this unlock's token.
     drawingLayer.attach(session);
+    canvasPane.attach(session);
     if (voiceRecorder === null) voiceRecorder = createRecorder();
     const requestGeneration = contentGeneration;
     const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
@@ -3760,6 +3826,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // progress is withdrawn with a live cancel, and the surface, live previews and every
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
+      canvasPane.detach();
       wyrModel.reset();
       adventureModel.reset();
       cookoutModel.reset();
@@ -3837,6 +3904,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           recipeBook.messageDeleted(event.seq);
           // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
           drawingLayer.messageDeleted(event.seq);
+          canvasPane.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
           // was shown, patched in place — the server does NOT fan out a
           // message_updated for replies on delete.
@@ -3857,6 +3925,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         case "drawing_live":
           // spec 07 §4: another screen's stroke while it is being drawn — lossy, never stored.
           drawingLayer.handleLive(event.frame);
+          canvasPane.handleLive(event.frame);
           return;
         case "adventure_live":
           // spec 08 §3.5: the other person's swipe while they spin the globe — lossy, never stored.
@@ -3874,6 +3943,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     teardown(): void {
       stopTranscriptionProbe();
       drawingLayer.teardown();
+      canvasPane.teardown();
       wyrModel.reset();
       adventureModel.reset();
       cookoutModel.reset();

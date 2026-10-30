@@ -849,6 +849,85 @@ button.wx-srv-quote:focus-visible {
   background-size: 24px 24px;
 }
 
+/* The row above an inline canvas: its Open button (decisions/00206). Drawings are placed by the surface,
+   so this row never moves them. */
+.wx-srv-canvas-bubble-head {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 0 6px;
+}
+
+.wx-srv-canvas-open {
+  min-height: 44px;
+  min-width: 88px;
+  padding: 0 16px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* The Canvas tab (canvasPane.ts): the largest 4:5 canvas that fits, centred, never scrolled. The frame's
+   width is set from the pane's size; it hosts the Draw surface, so a stroke can only start on it. */
+.wx-srv-canvas-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.wx-srv-canvas-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--wx-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wx-srv-canvas-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.wx-srv-canvas-scroll {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.wx-srv-canvas-content {
+  position: relative;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.wx-srv-canvas-frame {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+  margin: 12px auto;
+}
+
+/* In the tab the canvas sits on the page's own background, so its edge is drawn (a shadow ring, which
+   never changes its size) and it takes the bubble's surface colour, as the inline canvas's frame does. */
+.wx-srv-canvas-frame .wx-srv-canvas-surface {
+  background-color: var(--wx-surface);
+  box-shadow: 0 0 0 1px var(--wx-border), var(--wx-shadow);
+}
+
 /* -- Would-you-rather: the preview card in the main chat ---------------------- */
 
 .wx-srv-bubble.wx-srv-bubble-wyr {
@@ -1193,10 +1272,11 @@ button.wx-srv-wyr-countdown {
   display: flex;
 }
 
-/* The pen draws on the thread; in the game tab there is no thread to draw on. */
-.wx-srv-in-game .wx-srv-pen-button,
-.wx-srv-in-game .wx-srv-pen-undo,
-.wx-srv-in-game .wx-srv-pen-redo {
+/* The chat's pen draws on the thread; in a game tab there is no thread to draw on. Only the HEADER's pen
+   buttons: the Canvas tab has its own pen (canvasPane.ts, decisions/00206). */
+.wx-srv-in-game .wx-srv-thread-header .wx-srv-pen-button,
+.wx-srv-in-game .wx-srv-thread-header .wx-srv-pen-undo,
+.wx-srv-in-game .wx-srv-thread-header .wx-srv-pen-redo {
   display: none;
 }
 
