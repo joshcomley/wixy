@@ -2517,6 +2517,13 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   used pick is allowed (so "omelette" passes when an egg custard, family egg dish, is picked - the long-standing
   family exemption); and `BARE_ONLY_WORDS` (`fish` for a fish pick, `sage`/`onion` for stuffing mix) are allowed only as
   a lone word, never inside a longer food span such as "fish sauce" or "onion rings".
+  Head-noun rule (round 2 audit F2): a bare word, or a phrase made from one pick's name, counts as shorthand only
+  through the pick's HEAD food noun (its last word, looking through pack words like `pot`/`pouch` and cut words like
+  `powder`/`breast`/`dough`), never through a leading modifier: `banana` does not cover banana shallot, `carrot`
+  does not cover carrot juice, brown/hot/white sauce is not covered by brown crab, hot-smoked salmon or white bread.
+  A chef's own shortening of a pick's name at either end ("pepperoni pizza") is the pick. Two picks pair only when
+  the phrase ends in a cook's compound base (`POOLED_HEADS`: garlic butter, chilli oil). The offline differential
+  against the pre-round-2 scan is `triad/cookout/r2/f2-differential.md`.
 - **Blind redaction** (`cookout_view_json`, in Python before serialisation). In Blind mode while `picking`: the
   partner's `picks` are `null` (only `pickCount`); `current.role/options/offerIndex/skipsRemaining` are filled only
   for the viewer whose turn it is (everyone else, a non-player included, sees only `turn`, `player`,
