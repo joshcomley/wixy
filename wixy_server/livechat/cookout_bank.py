@@ -134,6 +134,15 @@ HEAD_MODIFIERS = frozenset(
 )  # fmt: skip
 """Leading words of meat and fish names that are modifiers, not the food."""
 
+NOT_RAW_EGG_WORDS = frozenset(
+    {
+        "custard", "boiled", "hard", "pickled", "scotch", "mayonnaise", "nog", "noodle",
+        "noodles", "pasta", "tart", "cake", "roll", "white", "whites", "yolk", "yolks", "powder",
+        "substitute", "fried", "poached", "scrambled",
+    }
+)  # fmt: skip
+"""Egg names that are not a raw/whole egg: they do not make "omelette" shorthand."""
+
 # Words that make a bare culinary by-product word the cook's own shorthand for a pick
 # ("pastry" for a pie, pasty, quiche, tart, samosa or wellington that was picked).
 IMPLIED_WORDS: Mapping[str, frozenset[str]] = {
@@ -147,10 +156,6 @@ IMPLIED_WORDS: Mapping[str, frozenset[str]] = {
     "samosa": frozenset({"pastry"}),
     "samosas": frozenset({"pastry"}),
     "wellington": frozenset({"pastry"}),
-    "egg": frozenset({"omelette", "frittata"}),
-    "eggs": frozenset({"omelette", "frittata"}),
-    "roll": frozenset({"pastry"}),
-    "rolls": frozenset({"pastry"}),
     "turnover": frozenset({"pastry"}),
 }
 
@@ -308,6 +313,12 @@ class CookoutBank:
             dictionary.setdefault(key, entity)
         for short, staple_id in STAPLE_SHORT_FORMS.items():
             dictionary.setdefault((short,), ("staple", staple_id))
+        # "brown sugar" for "Light soft brown sugar": the last two words of a longer name that
+        # ends in a staple word are a food phrase of their own (review L3).
+        for ingredient in self.ingredients:
+            words = tokenise(ingredient.name)
+            if len(words) >= 3 and words[-1] in STAPLE_SHORT_FORMS and len(words[-2]) >= 3:
+                dictionary.setdefault(words[-2:], ("ingredient", ingredient.id))
         # A family word ("bacon" for "Streaky bacon") is a food word only when it is the tail of
         # a member's own name; slug artefacts ("baked", "beef-aged") are never read from prose.
         for family in sorted({i.family for i in self.ingredients}):
@@ -636,6 +647,11 @@ class CookoutBank:
                 words.add(token)
                 words.update(v[0] for v in _plural_variants((token,)))
                 words.update(IMPLIED_WORDS.get(token, ()))
+            parts = tokenise(name)
+            if parts[-2:] in (("sausage", "roll"), ("sausage", "rolls")):
+                words.add("pastry")
+            if ("egg" in parts or "eggs" in parts) and not set(parts) & NOT_RAW_EGG_WORDS:
+                words.update({"omelette", "frittata"})
         return frozenset(words)
 
     def mentions(self, text: str, ingredient_id: str) -> bool:
@@ -792,7 +808,13 @@ class CookoutBank:
                 or (
                     len(tokens) > 1
                     and food_words
-                    and any(all(t in src for t in food_words) for src in sources)
+                    and (
+                        any(all(t in src for t in food_words) for src in sources)
+                        or (
+                            len(food_words) > 1
+                            and all((t,) in self._dictionary and t in covered for t in food_words)
+                        )
+                    )
                 )
             ):
                 # Built only from words of what the dish uses and ordinary cooking language
@@ -825,34 +847,28 @@ class CookoutBank:
         return found
 
 
-_CRISPS_FOOD_BEFORE = frozenset(
+_CRISPS_SUBJECTS = frozenset(
     {
-        "with", "and", "of", "some", "serve", "served", "serving", "extra", "handful", "bag",
-        "packet", "plus", "topped", "a", "the", "salted", "bags", "crushed", "toasted",
+        "it", "they", "skin", "skins", "edges", "edge", "fat", "top", "crust", "surface",
+        "exterior", "which", "that", "this", "outside", "base", "bottom",
     }
 )  # fmt: skip
-_CRISPS_VERB_AFTER = frozenset(
-    {
-        "up", "until", "at", "on", "in", "to", "over", "around", "through", "and", "then",
-        "while", "so", "as", "but", "when", "once", "before", "after", "too", "well", "nicely",
-    }
-)  # fmt: skip
+_CRISPS_VERB_AFTER = frozenset({"up", "until", "well"})
 
 
 def _crisps_is_verb(tokens: tuple[str, ...], index: int) -> bool:
-    """ "the skin crisps", "it crisps up", "crisps beautifully" read the verb; "with crisps",
-    "serve crisps", "a handful of crisps" read the food (round 2, review M4)."""
+    """ "the skin crisps", "it crisps up", "so it catches and crisps" read the verb; everything
+    else ("with crisps", "sprinkle crisps over", "crisps on top") reads the food. A verb needs a
+    subject just before it, or is followed by up/until/well after one (round 2, review M1)."""
     before = tokens[index - 1] if index > 0 else ""
     after = tokens[index + 1] if index + 1 < len(tokens) else ""
-    if before in ("and", "then") and any(
-        t in ("it", "they", "which", "that", "this", "edges", "skin") for t in tokens[:index]
-    ):
-        return True  # "it catches and crisps": a second verb of the same subject
-    if before in _CRISPS_FOOD_BEFORE:
-        return False
-    if not after:
-        return bool(before)
-    return after in _CRISPS_VERB_AFTER or after.endswith("ly")
+    if before in _CRISPS_SUBJECTS:
+        return True
+    if before in ("and", "then") and any(t in _CRISPS_SUBJECTS for t in tokens[:index]):
+        return True
+    return before in ("so", "that", "until", "till", "as", "once", "when") and after in (
+        _CRISPS_VERB_AFTER | {""}
+    )
 
 
 _CLAUSE_BREAK_RE = re.compile(r"[,.;:!?()\[\]{}—–\n]|\s[-‐-‒]+\s")

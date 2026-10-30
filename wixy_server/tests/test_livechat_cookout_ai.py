@@ -1041,7 +1041,14 @@ class TestConceptsJob:
         store.add_round()
 
         async def retry_meanwhile() -> None:
-            await anyio.sleep(0.1)
+            # Wait (bounded) until the runner has spawned its run AND recorded it on the round,
+            # then flip the run id: a fixed sleep raced the runner under load.
+            with anyio.fail_after(30):
+                while not (
+                    state.chat_spawn_runs
+                    and store.rounds[1]["concepts_run_id"] in state.chat_spawn_runs
+                ):
+                    await anyio.sleep(0.01)
             store.rounds[1]["concepts_run_id"] = "a-newer-run"
 
         _drive_concepts(_runner(store, _client(state), tmp_path), extra=retry_meanwhile)

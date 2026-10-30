@@ -1323,3 +1323,76 @@ def test_trial6_false_positives_bacon_fat_omelette_and_a_second_verb() -> None:
     assert _scan("duck fat", {"lemongrass"}) == ["Duck fat"]
     assert _scan("rough it up so it catches and crisps.", set()) == []
     assert _scan("salt and crisps", set()) == ["crisps"]
+
+
+# -- round 2 review v2 (M1 crisps, M2 garlic butter, L1-L3) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "sprinkle crisps over",
+        "crisps on top",
+        "crisps in the bowl",
+        "Layer in crisps then",
+        "Add crisps beautifully",
+        "serves crisps nicely",
+    ],
+)
+def test_m1_crisps_after_an_imperative_or_without_a_subject_is_the_food(prose: str) -> None:
+    assert _scan(prose, {"chicken-breast"}) == ["crisps"], prose
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "the skin crisps",
+        "it crisps up",
+        "the edges crisps beautifully",
+        "until the skin crisps",
+        "so it catches and crisps.",
+        "dice it small so the skin crisps quickly",
+    ],
+)
+def test_m1_crisps_with_a_subject_is_the_verb(prose: str) -> None:
+    assert _scan(prose, {"chicken-breast"}) == [], prose
+
+
+def test_m2_two_standalone_foods_from_two_sources_pass_but_a_single_head_does_not() -> None:
+    bank = load_cookout_bank()
+    assert (
+        bank.find_contraband_ingredients(
+            "garlic butter",
+            allowed_ingredient_ids={"garlic-cloves"},
+            allowed_staple_ids={"butter"},
+        )
+        == []
+    )
+    assert _scan("pork mince", {"pork-loin-chop", "chicken-mince"}) == ["Pork mince"]
+    assert _scan("beef mince", {"lamb-mince", "beef-topside"}) == ["Beef mince"]
+
+
+def test_l1_pastry_is_not_implied_by_a_bread_roll_but_is_by_a_sausage_roll() -> None:
+    assert _scan("wrap in pastry", {"hot-dog-roll"}) == ["pastry"]
+    assert _scan("wrap in pastry", {"sausage-roll"}) == []
+
+
+def test_l2_omelette_is_implied_by_a_raw_egg_pick_not_a_boiled_egg() -> None:
+    assert _scan("a Spanish omelette", {"brown-egg"}) == []
+    bank = load_cookout_bank()
+    assert "omelette" not in bank._covered_tokens({"boiled-egg"}, set())
+    assert "omelette" in bank._covered_tokens({"brown-egg"}, set())
+
+
+def test_l3_chicken_fond_and_brown_sugar_need_their_own_picks() -> None:
+    assert _scan("a chicken fond", {"lemongrass"}) == ["chicken"]
+    bank = load_cookout_bank()
+    assert bank.find_contraband_ingredients(
+        "brown sugar", allowed_ingredient_ids=set(), allowed_staple_ids={"granulated-sugar"}
+    )
+    assert (
+        bank.find_contraband_ingredients(
+            "a little sugar", allowed_ingredient_ids=set(), allowed_staple_ids={"granulated-sugar"}
+        )
+        == []
+    )
