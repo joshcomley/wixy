@@ -298,6 +298,23 @@ real provisioning failure (decisions/00031).
 - **Game mode** (`cookout_rounds.mode`, schema v22) — `classic` (default) or `toastie` (Toasted sandwich: a bread on turn 1, a filling on turn 2,
   fillings drawn from the mode's candidate pool by `family`). Data in `cookout_modes.json`; enabled per server by `WIXY_COOKOUT_MODES`.
   An unknown mode id is read-only (409 `bad_state`, abandon allowed). Bank entries carry `kind` on each ingredient snap (null for Classic).
+  Not to be confused with **Open / Blind play** (`blind`), the older way of playing, independent of the game mode; the code and
+  docs say "play style" / "Open/Blind play" for that, and "mode" only for the game mode.
+- **Pick kind** (`PickSnap.kind`, `mode.kinds[]`, `current.role`) — what one turn offers. Classic: one of the four bank roles.
+  Toasted sandwich: `bread`, `cheese`, `main`, `produce` or `finish`. Each kind has a `label`, a banner `prompt` (<= 22 chars), a
+  candidate pool, a `facet` and whether the chaos shelf works on it.
+- **Facet** (`category` | `family`) — the axis that keeps a pair varied. `category` is the core rule; `family` is for a kind whose whole
+  pool shares one category (every bread is `grains-bakery`, every cheese `dairy-eggs`), so the pair must come from two different
+  families and the least-shown tie-break counts families.
+- **Bread** — the one `bread`-kind pick of a Toasted sandwich, made by the starter on turn 1 from a curated list of 52. It is the
+  mode's **anchor** (`mode.anchorKind`): every chef idea uses it, the reveal shows it in its own first row, and each dish card says
+  "On <bread>" from the basket's own snapshot, never from the chef's prose.
+- **Filling** — every other Toasted sandwich pick (turns 2-8): a cheese, a main filling, veg or fruit, and the finishing touch.
+- **Build** (`concept.build`, `{id,label}`) — how a toasted sandwich is made: `pressed`, `skillet`, `grill-toasted`, `oven-baked`,
+  `dipped`, `crunchy-crusted` or `jaffle`. Mode data maps it to a `technique`, a prompt phrase and a picture phrase; every idea has a
+  different one, and a dish card shows it as a pill in place of dish type / technique.
+- **Signal** (`Parsed.signals`) — a non-fatal chef-prose note (e.g. `open sandwich`, `bruschetta`) for a person to read in the trial
+  report; it never rejects or repairs an answer.
 - **Generation** (`cookout_rounds.generation`) — which set of three dishes is on the table. Starts at 1; a completed **rescue
   swap** (states `none` → `proposed` → `done`, once per round) archives the old set into `cookout_generations` (read-only,
   the "Earlier dishes") and starts generation 2. Concept ids `a|b|c` repeat per generation, so Bank, vote and the retries
