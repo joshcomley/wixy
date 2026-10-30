@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from check import (
@@ -24,11 +24,16 @@ from check import (
     Verdict,
     VerdictError,
     check_images,
-    check_verdict_rules,
     strip_json,
     vision_proof,
 )
-from prompts import PROBLEMS, check_prompt, reconcile_prompt, review_stage_prompt
+from prompts import (
+    PROBLEMS,
+    check_prompt,
+    parse_error_retry_prompt,
+    reconcile_prompt,
+    review_stage_prompt,
+)
 
 SAMPLE_SIZE = 100
 PER_CHECKER = 50
@@ -102,7 +107,11 @@ def check_judge_final(where: str, verdict: str, problems: tuple[str, ...], reaso
         if problems:
             raise VerdictError(f"{where}: 'correct' needs empty finalProblems")
         return
-    check_verdict_rules(where, verdict, problems, reason if reason else "x" * 10)
+    if verdict not in ("wrong", "unclear"):
+        raise VerdictError(f"{where}: finalVerdict must be correct, wrong or unclear")
+    if verdict == "wrong" and not problems:
+        raise VerdictError(f"{where}: 'wrong' needs at least one finalProblems entry")
+    # The judge's `reason` is free text (the 10-200 character rule is the checker's, §C.1).
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,8 +212,12 @@ def render_report(
     choice: str | None,
     disagreements: Sequence[str],
     agreement: Mapping[str, int],
+    judge_right: Mapping[str, Mapping[str, int]] | None = None,
 ) -> str:
-    """The plain-English Markdown report: the answer first, then a table, then disagreements."""
+    """The plain-English Markdown report: the answer first, then a table, then the detail.
+    `agreement` has `total`, `blind` (judges agreed before seeing the checker) and `final`
+    (judges agreed at the end); `judge_right[checker][judge]` counts the checker's verdicts that
+    match that judge's own final verdict."""
     by = {s.label: s for s in scores}
     head = ", ".join(f"{s.label.title()} got {s.right} of {s.total} right" for s in scores)
     if choice is None:
@@ -220,27 +233,54 @@ def render_report(
         "",
         f"{head}. {verdict_line}",
         "",
-        "| Checker | Right | Wrong food let through | Fine picture rejected | "
-        "Judges could not agree | Planted wrong pictures caught |",
-        "|---|---|---|---|---|---|",
+        "The bar a checker had to clear: at most 2 mistakes in its 50 pictures (a mistake is a "
+        "wrong picture let through, a fine picture rejected, or one the two judges could not "
+        "settle), no wrong food let through, and every planted wrong picture caught.",
+        "",
+        "| Checker | Right | Mistakes | Wrong food let through | Fine picture rejected | "
+        "Judges could not agree | Planted wrong pictures caught | Met the bar |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for s in scores:
         lines.append(
-            f"| {s.label.title()} | {s.right} of {s.total} | {s.wrong_food_false_accepts} | "
-            f"{s.false_rejects} | {s.unresolved} | {s.decoys_caught} of {s.decoys_total} |"
+            f"| {s.label.title()} | {s.right} of {s.total} | {s.errors} | "
+            f"{s.wrong_food_false_accepts} | {s.false_rejects} | {s.unresolved} | "
+            f"{s.decoys_caught} of {s.decoys_total} | {'yes' if s.qualifies else 'no'} |"
         )
     lines += ["", f"Random seed for the 100 pictures: {seed}.", ""]
+    total = agreement.get("total", 0)
     lines.append(
-        "How firm the answer key is: the two judges (Sol and Opus) agreed on "
-        + ", ".join(f"{v} pictures {k}" for k, v in agreement.items())
-        + "."
+        f"How firm the answer key is: the two judges (Sol and Opus) gave the same verdict on "
+        f"{agreement.get('blind', 0)} of {total} pictures before seeing any checker, and on "
+        f"{agreement.get('final', 0)} of {total} at the end."
     )
+    if judge_right:
+        lines += ["", "How often each checker matched each judge's own final verdict:", ""]
+        lines += [
+            f"- {label.title()}: {counts.get('sol', 0)} of {by[label].total} against Sol, "
+            f"{counts.get('opus', 0)} of {by[label].total} against Opus."
+            for label, counts in judge_right.items()
+            if label in by
+        ]
+    lines += ["", "## Verdict tables (checker down, answer key across)", ""]
+    columns = ("correct", "wrong", "unclear", "unresolved")
+    for s in scores:
+        lines += [
+            f"**{s.label.title()}**",
+            "",
+            "| Checker said | " + " | ".join(columns) + " |",
+            "|---|" + "---|" * len(columns),
+        ]
+        for said in ("correct", "wrong", "unclear"):
+            row = s.table.get(said, {})
+            lines.append(f"| {said} | " + " | ".join(str(row.get(c, 0)) for c in columns) + " |")
+        lines.append("")
     if by and all(s.false_accepts == 0 and s.false_rejects == 0 for s in scores):
         lines.append(
             "The sample held few wrong pictures, so the planted wrong pictures are the better "
             "measure of whether a checker catches mistakes."
         )
-    lines += ["", "## Disagreements", ""]
+    lines += ["", "## Where the checker and the judges differed", ""]
     lines += [f"- {d}" for d in disagreements] or ["- None."]
     return "\n".join(lines) + "\n"
 
@@ -272,7 +312,19 @@ async def run_stage(
         tool_profile="replay_probe",
         timeout_secs=1800,
     )
-    return parse_judge_final(text, numbers, with_checker_right=with_checker_right)
+    try:
+        return parse_judge_final(text, numbers, with_checker_right=with_checker_right)
+    except VerdictError as first:  # one retry quoting the error, like the checker runs
+        retry = await runner.run(
+            prompt=parse_error_retry_prompt(prompt, str(first)),
+            model=model.model,
+            provider=model.provider,
+            effort=model.effort,
+            cwd=cwd,
+            tool_profile="replay_probe",
+            timeout_secs=1800,
+        )
+        return parse_judge_final(retry, numbers, with_checker_right=with_checker_right)
 
 
 def stage2_rows(
@@ -485,16 +537,33 @@ async def run_calibration(
         for m in (HAIKU, LUNA)
     ]
     choice = recommend(scores[0], scores[1])
-    agree = sum(1 for t in truths.values() if t.resolved)
+    agreement = {
+        "total": len(names),
+        "blind": sum(1 for i in names if blind["sol"][i].verdict == blind["opus"][i].verdict),
+        "final": sum(1 for t in truths.values() if t.resolved),
+    }
+    judge_right = {
+        label: {
+            judge: sum(
+                1
+                for i, v in checks.items()
+                if v.verdict == finals[judge][i].verdict
+                or (v.verdict != "correct" and finals[judge][i].verdict != "correct")
+            )
+            for judge in ("sol", "opus")
+        }
+        for label, checks in verdicts.items()
+    }
     report = render_report(
         seed,
         scores,
         choice,
         disagreement_lines(names, all_checks, truths, finals["sol"], finals["opus"]),
-        {"agreed on": agree, "still disagreed on": len(truths) - agree},
+        agreement,
+        judge_right,
     )
     cal_dir = work / "calibration"
-    save_json(cal_dir / "scores.json", [s.__dict__ for s in scores])
+    save_json(cal_dir / "scores.json", [asdict(s) | {"errors": s.errors} for s in scores])
     for label, check_rows in (("luna", verdicts["luna"]), ("haiku", verdicts["haiku"])):
         save_jsonl(cal_dir / f"checks-{label}.jsonl", check_rows)
     for label, blind_rows in blind.items():
@@ -617,10 +686,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         attempts = work.read_attempts(ident)
         if attempts and attempts[0]["attempt"] == 1 and work.card(ident, 1).exists():
             first.append(ident)
-    seed = secrets.randbits(32)
-    for_luna, for_haiku = draw_sample(first, seed)
     cal_dir = work.root / "calibration"
-    save_json(cal_dir / "sample.json", {"seed": seed, "luna": for_luna, "haiku": for_haiku})
+    saved = cal_dir / "sample.json"
+    if (
+        saved.exists()
+    ):  # a restarted run reuses its sample (never redrawn) so journalled runs resume
+        record = json.loads(saved.read_text("utf-8"))
+        seed, for_luna, for_haiku = int(record["seed"]), record["luna"], record["haiku"]
+    else:
+        seed = secrets.randbits(32)
+        for_luna, for_haiku = draw_sample(first, seed)
+        save_json(saved, {"seed": seed, "luna": for_luna, "haiku": for_haiku})
 
     def to_image(ident: str) -> CheckImage:
         s = subjects[ident]

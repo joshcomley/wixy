@@ -517,11 +517,20 @@ def test_report_opens_with_the_answer(mods: dict[str, ModuleType]) -> None:
     cal, c = mods["calibrate"], mods["check"]
     h, lu = _fifty(cal, c, []), _fifty(cal, c, [("wrong", "correct", ())] * 2)
     h.label, lu.label = "haiku", "luna"
-    text = cal.render_report(7, [h, lu], "haiku", ["Lime: checker said wrong."], {"agreed on": 100})
+    text = cal.render_report(
+        7,
+        [h, lu],
+        "haiku",
+        ["Lime: checker said wrong."],
+        {"total": 100, "blind": 97, "final": 100},
+        {"haiku": {"sol": 50, "opus": 49}},
+    )
     first = text.split("\n\n")[1]
     assert "Haiku got 50 of 50" in first and "using Haiku" in first
     assert "Random seed" in text and "Lime" in text
-    none = cal.render_report(7, [h, lu], None, [], {"agreed on": 1})
+    assert "97 of 100 pictures before seeing any checker" in text
+    assert "50 of 50 against Sol" in text and "| Checker said |" in text
+    none = cal.render_report(7, [h, lu], None, [], {"total": 1, "blind": 1, "final": 1})
     assert "paused" in none
 
 
@@ -891,3 +900,155 @@ def test_images_docstring_matches_the_code(mods: dict[str, ModuleType]) -> None:
     doc = mods["images"].__doc__ or ""
     assert "scheduled task" in doc and "nothing here claims a CLI" not in doc
     assert "Run as a Grid task" not in doc
+
+
+def test_judge_reason_is_free_text_and_stage_retries_once(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    cal, c = mods["calibrate"], mods["check"]
+
+    def answer(reason: str, verdict: str = "unclear", problems: list[str] | None = None) -> str:
+        item = {
+            "image": "01",
+            "checkerRight": True,
+            "finalVerdict": verdict,
+            "finalProblems": problems or [],
+            "reason": reason,
+        }
+        return json.dumps({"items": [item]})
+
+    # a short or empty reason is fine for a judge's final answer
+    got = cal.parse_judge_final(answer("ok"), ["01"], with_checker_right=True)
+    assert got["01"][0].verdict == "unclear"
+    assert cal.parse_judge_final(answer(""), ["01"], with_checker_right=True)
+    with pytest.raises(c.VerdictError):  # but `wrong` still needs a problem
+        cal.parse_judge_final(answer("x", "wrong"), ["01"], with_checker_right=True)
+    with pytest.raises(c.VerdictError):
+        cal.parse_judge_final(answer("x", "maybe"), ["01"], with_checker_right=True)
+
+    calls: list[str] = []
+
+    def flaky(prompt: str, cwd: Path) -> str:
+        calls.append(prompt)
+        return "not json" if len(calls) == 1 else answer("fine", "wrong", ["wrong_food"])
+
+    out = asyncio.run(
+        cal.run_stage(
+            FakeRunner(flaky), c.SOL, "judge these", tmp_path, ["01"], with_checker_right=True
+        )
+    )
+    assert out["01"][0].problems == ("wrong_food",) and len(calls) == 2
+    assert "could not be accepted" in calls[1]
+
+
+def test_pool_runner_retries_a_dead_run(
+    mods: dict[str, ModuleType], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    im = mods["images"]
+    monkeypatch.setattr(im, "RUN_RETRY_GAP_S", 0.0)
+
+    class Outcome:
+        def __init__(self, status: str, text: str | None) -> None:
+            self.status, self.text, self.error = status, text, "process exited before end_turn"
+            self.ok = status == "completed" and text is not None
+
+    class Pool:
+        def __init__(self, outcomes: list[Outcome]) -> None:
+            self.outcomes = outcomes
+            self.keys: list[str] = []
+
+        async def run(self, key: str, pass_name: str, ids: list[str], spec: object) -> Outcome:
+            self.keys.append(key)
+            return self.outcomes.pop(0)
+
+    def make(outcomes: list[Outcome]) -> tuple[Any, Pool]:
+        pool = Pool(outcomes)
+        return im.PoolRunner(pool, lambda **kw: kw, lambda p, m: (p, m)), pool
+
+    kw: dict[str, Any] = dict(
+        prompt="p",
+        model="m",
+        provider="x",
+        effort="medium",
+        cwd=tmp_path,
+        tool_profile="replay_probe",
+        timeout_secs=9,
+    )
+    runner, pool = make([Outcome("error", None), Outcome("completed", "answer")])
+    assert asyncio.run(runner.run(**kw)) == "answer"
+    assert len(pool.keys) == 2 and pool.keys[0] == pool.keys[1]  # same key: journal-resumable
+    runner, pool = make([Outcome("error", None)] * 3)
+    with pytest.raises(mods["check"].VerdictError, match="process exited"):
+        asyncio.run(runner.run(**kw))
+    assert len(pool.keys) == 3  # first try + two retries, then it gives up loudly
+
+
+def test_run_calibration_end_to_end_with_fakes(mods: dict[str, ModuleType], tmp_path: Path) -> None:
+    """The whole calibration (checks with decoys, blind judges, review, reconcile, scoring, files)
+    against fake models, so a crash at any stage shows up here and not after hours of real runs."""
+    import re
+
+    from PIL import Image
+
+    cal, c, im = mods["calibrate"], mods["check"], mods["images"]
+    names = [f"Item{n:02d}" for n in range(20)]
+    levels = {n.lower(): 10 + 11 * i for i, n in enumerate(names)}
+    subjects = {
+        n.lower(): im.Subject(n.lower(), n, f"cat{i % 4}", f"A plain {n}.", "v", "whole")
+        for i, n in enumerate(names)
+    }
+    cards: dict[str, Path] = {}
+    for ident, level in levels.items():
+        path = tmp_path / f"{ident}.webp"
+        Image.new("RGB", (32, 32), (level, level, level)).save(path, "WEBP", lossless=True)
+        cards[ident] = path
+    name_of = {k: s.name for k, s in subjects.items()}
+    judge = FakeJudge(levels, name_of)
+
+    class Models:
+        async def run(self, **kw: Any) -> str:
+            prompt = str(kw["prompt"])
+            if "A checker model has now given" in prompt:
+                items = []
+                for m in re.finditer(r"Image (\d+): checker said (\w+);", prompt):
+                    wrong = m.group(2) != "correct"
+                    items.append(
+                        {
+                            "image": m.group(1),
+                            "checkerRight": True,
+                            "finalVerdict": m.group(2),
+                            "finalProblems": ["wrong_food"] if wrong else [],
+                            "reason": "",
+                        }
+                    )
+                return json.dumps({"items": items})
+            return await judge.run(**kw)
+
+    def image_of(ident: str) -> Any:
+        s = subjects[ident]
+        return c.CheckImage(ident, s.name, s.what, s.presentation, cards[ident])
+
+    ids = sorted(subjects)
+    rng = random.Random(5)
+    pick = im.pick_decoy_factory(subjects, lambda: cards, rng)
+    result = asyncio.run(
+        cal.run_calibration(
+            Models(),
+            [image_of(i) for i in ids[:10]],
+            [image_of(i) for i in ids[10:]],
+            pick,
+            tmp_path / "work",
+            5,
+            rng,
+        )
+    )
+    assert result.choice == "haiku" and {s.label for s in result.scores} == {"haiku", "luna"}
+    assert all(s.total == 10 and s.errors == 0 for s in result.scores)
+    assert all(s.decoys_caught == s.decoys_total == 1 for s in result.scores)
+    assert "Haiku got 10 of 10 right" in result.report and len(result.detail) == 20
+    out = tmp_path / "work" / "calibration"
+    names_written = sorted(p.name for p in out.iterdir())
+    assert "scores.json" in names_written and "checks-haiku.jsonl" in names_written
+    assert "judge-sol-blind.jsonl" in names_written and "judge-opus-final.jsonl" in names_written
+    scores = json.loads((out / "scores.json").read_text("utf-8"))
+    assert [s["label"] for s in scores] == ["haiku", "luna"] and scores[0]["errors"] == 0

@@ -294,6 +294,8 @@ import review as _review  # noqa: E402
 
 PILOT_PER_CATEGORY = 40
 CHECK_TIMEOUT_S = 900
+RUN_RETRIES = 2
+RUN_RETRY_GAP_S = 15.0
 CALLER = "wixy-cookout-pictures"
 GH_EXE = r"C:\Program Files\GitHub CLI\gh.exe"
 GH_REPO = "joshcomley/wixy"
@@ -432,10 +434,17 @@ class PoolRunner:
             timeout_secs=timeout_secs,
             tool_profile=tool_profile,
         )
-        outcome = await self._pool.run(key, f"image-{tool_profile}", [], spec)
-        if not outcome.ok or outcome.text is None:
-            raise _check.VerdictError(f"run {outcome.status}: {outcome.error}")
-        return str(outcome.text)
+        outcome = None
+        for attempt in range(1 + RUN_RETRIES):
+            outcome = await self._pool.run(key, f"image-{tool_profile}", [], spec)
+            if outcome.ok and outcome.text is not None:
+                return str(outcome.text)
+            # a run that died (`process exited before end_turn`, a timeout, a failed spawn) is
+            # journalled as not resumable, so the same key spawns a fresh one
+            if attempt < RUN_RETRIES:
+                await asyncio.sleep(RUN_RETRY_GAP_S)
+        assert outcome is not None
+        raise _check.VerdictError(f"run {outcome.status}: {outcome.error}")
 
 
 def comfy_queue_getter(base_url: str) -> Callable[[], Mapping[str, Any]]:
