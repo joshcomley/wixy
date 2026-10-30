@@ -33,6 +33,8 @@ export interface FridgeSearch {
   set(snap: IngredientSnap | null): void;
   /** Lock the controls while a start is in flight. */
   setDisabled(disabled: boolean): void;
+  /** The field's example words (a toasted sandwich searches breads, 09c §6.1). */
+  setPlaceholder(text: string): void;
   /** Forget the query, the results and any request in flight. */
   reset(): void;
 }
@@ -202,6 +204,9 @@ export function createFridgeSearch(deps: FridgeSearchDeps): FridgeSearch {
       disabled = next;
       input.disabled = next;
       for (const b of root.querySelectorAll<HTMLButtonElement>("button")) b.disabled = next;
+    },
+    setPlaceholder(text) {
+      input.placeholder = text;
     },
     reset() {
       if (timer !== null) clearTimer(timer);
