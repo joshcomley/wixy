@@ -972,3 +972,74 @@ def test_pool_runner_retries_a_dead_run(
     with pytest.raises(mods["check"].VerdictError, match="process exited"):
         asyncio.run(runner.run(**kw))
     assert len(pool.keys) == 3  # first try + two retries, then it gives up loudly
+
+
+def test_run_calibration_end_to_end_with_fakes(mods: dict[str, ModuleType], tmp_path: Path) -> None:
+    """The whole calibration (checks with decoys, blind judges, review, reconcile, scoring, files)
+    against fake models, so a crash at any stage shows up here and not after hours of real runs."""
+    import re
+
+    from PIL import Image
+
+    cal, c, im = mods["calibrate"], mods["check"], mods["images"]
+    names = [f"Item{n:02d}" for n in range(20)]
+    levels = {n.lower(): 10 + 11 * i for i, n in enumerate(names)}
+    subjects = {
+        n.lower(): im.Subject(n.lower(), n, f"cat{i % 4}", f"A plain {n}.", "v", "whole")
+        for i, n in enumerate(names)
+    }
+    cards: dict[str, Path] = {}
+    for ident, level in levels.items():
+        path = tmp_path / f"{ident}.webp"
+        Image.new("RGB", (32, 32), (level, level, level)).save(path, "WEBP", lossless=True)
+        cards[ident] = path
+    name_of = {k: s.name for k, s in subjects.items()}
+    judge = FakeJudge(levels, name_of)
+
+    class Models:
+        async def run(self, **kw: Any) -> str:
+            prompt = str(kw["prompt"])
+            if "A checker model has now given" in prompt:
+                items = []
+                for m in re.finditer(r"Image (\d+): checker said (\w+);", prompt):
+                    wrong = m.group(2) != "correct"
+                    items.append(
+                        {
+                            "image": m.group(1),
+                            "checkerRight": True,
+                            "finalVerdict": m.group(2),
+                            "finalProblems": ["wrong_food"] if wrong else [],
+                            "reason": "",
+                        }
+                    )
+                return json.dumps({"items": items})
+            return await judge.run(**kw)
+
+    def image_of(ident: str) -> Any:
+        s = subjects[ident]
+        return c.CheckImage(ident, s.name, s.what, s.presentation, cards[ident])
+
+    ids = sorted(subjects)
+    rng = random.Random(5)
+    pick = im.pick_decoy_factory(subjects, lambda: cards, rng)
+    result = asyncio.run(
+        cal.run_calibration(
+            Models(),
+            [image_of(i) for i in ids[:10]],
+            [image_of(i) for i in ids[10:]],
+            pick,
+            tmp_path / "work",
+            5,
+            rng,
+        )
+    )
+    assert result.choice == "haiku" and {s.label for s in result.scores} == {"haiku", "luna"}
+    assert all(s.total == 10 and s.errors == 0 for s in result.scores)
+    assert all(s.decoys_caught == s.decoys_total == 1 for s in result.scores)
+    assert "Haiku got 10 of 10 right" in result.report and len(result.detail) == 20
+    out = tmp_path / "work" / "calibration"
+    names_written = sorted(p.name for p in out.iterdir())
+    assert "scores.json" in names_written and "checks-haiku.jsonl" in names_written
+    assert "judge-sol-blind.jsonl" in names_written and "judge-opus-final.jsonl" in names_written
+    scores = json.loads((out / "scores.json").read_text("utf-8"))
+    assert [s["label"] for s in scores] == ["haiku", "luna"] and scores[0]["errors"] == 0

@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from check import (
@@ -515,7 +515,7 @@ async def run_calibration(
         {"agreed on": agree, "still disagreed on": len(truths) - agree},
     )
     cal_dir = work / "calibration"
-    save_json(cal_dir / "scores.json", [s.__dict__ for s in scores])
+    save_json(cal_dir / "scores.json", [asdict(s) | {"errors": s.errors} for s in scores])
     for label, check_rows in (("luna", verdicts["luna"]), ("haiku", verdicts["haiku"])):
         save_jsonl(cal_dir / f"checks-{label}.jsonl", check_rows)
     for label, blind_rows in blind.items():
