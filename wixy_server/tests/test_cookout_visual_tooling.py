@@ -930,3 +930,45 @@ def test_judge_reason_is_free_text_and_stage_retries_once(
     )
     assert out["01"][0].problems == ("wrong_food",) and len(calls) == 2
     assert "could not be accepted" in calls[1]
+
+
+def test_pool_runner_retries_a_dead_run(
+    mods: dict[str, ModuleType], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    im = mods["images"]
+    monkeypatch.setattr(im, "RUN_RETRY_GAP_S", 0.0)
+
+    class Outcome:
+        def __init__(self, status: str, text: str | None) -> None:
+            self.status, self.text, self.error = status, text, "process exited before end_turn"
+            self.ok = status == "completed" and text is not None
+
+    class Pool:
+        def __init__(self, outcomes: list[Outcome]) -> None:
+            self.outcomes = outcomes
+            self.keys: list[str] = []
+
+        async def run(self, key: str, pass_name: str, ids: list[str], spec: object) -> Outcome:
+            self.keys.append(key)
+            return self.outcomes.pop(0)
+
+    def make(outcomes: list[Outcome]) -> tuple[Any, Pool]:
+        pool = Pool(outcomes)
+        return im.PoolRunner(pool, lambda **kw: kw, lambda p, m: (p, m)), pool
+
+    kw: dict[str, Any] = dict(
+        prompt="p",
+        model="m",
+        provider="x",
+        effort="medium",
+        cwd=tmp_path,
+        tool_profile="replay_probe",
+        timeout_secs=9,
+    )
+    runner, pool = make([Outcome("error", None), Outcome("completed", "answer")])
+    assert asyncio.run(runner.run(**kw)) == "answer"
+    assert len(pool.keys) == 2 and pool.keys[0] == pool.keys[1]  # same key: journal-resumable
+    runner, pool = make([Outcome("error", None)] * 3)
+    with pytest.raises(mods["check"].VerdictError, match="process exited"):
+        asyncio.run(runner.run(**kw))
+    assert len(pool.keys) == 3  # first try + two retries, then it gives up loudly
