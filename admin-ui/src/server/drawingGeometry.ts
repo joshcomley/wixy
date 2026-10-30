@@ -51,6 +51,22 @@ export function declaredColumnWidth(measuredColumnWidth: number): number {
   return Math.round(clamped * 100) / 100;
 }
 
+/** How many CLIENT px (what `getBoundingClientRect` and pointer events report) one of an
+ * element's own LAYOUT px (what `clientWidth` reads and `style.left`/`top` set) covers. It is 1
+ * unless CSS `zoom` applies — and the admin's own zoom control (zoom.ts) puts `zoom` on <html>:
+ * at 90% a measured distance is 0.9x the layout distance, so measured offsets must be divided by
+ * this before they are written back as `left`/`top` (decisions/00205). `currentZoom` is
+ * `Element.currentCSSZoom` where the browser has it (exact); otherwise the measured box width
+ * over the layout box width (`computedWidth`, unrounded, unlike `offsetWidth`). Never 0,
+ * negative or NaN: 1 when nothing usable was measured. */
+export function cssZoom(currentZoom: number | undefined, boxWidth: number, computedWidth: number): number {
+  if (currentZoom !== undefined && Number.isFinite(currentZoom) && currentZoom > 0) return currentZoom;
+  if (Number.isFinite(boxWidth) && boxWidth > 0 && Number.isFinite(computedWidth) && computedWidth > 0) {
+    return boxWidth / computedWidth;
+  }
+  return 1;
+}
+
 /** Viewer -> draw space for one point. `originX`/`originY` are where the draw-space origin
  * (the column's left edge, the anchor's top edge) currently sits in the same viewer
  * coordinates as `x`/`y`. */
