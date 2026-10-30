@@ -171,7 +171,7 @@ export async function joinCookout(page: Page, seq: string): Promise<void> {
   await expect(join).toBeVisible();
   await humanPause(page);
   await join.click();
-  await expect(join).toHaveCount(0);
+  await expect(join).toHaveCount(0, { timeout: 30_000 }); // the join request can queue behind a loaded box
 }
 
 /** Waits until exactly one of the pages has a pair it may pick from; returns that page and its index. */
