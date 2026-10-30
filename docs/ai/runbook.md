@@ -125,7 +125,8 @@ never exist while an older process can reach the database.
   (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
   schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot (this check fails
   closed: it needs `psutil` from the `dev` extra and refuses if the process list or any python/wixy process's
-  working directory cannot be read) and `GET /cookout/options` answers; it prints every check, writes the setting (other `.env` lines kept
+  working directory cannot be read) and `GET /cookout/options` answers; it prints every check, writes the setting atomically (a temp file in the same directory, fsynced, then `os.replace`d, so an interruption
+  leaves the old `.env` whole; the previous file is kept as `.env.bak`; other `.env` lines kept
   byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies the options now list
   the mode. `--disable toastie` removes it the same way (no checks needed).
 - **Rollback:** run `python tooling/cookout/activate_modes.py --check-rollback <commit>` FIRST. Never
