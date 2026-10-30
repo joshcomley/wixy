@@ -28,6 +28,9 @@ export interface CallDeps {
 
 const MAX_HELD_UNANSWERED_RINGS = 2;
 
+/** Each controller's Call-button reason element gets its own id (aria-describedby). */
+let reasonIds = 0;
+
 /** One attachment's presence and one explicit call attempt; never auto-resumes audio. */
 export function createCallController(deps: CallDeps) {
   const { win, hooks } = deps;
@@ -140,7 +143,11 @@ export function createCallController(deps: CallDeps) {
     labelButton(muteButton, muted ? "Unmute" : "Mute", muted ? "mic-off" : "mic");
     muteButton.setAttribute("aria-pressed", String(muted));
   });
-  element.append(status, callButton, acceptButton, muteButton, endButton, dialog, notice);
+  // Why Call is disabled, when it is: the button's description for a screen reader, and its title.
+  const callReason = win.document.createElement("span");
+  callReason.className = "wx-srv-call-reason";
+  callReason.id = `wx-srv-call-reason-${++reasonIds}`;
+  element.append(status, callButton, callReason, acceptButton, muteButton, endButton, dialog, notice);
 
   let session: ServerSession | null = null;
   let label = "Device";
@@ -272,7 +279,21 @@ export function createCallController(deps: CallDeps) {
     callButton.setAttribute("aria-haspopup", "dialog");
     callButton.hidden = inCall;
     const targetAvailable = availablePeers.some((peer) => peer.id === selectedTarget);
-    callButton.disabled = outgoingRequest !== null || (socket?.readyState === 1 && (availablePeers.length === 0 || deps.isMicBusy()));
+    const reason =
+      outgoingRequest !== null
+        ? "Your call is starting…"
+        : socket?.readyState !== 1
+          ? ""
+          : availablePeers.length === 0
+            ? "No other device is online right now"
+            : deps.isMicBusy()
+              ? "The microphone is in use"
+              : "";
+    callButton.disabled = reason !== "";
+    callReason.textContent = reason;
+    if (reason === "") callButton.removeAttribute("aria-describedby");
+    else callButton.setAttribute("aria-describedby", callReason.id);
+    callButton.title = reason === "" ? (callButton.getAttribute("aria-label") ?? "") : reason;
     confirm.disabled = !targetAvailable || socket?.readyState !== 1 || deps.isMicBusy() || outgoingRequest !== null;
     acceptButton.hidden = state !== "incoming";
     acceptButton.disabled = answerPending || deps.isMicBusy();

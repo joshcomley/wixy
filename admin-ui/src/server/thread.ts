@@ -103,7 +103,7 @@ import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
-import { CookoutStartError, createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
+import { CookoutStartError, createCookoutStartSheet, type CookoutStartSheet, type StartChoices, type StartPreset } from "./cookout/startSheet";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -480,7 +480,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
   cookoutItem.addEventListener("click", () => {
     closeMoreMenu();
-    cookoutStart.open({}, header.offsetHeight);
+    openCookoutStart({});
   });
   recipeBookItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -1481,7 +1481,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     },
     roundMessage: (seq) => confirmedBySeq.get(seq),
     partner: () => partnerName,
-    openStartSheet: (preset) => cookoutStart.open(preset, header.offsetHeight),
+    openStartSheet: (preset) => openCookoutStart(preset),
     openBook: () => recipeBook.open(header.offsetHeight),
     openLightbox: (src, alt) => lightbox.open(src, alt),
     afterChange: () => threadScroll.afterContentChange(false),
@@ -1496,6 +1496,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let cookoutModeOptions: readonly ModeOption[] | null = null;
   /** A card of a non-Classic round asked for the options once this unlock (09c §6.4). */
   let cookoutModesAsked = false;
+  /** The `clientId` of a Cookout start whose answer was lost (its round may still arrive on the stream). */
+  let lostCookoutStart: string | null = null;
   function loadCookoutOptions(): Promise<CookoutOptions | null> {
     const session = currentSession;
     if (session === null) return Promise.resolve(null);
@@ -1716,7 +1718,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     hooks,
     getSession: () => currentSession,
     openRecipe: (seq, conceptId, generation) => void openCookoutRecipe(seq, conceptId, generation),
-    openEncore: (encore) => cookoutStart.open({ encore }, header.offsetHeight),
+    openEncore: (encore) => openCookoutStart({ encore }),
   });
   element.appendChild(recipeBook.element);
   element.appendChild(cookoutStart.element);
@@ -2456,10 +2458,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (session === null) return;
     const requestGeneration = contentGeneration;
+    // A new start supersedes any earlier lost one: its round, landing later, must not close this sheet.
+    lostCookoutStart = null;
     let result: Awaited<ReturnType<typeof createCookout>>;
-    try {
+    const create = (): ReturnType<typeof createCookout> =>
       // Only the twists actually chosen go on the wire: a twist-free start is the core request exactly.
-      result = await createCookout(session, {
+      createCookout(session, {
         clientId,
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
@@ -2473,11 +2477,22 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         ...(choices.fridgeSeedId === null ? {} : { fridgeSeedId: choices.fridgeSeedId }),
         ...(choices.encore === null ? {} : { encore: choices.encore }),
       });
+    try {
+      result = await create();
+      // A lost answer (a timeout under load, a dropped connection) does not mean no round: the start is
+      // idempotent on `clientId`, so the round the stream already brought is this start's, and a replay is
+      // answered with the round the server made rather than a second one. A real refusal is not replayed.
+      if (!result.ok && result.kind === "lost" && requestGeneration === contentGeneration) {
+        const arrived = ownCookout(clientId);
+        result = arrived !== undefined ? { ok: true, message: arrived } : await create();
+      }
     } catch (error) {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       return;
     }
     if (requestGeneration !== contentGeneration || currentSession === null) return;
+    // Still lost: the round may yet arrive on the stream, and then the starter lands in it (`landLostCookout`).
+    lostCookoutStart = !result.ok && result.kind === "lost" ? clientId : null;
     if (!result.ok) {
       // A game mode switched off meanwhile (09c §6.1): the cached options listed it, so they are read again.
       const modeGone = result.kind === "game_unavailable" && choices.mode !== CLASSIC_MODE_ID;
@@ -2500,6 +2515,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     renderThreadList();
     threadScroll.scrollToBottom();
     gameTabs.open("cookout", result.message.seq);
+  }
+
+  /** Opens the start sheet afresh: an earlier start's lost round no longer belongs to it. */
+  function openCookoutStart(preset: StartPreset): void {
+    lostCookoutStart = null;
+    cookoutStart.open(preset, header.offsetHeight);
+  }
+
+  /** The Cookout round a start with this `clientId` made, if it has reached this device. */
+  function ownCookout(clientId: string): Message | undefined {
+    for (const message of confirmedBySeq.values()) {
+      if (message.clientId === clientId && parseCookoutSummary(message.cookout) !== null) return message;
+    }
+    return undefined;
+  }
+
+  /** A start whose answer never came: when its round arrives on the stream while the sheet still shows the
+   * failure, the sheet closes and the starter lands in the round, exactly as a start that was answered. */
+  function landLostCookout(): void {
+    if (lostCookoutStart === null) return;
+    const arrived = ownCookout(lostCookoutStart);
+    if (arrived === undefined) return;
+    lostCookoutStart = null;
+    if (!cookoutStart.isOpen()) return;
+    cookoutStart.close();
+    gameTabs.open("cookout", arrived.seq);
   }
 
   /** The Recipe book's tap: open that round's dish in the Cookout tab, loading its message first. */
@@ -2961,6 +3002,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     cookoutModel.observe(messages);
     askCookoutModes(messages);
     syncGames(messages);
+    landLostCookout();
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     threadScroll.afterContentChange(revealPillIfNotStuck);
     updateUnheard();
@@ -3043,6 +3085,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     cookoutOptions = null;
     cookoutModeOptions = null;
     cookoutModesAsked = false;
+    lostCookoutStart = null;
     partnerName = null;
     partnerSeq = 0;
     contentGeneration += 1;
