@@ -1052,3 +1052,17 @@ def test_run_calibration_end_to_end_with_fakes(mods: dict[str, ModuleType], tmp_
     assert "judge-sol-blind.jsonl" in names_written and "judge-opus-final.jsonl" in names_written
     scores = json.loads((out / "scores.json").read_text("utf-8"))
     assert [s["label"] for s in scores] == ["haiku", "luna"] and scores[0]["errors"] == 0
+
+
+def test_extend_plan_keeps_pilot_and_interleaves_new_ids(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    cats = {f"c{c}-{n}": f"cat{c}" for c in range(3) for n in range(10)}
+    first = {k: v for k, v in cats.items() if int(k.split("-")[1]) < 6}
+    plan = im.make_plan(first, 9, per_category=2)
+    grown = im.extend_plan(plan, cats)
+    assert grown["pilot"] == plan["pilot"] and grown["seed"] == plan["seed"]
+    assert grown["rest"][: len(plan["rest"])] == plan["rest"]  # earlier order untouched
+    added = grown["rest"][len(plan["rest"]) :]
+    assert sorted(added) == sorted(set(cats) - set(first))
+    assert {cats[i] for i in added[:3]} == {"cat0", "cat1", "cat2"}  # category-interleaved
+    assert im.extend_plan(grown, cats) == grown  # idempotent
