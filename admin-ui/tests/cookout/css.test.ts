@@ -79,6 +79,17 @@ describe("the game-mode styles (layout guards)", () => {
     expect(rule(".wx-srv-ck-twists-btn")).toMatch(/max-width:\s*calc\(100% - 188px\)/);
   });
 
+  it("the compact stage's cloche is small enough for 159 px with a wider font", () => {
+    const compact = /@container ck \(max-height: 505\.98px\) \{([\s\S]*?)\n\}/.exec(SOURCE)?.[1] ?? "";
+    const inner = (selector: string): string => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(compact)?.[1] ?? "";
+    };
+    expect(inner(".wx-srv-ck-table-stage > .wx-srv-ck-cloche")).toMatch(/padding:\s*8px 12px/);
+    expect(inner(".wx-srv-ck-table-stage .wx-srv-ck-cloche-dome")).toMatch(/font-size:\s*2rem;\s*line-height:\s*1\.3/);
+    expect(inner(".wx-srv-ck-table-stage .wx-srv-ck-cloche-sub")).toMatch(/font-size:\s*0\.75rem/);
+  });
+
   it("the turn banner's row grows when a wider font wraps its line, in every table layout", () => {
     const rows = [...SOURCE.matchAll(/\.wx-srv-ck-table[^{]*\{[^}]*grid-template-rows:\s*([^;]+);/g)].map((m) => m[1] ?? "");
     expect(rows).toHaveLength(4);

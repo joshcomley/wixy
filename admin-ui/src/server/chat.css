@@ -7192,6 +7192,24 @@ button.wx-srv-ck-card:disabled {
   .wx-srv-ck-car-slide {
     grid-template-rows: minmax(64px, 1fr) fit-content(55%);
   }
+  /* The cloche fits the compact stage's 159 px with a wider font (two lines of words and two of the Blind
+     note): a smaller dome on a tighter line, tighter padding and gaps. */
+  .wx-srv-ck-table-stage > .wx-srv-ck-cloche {
+    gap: 4px;
+    padding: 8px 12px;
+  }
+  .wx-srv-ck-table-stage .wx-srv-ck-cloche-dome {
+    font-size: 2rem;
+    line-height: 1.3;
+  }
+  .wx-srv-ck-table-stage .wx-srv-ck-cloche-text {
+    font-size: 0.9375rem;
+    line-height: 1.25;
+  }
+  .wx-srv-ck-table-stage .wx-srv-ck-cloche-sub {
+    font-size: 0.75rem;
+    line-height: 1.25;
+  }
   .wx-srv-ck-help-twists::after {
     content: "";
     position: absolute;
