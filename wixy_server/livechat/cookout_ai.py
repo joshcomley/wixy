@@ -31,6 +31,7 @@ import json
 import logging
 import re
 import time
+from collections import Counter
 from collections.abc import Awaitable, Callable, Mapping, Sequence, Set
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,6 +43,7 @@ from anyio import CapacityLimiter
 
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.cmdchat import CmdChatClient, CmdChatError, CmdChatUnreachableError
+from wixy_server.livechat.cookout_modes import Build, CookoutMode, CookoutModes, default_modes
 from wixy_server.livechat.cookout_twists import (
     COOKING_VESSEL_WORDS,
     NO_OVEN_WORDS,
@@ -298,7 +300,9 @@ def basket_payload(
     return payload
 
 
-def _concept_twist_lines(basket: Mapping[str, Any], forbidden_names: Sequence[str]) -> list[str]:
+def _concept_twist_lines(
+    basket: Mapping[str, Any], forbidden_names: Sequence[str], mode: CookoutMode
+) -> list[str]:
     """The twist directives, read back from the payload's own `twists` object so the prompt is a
     pure function of the basket it carries. Only catalogue text and ids ever appear."""
     twists = basket.get("twists")
@@ -308,7 +312,8 @@ def _concept_twist_lines(basket: Mapping[str, Any], forbidden_names: Sequence[st
     style_id = twists.get("style")
     style = style_by_id(style_id) if isinstance(style_id, str) else None
     if style is not None:
-        lines.append(f"STYLE: {style.concept_directive}")
+        directive = f"STYLE: {style.concept_directive}"
+        lines.append(f"{directive} {mode.chef.style_line}" if mode.chef.style_line else directive)
     challenge_id = twists.get("challenge")
     challenge = challenge_by_id(challenge_id) if isinstance(challenge_id, str) else None
     if challenge is not None:
@@ -359,13 +364,75 @@ def _challenge_id(twists: object) -> str | None:
     return value if isinstance(value, str) and challenge_by_id(value) is not None else None
 
 
-def build_concepts_prompt(basket: Mapping[str, Any], *, forbidden_names: Sequence[str] = ()) -> str:
+def anchor_of(mode: CookoutMode, ingredient_ids: Sequence[str]) -> str | None:
+    """The one anchor-kind (bread) id among `ingredient_ids` in a single-dish mode, else `None`
+    (also for Classic and for a basket with no, or more than one, such item)."""
+    anchor_kind = mode.chef.anchor_kind
+    if mode.chef.format != "single-dish" or anchor_kind is None:
+        return None
+    found = sorted({i for i in ingredient_ids if mode.kind_of(i) == anchor_kind})
+    return found[0] if len(found) == 1 else None
+
+
+def _build_list(mode: CookoutMode) -> str:
+    return ", ".join(f"{b.id} ({b.label}: {b.prompt_phrase})" for b in mode.chef.builds)
+
+
+def _single_dish_head(basket: Mapping[str, Any], mode: CookoutMode) -> str:
+    """Spec 09c §3.2: the single-dish opening and rules, then the BASKET_JSON line."""
+    records = [r for r in basket.get("ingredients") or [] if isinstance(r, Mapping)]
+    ids = [str(r.get("id")) for r in records]
+    bread_id = anchor_of(mode, ids)
+    if bread_id is None or mode.chef.concept_text is None:
+        raise ValueError("a single-dish basket needs exactly one anchor (bread) ingredient")
+    bread = next(str(r["name"]) for r in records if r.get("id") == bread_id)
+    fillings = len(ids) - 1
+    text = mode.chef.concept_text.format(
+        bread=bread,
+        bread_id=bread_id,
+        n=fillings,
+        each=fillings - (mode.chef.each_missing_max or 0),
+        best=fillings - (mode.chef.best_missing_max or 0),
+        build_list=_build_list(mode),
+    )
+    return f"{text}\n{_single_dish_rules(fillings)}\n\n{BASKET_MARKER}{_compact(basket)}"
+
+
+def _single_dish_rules(fillings: int) -> str:
+    """The Classic prompt's measured steering, carried into every single-dish mode (09c §3.2 gap,
+    found by the real-run trial: without it the chef describes a sauce by what it is made of, or
+    compares a dish to another, naming foods nobody picked, and miscounts "omitted")."""
+    return (
+        "- Ordinary cooking language is always fine (crisp, golden, melted, gooey). The check "
+        "looks for a real FOOD that is neither picked nor allowed, so never name one: not "
+        "what a picked sauce or spread is made of (no chilli, coriander, garlic, herbs or "
+        "spices unless picked), not a pickle, relish, chutney, syrup or side, and not another "
+        "dish you compare the sandwich to (no fish-finger or similar). Describe each sandwich "
+        "using only the picked items and butter. Before you answer, re-read every title, vibe "
+        "and description and delete any food word that is not the name of a picked item or a "
+        "chosen staple.\n"
+        '- "omitted" lists every filling the idea does NOT use (exactly the complement of its '
+        'fillings in "pickedIngredientIds"; the bread is never omitted), each with a short '
+        'reason, and an idea that uses every filling has "omitted": []. NEVER mention an omitted '
+        'filling anywhere except inside its own omitted "reason". Before you answer, count: '
+        f"each idea's used fillings plus its omitted fillings must be exactly {fillings}.\n"
+        '- Put ONLY picked ids in "pickedIngredientIds" (the bread included) and ONLY unpicked '
+        'cupboard staple ids in "stapleIds".'
+    )
+
+
+def build_concepts_prompt(
+    basket: Mapping[str, Any], *, mode: CookoutMode, forbidden_names: Sequence[str] = ()
+) -> str:
     """The Stage-1 prompt. Without a `twists` object in `basket` the text is exactly the core's;
     otherwise the count words follow the basket size and the twist lines are added before the
-    answer schema. `forbidden_names` are the display names of the payload's forbidden ids."""
+    answer schema. `forbidden_names` are the display names of the payload's forbidden ids. A
+    single-dish `mode` (09c §3.2) replaces the Classic opening and rules and the dish fields of
+    the schema; Classic is byte-identical to the core."""
+    single = mode.chef.format == "single-dish"
     count = _count_word(len(basket.get("ingredients") or []) or 10)
     pickable_staples = _pickable_staples_phrase(basket)
-    twist_lines = _concept_twist_lines(basket, forbidden_names)
+    twist_lines = _concept_twist_lines(basket, forbidden_names, mode)
     twist_block = ("\n" + "\n".join(twist_lines) + "\n") if twist_lines else ""
     challenge_id = _challenge_id(basket.get("twists"))
     note_field = ""
@@ -373,6 +440,23 @@ def build_concepts_prompt(basket: Mapping[str, Any], *, forbidden_names: Sequenc
         note_field = f'\n   "challengeNote": string (1-{MAX_CHALLENGE_NOTE} chars),'
         if challenge_id == "thirty-minutes":
             note_field += '\n   "totalMinutes": integer (5-30),'
+    if single:
+        build_ids = " | ".join(f'"{b.id}"' for b in mode.chef.builds)
+        return f"""{_single_dish_head(basket, mode)}
+{twist_block}
+Your FINAL message must be exactly one JSON object and nothing else (no text before or after it, \
+no markdown fences):
+
+{{"concepts": [ {{"id": "a" | "b" | "c",
+   "title": string (1-90 chars),
+   "vibe": string (1-40 chars),
+   "build": one of {build_ids},
+   "description": string (20-500 chars),{note_field}
+   "pickedIngredientIds": [picked ingredient ids used, the bread included],
+   "stapleIds": [staple ids used, excluding any id already in pickedIngredientIds],
+   "omitted": [ {{"id": picked id not used, "reason": string (1-140 chars)}} ]}} ]}}  \
+(exactly three concepts, ids a, b and c)
+"""
     return f"""You are a creative, practical home-cooking chef. Two friends have picked {count} \
 ingredients between them. Invent THREE distinct recipe concepts for two people that try hard to \
 use ALL {count} picked ingredients, then reply with a single JSON object.
@@ -470,12 +554,30 @@ def _recipe_twist_lines(
     return lines
 
 
+def _free_first(mode: CookoutMode) -> list[str]:
+    """The mode's free staples, the three seasonings first (Classic's own order)."""
+    first = [i for i in ("water", "salt", "black-pepper") if i in mode.staples.free]
+    return first + sorted(mode.staples.free - set(first))
+
+
+def _words_list(ids: Sequence[str], joiner: str) -> str:
+    names = [i.replace("-", " ") for i in ids]
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + f" {joiner} {names[-1]}"
+
+
+def _recipe_build(concept: Mapping[str, Any], mode: CookoutMode) -> Build | None:
+    build_id = concept.get("build")
+    return next((b for b in mode.chef.builds if b.id == build_id), None)
+
+
 def build_recipe_prompt(
     concept: Mapping[str, Any],
     manifest: Mapping[str, Any],
     *,
+    mode: CookoutMode,
     twists: RecipeTwists = RecipeTwists(),  # noqa: B008 - frozen, immutable default
 ) -> str:
+    single = mode.chef.format == "single-dish"
     payload: dict[str, Any] = {
         "title": concept["title"],
         "vibe": concept["vibe"],
@@ -484,6 +586,23 @@ def build_recipe_prompt(
         "description": concept["description"],
         "manifest": manifest,
     }
+    dish_line = ""
+    free_words = "Water, salt and black-pepper are always free too."
+    capped_words = "no butter, flour, oil, sugar or milk"
+    if single:
+        build = _recipe_build(concept, mode)
+        if build is not None:
+            payload["build"] = build.id
+            if mode.chef.recipe_text:
+                dish_line = (
+                    mode.chef.recipe_text.format(
+                        build_label=build.label, build_phrase=build.prompt_phrase
+                    )
+                    + "\n"
+                )
+        free_words = _words_list(_free_first(mode), "and").capitalize() + " are always free too."
+        capped = [i for i in STAPLE_ORDER if i in mode.staples.capped]
+        capped_words = "no " + _words_list(capped + sorted(mode.staples.capped - set(capped)), "or")
     twist_lines = _recipe_twist_lines(concept, manifest, twists)
     if twists.active:
         marker: dict[str, Any] = {}
@@ -500,12 +619,12 @@ def build_recipe_prompt(
 below (serves 2) and reply with a single JSON object.
 
 {CONCEPT_MARKER}{_compact(payload)}
-
+{dish_line}
 Rules:
 - The manifest lists the ONLY ingredients available: "ingredients" are the picked ingredients the \
-dish uses and "staples" the cupboard staples it uses. Water, salt and black-pepper are always free \
-too. Use every manifest item and nothing else: never add any other food, and never mention any \
-other food in any text (no butter, flour, oil, sugar or milk unless it is in the manifest).
+dish uses and "staples" the cupboard staples it uses. {free_words} Use every manifest item and \
+nothing else: never add any other food, and never mention any other food in any text \
+({capped_words} unless it is in the manifest).
 - Ordinary cooking language is always fine ("crisp", "juices", "gravy" made from the dish's own \
 items); only avoid naming a real food that is not in the manifest. That includes tips and \
 serving suggestions: no rice, crisps, syrup, eggs, ale, stock or any other side, swap or \
@@ -537,6 +656,9 @@ class Parsed:
 
     value: dict[str, Any] | None
     violations: tuple[str, ...]
+    signals: tuple[str, ...] = ()
+    """Non-fatal review notes (09c §3.4: a dish word in a single-dish idea). They never affect
+    acceptance or the repair loop."""
 
 
 def json_objects(text: str) -> list[object]:
@@ -644,21 +766,43 @@ def _forbidden_prose(
             )
 
 
+def _has_phrase(tokens: Sequence[str], phrase: Sequence[str]) -> bool:
+    size = len(phrase)
+    return size > 0 and any(
+        tuple(tokens[i : i + size]) == tuple(phrase) for i in range(len(tokens) - size + 1)
+    )
+
+
 def parse_concepts(
     response_text: str,
     *,
     bank: AiBank,
     picked_ids: Sequence[str],
+    mode: CookoutMode,
+    bread_id: str | None = None,
     twists: ConceptTwists = ConceptTwists(),  # noqa: B008 - frozen, immutable default
 ) -> Parsed:
     """Validate a concepts run's final message (spec §3.2, 09a §5.3). The LAST JSON object
     carrying a `concepts` list is judged against the basket of `len(picked_ids)` (ten, or eleven
     with the wildcard); the twist rules apply only when set. On success the canonical value to
-    store (`{"concepts": [...]}`, ids only — the server resolves names) is returned."""
+    store (`{"concepts": [...]}`, ids only — the server resolves names) is returned.
+
+    A single-dish `mode` (09c §3.4) swaps the Classic coverage, diversity and staple rules for the
+    anchor (bread) in every idea, coverage of the fillings, three different builds and the mode's
+    staples. Dish words are never failures: they come back as `Parsed.signals`."""
     selected = list(picked_ids)
     selected_set = set(selected)
     size = len(selected_set)
     count = _count_word(size)
+    single = mode.chef.format == "single-dish"
+    anchor: str | None = None
+    if single:
+        anchor = bread_id if bread_id in selected_set else anchor_of(mode, selected)
+        if anchor is None:
+            return Parsed(None, ("the basket has no single bread to anchor the ideas",))
+    fillings_n = size - 1
+    build_by_id = {b.id: b for b in mode.chef.builds}
+    signals: list[str] = []
     challenge = challenge_by_id(twists.challenge) if twists.challenge is not None else None
     forbidden = set(twists.forbidden_ids)
     candidate: dict[str, Any] | None = None
@@ -691,12 +835,22 @@ def parse_concepts(
         titles.add(_normal(title))
         vibe = _text(raw.get("vibe"), f"{tag} vibe", 1, 40, problems)
         description = _text(raw.get("description"), f"{tag} description", 20, 500, problems)
-        dish_type = raw.get("dishType")
-        if dish_type not in DISH_TYPES:
-            problems.append(f"{tag} dishType must be one of {', '.join(DISH_TYPES)}")
-        technique = raw.get("technique")
-        if technique not in TECHNIQUES:
-            problems.append(f"{tag} technique must be one of {', '.join(TECHNIQUES)}")
+        dish_type: object = raw.get("dishType")
+        technique: object = raw.get("technique")
+        build_id: object = None
+        if single:
+            build_id = raw.get("build")
+            chosen_build = build_by_id.get(build_id) if isinstance(build_id, str) else None
+            if chosen_build is None:
+                problems.append(f"{tag} build must be one of {', '.join(build_by_id)}")
+            # the model's own dishType/technique, if any, are ignored (09c §3.3)
+            dish_type = "sandwich"
+            technique = chosen_build.technique if chosen_build is not None else None
+        else:
+            if dish_type not in DISH_TYPES:
+                problems.append(f"{tag} dishType must be one of {', '.join(DISH_TYPES)}")
+            if technique not in TECHNIQUES:
+                problems.append(f"{tag} technique must be one of {', '.join(TECHNIQUES)}")
 
         challenge_note = ""
         total_minutes: int | None = None
@@ -719,10 +873,17 @@ def parse_concepts(
                 else:
                     total_minutes = raw_total
             elif challenge.id == "no-oven":
-                if raw.get("technique") in NO_OVEN_TECHNIQUES:
-                    problems.append(f"{tag} technique may not be roast or bake (no oven)")
-                if raw.get("dishType") in NO_OVEN_DISH_TYPES:
-                    problems.append(f"{tag} dishType may not be traybake, pie or bake (no oven)")
+                if single:
+                    oven_build = build_by_id.get(build_id) if isinstance(build_id, str) else None
+                    if oven_build is not None and oven_build.uses_oven:
+                        problems.append(f"{tag} build '{oven_build.id}' needs the oven (no oven)")
+                else:
+                    if raw.get("technique") in NO_OVEN_TECHNIQUES:
+                        problems.append(f"{tag} technique may not be roast or bake (no oven)")
+                    if raw.get("dishType") in NO_OVEN_DISH_TYPES:
+                        problems.append(
+                            f"{tag} dishType may not be traybake, pie or bake (no oven)"
+                        )
                 for field_name, value in (
                     ("title", title),
                     ("vibe", vibe),
@@ -761,9 +922,19 @@ def parse_concepts(
                 )
             elif staple_id in used:
                 problems.append(f"{tag} stapleIds repeats picked ingredient '{staple_id}'")
-        extra = [s for s in staples if s in NON_SEASONING_STAPLE_IDS]
-        if len(extra) > MAX_EXTRA_STAPLES:
-            problems.append(f"{tag} uses more than {MAX_EXTRA_STAPLES} extra staples")
+        if single:
+            for staple_id in staples:
+                if bank.staple(staple_id) is not None and staple_id not in (
+                    mode.staples.free | mode.staples.capped
+                ):
+                    problems.append(f"{tag} stapleIds has '{staple_id}', which this game lacks")
+            extra = [s for s in staples if s in mode.staples.capped]
+            if len(extra) > mode.staples.cap:
+                problems.append(f"{tag} uses more than {mode.staples.cap} extra staples")
+        else:
+            extra = [s for s in staples if s in NON_SEASONING_STAPLE_IDS]
+            if len(extra) > MAX_EXTRA_STAPLES:
+                problems.append(f"{tag} uses more than {MAX_EXTRA_STAPLES} extra staples")
 
         omitted_raw = raw.get("omitted")
         omitted: list[dict[str, str]] = []
@@ -787,15 +958,31 @@ def parse_concepts(
         ):
             problems.append(f"{tag} omitted must be exactly the picked ingredients it does not use")
 
-        coverage = len(used_set)
-        if coverage < MIN_PICKED_EACH:
-            problems.append(
-                f"{tag} uses only {coverage} picks; each concept needs {MIN_PICKED_EACH}+"
-            )
+        if single:
+            assert anchor is not None
+            if anchor not in used_set:
+                problems.append(
+                    f"{tag} leaves out the bread '{anchor}'; the bread must be in every idea"
+                )
+            coverage = len(used_set - {anchor})
+            least = fillings_n - (mode.chef.each_missing_max or 0)
+            if coverage < least:
+                problems.append(
+                    f"{tag} uses only {coverage} fillings; each idea needs {least}+ of the "
+                    f"{fillings_n}"
+                )
+        else:
+            coverage = len(used_set)
+            if coverage < MIN_PICKED_EACH:
+                problems.append(
+                    f"{tag} uses only {coverage} picks; each concept needs {MIN_PICKED_EACH}+"
+                )
 
         for star_id in sorted(twists.star_ids):
             if star_id not in used_set:
                 problems.append(f"concept {cid} must use star '{star_id}' (it is a hero)")
+            elif star_id == anchor:
+                continue  # the bread's name is never required in prose (09c §3.4); the UI shows it
             elif not (bank.mentions(title, star_id) or bank.mentions(description, star_id)):
                 problems.append(
                     f"concept {cid} must name star '{star_id}' in its title or description"
@@ -813,7 +1000,7 @@ def parse_concepts(
                 value,
                 f"{tag} {field_name}",
                 used_ids=used_set,
-                staple_ids=staple_set,
+                staple_ids=staple_set | mode.staples.free,
                 omitted_ids=omitted_set,
                 problems=problems,
             )
@@ -837,15 +1024,33 @@ def parse_concepts(
             "stapleIds": staples,
             "omitted": omitted,
         }
+        if single:
+            concept["build"] = build_id
+            for word in mode.chef.review_dish_words:
+                word_tokens = tuple(word.replace("-", " ").split())
+                for field_text in (title, vibe, description):
+                    if _has_phrase(bank.food_free_tokens(field_text), word_tokens):
+                        signals.append(f"concept {cid}: '{word}'")
+                        break
         if challenge is not None:
             concept["challengeNote"] = challenge_note
         if total_minutes is not None:
             concept["totalMinutes"] = total_minutes
         concepts.append(concept)
 
-    counts = [len(c["pickedIngredientIds"]) for c in concepts]
-    if max(counts) < MIN_PICKED_BEST:
-        problems.append(f"at least one concept must use {MIN_PICKED_BEST}+ of the {count} picks")
+    if single:
+        counts = [len(set(c["pickedIngredientIds"]) - {anchor}) for c in concepts]
+        best_needed = fillings_n - (mode.chef.best_missing_max or 0)
+        if max(counts) < best_needed:
+            problems.append(
+                f"at least one idea must use {best_needed}+ of the {fillings_n} fillings"
+            )
+    else:
+        counts = [len(c["pickedIngredientIds"]) for c in concepts]
+        if max(counts) < MIN_PICKED_BEST:
+            problems.append(
+                f"at least one concept must use {MIN_PICKED_BEST}+ of the {count} picks"
+            )
     union: set[str] = set()
     for c in concepts:
         union.update(c["pickedIngredientIds"])
@@ -859,9 +1064,18 @@ def parse_concepts(
     uncovered = sorted(selected_set - union)
     if uncovered:
         problems.append(f"no concept uses these picks: {', '.join(uncovered)}")
+    if single:
+        builds = [c["build"] for c in concepts]
+        for build_name, taken in sorted(Counter(b for b in builds if isinstance(b, str)).items()):
+            if taken > 1:
+                shared = [str(c["id"]) for c in concepts if c["build"] == build_name]
+                problems.append(
+                    f"concepts {' and '.join(shared)} share the build '{build_name}'; "
+                    "each idea needs a different build"
+                )
     # A malformed dishType/technique is already a violation above; only well-typed values are
     # compared (an unhashable one must not crash the validator).
-    if all(c["dishType"] in DISH_TYPES and c["technique"] in TECHNIQUES for c in concepts):
+    elif all(c["dishType"] in DISH_TYPES and c["technique"] in TECHNIQUES for c in concepts):
         pairs = {(c["dishType"], c["technique"]) for c in concepts}
         if len(pairs) != 3:
             problems.append("the three concepts need three different (dishType, technique) pairs")
@@ -869,8 +1083,8 @@ def parse_concepts(
             problems.append("the three concepts need at least two different dishType values")
 
     if problems:
-        return Parsed(None, tuple(problems))
-    return Parsed({"concepts": concepts}, ())
+        return Parsed(None, tuple(problems), tuple(signals))
+    return Parsed({"concepts": concepts}, (), tuple(signals))
 
 
 def canonical_json(value: object) -> str:
@@ -878,18 +1092,24 @@ def canonical_json(value: object) -> str:
 
 
 def concept_manifest(
-    concept: Mapping[str, Any], bank: AiBank, *, forbidden_ids: Set[str] = frozenset()
+    concept: Mapping[str, Any],
+    bank: AiBank,
+    *,
+    forbidden_ids: Set[str] = frozenset(),
+    mode: CookoutMode | None = None,
 ) -> dict[str, Any]:
     """The frozen manifest a recipe prompt carries: the concept's used picks and declared staples
     with their names (plus the always-free seasonings). A forbidden (swapped-out) id is never
-    listed, not even as a staple."""
+    listed, not even as a staple. `mode` (default Classic) says which staples are free: in a
+    single-dish mode butter is listed with the seasonings."""
+    free_ids = sorted(mode.staples.free if mode is not None else FREE_SEASONING_IDS)
     ingredients: list[dict[str, str]] = []
     for ingredient_id in concept["pickedIngredientIds"]:
         found = bank.ingredient(ingredient_id)
         if found is not None and found.id not in forbidden_ids:
             ingredients.append({"id": found.id, "name": found.name})
     staples: list[dict[str, str]] = []
-    for staple_id in [*concept["stapleIds"], *sorted(FREE_SEASONING_IDS)]:
+    for staple_id in [*concept["stapleIds"], *free_ids]:
         staple = bank.staple(staple_id)
         if (
             staple is not None
@@ -925,6 +1145,7 @@ def parse_recipe(
     *,
     bank: AiBank,
     concept: Mapping[str, Any],
+    mode: CookoutMode,
     twists: RecipeTwists = RecipeTwists(),  # noqa: B008 - frozen, immutable default
 ) -> Parsed:
     """Validate a recipe run's final message against its concept's frozen manifest (spec §3.4,
@@ -945,7 +1166,7 @@ def parse_recipe(
     forbidden = set(twists.forbidden_ids)
     challenge = challenge_by_id(twists.challenge) if twists.challenge is not None else None
     manifest_ids = (set(picked) | set(staples)) - forbidden
-    allowed_ids = manifest_ids | FREE_SEASONING_IDS
+    allowed_ids = manifest_ids | mode.staples.free
 
     if candidate.get("serves") != 2 or isinstance(candidate.get("serves"), bool):
         problems.append("serves must be 2")
@@ -1069,7 +1290,7 @@ def parse_recipe(
     staple_set = set(staples)
     scan_args: dict[str, Any] = {
         "used_ids": used_set,
-        "staple_ids": staple_set,
+        "staple_ids": staple_set | mode.staples.free,
         "omitted_ids": omitted_ids,
         "problems": problems,
     }
@@ -1240,9 +1461,11 @@ class CmdCookoutRunner:
         timing: CookoutTiming | None = None,
         clock: Callable[[], float] = time.monotonic,
         wall_clock: Callable[[], float] = time.time,
+        modes: CookoutModes | None = None,
     ) -> None:
         self._store = store
         self._bank = bank
+        self._modes = modes
         self._client = client
         self._notifier = notifier
         self._cwd = cwd
@@ -1361,6 +1584,14 @@ class CmdCookoutRunner:
     async def _row(self, anchor_seq: int) -> dict[str, Any] | None:
         return await anyio.to_thread.run_sync(lambda: self._store.get_cookout_round(anchor_seq))
 
+    def _mode_of(self, row: Mapping[str, Any]) -> CookoutMode | None:
+        """The round's game mode (`classic` for a row that carries none), or `None` for a mode
+        this process does not know: such a job aborts WITHOUT writing (09c §5.6, A.4) — it must
+        never fail, finish or claim a round it cannot interpret."""
+        modes = self._modes if self._modes is not None else default_modes()
+        raw = row.get("mode")
+        return modes.mode(raw if isinstance(raw, str) and raw else "classic")
+
     async def _finish_concepts(
         self,
         anchor_seq: int,
@@ -1459,6 +1690,7 @@ class CmdCookoutRunner:
                 row = await self._row(anchor_seq)
                 if (
                     row is not None
+                    and self._mode_of(row) is not None
                     and row.get("generation", 1) == generation
                     and row.get("concepts") == "pending"
                 ):
@@ -1509,10 +1741,26 @@ class CmdCookoutRunner:
             or row.get("state") != "finished"
         ):
             return False
+        mode = self._mode_of(row)
+        if mode is None:
+            _LOGGER.warning("cookout: round %s has a game mode this server lacks", anchor_seq)
+            return False
         basket_ids = [str(i) for i in row.get("basket_ids") or []]
         twists = concept_twists_of(row)
         basket = basket_payload(self._bank, basket_ids, twists=twists)
-        if basket is None or len(set(basket_ids)) not in BASKET_SIZES:
+        bread_id = row.get("bread_id")
+        if bread_id is not None and not isinstance(bread_id, str):
+            bread_id = None
+        if (
+            basket is None
+            or len(set(basket_ids)) not in mode.basket_sizes
+            # a single-dish prompt needs exactly one anchor (bread) item: a basket without one
+            # fails the job cleanly instead of raising out of the prompt builder
+            or (
+                mode.chef.format == "single-dish"
+                and (bread_id if bread_id in basket_ids else anchor_of(mode, basket_ids)) is None
+            )
+        ):
             await self._finish_concepts(
                 anchor_seq,
                 generation,
@@ -1567,13 +1815,18 @@ class CmdCookoutRunner:
         spec = _Spec(
             name=f"concepts round {anchor_seq} generation {generation}",
             caller=CONCEPTS_CALLER,
-            prompt=build_concepts_prompt(basket, forbidden_names=forbidden_names),
+            prompt=build_concepts_prompt(basket, mode=mode, forbidden_names=forbidden_names),
             initial_run_id=row.get("concepts_run_id"),
             deadline_at=_float_or_none(row.get("concepts_deadline_at")),
             still_waiting=still_waiting,
             record_run=record_run,
             parse=lambda text: parse_concepts(
-                text, bank=self._bank, picked_ids=basket_ids, twists=twists
+                text,
+                bank=self._bank,
+                picked_ids=basket_ids,
+                mode=mode,
+                bread_id=bread_id,
+                twists=twists,
             ),
             finish_ok=finish_ok,
             finish_bad=finish_bad,
@@ -1595,9 +1848,12 @@ class CmdCookoutRunner:
             if self._client is None:
                 row = await self._row(anchor_seq)
                 slot = ((row or {}).get("recipes") or {}).get(concept_id) or {}
-                if (row or {}).get("generation", 1) == generation and slot.get(
-                    "state"
-                ) == "pending":
+                if (
+                    row is not None
+                    and self._mode_of(row) is not None
+                    and row.get("generation", 1) == generation
+                    and slot.get("state") == "pending"
+                ):
                     await self._finish_recipe(
                         anchor_seq,
                         generation,
@@ -1659,8 +1915,14 @@ class CmdCookoutRunner:
                 error=RECIPE_FAILED_TEXT,
             )
             return
+        mode = self._mode_of(row)
+        if mode is None:
+            _LOGGER.warning("cookout: round %s has a game mode this server lacks", anchor_seq)
+            return
         twists = recipe_twists_of(row)
-        manifest = concept_manifest(concept, self._bank, forbidden_ids=twists.forbidden_ids)
+        manifest = concept_manifest(
+            concept, self._bank, forbidden_ids=twists.forbidden_ids, mode=mode
+        )
 
         async def still_waiting(run_id: str | None) -> bool:
             current = await self._row(anchor_seq)
@@ -1712,12 +1974,14 @@ class CmdCookoutRunner:
         spec = _Spec(
             name=f"recipe {anchor_seq}/{generation}/{concept_id}",
             caller=RECIPE_CALLER,
-            prompt=build_recipe_prompt(concept, manifest, twists=twists),
+            prompt=build_recipe_prompt(concept, manifest, mode=mode, twists=twists),
             initial_run_id=slot.get("run_id"),
             deadline_at=_float_or_none(slot.get("deadline_at")),
             still_waiting=still_waiting,
             record_run=record_run,
-            parse=lambda text: parse_recipe(text, bank=self._bank, concept=concept, twists=twists),
+            parse=lambda text: parse_recipe(
+                text, bank=self._bank, concept=concept, mode=mode, twists=twists
+            ),
             finish_ok=finish_ok,
             finish_bad=finish_bad,
         )
@@ -1799,6 +2063,9 @@ class CmdCookoutRunner:
 
             if status == "completed":
                 parsed = spec.parse(text or "")
+                if parsed.signals:
+                    # a count only: signals carry words of the answer, never logged (09c §3.4)
+                    _LOGGER.info("%s: %d review signals", spec.name, len(parsed.signals))
                 if parsed.value is not None:
                     await spec.finish_ok(run_id, parsed.value)
                     return

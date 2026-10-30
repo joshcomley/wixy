@@ -42,6 +42,7 @@ import anyio.to_thread
 from anyio import CapacityLimiter
 
 from wixy_server.background import ContainedTaskGroup
+from wixy_server.livechat.cookout_modes import Build, CookoutMode, CookoutModes, default_modes
 from wixy_server.livechat.cookout_twists import style_by_id
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.wyr_game import WyrDemand
@@ -105,14 +106,37 @@ def clear_cookout_scratch(
 
 
 def build_image_prompt(
-    title: str, ingredient_names: Sequence[str], *, style: str | None = None
+    title: str,
+    ingredient_names: Sequence[str],
+    *,
+    style: str | None = None,
+    mode: CookoutMode | None = None,
+    bread_name: str | None = None,
+    build: Build | None = None,
 ) -> str:
     """The deterministic, server-built dish prompt (spec §3.3): the concept title plus the
     resolved names of its picked ingredients and declared staples. A known chef's `style` swaps
     the core presentation phrase for that style's fixed picture phrase (spec 09a §5.4); every
-    "no people / no text" clause is unchanged."""
+    "no people / no text" clause is unchanged.
+
+    A single-dish `mode` (09c §3.6) uses the mode's template instead: `ingredient_names` are then
+    the FILLINGS only (the caller leaves out the bread and the staples), the bread is named by
+    `bread_name`, and the build adds its picture phrase. The style's picture phrase becomes the
+    setting; the subject stays one closed, cut toasted sandwich."""
     names = ", ".join(ingredient_names)
     chosen = style_by_id(style) if style is not None else None
+    if mode is not None and mode.picture.format == "single-dish" and mode.picture.template:
+        phrase = chosen.picture_phrase if chosen is not None else None
+        presentation = (
+            phrase[:1].upper() + phrase[1:] if phrase else (mode.picture.default_presentation or "")
+        )
+        return mode.picture.template.format(
+            title=title,
+            bread=bread_name or "bread",
+            build_phrase=build.picture_phrase if build is not None else "toasted until golden",
+            fillings=names,
+            presentation=presentation,
+        )
     if chosen is None:
         return IMAGE_PROMPT_TEMPLATE.format(title=title, ingredients=names)
     phrase = chosen.picture_phrase
@@ -164,9 +188,19 @@ class PictureTiming:
     scratch_max_age_s: float = SCRATCH_MAX_AGE_S
 
 
-def concept_prompts(round_row: Mapping[str, Any], namer: DishNamer) -> dict[str, str] | None:
+def concept_prompts(
+    round_row: Mapping[str, Any], namer: DishNamer, modes: CookoutModes | None = None
+) -> dict[str, str] | None:
     """`{slot: image prompt}` for the round's three stored concepts, or `None` when the concepts
-    are not a readable list of the three slots."""
+    are not a readable list of the three slots (or the round's game mode is unknown here)."""
+    raw_mode = round_row.get("mode")
+    mode = (modes if modes is not None else default_modes()).mode(
+        raw_mode if isinstance(raw_mode, str) and raw_mode else "classic"
+    )
+    if mode is None:
+        return None
+    single = mode.picture.format == "single-dish"
+    round_bread = round_row.get("bread_id")
     raw = round_row.get("concepts_json")
     if not isinstance(raw, str):
         return None
@@ -187,20 +221,47 @@ def concept_prompts(round_row: Mapping[str, Any], namer: DishNamer) -> dict[str,
         if slot not in SLOTS or not isinstance(title, str):
             continue
         names: list[str] = []
-        for key, lookup in (
-            ("pickedIngredientIds", namer.ingredient_name),
-            ("stapleIds", namer.staple_name),
-        ):
+        bread_id: str | None = None
+        if single:
+            picked = [i for i in concept.get("pickedIngredientIds") or [] if isinstance(i, str)]
+            if isinstance(round_bread, str) and round_bread in picked:
+                bread_id = round_bread
+            else:
+                breads = [i for i in picked if mode.kind_of(i) == mode.chef.anchor_kind]
+                bread_id = breads[0] if len(breads) == 1 else None
+        # a single-dish picture names the fillings only: the bread has its own phrase and the
+        # staples ("a filling of milk and plain flour") help no picture
+        sources = (
+            (("pickedIngredientIds", namer.ingredient_name),)
+            if single
+            else (
+                ("pickedIngredientIds", namer.ingredient_name),
+                ("stapleIds", namer.staple_name),
+            )
+        )
+        for key, lookup in sources:
             ids = concept.get(key)
             if not isinstance(ids, list):
                 continue
             for item in ids:
-                name = lookup(item) if isinstance(item, str) else None
+                if not isinstance(item, str) or item == bread_id:
+                    continue
+                name = lookup(item)
                 if name is not None and name not in names:
                     names.append(name)
-        prompts[str(slot)] = build_image_prompt(
-            title, names, style=style if isinstance(style, str) else None
-        )
+        style_id = style if isinstance(style, str) else None
+        if single:
+            build_id = concept.get("build")
+            prompts[str(slot)] = build_image_prompt(
+                title,
+                names,
+                style=style_id,
+                mode=mode,
+                bread_name=namer.ingredient_name(bread_id) if bread_id is not None else None,
+                build=next((b for b in mode.chef.builds if b.id == build_id), None),
+            )
+        else:
+            prompts[str(slot)] = build_image_prompt(title, names, style=style_id)
     return prompts if set(prompts) == set(SLOTS) else None
 
 
