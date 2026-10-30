@@ -415,9 +415,29 @@ async function rig(browser: import("@playwright/test").Browser, long: boolean): 
   return { contextA, contextB, pageA, pageB, stop, errors: errors.map((e) => () => e.filter((m) => !/favicon|getUserMedia|microphone/i.test(m))) };
 }
 
+/** The call controller ends a live call, on purpose, when the page cannot keep up: the main thread stalls longer than
+ * `LEASE_MS` (300 ms, admin-ui/src/server/call/protocol.ts) or the socket backs up for more than 250 ms ("The browser
+ * paused, so the call stopped" / "The connection couldn't keep up, so the call stopped"). On a box running several
+ * suites that happens now and then to a call held across many layout checks, and its notice then sits over the banner.
+ * That drop is the product's safety behaviour, not a layout fault, so the answered-call variants recognise exactly it
+ * (by the notice's words), dismiss the notice and set the call up again; any other failure still fails. */
+const CALL_DROPPED = /couldn't keep up|browser paused|call stopped/i;
+
+async function droppedCallNotice(page: Page): Promise<string | null> {
+  const text = (await page.locator(".wx-srv-call-notice").allInnerTexts()).join(" / ");
+  return CALL_DROPPED.test(text) ? text : null;
+}
+
+async function dismissCallNotice(page: Page): Promise<void> {
+  const dismiss = page.locator(".wx-srv-call").getByRole("button", { name: "Dismiss call details" });
+  if (await dismiss.isVisible()) await dismiss.click();
+}
+
 /** Audits one page in one state across the whole matrix; a ringing call is set up once for its variants. */
 async function sweep(measured: Page, other: Page, measuredName: string, state: string, args: Omit<AuditArgs, "call">): Promise<number> {
   let audits = 0;
+  await dismissCallNotice(measured);
+  await dismissCallNotice(other);
   const run = async (v: Variant): Promise<void> => {
     await applyLayout(measured, v);
     const where = `${state} @ ${v.width}x${v.height} inset ${v.inset}${v.call ? (v.answered === true ? " + answered call" : " + ringing call") : ""}${v.wide === true ? " + wide font" : ""}`;
@@ -428,11 +448,33 @@ async function sweep(measured: Page, other: Page, measuredName: string, state: s
   };
   for (const v of VARIANTS.filter((x) => !x.call && x.wide !== true)) await run(v);
   for (const v of VARIANTS.filter((x) => x.wide === true)) await run(v);
-  const call = await ring(measured, other, measuredName);
+  let call = await ring(measured, other, measuredName);
   for (const v of VARIANTS.filter((x) => x.call && x.answered !== true)) await run(v);
   await call.answer();
-  for (const v of VARIANTS.filter((x) => x.answered === true)) await run(v);
-  await call.end();
+  let drops = 0;
+  for (const v of VARIANTS.filter((x) => x.answered === true)) {
+    for (;;) {
+      try {
+        await run(v);
+        break;
+      } catch (error) {
+        const notice = await droppedCallNotice(measured);
+        if (notice === null || drops >= 3) throw error; // only the call controller's own watchdog is tolerated
+        drops += 1;
+        test.info().annotations.push({ type: "call-watchdog-drop", description: `${state}: ${notice}` });
+        await dismissCallNotice(measured);
+        await dismissCallNotice(other);
+        call = await ring(measured, other, measuredName);
+        await call.answer();
+      }
+    }
+  }
+  // A call that was dropped after its last check has already ended; ending a call that is over is not a failure.
+  if ((await droppedCallNotice(measured)) === null) await call.end();
+  else {
+    await dismissCallNotice(measured);
+    await dismissCallNotice(other);
+  }
   await applyLayout(measured, { width: 390, height: 844, inset: 0, call: false });
   return audits;
 }
