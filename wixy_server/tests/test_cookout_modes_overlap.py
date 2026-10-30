@@ -405,6 +405,56 @@ class TestActivationTool:
         assert (root / "Storage" / ".env").read_bytes() == b"A=1\n"
 
 
+class TestEnvWriteIsAtomic:
+    def probe(self, tmp_path: Path) -> tuple[am.MachineProbe, Path]:
+        root = tmp_path / "Wixy"
+        (root / "Storage").mkdir(parents=True)
+        env = root / "Storage" / ".env"
+        env.write_bytes(b"WIXY_PORT=9380\nOTHER=1\n")
+        return am.MachineProbe(root=root, repo=REPO_ROOT, token="t"), env
+
+    def test_it_replaces_the_file_and_keeps_a_backup_of_the_original(self, tmp_path: Path) -> None:
+        probe, env = self.probe(tmp_path)
+        probe.write_env("WIXY_PORT=9380\nWIXY_COOKOUT_MODES=toastie\n")
+        assert env.read_bytes() == b"WIXY_PORT=9380\nWIXY_COOKOUT_MODES=toastie\n"
+        assert (env.parent / ".env.bak").read_bytes() == b"WIXY_PORT=9380\nOTHER=1\n"
+        assert [p.name for p in env.parent.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_a_failure_while_writing_leaves_the_original_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        probe, env = self.probe(tmp_path)
+
+        def boom(_fd: int) -> None:
+            raise OSError("disk went away mid-write")
+
+        monkeypatch.setattr(os, "fsync", boom)
+        with pytest.raises(OSError, match="mid-write"):
+            probe.write_env("WIXY_COOKOUT_MODES=toastie\n")
+        assert env.read_bytes() == b"WIXY_PORT=9380\nOTHER=1\n"
+        assert [p.name for p in env.parent.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_a_failure_at_the_swap_leaves_the_original_intact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        probe, env = self.probe(tmp_path)
+
+        def boom(_src: object, _dst: object) -> None:
+            raise OSError("swap interrupted")
+
+        monkeypatch.setattr(os, "replace", boom)
+        with pytest.raises(OSError, match="swap interrupted"):
+            probe.write_env("WIXY_COOKOUT_MODES=toastie\n")
+        assert env.read_bytes() == b"WIXY_PORT=9380\nOTHER=1\n"
+        assert [p.name for p in env.parent.iterdir() if p.name.endswith(".tmp")] == []
+
+    def test_it_creates_the_file_when_there_is_none_yet(self, tmp_path: Path) -> None:
+        probe, env = self.probe(tmp_path)
+        env.unlink()
+        probe.write_env("A=1\n")
+        assert env.read_bytes() == b"A=1\n" and not (env.parent / ".env.bak").exists()
+
+
 class TestCheckDFailsClosed:
     def test_an_unrelated_process_with_an_unreadable_cwd_does_not_block(self) -> None:
         facts = good_facts(

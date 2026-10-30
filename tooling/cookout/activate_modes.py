@@ -39,6 +39,7 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -420,7 +421,22 @@ class MachineProbe:
             return ""
 
     def write_env(self, text: str) -> None:
-        self.env_path.write_bytes(text.encode("utf-8"))
+        """Replace `.env` atomically: the new text goes to a temp file in the SAME directory, is
+        fsynced, then `os.replace`d over the original, so an interruption at any point leaves the old
+        file whole (never empty or partial). The previous file is kept as `.env.bak`."""
+        target = self.env_path
+        temp = target.with_name(f"{target.name}.{os.getpid()}.tmp")
+        try:
+            with open(temp, "wb") as handle:
+                handle.write(text.encode("utf-8"))
+                handle.flush()
+                os.fsync(handle.fileno())
+            if target.exists():
+                shutil.copy2(target, target.with_name(f"{target.name}.bak"))
+            os.replace(temp, target)
+        except BaseException:
+            temp.unlink(missing_ok=True)
+            raise
 
     def bounce(self) -> None:
         request = urllib.request.Request(f"{self.devfleet_url}/restart/Wixy", method="POST")
