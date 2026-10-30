@@ -906,3 +906,191 @@ test.describe("Cookout chef stage", () => {
     await context.close();
   });
 });
+
+// -- The picking table with a wider font (spec/server-chat/09b-cookout-visual.md §D.3, §F.3) ---------------
+// The table fits at every 09b viewport with any font, not only the one this machine happens to have: a
+// phone's own font (Roboto, DejaVu on Linux) is wider than Windows' Segoe UI. The stress widens every glyph
+// of the pane by a fixed letter-spacing, which no font choice can undo, so the check is the same on every
+// machine. The round is read as "my turn, before the partner joins" with both drafting twists usable (so
+// the 🎲 Twists button stands beside the skip), as Classic and as a Toasted sandwich's bread turn. For every
+// element in the pane nothing overflows, whatever its `overflow` (hidden overflow is a failure), except a
+// picture's own box — and, only where the pane is under 411 px, the stage, which then scrolls on its own.
+// Where the pane is at least 411 px both card pictures are at least 96 px. The skip and Twists buttons sit
+// side by side in the actions row, each at least 44 px high, wrapping a label rather than clipping it.
+
+const WIDE_FONT_STRESS = ".wx-srv-ck, .wx-srv-ck * { letter-spacing: 0.15em !important; }";
+
+/** The view's `mode` block of a Toasted sandwich round (09c §5.4). */
+const TOASTIE_MODE = {
+  id: "toastie",
+  label: "Toasted sandwich",
+  emoji: "🥪",
+  turns: 8,
+  picksPerPlayer: 4,
+  kinds: [
+    { id: "bread", label: "the bread", prompt: "pick the bread" },
+    { id: "cheese", label: "a cheese", prompt: "add a cheese" },
+    { id: "main", label: "a main filling", prompt: "add a main filling" },
+    { id: "produce", label: "veg or fruit", prompt: "add veg or fruit" },
+    { id: "finish", label: "a finishing touch", prompt: "add a finishing touch" },
+  ],
+  anchorKind: "bread",
+};
+
+interface TableFit {
+  missing: string[];
+  paneHeight: number;
+  pageScrolls: boolean;
+  overflow: string[];
+  stageScroll: string;
+  pictures: Array<{ width: number; height: number }>;
+  buttons: Array<{ name: string; text: string; left: number; right: number; top: number; bottom: number; height: number }>;
+  rowLeft: number;
+  rowRight: number;
+  rowTop: number;
+  rowBottom: number;
+}
+
+/** Measures the picking table on ANY markup: a missing part is reported, never a crash. */
+async function measureTable(page: Page): Promise<TableFit> {
+  return await page.evaluate((): TableFit => {
+    const missing: string[] = [];
+    const pane = document.querySelector<HTMLElement>('.wx-srv-ck[data-game="cookout"]');
+    if (pane === null) missing.push("pane");
+    const paneHeight = pane?.getBoundingClientRect().height ?? 0;
+    const stage = pane?.querySelector<HTMLElement>(".wx-srv-ck-table-stage") ?? null;
+    if (stage === null) missing.push("stage");
+    const overflow: string[] = [];
+    for (const node of pane?.querySelectorAll<HTMLElement>("*") ?? []) {
+      if (node.tagName === "IMG" || node.getClientRects().length === 0) continue;
+      // Below P = 411 only the stage may scroll (vertically).
+      if (node === stage && paneHeight < 411 && node.scrollWidth <= node.clientWidth + 1) continue;
+      if (node.scrollHeight > node.clientHeight + 1 || node.scrollWidth > node.clientWidth + 1) {
+        overflow.push(`${node.className} ${node.scrollWidth}/${node.clientWidth} x ${node.scrollHeight}/${node.clientHeight}`);
+      }
+    }
+    const row = pane?.querySelector<HTMLElement>(".wx-srv-ck-actions") ?? null;
+    if (row === null) missing.push("actions row");
+    const r = row?.getBoundingClientRect();
+    const buttons: TableFit["buttons"] = [];
+    for (const name of ["wx-srv-ck-skip", "wx-srv-ck-twists-btn"]) {
+      const b = row?.querySelector<HTMLElement>(`.${name}`) ?? null;
+      if (b === null) {
+        missing.push(name);
+        continue;
+      }
+      const box = b.getBoundingClientRect();
+      buttons.push({ name, text: b.textContent ?? "", left: box.left, right: box.right, top: box.top, bottom: box.bottom, height: box.height });
+    }
+    const pictures = [...(pane?.querySelectorAll<HTMLElement>(".wx-srv-ck-pair .wx-srv-ck-card-pic") ?? [])].map((p) => {
+      const box = p.getBoundingClientRect();
+      return { width: box.width, height: box.height };
+    });
+    return {
+      missing,
+      paneHeight,
+      pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight,
+      overflow,
+      stageScroll: stage === null ? "" : getComputedStyle(stage).overflowY,
+      pictures,
+      buttons,
+      rowLeft: r?.left ?? 0,
+      rowRight: r?.right ?? 0,
+      rowTop: r?.top ?? 0,
+      rowBottom: r?.bottom ?? 0,
+    };
+  });
+}
+
+function expectTableFits(fit: TableFit, where: string): void {
+  expect(fit.missing, `${where}: parts of the table not found`).toEqual([]);
+  expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
+  expect(fit.overflow, `${where}: overflowing elements`).toEqual([]);
+  if (fit.paneHeight < 411) expect(fit.stageScroll, `${where}: the stage scrolls on its own`).toBe("auto");
+  expect(fit.pictures, `${where}: both card pictures`).toHaveLength(2);
+  if (fit.paneHeight >= 411) {
+    for (const pic of fit.pictures) {
+      expect(pic.width, `${where} (P ${fit.paneHeight}): picture width`).toBeGreaterThanOrEqual(95.5);
+      expect(pic.height, `${where} (P ${fit.paneHeight}): picture height`).toBeGreaterThanOrEqual(95.5);
+    }
+  }
+  for (const b of fit.buttons) {
+    const what = `${where}: ${b.name} "${b.text}"`;
+    expect(b.height, `${what} height`).toBeGreaterThanOrEqual(43.5);
+    expect(b.left, `${what} left`).toBeGreaterThanOrEqual(fit.rowLeft - 1);
+    expect(b.right, `${what} right`).toBeLessThanOrEqual(fit.rowRight + 1);
+    expect(b.top, `${what} top`).toBeGreaterThanOrEqual(fit.rowTop - 1);
+    expect(b.bottom, `${what} bottom`).toBeLessThanOrEqual(fit.rowBottom + 1);
+  }
+  // Side by side: the skip left of the Twists button, on the same line, not overlapping.
+  const [skip, twists] = fit.buttons;
+  expect(skip!.right, `${where}: skip and Twists overlap`).toBeLessThanOrEqual(twists!.left + 0.5);
+  expect(Math.abs(skip!.top - twists!.top), `${where}: skip and Twists on one line`).toBeLessThanOrEqual(1);
+}
+
+/** Puts `css` in the page's own style element `id` (replacing what it held). */
+async function setStyle(page: Page, id: string, css: string): Promise<void> {
+  await page.evaluate(
+    ([styleId, text]) => {
+      let style = document.getElementById(styleId);
+      if (style === null) {
+        style = document.createElement("style");
+        style.id = styleId;
+        document.head.append(style);
+      }
+      style.textContent = text;
+    },
+    [id, css] as const,
+  );
+}
+
+test.describe("Cookout picking table with a wider font", () => {
+  for (const toastie of [false, true]) {
+    test(`the ${toastie ? "toasted sandwich's bread turn" : "Classic table"} fits with a wider font at every 09b viewport`, async ({ browser }) => {
+      const context = await browser.newContext({ viewport: { width: 360, height: 640 } });
+      const page = await context.newPage();
+      const errors = trackConsoleErrors(page);
+      await unlockServer(page, "Alice");
+      const stopAwake = keepAwake([page]);
+      // Both drafting twists usable on my turn (and, for the toastie, the round is its bread turn).
+      await page.route(/\/api\/admin\/server\/cookout\/\d+\?as=/, async (route) => {
+        const response = await route.fetch();
+        const json = (await response.json()) as Record<string, unknown>;
+        const current = json["current"] as Record<string, unknown> | null;
+        const view = current === null ? json : { ...json, current: { ...current, canLucky: true, canChaos: true, ...(toastie ? { role: "bread" } : {}) } };
+        await route.fulfill({ response, json: toastie ? { ...view, mode: TOASTIE_MODE } : view });
+      });
+      await startCookout(page, false);
+      await expect(pickable(page)).toHaveCount(2);
+      await expect(game(page).locator(".wx-srv-ck-skip")).toHaveText("Deal two new ones (2 left)");
+      await expect(game(page).locator(".wx-srv-ck-twists-btn")).toBeVisible();
+      await expect(game(page).locator(".wx-srv-ck-turn")).toHaveText(toastie ? "Your turn — pick the bread" : "Your turn — tap the one you want");
+      for (const stress of ["", WIDE_FONT_STRESS]) {
+        await setStyle(page, "e2e-wide-font", stress);
+        for (const [width, height, inset] of [
+          [360, 640, 0],
+          [360, 640, 34],
+          [390, 844, 0],
+          [390, 844, 34],
+          [360, 560, 0],
+          [360, 560, 34],
+          [360, 480, 0],
+          [360, 480, 34],
+          [1280, 800, 0],
+        ] as const) {
+          await page.setViewportSize({ width, height });
+          await setStyle(page, "e2e-inset", inset > 0 ? `.wx-srv-tabs { padding-bottom: ${inset}px !important }` : "");
+          await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          const where = `${toastie ? "toastie" : "classic"} ${width}x${height} inset ${inset}${stress === "" ? "" : " wide font"}`;
+          expectTableFits(await measureTable(page), where);
+          if (inset === 0 && width === 360) {
+            await page.screenshot({ path: test.info().outputPath(`table-${toastie ? "toastie" : "classic"}-${width}x${height}${stress === "" ? "" : "-wide"}.png`) });
+          }
+        }
+      }
+      stopAwake();
+      expect(errors.filter((m) => !/favicon/i.test(m))).toEqual([]);
+      await context.close();
+    });
+  }
+});
