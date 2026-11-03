@@ -1688,7 +1688,14 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     syncMessages(messages: readonly Message[]): void {
       if (torndown) return;
       const alive = new Set(messages.map((message) => message.seq));
-      for (const seq of model.anchorSeqs()) if (!alive.has(seq)) dropAnchor(seq);
+      const activeAnchor = activeStroke === null ? undefined : model.get(activeStroke.key)?.anchorSeq;
+      for (const seq of model.anchorSeqs()) {
+        if (alive.has(seq)) continue;
+        // No longer held (the chat left a stretch of old history) is not deleted, which arrives by
+        // `messageDeleted`. Work not yet stored stays until it is, for the next call to drop.
+        if (seq === activeAnchor || sync.anchorHasPending(seq)) continue;
+        dropAnchor(seq);
+      }
       for (const message of messages) {
         const summaries = parseDrawingSummaries(message.drawings);
         if (summaries !== null) sync.observe(message.seq, summaries);

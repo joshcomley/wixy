@@ -1086,15 +1086,14 @@ Tapping a sent bubble's quote (`scrollToOriginal` in `thread.ts`) scrolls to the
 it, and highlights it for ~1.5s (`scrollIntoView`'s own `behavior` option is `"auto"` under
 `prefers-reduced-motion`, never a CSS `scroll-behavior` — that would also make `loadOlderPage`'s
 own precise `scrollTop` restoration animate, breaking its "never visually jump" guarantee). If the
-original isn't loaded yet, it pages backwards with the existing `before` cursor at its own larger
-page size (`SCROLL_TO_ORIGINAL_PAGE_SIZE`, 100 vs. the ordinary 50) via the same
-`loadOlderPage`, which returns one of `"loaded"|"blocked"|"exhausted"|"error"` rather than a bare
-boolean — `"blocked"` (another load, ordinary or a sibling scroll-to-original, holds the single
-history-load slot) is distinct from `"exhausted"` precisely so a second quote tapped mid-page
-retries instead of wrongly concluding its target was deleted. A `scrollToOriginalGeneration`
-counter aborts a stale run's continuation (never its underlying network call) on a lock, a wipe, or
-another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Never found once paging
-exhausts (deleted in the meantime) removes the quote via the same path `message_deleted` uses.
+original isn't on screen, it is shown in its own neighbourhood, one request however old it is
+(`showMessage`; see "Search, the date strip and Message info", decisions/00208). A tap in a game's
+pop-up goes to the chat first. A load already holding the single history-load slot is waited for,
+so a second quote tapped mid-load is not mistaken for a deleted target. A
+`scrollToOriginalGeneration` counter aborts a stale run's continuation (never its underlying network
+call) on a lock, a wipe, or another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Only
+the server's answer lacking the original (deleted in the meantime) removes the quote, via the same
+path `message_deleted` uses; a network failure leaves it.
 
 Client-side erasure (Inv 46/Inv 51) — see Inv 51's own text for the full three-mechanism picture
 (audit F3/F9: an earlier version of this doc called `message_deleted` the "only signal", which is
@@ -2164,6 +2163,57 @@ question bank's categories (25 today, each with its question count), **Select al
   topics (the whole pool capped at 3x target), so an hour of one topic is not left painting on demand.
 - **Tests.** `test_livechat_wyr_topics.py`, `admin-ui/tests/serverWyrTopics.test.ts`, `e2e/tests/server-wyr.spec.ts`
   (topics at 360 px).
+
+### Search, the date strip and Message info (workspace 00061, decisions/00208)
+
+**Search** (`searchView.ts`, `searchMarks.ts`, `api/search.ts`, server `livechat/search.py`). The ⋯ menu's
+**Search** entry (straight after Gallery) opens a full-height screen with a box to type in, closed and forgotten by
+every lock, wipe and teardown (`reset()`; nothing is written to storage). A pause of 250 ms or Enter runs
+`POST /messages/search`: messages holding every word in any order, matching inside longer words, ignoring case,
+accents and curly punctuation, from the message's text or a voice note's finished transcript ("Voice note:"), never a
+view-once message. Newest first, a page of 30, with a short excerpt and the words marked. Tapping one closes the list
+and shows it in the chat (`revealSearchResult`). It is centred and highlighted like a quote's original, and its words are
+marked with the CSS Custom Highlight API (`wx-srv-search-match`; no DOM change, nothing where unsupported).
+A result not on screen is shown in its own neighbourhood: ONE `GET /messages?around=`, 50 messages, however old it is. If
+those don't reach what is already loaded, the thread enters a **detached view** (`detachedView`, `{high, mainFloor}`):
+it renders only messages up to `high`, while the newest messages from `mainFloor` up stay held and keep arriving, off
+screen, with a gap between that neither side has loaded. The game models still observe every held message. Scrolling up
+pages older as usual; reaching `.wx-srv-thread-sentinel-newer` pages newer (`GET /messages?after=`) until the two meet and
+the chat is simply the chat again. `.wx-srv-jump-pill` reads "↓ Latest messages" throughout, and it, sending anything, or
+going to a result or an unheard note in the newest messages leaves the view (`goToLatest`/`leaveDetachedView`), forgetting
+the old stretch. So does every lock and token renewal (`attach`), because attaching refreshes everything held back to the
+oldest and must never page across the gap. `threadScroll.unstick()` keeps the end of the view from being followed like the
+end of the chat. Rules that keep the gap honest: a stream event for a message `belongsInHeldRange` rejects (older than
+anything held, or in the gap) is not taken in, because its page brings it; a page for a view since left is dropped; only
+the newest jump may change the chat (`revealToken`), and closing the search, sending or locking cancels one; a deleted
+target's quote is cleared from every held copy and pending echo, not only the bubbles (`removeQuotesTargeting`); the drawing layer gets every held
+message, since a missing anchor means "deleted" to it. Sending from a game's tab doesn't leave the view, because a game
+opened from the old stretch needs it. A stroke not yet stored survives its message going off screen (`anchorHasPending`,
+for the chat and the canvas). Quote jumps use the same neighbourhood (`showMessage`), so an old original is one request away
+too. *Honest limits:* leaving from the chat closes a tab opened from the old stretch, and jumping stops a voice note playing
+in a bubble that goes off screen. Opening an old banked trip (`ensureMessageLoaded`) still pages older 100 at a time.
+`.wx-srv-search-nav`, in the same place as the unread voice notes bar, which it replaces (each closes the other), offers
+`‹ Older` · `3 of 57` (back to the list as it was) · `Newer ›` · ✕, is `data-srv-gesture-exempt`, and Older loads the
+next page when it runs out. A delete leaves the results at once; an arrival or a finished transcript is asked about with
+`only:<seq>`, one at a time. A result found gone when going to it is dropped and the steps still work from where it was.
+
+A jump of more than `REVEAL_SMOOTH_MAX_SCREENS` goes straight there instead of scrolling smoothly (`revealMessage`, so
+quote jumps too). There is no search index, on purpose: see decisions/00208 and Inv 58.
+
+**The date strip** (`.wx-srv-day-strip`, `syncDayStrip` in `thread.ts`). Once the top of the chat is on a day before
+today, a small label stays at the top saying which: "Yesterday", or the weekday and date as the day separators word it
+(`formatDaySeparator`). Hidden on today, and while that day's own separator is at the top. It runs on each scroll and
+render, bisecting `daysInOrder`, and takes no taps.
+
+**Message info** (`messageInfo.ts`, `messageActions.ts`). An item in a message's ⋯ menu that swaps the menu's list for a
+pane: the exact send time to the second with weekday, date and timezone, the sender, the kind of message, its length in
+words and characters, each attachment's size, duration and whether it was transcribed, who it replies to, who reacted,
+drawings, and its message number. A view-once message gets its time and timer only. Built from the `Message` already held,
+so nothing new leaves the server, and live if a reaction lands while it is open. The chat records no delivered or read
+state, so none is shown.
+
+*Tests:* `wixy_server/tests/test_livechat_search.py`, `admin-ui/tests/serverSearch.test.ts`,
+`admin-ui/tests/serverMessageInfo.test.ts`, `e2e/tests/server-search.spec.ts` (320 and 390 px).
 
 ### Links view (workspace 00052)
 

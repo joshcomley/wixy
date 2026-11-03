@@ -712,6 +712,29 @@ describe("drawingLayer: a lock destroys the session, the surface and every timer
     );
   });
 
+  it("a waiting stroke survives its message no longer being held, and is dropped once stored", async () => {
+    const s = setup();
+    s.addBubble(2, 300);
+    s.api.createDrawing.mockResolvedValueOnce({ kind: "retry" });
+    s.layer.attach(SESSION);
+    s.layer.penButton.click();
+    drawMouseStroke(s, [[40, 320], [60, 330]]);
+    await flush();
+    s.layer.detach();
+    // The chat left a stretch of old history on the lock: not held is not deleted.
+    s.layer.syncMessages([]);
+    const renewed: ServerSession = { token: "tok-2", expiresAt: 9_999_999_999 };
+    s.layer.attach(renewed);
+    await flush();
+    expect(s.api.createDrawing).toHaveBeenCalledTimes(2);
+    expect(s.api.createDrawing.mock.calls[1]![0]).toBe(renewed);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    s.layer.syncMessages([]);
+    expect(s.svgs()).toHaveLength(0);
+    s.layer.detach();
+  });
+
   it("a 401 on a live batch locks the chat", async () => {
     const s = setup();
     s.addBubble(2, 300);

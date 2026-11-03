@@ -64,6 +64,7 @@ from wixy_server.livechat.models import (
     MessageHook,
     MessageRow,
     PushSubscriptionRow,
+    SearchHit,
     TranscriptRow,
     drawing_json,
     message_json,
@@ -78,6 +79,7 @@ from wixy_server.livechat.push import (
     validate_push_endpoint,
 )
 from wixy_server.livechat.reactions import is_allowed_reaction, reactor_key
+from wixy_server.livechat.search import MAX_QUERY_CHARS, excerpt, query_words
 from wixy_server.livechat.store import (
     AttachmentNotReadyError,
     DrawingAnchorNotFoundError,
@@ -485,14 +487,40 @@ async def revoke_all_device_grants(request: Request) -> Response:
 
 
 @router.get("/messages", response_model=None)
-async def get_history(request: Request, before: int | None = None, limit: int = 50) -> JsonObject:
+async def get_history(
+    request: Request,
+    before: int | None = None,
+    limit: int = 50,
+    around: int | None = None,
+    after: int | None = None,
+) -> JsonObject:
+    """One page of history: the newest, or older than `before`. `around` is a message's own
+    neighbourhood (going straight to it from Search, decisions/00208) and `after` the next page
+    newer than a seq; both also say whether anything newer exists (`hasNewer`)."""
     auth = await require_server_token(request)
     if not (1 <= limit <= 100):
         raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    if sum(value is not None for value in (before, around, after)) > 1:
+        raise HTTPException(status_code=422, detail="before, around and after are exclusive")
 
     store: LiveChatStore = request.app.state.livechat_store
     secret: bytes = request.app.state.livechat_secret
     signer = MediaSigner.for_auth(secret, auth)
+
+    def _neighbourhood() -> tuple[list[MessageRow], bool, bool, int]:
+        if around is not None:
+            return store.list_messages_around(seq=around, limit=limit)
+        assert after is not None
+        return store.list_messages_after(after=after, limit=limit)
+
+    if around is not None or after is not None:
+        rows, has_older, has_newer, position = await anyio.to_thread.run_sync(_neighbourhood)
+        return {
+            "messages": [message_json(m, signer) for m in rows],
+            "hasMore": has_older,
+            "hasNewer": has_newer,
+            "cursor": position,
+        }
 
     def _list() -> tuple[list[MessageRow], bool, int]:
         return store.list_messages(before=before, limit=limit)
@@ -527,6 +555,58 @@ async def get_link_messages(
         lambda: store.list_link_messages(before=before, limit=limit)
     )
     return {"messages": [message_json(m, signer) for m in messages], "hasMore": has_more}
+
+
+# ---------------------------------------------------------------------------
+# POST /messages/search — the Search screen (decisions/00208). A POST so that what somebody
+# searched for sits in a request body: a query string lands in access logs and in anything
+# between the browser and here. Never logged, never kept, and the answer is never cached.
+# ---------------------------------------------------------------------------
+
+
+class SearchMessagesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str
+    before: int | None = None
+    only: int | None = None
+    limit: int = 30
+
+
+def _search_hit_json(hit: SearchHit, words: tuple[str, ...]) -> JsonObject:
+    found = excerpt(hit.text, words)
+    return {
+        "seq": hit.seq,
+        "sender": hit.sender,
+        "createdAt": hit.created_at,
+        "source": hit.source,
+        "parts": [{"text": part.text, "match": part.match} for part in found.parts],
+        "matched": list(found.matched),
+    }
+
+
+@router.post("/messages/search", response_model=None)
+async def search_messages(body: SearchMessagesIn, request: Request) -> JSONResponse:
+    await require_server_token(request)
+    if not (1 <= len(body.q) <= MAX_QUERY_CHARS):
+        return _invalid(f"q must be 1-{MAX_QUERY_CHARS} characters")
+    if not (1 <= body.limit <= 100):
+        return _invalid("limit must be between 1 and 100")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    words = query_words(body.q)
+
+    def _search() -> JsonObject:
+        hits, has_more, total = store.search_messages(
+            words=words, before=body.before, only=body.only, limit=body.limit
+        )
+        return {
+            "results": [_search_hit_json(hit, words) for hit in hits],
+            "hasMore": has_more,
+            "total": total,
+        }
+
+    return JSONResponse(await anyio.to_thread.run_sync(_search), headers=_NO_STORE)
 
 
 # ---------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   HEART_VARIANTS,
 } from "./reactions";
 import { EMOJI_CATEGORIES, searchEmojis } from "./emojiData";
+import { messageInfoRows } from "./messageInfo";
 
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_PX = 10;
@@ -65,6 +66,33 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   const confirmation = documentRef.createElement("div");
   confirmation.className = "wx-srv-message-delete-confirm";
   confirmation.hidden = true;
+
+  const infoPane = documentRef.createElement("div");
+  infoPane.className = "wx-srv-message-info";
+  infoPane.hidden = true;
+  const infoList = documentRef.createElement("dl");
+  infoList.className = "wx-srv-message-info-list";
+  const infoBack = documentRef.createElement("button");
+  infoBack.type = "button";
+  infoBack.className = "wx-srv-message-info-back";
+  infoBack.textContent = "Back";
+  infoBack.dataset["srvGestureBoundary"] = "";
+  infoBack.addEventListener("click", () => {
+    infoPane.hidden = true;
+    actions.hidden = false;
+  });
+  infoPane.append(infoList, infoBack);
+
+  function renderInfo(): void {
+    infoList.replaceChildren();
+    for (const row of messageInfoRows(message)) {
+      const label = documentRef.createElement("dt");
+      label.textContent = row.label;
+      const value = documentRef.createElement("dd");
+      value.textContent = row.value;
+      infoList.append(label, value);
+    }
+  }
 
   const copyError = documentRef.createElement("p");
   copyError.className = "wx-srv-message-action-error";
@@ -438,6 +466,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     menu.classList.remove("wx-srv-message-actions-picker-open");
     menu.hidden = true;
     confirmation.hidden = true;
+    infoPane.hidden = true;
     actions.hidden = false;
     fullPicker.hidden = true;
     backdrop.hidden = true;
@@ -496,6 +525,23 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     actions.appendChild(copy);
   }
 
+  const info = documentRef.createElement("button");
+  info.type = "button";
+  info.className = "wx-srv-message-action-info";
+  info.textContent = "Message info";
+  info.setAttribute("role", "menuitem");
+  info.dataset["srvGestureBoundary"] = "";
+  info.addEventListener("click", () => {
+    renderInfo();
+    actions.hidden = true;
+    infoPane.hidden = false;
+    if (typeof infoPane.scrollIntoView === "function") {
+      infoPane.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    infoBack.focus();
+  });
+  actions.appendChild(info);
+
   const remove = documentRef.createElement("button");
   remove.type = "button";
   remove.className = "wx-srv-message-action-delete";
@@ -539,7 +585,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
   cancelDelete.addEventListener("click", close);
   confirmButtons.append(confirmDeleteButton, cancelDelete);
   confirmation.append(question, confirmButtons);
-  menu.append(actions, confirmation, copyError);
+  menu.append(actions, confirmation, infoPane, copyError);
 
   trigger.addEventListener("click", () => {
     if (menu.hidden) open();
@@ -676,6 +722,7 @@ export function mountMessageActions(deps: MessageActionsDeps): MessageActionsCon
     update(next: Message): void {
       message = next;
       syncPicker();
+      if (!infoPane.hidden) renderInfo();
     },
     teardown(): void {
       close();

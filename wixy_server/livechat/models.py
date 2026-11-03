@@ -785,6 +785,18 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
     }
 
 
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    """A message the Search screen found, and the text it was found in: its own words, or one of
+    its voice notes' transcripts."""
+
+    seq: int
+    sender: str
+    created_at: float
+    source: Literal["text", "transcript"]
+    text: str
+
+
 def drawing_stroke_json(row: DrawingStrokeRow) -> JsonObject:
     return {
         "strokeId": row.stroke_id,

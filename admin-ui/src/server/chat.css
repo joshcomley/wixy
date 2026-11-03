@@ -748,6 +748,7 @@ button.wx-srv-quote:focus-visible {
   bottom: 12px;
   right: 16px;
   z-index: 2;
+  min-height: 44px;
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: 999px;
@@ -2297,6 +2298,10 @@ dialog.wx-srv-game-pictures[open] {
   text-align: left;
   font: 500 0.8125rem/1.3 system-ui, sans-serif;
   cursor: pointer;
+}
+
+.wx-srv-message-actions-list > button {
+  min-height: 44px;
 }
 
 .wx-srv-message-actions button:hover,
@@ -9781,4 +9786,292 @@ button.wx-srv-ck-heart {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* -- Search (decisions/00208) ------------------------------------------------ */
+
+.wx-srv-search-view {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  background: var(--wx-canvas);
+}
+
+.wx-srv-search-view[hidden],
+.wx-srv-search-summary[hidden],
+.wx-srv-search-hint[hidden],
+.wx-srv-search-loading[hidden],
+.wx-srv-search-error[hidden],
+.wx-srv-search-more[hidden],
+.wx-srv-search-nav[hidden],
+.wx-srv-search-nav button[hidden] {
+  display: none;
+}
+
+.wx-srv-search-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.wx-srv-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  /* 16px or more: iOS zooms the whole page when a smaller box takes focus. */
+  font: inherit;
+  font-size: max(1rem, 16px);
+}
+
+.wx-srv-search-close {
+  flex: none;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+.wx-srv-search-summary {
+  flex: none;
+  margin: 0 0 8px;
+  color: var(--wx-muted);
+  font-size: 0.875rem;
+}
+
+.wx-srv-search-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 12px;
+}
+
+.wx-srv-search-item {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-search-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 2px 12px;
+  font-size: 0.8125rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-search-item-sender {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+  color: var(--wx-ink);
+}
+
+.wx-srv-search-item-text {
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-search-item-source {
+  color: var(--wx-muted);
+}
+
+/* The same fixed pair in the list and the chat, whatever the theme or the bubble's own colour. */
+.wx-srv-search-item-text mark {
+  background: #ffe08a;
+  color: #1a1a1a;
+  border-radius: 2px;
+}
+
+::highlight(wx-srv-search-match) {
+  background-color: #ffe08a;
+  color: #1a1a1a;
+}
+
+.wx-srv-search-footer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.wx-srv-search-hint,
+.wx-srv-search-loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--wx-muted);
+}
+
+.wx-srv-search-error {
+  margin: 8px 0;
+  text-align: center;
+  color: var(--wx-danger, var(--wx-ink));
+}
+
+.wx-srv-search-more {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  cursor: pointer;
+}
+
+/* Stepping through results in the chat: the same place as the unread voice notes bar, which it
+   replaces. Never wider than the screen. */
+.wx-srv-search-nav {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-brand-blue-text);
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-ink);
+}
+
+.wx-srv-search-nav button {
+  flex: none;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wx-srv-search-nav .wx-srv-search-pos {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 4px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 0.875rem;
+  text-decoration: underline;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-search-nav .wx-srv-search-nav-close {
+  padding: 0;
+}
+
+/* The date strip (thread.ts `syncDayStrip`). Taps go straight through it to the chat beneath. */
+.wx-srv-day-strip {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.wx-srv-day-strip[hidden] {
+  display: none;
+}
+
+.wx-srv-day-strip span {
+  max-width: calc(100% - 24px);
+  box-sizing: border-box;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 600 0.75rem/1.2 system-ui, sans-serif;
+  text-align: center;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+}
+
+/* Message info, in the message's own menu. */
+.wx-srv-message-info[hidden] {
+  display: none;
+}
+
+.wx-srv-message-info {
+  width: min(18rem, calc(100vw - 72px));
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wx-srv-message-info-list {
+  margin: 0;
+  padding: 4px 6px 0;
+}
+
+.wx-srv-message-info-list dt {
+  font-size: 0.75rem;
+  color: var(--wx-muted);
+}
+
+.wx-srv-message-info-list dd {
+  margin: 0 0 8px;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-message-info-back {
+  flex: none;
+  min-height: 44px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  cursor: pointer;
+}
+
+/* A bar takes the bottom of the thread: the chat makes room for it, and the way back to the latest
+   messages sits above it. */
+.wx-srv-thread-wrap-bottom-bar .wx-srv-jump-pill {
+  bottom: 76px;
+}
+
+.wx-srv-thread-wrap-bottom-bar .wx-srv-thread {
+  padding-bottom: 72px;
+}
+
+.wx-srv-thread-sentinel-newer[hidden] {
+  display: none;
 }
