@@ -1086,15 +1086,14 @@ Tapping a sent bubble's quote (`scrollToOriginal` in `thread.ts`) scrolls to the
 it, and highlights it for ~1.5s (`scrollIntoView`'s own `behavior` option is `"auto"` under
 `prefers-reduced-motion`, never a CSS `scroll-behavior` — that would also make `loadOlderPage`'s
 own precise `scrollTop` restoration animate, breaking its "never visually jump" guarantee). If the
-original isn't loaded yet, it pages backwards with the existing `before` cursor at its own larger
-page size (`SCROLL_TO_ORIGINAL_PAGE_SIZE`, 100 vs. the ordinary 50) via the same
-`loadOlderPage`, which returns one of `"loaded"|"blocked"|"exhausted"|"error"` rather than a bare
-boolean — `"blocked"` (another load, ordinary or a sibling scroll-to-original, holds the single
-history-load slot) is distinct from `"exhausted"` precisely so a second quote tapped mid-page
-retries instead of wrongly concluding its target was deleted. A `scrollToOriginalGeneration`
-counter aborts a stale run's continuation (never its underlying network call) on a lock, a wipe, or
-another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Never found once paging
-exhausts (deleted in the meantime) removes the quote via the same path `message_deleted` uses.
+original isn't on screen, it is shown in its own neighbourhood, one request however old it is
+(`showMessage`; see "Search, the date strip and Message info", decisions/00208). A tap in a game's
+pop-up goes to the chat first. A load already holding the single history-load slot is waited for,
+so a second quote tapped mid-load is not mistaken for a deleted target. A
+`scrollToOriginalGeneration` counter aborts a stale run's continuation (never its underlying network
+call) on a lock, a wipe, or another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Only
+the server's answer lacking the original (deleted in the meantime) removes the quote, via the same
+path `message_deleted` uses; a network failure leaves it.
 
 Client-side erasure (Inv 46/Inv 51) — see Inv 51's own text for the full three-mechanism picture
 (audit F3/F9: an earlier version of this doc called `message_deleted` the "only signal", which is
@@ -2187,7 +2186,7 @@ oldest and must never page across the gap. `threadScroll.unstick()` keeps the en
 end of the chat. Rules that keep the gap honest: a stream event for a message `belongsInHeldRange` rejects (older than
 anything held, or in the gap) is not taken in, because its page brings it; a page for a view since left is dropped; only
 the newest jump may change the chat (`revealToken`), and closing the search, sending or locking cancels one; a deleted
-target's quote is cleared from held-but-unrendered messages too (`removeQuotesTargeting`); the drawing layer gets every held
+target's quote is cleared from every held copy and pending echo, not only the bubbles (`removeQuotesTargeting`); the drawing layer gets every held
 message, since a missing anchor means "deleted" to it. Sending from a game's tab doesn't leave the view, because a game
 opened from the old stretch needs it. A stroke not yet stored survives its message going off screen (`anchorHasPending`,
 for the chat and the canvas). Quote jumps use the same neighbourhood (`showMessage`), so an old original is one request away

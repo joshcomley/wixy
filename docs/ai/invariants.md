@@ -1240,8 +1240,8 @@ booleans rejected, and never a 500 even at SQLite's own integer ceiling), `test_
 shared fixture `spec/server-chat/fixtures/reply-to-cases.json` so the server's `reply_to_json` and
 the client's `replyToFromMessage` can never silently drift apart — and
 `admin-ui/tests/serverThread.test.ts`'s "reply to a message" suite (the composer bar, draft
-carry-through on a failed send, the sent bubble's quote button and its scroll-to-original paging
-including that a paging error never removes a quote genuine exhaustion would, and the in-place
+carry-through on a failed send, the sent bubble's quote button and its scroll to the original
+including that a failed load never removes a quote a real "gone" would, and the in-place
 quote removal on `message_deleted`, including that a playing `<audio>` element in the reply keeps
 its identity and `currentTime`), plus its "reattach after a lock" and "in-flight data can never
 resurrect a deleted target's words" suites (mechanisms 2 and 3 above, and the three narrower races

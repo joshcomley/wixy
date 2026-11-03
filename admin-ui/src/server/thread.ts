@@ -135,8 +135,8 @@ const REACTION_ERROR_MS = 5_000;
 /** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
 const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
 const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
-/** Round 2 ruling item 10 §(4): paging backwards to find a quote's original
- * message uses its own, larger page size than ordinary history scrolling. */
+/** Paging back to a message a game opens (`ensureMessageLoaded`) uses a larger page than ordinary
+ * history scrolling. A quote's original is fetched by its neighbourhood instead (`showMessage`). */
 const SCROLL_TO_ORIGINAL_PAGE_SIZE = 100;
 /** Going to a search result not on screen: this many messages, half either side of it. */
 const JUMP_PAGE_SIZE = 50;
@@ -2517,7 +2517,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   /** §(4): a `<button>` whose accessible name reads like "Show the original
-   * message from <name>"; tapping it scrolls to the original (paging
+   * message from <name>"; tapping it scrolls to the original (fetching
    * backwards to find it if needed). It carries `data-srv-gesture-boundary`
    * — its tap makes a different control (the original) appear under the
    * finger, so a double-tap on a quote never locks either. */
@@ -3574,10 +3574,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (pendingReply?.seq === seq) setPendingReply(null);
   }
 
-  /** §(4): tapping a quote scrolls to the original, paging backwards (the
-   * quote shows busy meanwhile) if it isn't loaded yet. Not found after
-   * paging exhausts → the target was deleted meanwhile; remove the quote.
-   * Aborts on a lock, a wipe, or another tap — all three bump
+  /** §(4), decisions/00208: tapping a quote scrolls to the original, shown in its own neighbourhood
+   * if it isn't on screen (the quote shows busy meanwhile). The server saying it is gone means it was
+   * deleted meanwhile: remove the quote. Aborts on a lock, a wipe, or another tap — all three bump
    * `scrollToOriginalGeneration`. */
   async function scrollToOriginal(seq: number, button: HTMLButtonElement): Promise<void> {
     scrollToOriginalGeneration += 1;
@@ -3591,6 +3590,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // failure leaves it alone, since the original may well still exist (audit F6).
       if (!renderedMessages.has(seq)) {
         revealToken += 1;
+        // A quote tapped in a game's pop-up: go to the original visibly, not behind the game.
+        if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
         const outcome = await showMessage(seq, () => generation === scrollToOriginalGeneration);
         if (generation !== scrollToOriginalGeneration) return;
         if (outcome === "gone") removeQuotesTargeting(seq);
@@ -4252,6 +4253,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
       canvasPane.detach();
+      // The next unlock refreshes everything held, back to the oldest: never across the gap. After
+      // the drawing layers stand down, so a stroke in progress is withdrawn properly, and before
+      // the games forget everything below, because this render would otherwise fill them again.
+      if (detachedView !== null) {
+        scrollToOriginalGeneration += 1;
+        leaveDetachedView();
+        renderThreadList(false);
+        threadScroll.scrollToBottom();
+      }
       wyrModel.reset();
       adventureModel.reset();
       cookoutModel.reset();
@@ -4267,14 +4277,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       cookoutStart.close();
       cookoutOptions = null;
       wyrTopics.close();
-      // The next unlock refreshes everything held, back to the oldest: never across the gap. After
-      // the drawing layer has stood down above, so a stroke in progress was withdrawn properly.
-      if (detachedView !== null) {
-        scrollToOriginalGeneration += 1;
-        leaveDetachedView();
-        renderThreadList(false);
-        threadScroll.scrollToBottom();
-      }
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending

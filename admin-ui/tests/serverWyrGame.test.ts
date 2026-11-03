@@ -798,6 +798,33 @@ describe("thread wiring", () => {
     thread.teardown();
   });
 
+  it("a lock from a stretch of old history forgets the games like any other lock", async () => {
+    const reply = {
+      ...chatMessage(10, 0, "a reply", "Purdy"),
+      wyrRef: null,
+      replyTo: { seq: 1, sender: "Purdy", text: "original", truncated: false, media: null },
+    };
+    getHistory.mockResolvedValueOnce({ messages: [message(9), reply], hasMore: true, cursor: 0 });
+    getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
+    const thread = await mount();
+    getHistory.mockResolvedValueOnce({
+      messages: [{ ...chatMessage(1, 0, "original", "Purdy"), wyrRef: null }],
+      hasMore: false,
+      hasNewer: true,
+      cursor: 0,
+    });
+    thread.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!.click();
+    await flush();
+    expect(thread.element.querySelector(".wx-srv-jump-pill")!.textContent).toBe("↓ Latest messages");
+
+    getWyrRound.mockClear();
+    thread.detach();
+    await flush();
+    expect(getWyrRound).not.toHaveBeenCalled();
+    expect(thread.element.querySelector(".wx-srv-tabs")!.hasAttribute("hidden")).toBe(true);
+    thread.teardown();
+  });
+
   it("messages sent in the WYR tab carry wyrSeq; in the Chat tab they do not", async () => {
     createWyrRound.mockResolvedValue({ ok: true, message: message(9) });
     getWyrRound.mockResolvedValue({ ok: true, view: view({ seq: 9 }) });
