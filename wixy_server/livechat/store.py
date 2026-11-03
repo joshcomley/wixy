@@ -90,6 +90,7 @@ from wixy_server.livechat.drawings import (
     MAX_STROKES_PER_DRAWING,
 )
 from wixy_server.livechat.links import text_has_link
+from wixy_server.livechat.search import fold, matches_all
 from wixy_server.livechat.models import (
     AdventureLanding,
     AdventureRoundRow,
@@ -2157,6 +2158,90 @@ class LiveChatStore:
             cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
             cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
             return messages, has_more, cursor
+
+    def list_messages_through(
+        self, *, before: int, through: int, limit: int
+    ) -> tuple[list[MessageRow], bool, int]:
+        """One load for going straight to an old message: everything from `before` back down to
+        `through`, at most `limit` rows (the newest of them; the caller asks again for the rest),
+        ascending like history. `has_more` says whether anything older than the rows returned
+        exists, exactly as `list_messages` does, so ordinary paging carries on from here."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM messages WHERE seq < ? AND seq >= ? ORDER BY seq DESC LIMIT ?",
+                (before, through, limit),
+            ).fetchall()
+            lowest = rows[-1]["seq"] if rows else before
+            has_more = (
+                conn.execute("SELECT 1 FROM messages WHERE seq < ? LIMIT 1", (lowest,)).fetchone()
+                is not None
+            )
+            messages = _hydrate_messages(conn, list(reversed(rows)))
+            cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
+            cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
+            return messages, has_more, cursor
+
+    def search_messages(
+        self,
+        *,
+        words: tuple[str, ...],
+        before: int | None,
+        only: int | None,
+        limit: int,
+    ) -> tuple[list[SearchHit], bool, int]:
+        """The Search screen's page: messages whose text, or a voice note's finished transcript,
+        contains every word, newest first. Returns `(hits, has_more, total)`, `total` counting
+        every match in the chat whichever page was asked for.
+
+        This reads the live rows and keeps no copy of anything, so a delete or a wipe needs to
+        know nothing about search (decisions/00208). View-once messages are never searched: the
+        whole point of one is that it is seen once, and on its own terms (Inv 52).
+
+        `only` asks about a single message that just arrived or changed: it is the only row a hit
+        can be returned for, while `total` still counts the whole chat."""
+        if not words:
+            return [], False, 0
+        with self._read_txn() as conn:
+            found: dict[int, SearchHit] = {}
+            for row in conn.execute(
+                "SELECT seq, sender, created_at, text FROM messages "
+                "WHERE view_once_s IS NULL AND text IS NOT NULL AND text <> ''"
+            ):
+                if matches_all(fold(row["text"]), words):
+                    found[row["seq"]] = SearchHit(
+                        seq=row["seq"],
+                        sender=row["sender"],
+                        created_at=row["created_at"],
+                        source="text",
+                        text=row["text"],
+                    )
+            # A message found by its own words is shown by them, not by its voice note's.
+            for row in conn.execute(
+                "SELECT m.seq, m.sender, m.created_at, t.text "
+                "FROM attachment_transcripts AS t "
+                "JOIN attachments AS a ON a.id = t.attachment_id "
+                "JOIN messages AS m ON m.seq = a.message_seq "
+                "WHERE t.status = 'done' AND t.text IS NOT NULL AND m.view_once_s IS NULL "
+                "ORDER BY a.ordinal"
+            ):
+                if row["seq"] not in found and matches_all(fold(row["text"]), words):
+                    found[row["seq"]] = SearchHit(
+                        seq=row["seq"],
+                        sender=row["sender"],
+                        created_at=row["created_at"],
+                        source="transcript",
+                        text=row["text"],
+                    )
+        total = len(found)
+        if only is not None:
+            hit = found.get(only)
+            return ([hit] if hit is not None else []), False, total
+        newest_first = sorted(
+            (hit for hit in found.values() if before is None or hit.seq < before),
+            key=lambda hit: hit.seq,
+            reverse=True,
+        )
+        return newest_first[:limit], len(newest_first) > limit, total
 
     def index_pending_links(self) -> int:
         """Settle `has_link` for messages inserted without it (a process older than schema 18
