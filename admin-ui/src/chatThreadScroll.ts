@@ -34,6 +34,9 @@ export interface ChatThreadScroll {
    * adopt that, so the height change is not compensated a second time. A reader stuck to the
    * bottom is kept exactly at the bottom. */
   adoptPosition(): void;
+  /** The bottom of what is on screen is not the end of the thread (the Server chat showing a
+   * stretch of old history): stop following it until the viewer next scrolls. */
+  unstick(): void;
   teardown(): void;
 }
 
@@ -113,6 +116,9 @@ export function mountChatThreadScroll(thread: HTMLElement, jumpPill: HTMLElement
       if (stuck && holds === 0) thread.scrollTop = thread.scrollHeight;
       lastTop = thread.scrollTop;
       lastHeight = thread.clientHeight;
+    },
+    unstick(): void {
+      stuck = false;
     },
     hold(): () => void {
       holds += 1;

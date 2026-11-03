@@ -2165,6 +2165,48 @@ question bank's categories (25 today, each with its question count), **Select al
 - **Tests.** `test_livechat_wyr_topics.py`, `admin-ui/tests/serverWyrTopics.test.ts`, `e2e/tests/server-wyr.spec.ts`
   (topics at 360 px).
 
+### Search, the date strip and Message info (workspace 00061, decisions/00208)
+
+**Search** (`searchView.ts`, `searchMarks.ts`, `api/search.ts`, server `livechat/search.py`). The ⋯ menu's
+**Search** entry (straight after Gallery) opens a full-height screen with a box to type in, closed and forgotten by
+every lock, wipe and teardown (`reset()`; nothing is written to storage). A pause of 250 ms or Enter runs
+`POST /messages/search`: messages holding every word in any order, matching inside longer words, ignoring case,
+accents and curly punctuation, from the message's text or a voice note's finished transcript ("Voice note:"), never a
+view-once message. Newest first, a page of 30, with a short excerpt and the words marked. Tapping one closes the list
+and shows it in the chat (`revealSearchResult`). It is centred and highlighted like a quote's original, and its words are
+marked with the CSS Custom Highlight API (`wx-srv-search-match`; no DOM change, nothing where unsupported).
+A result not on screen is shown in its own neighbourhood: ONE `GET /messages?around=`, 50 messages, however old it is. If
+those don't reach what is already loaded, the thread enters a **detached view** (`detachedView`, `{high, mainFloor}`):
+it renders only messages up to `high`, while the newest messages from `mainFloor` up stay held and keep arriving, off
+screen, with a gap between that neither side has loaded. The game models still observe every held message. Scrolling up
+pages older as usual; reaching `.wx-srv-thread-sentinel-newer` pages newer (`GET /messages?after=`) until the two meet and
+the chat is simply the chat again. `.wx-srv-jump-pill` reads "↓ Latest messages" throughout, and it, sending anything, or
+going to a result or an unheard note in the newest messages leaves the view (`goToLatest`/`leaveDetachedView`), forgetting
+the old stretch. So does every lock, because the next unlock refreshes everything held back to the oldest and must never
+page across the gap. `threadScroll.unstick()` keeps the end of the view from being followed like the end of the chat.
+`.wx-srv-search-nav`, in the same place as the unread voice notes bar, which it replaces (each closes the other), offers
+`‹ Older` · `3 of 57` (back to the list as it was) · `Newer ›` · ✕, is `data-srv-gesture-exempt`, and Older loads the
+next page when it runs out. A delete leaves the results at once; an arrival or a finished transcript is asked about with
+`only:<seq>`, one at a time. A result found gone when going to it is dropped and the steps still work from where it was.
+
+A jump of more than `REVEAL_SMOOTH_MAX_SCREENS` goes straight there instead of scrolling smoothly (`revealMessage`, so
+quote jumps too). There is no search index, on purpose: see decisions/00208 and Inv 58.
+
+**The date strip** (`.wx-srv-day-strip`, `syncDayStrip` in `thread.ts`). Once the top of the chat is on a day before
+today, a small label stays at the top saying which: "Yesterday", or the weekday and date as the day separators word it
+(`formatDaySeparator`). Hidden on today, and while that day's own separator is at the top. It runs on each scroll and
+render, bisecting `daysInOrder`, and takes no taps.
+
+**Message info** (`messageInfo.ts`, `messageActions.ts`). An item in a message's ⋯ menu that swaps the menu's list for a
+pane: the exact send time to the second with weekday, date and timezone, the sender, the kind of message, its length in
+words and characters, each attachment's size, duration and whether it was transcribed, who it replies to, who reacted,
+drawings, and its message number. A view-once message gets its time and timer only. Built from the `Message` already held,
+so nothing new leaves the server, and live if a reaction lands while it is open. The chat records no delivered or read
+state, so none is shown.
+
+*Tests:* `wixy_server/tests/test_livechat_search.py`, `admin-ui/tests/serverSearch.test.ts`,
+`admin-ui/tests/serverMessageInfo.test.ts`, `e2e/tests/server-search.spec.ts` (320 and 390 px).
+
 ### Links view (workspace 00052)
 
 The ⋯ menu's **Links** entry opens a full-height screen (`linksView.ts`, created next to the gallery in

@@ -1,5 +1,16 @@
 # Invariants
 
+### Inv 58 — Chat search keeps no copy of anything, never sees view-once, and its words are never in a URL
+`LiveChatStore.search_messages` reads the live `messages` and `attachment_transcripts` rows on every search. There is no
+index or other table of chat text, so Inv 46's delete and wipe need to know nothing about search. A view-once message is
+never found (Inv 52), and neither is an unfinished transcript. What was searched for travels in the body of
+`POST /messages/search`, whose answer is `no-store`; it is never logged, and the client holds it only in memory until a
+close, lock or wipe, which also empty the results. A deleted message leaves open results when its event arrives, and a page
+read before the delete cannot bring it back. Why not an index, with measurements: decisions/00208.
+*Enforced by:* `wixy_server/tests/test_livechat_search.py` (`test_search_adds_no_table_holding_a_copy_of_the_chat`,
+view-once, delete and wipe, `no-store`, no log line carrying the words), `admin-ui/tests/serverSearch.test.ts` (lock, wipe,
+delete, a stale page), `e2e/tests/server-search.spec.ts` (the words never appear in any request URL).
+
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 
 The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21, workspace 00058) is

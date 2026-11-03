@@ -124,6 +124,8 @@ export function parseWyrRefKind(value: unknown): WyrRefKind | null {
 export interface HistoryPage {
   readonly messages: readonly Message[];
   readonly hasMore: boolean;
+  /** Only for `around` and `after`: anything newer than this page exists. */
+  readonly hasNewer?: boolean;
   readonly cursor: number;
 }
 
@@ -131,11 +133,13 @@ export interface HistoryPage {
  * pages by passing the oldest loaded message's `seq` back in as `before`. */
 export async function getHistory(
   session: ServerSession,
-  opts: { before?: number; limit?: number } = {},
+  opts: { before?: number; limit?: number; around?: number; after?: number } = {},
 ): Promise<HistoryPage> {
   const params = new URLSearchParams();
   if (opts.before !== undefined) params.set("before", String(opts.before));
   params.set("limit", String(opts.limit ?? 50));
+  if (opts.around !== undefined) params.set("around", String(opts.around));
+  if (opts.after !== undefined) params.set("after", String(opts.after));
   const response = await serverFetch(`/messages?${params.toString()}`, { method: "GET" }, session);
   if (!response.ok) throw new Error(`Couldn't load history (${response.status}).`);
   return (await response.json()) as HistoryPage;
