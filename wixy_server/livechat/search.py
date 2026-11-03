@@ -93,15 +93,19 @@ def _fold_with_origin(text: str) -> tuple[str, list[int]]:
 
 def _match_ranges(text: str, words: tuple[str, ...]) -> list[tuple[int, int]]:
     """Every occurrence of every word as sorted, merged ranges of the ORIGINAL text. A range's end
-    runs up to the next folded character, so an accent stored as its own character stays with its
-    letter."""
+    is rounded out to whole characters."""
     folded, origin = _fold_with_origin(text)
     ranges: list[tuple[int, int]] = []
     for word in words:
         start = folded.find(word)
         while start != -1:
             end = start + len(word)
-            ranges.append((origin[start], origin[end] if end < len(origin) else len(text)))
+            # The whole of the last character matched, however many it folds to, and anything
+            # after it that folds to nothing (an accent stored apart stays with its letter).
+            stop = origin[end - 1] + 1
+            while stop < len(text) and _fold_char(text[stop]) == "":
+                stop += 1
+            ranges.append((origin[start], stop))
             start = folded.find(word, end)
     ranges.sort()
     merged: list[tuple[int, int]] = []
@@ -111,6 +115,19 @@ def _match_ranges(text: str, words: tuple[str, ...]) -> list[tuple[int, int]]:
         else:
             merged.append((start, end))
     return merged
+
+
+def _joins_previous(text: str, index: int) -> bool:
+    """Whether the character at `index` belongs with the one before it, so nothing may be cut
+    between them: an accent, a skin tone or an emoji's colour selector, either side of a joiner."""
+    if index <= 0 or index >= len(text):
+        return False
+    char = text[index]
+    return (
+        unicodedata.category(char) in ("Mn", "Me", "Cf", "Sk")
+        or "\U0001f3fb" <= char <= "\U0001f3ff"
+        or text[index - 1] == "\u200d"
+    )
 
 
 def excerpt(text: str, words: tuple[str, ...]) -> Excerpt:
@@ -126,6 +143,11 @@ def excerpt(text: str, words: tuple[str, ...]) -> Excerpt:
         if space != -1:
             start = space + 1
     end = min(len(text), start + SNIPPET_CHARS)
+    # Never open on half a joined emoji or a stray accent, or end on one.
+    while start < first and _joins_previous(text, start):
+        start += 1
+    while end < len(text) and _joins_previous(text, end):
+        end += 1
 
     parts: list[SnippetPart] = []
     if start > 0:

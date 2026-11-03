@@ -156,6 +156,8 @@ for (const viewport of [
     const before = await page.locator(".wx-srv-message-list .wx-srv-bubble").count();
     await thread.evaluate((el) => (el.scrollTop = el.scrollHeight));
     await expect.poll(() => page.locator(".wx-srv-message-list .wx-srv-bubble").count()).toBeGreaterThan(before);
+    // More appeared below, and the reader wasn't carried along to the end of it.
+    expect(await thread.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeGreaterThan(100);
 
     await humanPause(page);
     await pill.click();

@@ -182,6 +182,64 @@ describe("search screen", () => {
     expect(seqs()).toEqual([5]);
   });
 
+  it("a change noticed while the first page is loading doesn't jump the queue", async () => {
+    const { view, seqs, input, fetchPage } = setup([]);
+    let release: (value: SearchPage) => void = () => {};
+    fetchPage.mockImplementationOnce(() => new Promise<SearchPage>((resolve) => (release = resolve)));
+    view.open(0);
+    input.value = "milk";
+    input.dispatchEvent(new Event("input"));
+    await vi.advanceTimersByTimeAsync(300);
+    view.messageChanged(message(2, "reacted to"));
+    await flush();
+    expect(fetchPage).toHaveBeenCalledTimes(1);
+    release(page([9, 7], 3, true));
+    await flush();
+    expect(seqs()).toEqual([9, 7]);
+  });
+
+  it("one failed check doesn't lose the others", async () => {
+    const { view, seqs, type, fetchPage } = setup([page([5])]);
+    view.open(0);
+    await type("milk");
+    fetchPage.mockReset();
+    fetchPage.mockRejectedValueOnce(new Error("offline"));
+    fetchPage.mockImplementationOnce((async () => page([8], 2)) as never);
+    view.messageChanged(message(6, "milk"));
+    view.messageChanged(message(8, "milk"));
+    await flush();
+    await flush();
+    expect(seqs()).toEqual([8, 5]);
+  });
+
+  it("a delete that failed gives the message back to the results", async () => {
+    const { view, seqs, type, fetchPage } = setup([page([9, 5], 2)]);
+    view.open(0);
+    await type("milk");
+    view.messageDeleted(9);
+    expect(seqs()).toEqual([5]);
+    fetchPage.mockImplementationOnce((async () => page([9], 2)) as never);
+    view.messageChanged(message(9, "milk"));
+    await flush();
+    expect(seqs()).toEqual([9, 5]);
+  });
+
+  it("Older waits for a page already on its way", async () => {
+    const { view, item, nav, type, reveal, fetchPage } = setup([page([9], 2, true)]);
+    view.open(0);
+    await type("milk");
+    item(9).click();
+    await flush();
+    let release: (value: SearchPage) => void = () => {};
+    fetchPage.mockImplementationOnce(() => new Promise<SearchPage>((resolve) => (release = resolve)));
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-search-more")!.click();
+    nav.older.click();
+    release(page([3], 2));
+    await flush();
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+    expect(reveal).toHaveBeenLastCalledWith(3, ["milk"]);
+  });
+
   it("offers a retry when a search fails, and a lost session locks the chat", async () => {
     const { view, type, fetchPage, lockNow } = setup([]);
     fetchPage.mockRejectedValueOnce(new Error("Couldn't search the messages (500)."));
@@ -613,6 +671,152 @@ describe("in the thread", () => {
     await flush();
     expect(getHistory).toHaveBeenCalledTimes(1);
     expect(onScreen(view)).toEqual([5000]);
+    view.teardown();
+  });
+
+  it("a deleted message's words don't come back in a quote when the newest messages return", async () => {
+    getHistory.mockResolvedValueOnce({
+      messages: [
+        message(4999, "secret words"),
+        {
+          ...message(5000, "a reply"),
+          replyTo: { seq: 4999, sender: "Cupcake", text: "secret words", truncated: false, media: null },
+        },
+      ],
+      hasMore: true,
+      cursor: 0,
+    });
+    searchMessages.mockResolvedValue(page([100], 1));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    await search(view);
+    getHistory.mockResolvedValueOnce({ messages: [message(100, "milk")], hasMore: true, hasNewer: true, cursor: 0 });
+    row(view, 100).click();
+    await flush();
+    view.handleStreamEvent({ type: "message_deleted", seq: 4999 } as never);
+    pill(view).click();
+    expect(onScreen(view)).toEqual([5000]);
+    expect(view.element.textContent).not.toContain("secret words");
+    view.teardown();
+  });
+
+  it("an older page arriving after the view was left is dropped, leaving the gap to be paged", async () => {
+    const view = await detachAt100();
+    let release: (value: unknown) => void = () => {};
+    getHistory.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    observers[0]!([{ isIntersecting: true, target: view.element.querySelector(".wx-srv-thread-sentinel")! } as never]);
+    pill(view).click();
+    release({ messages: [message(50, "old")], hasMore: true, cursor: 0 });
+    await flush();
+    expect(onScreen(view)).toEqual([5000]);
+    view.teardown();
+  });
+
+  it("an update to a message older than anything held isn't taken in, in or out of a view", async () => {
+    const view = await detachAt100();
+    view.handleStreamEvent({ type: "message_updated", message: message(50, "reacted to") } as never);
+    expect(onScreen(view)).toEqual([99, 100, 101]);
+    pill(view).click();
+    view.handleStreamEvent({ type: "message_updated", message: message(101, "reacted to") } as never);
+    expect(onScreen(view)).toEqual([5000]);
+    getHistory.mockClear();
+    getHistory.mockResolvedValueOnce({ messages: [], hasMore: false, cursor: 0 });
+    observers[0]!([{ isIntersecting: true, target: view.element.querySelector(".wx-srv-thread-sentinel")! } as never]);
+    await flush();
+    expect(getHistory).toHaveBeenCalledWith(SESSION, { before: 5000, limit: 50 });
+    view.teardown();
+  });
+
+  it("joining the newest messages doesn't carry the reader to the end", async () => {
+    const view = await detachAt100();
+    const thread = view.element.querySelector<HTMLElement>(".wx-srv-thread")!;
+    Object.defineProperty(thread, "scrollHeight", { configurable: true, value: 1000 });
+    Object.defineProperty(thread, "clientHeight", { configurable: true, value: 500 });
+    thread.scrollTop = 500;
+    thread.dispatchEvent(new Event("scroll"));
+    Object.defineProperty(thread, "scrollHeight", { configurable: true, value: 2000 });
+    getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, hasNewer: false, cursor: 0 });
+    observers[0]!(newerEntry(view));
+    await flush();
+    expect(onScreen(view)).toEqual([99, 100, 101, 5000]);
+    expect(thread.scrollTop).toBe(500);
+    view.teardown();
+  });
+
+  it("a send during a jump wins: the answer that arrives later changes nothing", async () => {
+    getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
+    searchMessages.mockResolvedValue(page([100], 1));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    await search(view);
+    let release: (value: unknown) => void = () => {};
+    getHistory.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    row(view, 100).click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-search-nav-close")!.click();
+    release({ messages: [message(100, "milk")], hasMore: true, hasNewer: true, cursor: 0 });
+    await flush();
+    expect(onScreen(view)).toEqual([5000]);
+    expect(pill(view).hidden).toBe(true);
+    view.teardown();
+  });
+
+  it("a renewed token leaves the old stretch instead of walking the gap", async () => {
+    const view = await detachAt100();
+    getHistory.mockClear();
+    getHistory.mockResolvedValue({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
+    await view.attach({ ...SESSION, token: "renewed" });
+    await flush();
+    expect(getHistory).toHaveBeenCalledTimes(1);
+    expect(onScreen(view)).toEqual([5000]);
+    view.teardown();
+  });
+
+  it("a quote whose original is above the gap is found by its neighbourhood, not declared deleted", async () => {
+    getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
+    searchMessages.mockResolvedValue(page([100], 1));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    await search(view);
+    getHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          ...message(100, "milk"),
+          replyTo: { seq: 90, sender: "Cupcake", text: "original", truncated: false, media: null },
+        },
+      ],
+      hasMore: true,
+      hasNewer: true,
+      cursor: 0,
+    });
+    row(view, 100).click();
+    await flush();
+    getHistory.mockResolvedValueOnce({ messages: [message(90, "original")], hasMore: true, hasNewer: true, cursor: 0 });
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!.click();
+    await flush();
+    expect(getHistory).toHaveBeenLastCalledWith(SESSION, { around: 90, limit: 50 });
+    expect(onScreen(view)).toEqual([90]);
+    view.teardown();
+  });
+
+  it("a pending reply to a message in the old stretch is cancelled if it was deleted across a lock", async () => {
+    const view = await detachAt100();
+    const bubble = view.element.querySelector<HTMLElement>('.wx-srv-bubble[data-message-seq="100"]')!;
+    bubble.querySelector<HTMLButtonElement>(".wx-srv-message-action-reply")!.click();
+    const bar = view.element.querySelector<HTMLElement>(".wx-srv-reply-bar");
+    expect(bar).not.toBeNull();
+    expect(bar!.hidden).toBe(false);
+    view.detach();
+
+    getHistory.mockClear();
+    getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
+    getHistory.mockResolvedValueOnce({ messages: [message(101, "a neighbour")], hasMore: true, hasNewer: true, cursor: 0 });
+    await view.attach(SESSION);
+    await flush();
+    expect(getHistory).toHaveBeenLastCalledWith(SESSION, { around: 100, limit: 1 });
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-reply-bar")!.hidden).toBe(true);
     view.teardown();
   });
 

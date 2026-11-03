@@ -146,8 +146,10 @@ const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
  * it scrolls, if the browser never says the scroll ended (`scrollend` is missing, or nothing moved). */
 const REVEAL_HOLD_MAX_MS = 1_200;
 const REVEAL_SMOOTH_MAX_SCREENS = 3;
-/** Mirrors `.wx-srv-day-strip`'s `top` in chat.css. */
-const DAY_STRIP_TOP_PX = 8;
+/** The height from the thread's top that the date strip takes (`.wx-srv-day-strip`'s `top` and
+ * its pill, in chat.css). Fixed: it must not differ between the strip showing and not, or a
+ * separator passing under it would flip the answer on alternate scroll events. */
+const DAY_STRIP_BAND_PX = 36;
 /** Audit F2: when a sibling load owns the single history-load slot, retry
  * after a real macrotask, not just `await Promise.resolve()` — a microtask-only
  * yield never lets the in-flight fetch (a network macrotask) get a turn to
@@ -1628,6 +1630,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * `mainFloor` up (the newest messages, still arriving) are held but not shown. Everything else
    * in the thread already copes with only part of the history being loaded. */
   let detachedView: { high: number; readonly mainFloor: number } | null = null;
+  /** Bumped by each search jump and by whatever cancels one: only the newest may change the chat. */
+  let revealToken = 0;
   let jumpPillDetached = false;
   const confirmedBySeq = new Map<number, Message>();
   const deletedSeqs = new Set<number>();
@@ -1782,7 +1786,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     getSession: () => currentSession,
     senderLabel: (sender) => (identity.isMine(sender) ? "You" : sender),
     reveal: revealSearchResult,
-    clearReveal: () => clearSearchMarks(win),
+    clearReveal: () => {
+      revealToken += 1;
+      clearSearchMarks(win);
+    },
     onNavChange: () => {
       if (search.navActive()) closeUnheardNav();
       threadWrap.classList.toggle("wx-srv-thread-wrap-search-nav", search.navActive());
@@ -2206,6 +2213,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (pending === null || session === null || voiceSendBusy) return;
     voiceSendBusy = true;
+    if (detachedView !== null) goToLatest();
     const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     retryVoiceButton.disabled = true;
     setVoiceRetryOffered(false);
@@ -2688,7 +2696,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     while (!confirmedBySeq.has(seq)) {
       if (currentSession === null || generation !== contentGeneration || !hasMoreHistory) return false;
       const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
-      if (generation !== contentGeneration || currentSession === null) return false;
+      if (generation !== contentGeneration || currentSession === null || detachedView !== null) return false;
       if (result === "loaded") continue;
       if (result === "blocked") {
         await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
@@ -3033,7 +3041,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * charge is found by bisecting rather than by measuring every day in a long chat. */
   function syncDayStrip(): void {
     const top = thread.getBoundingClientRect().top;
-    const stripBottom = top + dayStrip.offsetHeight + DAY_STRIP_TOP_PX;
+    const stripBottom = top + DAY_STRIP_BAND_PX;
     let low = 0;
     let high = daysInOrder.length - 1;
     let current: number | null = null;
@@ -3193,12 +3201,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Drawings follow their anchors (positions re-read from the new layout before the scroll
     // decision below, which must see a drawing that extends past the last bubble), fetch
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
-    drawingLayer.syncMessages(messages);
+    // Every held message: being off screen for now is not being deleted, which is what a missing
+    // anchor means to the drawing layer, and it would throw away strokes still being sent.
+    drawingLayer.syncMessages(allMessages);
     canvasPane.sync();
     wyrModel.observe(allMessages);
     adventureModel.observe(allMessages);
     cookoutModel.observe(allMessages);
-    syncGames(allMessages);
+    // The old stretch is history, never a new game to offer. Paging older could already bring one
+    // in, but a single tap on a search result shouldn't retire the game on screen.
+    syncGames(view === null ? allMessages : allMessages.filter((message) => message.seq > view.high));
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     // The end of a detached view is not the end of the chat: nothing may pull the reader along it.
     if (view !== null) threadScroll.unstick();
@@ -3248,7 +3260,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const fadeTimer = deleteFadeTimers.get(message.seq);
         if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
         deleteFadeTimers.delete(message.seq);
-        addConfirmed(message);
+        if (belongsInHeldRange(message.seq)) addConfirmed(message);
+        search.messageChanged(message);
         renderThreadList(false);
         const restored = messageList.querySelector<HTMLElement>(
           `[data-message-seq="${message.seq}"]`,
@@ -3491,13 +3504,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (historyLoading) return "blocked";
     if (!hasMoreHistory) return "exhausted";
     const requestGeneration = contentGeneration;
+    const requestView = detachedView;
     const session = currentSession;
     const before = oldestLoadedSeq();
-    if (before === null) return "exhausted";
     historyLoading = true;
     try {
-      const page = await getHistory(session, { before, limit });
-      if (requestGeneration !== contentGeneration) return "error";
+      // Nothing held but more to come: the newest messages were left out of a view and gone since.
+      const page = await getHistory(session, before === null ? { limit } : { before, limit });
+      // A page for a view since left would land beside the newest messages, hiding the gap for good.
+      if (requestGeneration !== contentGeneration || detachedView !== requestView) return "error";
       const wasStuck = threadScroll.stuck && detachedView === null;
       const prevScrollHeight = thread.scrollHeight;
       const prevScrollTop = thread.scrollTop;
@@ -3526,6 +3541,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * Never re-renders a whole bubble — the same voice/video cut-off trap as
    * reactions. */
   function removeQuotesTargeting(seq: number): void {
+    // Held but not on screen (the newest messages during a detached view) is still held: its bubble
+    // will be built from this copy, and must not bring the deleted words back.
+    for (const [heldSeq, held] of confirmedBySeq) {
+      if (held.replyTo?.seq === seq && !renderedMessages.has(heldSeq)) {
+        confirmedBySeq.set(heldSeq, { ...held, replyTo: null });
+      }
+    }
     for (const rendered of renderedMessages.values()) {
       if (rendered.message.replyTo?.seq === seq) {
         rendered.element.querySelector(".wx-srv-quote")?.remove();
@@ -3550,6 +3572,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     button.classList.add("wx-srv-quote-busy");
     button.setAttribute("aria-busy", "true");
     try {
+      // In a detached view paging older can't reach a target above the gap, and running out would
+      // read as the original being deleted (a quote in a game's pop-up or the unheard list).
+      if (detachedView !== null && !renderedMessages.has(seq)) {
+        revealToken += 1;
+        const outcome = await showMessage(seq, () => generation === scrollToOriginalGeneration);
+        if (generation !== scrollToOriginalGeneration) return;
+        if (outcome === "gone") removeQuotesTargeting(seq);
+        const shown = renderedMessages.get(seq);
+        if (outcome === "shown" && shown !== undefined) revealMessage(shown.element, true);
+        return;
+      }
       // Audit F6: only "exhausted" (paging genuinely ran out of history) means
       // the target was deleted — a network/auth "error" must leave the quote
       // alone, since `loadOlderPage` swallows every exception and the original
@@ -3601,11 +3634,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     contentRevision += 1;
   }
 
-  /** The newest messages, from wherever the reader is. */
+  /** Whether a message not held could be taken in without leaving a hole in what is held. */
+  function belongsInHeldRange(seq: number): boolean {
+    const oldest = oldestLoadedSeq();
+    if (oldest === null) return true;
+    if (seq < oldest) return false;
+    return detachedView === null || seq <= detachedView.high || seq >= detachedView.mainFloor;
+  }
+
+  /** The newest messages, from wherever the reader is. From a game's tab the thread isn't showing,
+   * and a game opened from the old stretch needs that stretch: the view is left from the chat. */
   function goToLatest(): void {
     if (detachedView !== null) {
+      if (gameTabs.activeTab() !== "chat") return;
+      revealToken += 1;
+      scrollToOriginalGeneration += 1;
       leaveDetachedView();
       renderThreadList(false);
+      // Everything newer has been deleted since: the page that fills the chat again.
+      if (confirmedBySeq.size === 0) void loadOlderPage();
     }
     threadScroll.scrollToBottom();
   }
@@ -3639,6 +3686,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const newest = page.messages[page.messages.length - 1]?.seq ?? view.high;
       if (page.hasNewer !== true || newest >= view.mainFloor) detachedView = null;
       else view.high = newest;
+      // The reader is at the end of what was on screen, so reads as stuck to the bottom. Joining
+      // must not carry them to the very end, past everything just loaded.
+      threadScroll.unstick();
       renderThreadList(false);
     } catch {
       // Best-effort, like paging older: the sentinel fires again on the next scroll to the end.
@@ -3647,49 +3697,59 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
-  /** Goes to a search result. One not on screen is shown in its own neighbourhood, one request
+  /** Makes sure `seq` is on screen. One not on screen is shown in its own neighbourhood, one request
    * however old it is, rather than building every message between here and there: at this chat's
    * size that was over 565,000 page elements and took 5 seconds on a fast desktop, far longer on a
-   * phone (decisions/00208). */
-  async function revealSearchResult(seq: number, matched: readonly string[]): Promise<RevealOutcome> {
+   * phone (decisions/00208). `stillWanted` going false stops it changing anything. */
+  async function showMessage(seq: number, stillWanted: () => boolean): Promise<RevealOutcome> {
     const generation = contentGeneration;
-    let instant = false;
-    if (!renderedMessages.has(seq)) {
-      instant = true;
-      if (confirmedBySeq.has(seq)) {
-        leaveDetachedView();
-        renderThreadList(false);
-      } else {
-        if (deletedSeqs.has(seq)) return "gone";
-        while (historyLoading) {
-          await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
-          if (generation !== contentGeneration) return "failed";
-        }
-        const session = currentSession;
-        if (session === null) return "failed";
-        historyLoading = true;
-        try {
-          const page = await getHistory(session, { around: seq, limit: JUMP_PAGE_SIZE });
-          if (generation !== contentGeneration || currentSession === null) return "failed";
-          if (!page.messages.some((message) => message.seq === seq)) return "gone";
-          const mainFloor = detachedView?.mainFloor ?? oldestLoadedSeq() ?? Number.POSITIVE_INFINITY;
-          leaveDetachedView();
-          for (const message of page.messages) addConfirmed(message);
-          if (!confirmedBySeq.has(seq)) return "gone";
-          const newest = page.messages[page.messages.length - 1]?.seq ?? seq;
-          detachedView = page.hasNewer === true && newest < mainFloor ? { high: newest, mainFloor } : null;
-          hasMoreHistory = page.hasMore;
-          renderThreadList(false);
-        } catch {
-          return "failed";
-        } finally {
-          historyLoading = false;
-        }
-      }
+    const wanted = (): boolean => stillWanted() && generation === contentGeneration && currentSession !== null;
+    if (renderedMessages.has(seq)) return "shown";
+    if (confirmedBySeq.has(seq)) {
+      leaveDetachedView();
+      renderThreadList(false);
+      return renderedMessages.has(seq) ? "shown" : "gone";
     }
+    if (deletedSeqs.has(seq)) return "gone";
+    while (historyLoading) {
+      await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
+      if (!wanted()) return "cancelled";
+    }
+    const session = currentSession;
+    if (session === null) return "cancelled";
+    historyLoading = true;
+    try {
+      const page = await getHistory(session, { around: seq, limit: JUMP_PAGE_SIZE });
+      if (!wanted()) return "cancelled";
+      if (!page.messages.some((message) => message.seq === seq)) return "gone";
+      const mainFloor = detachedView?.mainFloor ?? oldestLoadedSeq() ?? Number.POSITIVE_INFINITY;
+      leaveDetachedView();
+      for (const message of page.messages) addConfirmed(message);
+      if (!confirmedBySeq.has(seq)) return "gone";
+      const newest = page.messages[page.messages.length - 1]?.seq ?? seq;
+      detachedView = page.hasNewer === true && newest < mainFloor ? { high: newest, mainFloor } : null;
+      hasMoreHistory = page.hasMore;
+      renderThreadList(false);
+    } catch {
+      return wanted() ? "failed" : "cancelled";
+    } finally {
+      historyLoading = false;
+    }
+    return renderedMessages.has(seq) ? "shown" : "gone";
+  }
+
+  /** Goes to a search result. The newest request wins; anything that closes the search, leaves the
+   * view or locks the chat cancels it. */
+  async function revealSearchResult(seq: number, matched: readonly string[]): Promise<RevealOutcome> {
+    scrollToOriginalGeneration += 1;
+    revealToken += 1;
+    const token = revealToken;
+    const wasOnScreen = renderedMessages.has(seq);
+    const outcome = await showMessage(seq, () => token === revealToken);
+    if (outcome !== "shown") return outcome;
     const rendered = renderedMessages.get(seq);
     if (rendered === undefined) return "gone";
-    revealMessage(rendered.element, instant);
+    revealMessage(rendered.element, !wasOnScreen);
     applySearchMarks(win, rendered.element, matched);
     return "shown";
   }
@@ -3787,6 +3847,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     voIndex: number,
     requestGeneration: number,
   ): void {
+    if (detachedView !== null) goToLatest();
     const text = draft.base.text;
     const voStaged = draft.base.staged[voIndex]!;
     const voSettings = fileViewOnceSettings.get(voStaged.file)!;
@@ -4079,6 +4140,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     stopTranscriptionProbe(false);
     const availabilityOwner = transcriptionOwner;
     currentSession = session;
+    // Everything held is refreshed below, back to the oldest: never across a gap. A renewed token
+    // arrives here without a lock, so this can't be left to `detach`.
+    revealToken += 1;
+    if (detachedView !== null) {
+      scrollToOriginalGeneration += 1;
+      leaveDetachedView();
+    }
     // Capability recovery belongs to the attachment, independently of history or wipe.
     void refreshTranscriptionAvailability(session, availabilityOwner);
     // A renewed token: an open gallery swaps in freshly signed media URLs, no visible change.
@@ -4147,6 +4215,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           setPendingReply(null);
         }
       }
+      // Replying to a message in a detached view, which has since been left: its target is no longer
+      // held, so the refresh above can't say whether it survived. Ask.
+      if (
+        pendingReply !== null &&
+        !retainedSeqsAtAttach.has(pendingReply.seq) &&
+        !refreshedMessages.has(pendingReply.seq)
+      ) {
+        const target = pendingReply.seq;
+        const page = await getHistory(session, { around: target, limit: 1 });
+        if (requestGeneration !== contentGeneration) return null;
+        if (!page.messages.some((message) => message.seq === target)) setPendingReply(null);
+      }
       for (const message of refreshedMessages.values()) addConfirmed(message);
       historyLoaded = true;
       renderThreadList();
@@ -4176,7 +4256,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attach,
     detach(): void {
       // The next unlock refreshes everything held, back to the oldest: never across the gap.
+      revealToken += 1;
       if (detachedView !== null) {
+        scrollToOriginalGeneration += 1;
         leaveDetachedView();
         renderThreadList(false);
       }
@@ -4233,15 +4315,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           // An update to a message already on screen (a transcript, media finishing) is not an
           // arrival, so it never raises the "New messages" pill.
           const isArrival = !confirmedBySeq.has(event.message.seq);
-          // An update to a message in the gap of a detached view: not held, so nothing to update.
-          if (
-            event.type === "message_updated" &&
-            isArrival &&
-            detachedView !== null &&
-            event.message.seq > detachedView.high &&
-            event.message.seq < detachedView.mainFloor
-          ) {
+          // Older than anything held, or in a detached view's gap: taken in, it would make later
+          // paging skip everything between. Its page brings it, as it is by then.
+          if (isArrival && !belongsInHeldRange(event.message.seq)) {
+            links.messageChanged(event.message);
             search.messageChanged(event.message);
+            holidayBank.messageChanged(event.message);
+            recipeBook.messageChanged(event.message);
             return;
           }
           addConfirmed(event.message);

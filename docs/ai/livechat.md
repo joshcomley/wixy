@@ -2182,8 +2182,16 @@ screen, with a gap between that neither side has loaded. The game models still o
 pages older as usual; reaching `.wx-srv-thread-sentinel-newer` pages newer (`GET /messages?after=`) until the two meet and
 the chat is simply the chat again. `.wx-srv-jump-pill` reads "↓ Latest messages" throughout, and it, sending anything, or
 going to a result or an unheard note in the newest messages leaves the view (`goToLatest`/`leaveDetachedView`), forgetting
-the old stretch. So does every lock, because the next unlock refreshes everything held back to the oldest and must never
-page across the gap. `threadScroll.unstick()` keeps the end of the view from being followed like the end of the chat.
+the old stretch. So does every lock and token renewal (`attach`), because attaching refreshes everything held back to the
+oldest and must never page across the gap. `threadScroll.unstick()` keeps the end of the view from being followed like the
+end of the chat. Rules that keep the gap honest: a stream event for a message `belongsInHeldRange` rejects (older than
+anything held, or in the gap) is not taken in, because its page brings it; a page for a view since left is dropped; only
+the newest jump may change the chat (`revealToken`), and closing the search, sending or locking cancels one; a deleted
+target's quote is cleared from held-but-unrendered messages too (`removeQuotesTargeting`); the drawing layer gets every held
+message, since a missing anchor means "deleted" to it. Sending from a game's tab doesn't leave the view, because a game
+opened from the old stretch needs it. *Honest limits:* leaving from the chat closes such a game's tab, and jumping stops a
+voice note playing in a bubble that goes off screen. Strokes still being retried on a message in the old stretch are
+dropped when the view is left. Quote jumps outside a detached view still page older 100 at a time.
 `.wx-srv-search-nav`, in the same place as the unread voice notes bar, which it replaces (each closes the other), offers
 `‹ Older` · `3 of 57` (back to the list as it was) · `Newer ›` · ✕, is `data-srv-gesture-exempt`, and Older loads the
 next page when it runs out. A delete leaves the results at once; an arrival or a finished transcript is asked about with

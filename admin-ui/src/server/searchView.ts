@@ -12,7 +12,8 @@ import type { Message } from "./api/messages";
 import { SEARCH_MAX_CHARS, SEARCH_PAGE, searchMessages, type SearchPage, type SearchResult } from "./api/search";
 import type { LockHooks, ServerSession } from "./types";
 
-export type RevealOutcome = "shown" | "gone" | "failed";
+/** "cancelled": something newer took over, and the chat was left alone. */
+export type RevealOutcome = "shown" | "gone" | "failed" | "cancelled";
 
 export interface SearchDeps {
   readonly document: Document;
@@ -177,6 +178,7 @@ export function createSearchView(deps: SearchDeps): SearchView {
   const deletedSeqs = new Set<number>();
   const changedSeqs = new Set<number>();
   let checkingChanged = false;
+  let pageLoad: Promise<void> | null = null;
 
   function refreshChrome(): void {
     const typing = input.value.trim() !== "";
@@ -261,9 +263,16 @@ export function createSearchView(deps: SearchDeps): SearchView {
     loadError.hidden = false;
   }
 
-  /** One page of the current query: the first when nothing is held, else the next older. */
-  async function loadPage(startGeneration: number): Promise<void> {
-    if (busy || query === "") return;
+  /** One page of the current query: the first when nothing is held, else the next older. One
+   * already on its way is the one asked for. */
+  function loadPage(startGeneration: number): Promise<void> {
+    if (pageLoad !== null && busy) return pageLoad;
+    pageLoad = fetchNextPage(startGeneration);
+    return pageLoad;
+  }
+
+  async function fetchNextPage(startGeneration: number): Promise<void> {
+    if (query === "") return;
     const session = deps.getSession();
     if (session === null) return;
     busy = true;
@@ -359,8 +368,17 @@ export function createSearchView(deps: SearchDeps): SearchView {
         changedSeqs.delete(seq);
         const session = deps.getSession();
         if (session === null || query === "") break;
+        // The first page is still on its way, and will include it if it belongs.
+        if (!searched) continue;
         const startGeneration = generation;
-        const page = await fetchPage(session, query, { only: seq });
+        let page: SearchPage;
+        try {
+          page = await fetchPage(session, query, { only: seq });
+        } catch (error) {
+          // Only a refinement of a list already on screen; one lost answer doesn't lose the rest.
+          if (error instanceof ServerLockedError) throw error;
+          continue;
+        }
         if (generation !== startGeneration) continue;
         const oldest = rows[rows.length - 1]?.result.seq;
         for (const result of page.results) {
@@ -374,7 +392,6 @@ export function createSearchView(deps: SearchDeps): SearchView {
         syncNav();
       }
     } catch (error) {
-      // Only a refinement of a list already on screen: any other failure shows on the next search.
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       changedSeqs.clear();
     } finally {
@@ -450,6 +467,10 @@ export function createSearchView(deps: SearchDeps): SearchView {
     void deps.reveal(seq, row.result.matched).then((outcome) => {
       if (startReveal !== revealGeneration) return;
       finding = false;
+      if (outcome === "cancelled") {
+        syncNav();
+        return;
+      }
       if (outcome === "gone") view.messageDeleted(seq);
       else if (outcome === "failed") navNote = "Couldn't get to that one";
       syncNav();
@@ -500,6 +521,8 @@ export function createSearchView(deps: SearchDeps): SearchView {
     navActive: () => currentSeq !== null,
     messageChanged(message: Message): void {
       if (query === "" || message.viewOnce) return;
+      // The server says it exists: a delete that failed gives it back.
+      deletedSeqs.delete(message.seq);
       changedSeqs.add(message.seq);
       void checkChanged();
     },

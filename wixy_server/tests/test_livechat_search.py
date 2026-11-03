@@ -139,6 +139,20 @@ class TestExcerpt:
         assert self._marked("🎉 Straße ❤️ dinner", "dinner") == ["dinner"]
         assert self._marked("Straße dinner", "strasse") == ["Straße"]
 
+    def test_a_character_folding_to_several_is_marked_whole(self) -> None:
+        assert self._marked("\ufb01ne", "f") == ["\ufb01"]
+        assert self._marked("Straße", "stras") == ["Straß"]
+        assert excerpt("\ufb01ne", query_words("f")).matched == ("\ufb01",)
+
+    def test_a_cut_never_splits_a_joined_emoji(self) -> None:
+        family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"
+        text = ("x" * 136) + family + "tail"
+        joined = "".join(part.text for part in excerpt(text, query_words("xxx")).parts)
+        assert family in joined
+        text = "y" * 37 + family + "needle"
+        opened = excerpt(text, query_words("needle")).parts[1].text
+        assert not opened.startswith("\u200d")
+
     def test_long_text_is_cut_around_the_first_match_on_a_word_boundary(self) -> None:
         text = ("word " * 60) + "needle" + (" more" * 60)
         found = excerpt(text, query_words("needle"))
