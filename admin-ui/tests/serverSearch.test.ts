@@ -820,6 +820,112 @@ describe("in the thread", () => {
     view.teardown();
   });
 
+  it("a message deleted before the jump doesn't bring its words back in a quote on return", async () => {
+    getHistory.mockResolvedValueOnce({
+      messages: [
+        message(4999, "secret words"),
+        {
+          ...message(5000, "a reply"),
+          replyTo: { seq: 4999, sender: "Cupcake", text: "secret words", truncated: false, media: null },
+        },
+      ],
+      hasMore: true,
+      cursor: 0,
+    });
+    searchMessages.mockResolvedValue(page([100], 1));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    view.handleStreamEvent({ type: "message_deleted", seq: 4999 } as never);
+    expect(view.element.textContent).not.toContain("secret words");
+    await search(view);
+    getHistory.mockResolvedValueOnce({ messages: [message(100, "milk")], hasMore: true, hasNewer: true, cursor: 0 });
+    row(view, 100).click();
+    await flush();
+    pill(view).click();
+    expect(onScreen(view)).toEqual([5000]);
+    expect(view.element.textContent).not.toContain("secret words");
+    view.teardown();
+  });
+
+  it("a delete arriving during a jump changes nothing, so no gap is hidden", async () => {
+    getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
+    searchMessages.mockResolvedValue(page([100, 50], 2));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    await search(view);
+    let release: (value: unknown) => void = () => {};
+    getHistory.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    row(view, 100).click();
+    view.handleStreamEvent({ type: "message_deleted", seq: 100 } as never);
+    release({
+      messages: [message(99, "older"), message(100, "milk"), message(101, "newer")],
+      hasMore: true,
+      hasNewer: true,
+      cursor: 0,
+    });
+    await flush();
+    expect(onScreen(view)).toEqual([5000]);
+    view.handleStreamEvent({ type: "message", message: message(5001, "just in") } as never);
+    expect(onScreen(view)).toEqual([5000, 5001]);
+    view.teardown();
+  });
+
+  it("a quote of an old message anywhere goes there in one request, however far back", async () => {
+    getHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          ...message(5000, "a reply"),
+          replyTo: { seq: 90, sender: "Cupcake", text: "original", truncated: false, media: null },
+        },
+      ],
+      hasMore: true,
+      cursor: 0,
+    });
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    getHistory.mockResolvedValueOnce({ messages: [message(90, "original")], hasMore: true, hasNewer: true, cursor: 0 });
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!.click();
+    await flush();
+    expect(getHistory.mock.calls.slice(1)).toEqual([[SESSION, { around: 90, limit: 50 }]]);
+    expect(onScreen(view)).toEqual([90]);
+    expect(pill(view).textContent).toBe("\u2193 Latest messages");
+    view.teardown();
+  });
+
+  it("a quote tapped while a jump is loading isn't declared deleted", async () => {
+    getHistory.mockResolvedValueOnce({
+      messages: [
+        {
+          ...message(5000, "a reply"),
+          replyTo: { seq: 90, sender: "Cupcake", text: "original", truncated: false, media: null },
+        },
+      ],
+      hasMore: true,
+      cursor: 0,
+    });
+    searchMessages.mockResolvedValue(page([100], 1));
+    const view = mount();
+    await view.attach(SESSION);
+    await flush();
+    await search(view);
+    let release: (value: unknown) => void = () => {};
+    getHistory.mockImplementationOnce(() => new Promise((resolve) => (release = resolve)));
+    row(view, 100).click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!.click();
+    release({ messages: [message(100, "milk")], hasMore: true, hasNewer: true, cursor: 0 });
+    getHistory.mockResolvedValueOnce({ messages: [message(90, "original")], hasMore: true, hasNewer: true, cursor: 0 });
+    await flush();
+    await vi.advanceTimersByTimeAsync(200);
+    await flush();
+    expect(onScreen(view)).toEqual([90]);
+    pill(view).click();
+    expect(view.element.querySelector(".wx-srv-quote")).not.toBeNull();
+    view.teardown();
+  });
+
   it("a result no longer there is dropped", async () => {
     getHistory.mockResolvedValueOnce({ messages: [message(5000, "latest")], hasMore: true, cursor: 0 });
     searchMessages.mockResolvedValue(page([100, 50], 2));

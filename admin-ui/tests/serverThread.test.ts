@@ -2996,7 +2996,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       vi.useRealTimers();
     });
 
-    it("pages backwards with limit 100 until the target is found", async () => {
+    it("goes to an unloaded target in one request, its neighbourhood (decisions/00208)", async () => {
       const target = fakeMessage({ seq: 1, sender: "Purdy", text: "old original" });
       const reply = fakeMessage({ seq: 5, clientId: "c5", sender: "Josh", text: "the reply", replyTo: replyToOf(target) });
       getHistory
@@ -3009,7 +3009,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")?.click();
       await flush();
 
-      expect(getHistory).toHaveBeenLastCalledWith(SESSION, { before: 5, limit: 100 });
+      expect(getHistory).toHaveBeenLastCalledWith(SESSION, { around: 1, limit: 50 });
       expect(view.element.querySelector('[data-message-seq="1"]')).not.toBeNull();
       view.teardown();
     });
@@ -3049,7 +3049,7 @@ describe("reply to a message (round 2 ruling item 10)", () => {
       view.teardown();
     });
 
-    it("aborts an in-flight paging run when a different quote is tapped", async () => {
+    it("aborts an in-flight load when a different quote is tapped", async () => {
       const targetA = fakeMessage({ seq: 1, sender: "Purdy", text: "target A" });
       const targetB = fakeMessage({ seq: 2, clientId: "cB", sender: "Purdy", text: "target B" });
       const replyToA = fakeMessage({ seq: 10, clientId: "r10", sender: "Josh", text: "reply to A", replyTo: replyToOf(targetA) });
@@ -3074,16 +3074,17 @@ describe("reply to a message (round 2 ruling item 10)", () => {
 
       // A's stale page finally arrives — its own continuation must abort
       // (generation moved on to B) rather than scrolling/highlighting for A,
-      // but it does free the history-load slot for B's retry loop to use.
-      resolveFirstPage(emptyHistory({ messages: [targetA, targetB], hasMore: false, cursor: 11 }));
+      // but it does free the history-load slot for B's own load.
+      getHistory.mockResolvedValueOnce(emptyHistory({ messages: [targetB], hasMore: false, cursor: 11 }));
+      resolveFirstPage(emptyHistory({ messages: [targetA], hasMore: false, cursor: 11 }));
       await vi.waitFor(() => {
         expect(view.element.querySelector('[data-message-seq="2"]')).not.toBeNull();
       });
       const bBubble = view.element.querySelector('[data-message-seq="2"]');
       const aBubble = view.element.querySelector('[data-message-seq="1"]');
       expect(bBubble?.classList.contains("wx-srv-bubble-highlighted")).toBe(true);
-      expect(aBubble?.classList.contains("wx-srv-bubble-highlighted")).toBe(false);
-      expect(getHistory).toHaveBeenCalledTimes(2);
+      expect(aBubble).toBeNull(); // A's abandoned page changed nothing
+      expect(getHistory).toHaveBeenCalledTimes(3);
       view.teardown();
     });
 
@@ -3102,12 +3103,11 @@ describe("reply to a message (round 2 ruling item 10)", () => {
         const view = mountServerThread({ identity: fakeIdentity("Josh"), hooks: fakeHooks(), win: fakeWindow(), onSettings: vi.fn() });
         await view.attach(SESSION);
 
-        getHistory.mockImplementationOnce(
-          () =>
-            new Promise((resolve) => {
-              setTimeout(() => resolve(emptyHistory({ messages: [target], hasMore: false, cursor: 5 })), 20);
-            }),
-        );
+        const slowPage = () =>
+          new Promise<HistoryPage>((resolve) => {
+            setTimeout(() => resolve(emptyHistory({ messages: [target], hasMore: false, cursor: 5 })), 20);
+          });
+        getHistory.mockImplementationOnce(slowPage).mockImplementationOnce(slowPage);
         const quote = view.element.querySelector<HTMLButtonElement>(".wx-srv-quote")!;
         quote.click(); // starts paging, historyLoading=true, in flight for a real 20ms
         await flush();

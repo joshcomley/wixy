@@ -2189,9 +2189,10 @@ anything held, or in the gap) is not taken in, because its page brings it; a pag
 the newest jump may change the chat (`revealToken`), and closing the search, sending or locking cancels one; a deleted
 target's quote is cleared from held-but-unrendered messages too (`removeQuotesTargeting`); the drawing layer gets every held
 message, since a missing anchor means "deleted" to it. Sending from a game's tab doesn't leave the view, because a game
-opened from the old stretch needs it. *Honest limits:* leaving from the chat closes such a game's tab, and jumping stops a
-voice note playing in a bubble that goes off screen. Strokes still being retried on a message in the old stretch are
-dropped when the view is left. Quote jumps outside a detached view still page older 100 at a time.
+opened from the old stretch needs it. A stroke not yet stored survives its message going off screen (`anchorHasPending`,
+for the chat and the canvas). Quote jumps use the same neighbourhood (`showMessage`), so an old original is one request away
+too. *Honest limits:* leaving from the chat closes a tab opened from the old stretch, and jumping stops a voice note playing
+in a bubble that goes off screen. Opening an old banked trip (`ensureMessageLoaded`) still pages older 100 at a time.
 `.wx-srv-search-nav`, in the same place as the unread voice notes bar, which it replaces (each closes the other), offers
 `‹ Older` · `3 of 57` (back to the list as it was) · `Newer ›` · ✕, is `data-srv-gesture-exempt`, and Older loads the
 next page when it runs out. A delete leaves the results at once; an arrival or a finished transcript is asked about with

@@ -146,6 +146,7 @@ for (const viewport of [
     // The way back to the latest messages is above the bar, and takes you there.
     const pill = page.locator(".wx-srv-jump-pill");
     await expect(pill).toHaveText("\u2193 Latest messages");
+    await expectFits(page, pill, "Latest messages");
     const pillBox = (await pill.boundingBox())!;
     expect(pillBox.y + pillBox.height).toBeLessThanOrEqual((await nav.boundingBox())!.y + 0.5);
     // Only that stretch is on screen, not everything since.
@@ -168,6 +169,7 @@ for (const viewport of [
     await expect(nav.locator(".wx-srv-search-pos")).toHaveText("3 of 3");
 
     await humanPause(page);
+
     // Newer twice, quickly (well inside the double-tap window): never a lock.
     await nav.locator(".wx-srv-search-newer").click();
     await page.waitForTimeout(120);
@@ -182,6 +184,33 @@ for (const viewport of [
     await nav.locator(".wx-srv-search-pos").click();
     await expect(page.locator(".wx-srv-search-view")).toBeVisible();
     await expect(input).toHaveValue(`NEEDLE ${stamp}`);
+    await expect(items).toHaveCount(3);
+
+    // The newest result, the very last message of its stretch, can be read clear of the bar.
+    await humanPause(page);
+    await page.locator(".wx-srv-search-close").click();
+    await expect(nav).toBeHidden();
+    await seed(page, `${stamp} lastword`, 1, 0);
+    await expect(page.locator(".wx-srv-bubble-text", { hasText: `${stamp} lastword #1` })).toHaveCount(1);
+    await humanPause(page);
+    await openSearch(page);
+    await input.fill(`lastword ${stamp}`);
+    await expect(items).toHaveCount(1);
+    await humanPause(page);
+    await items.first().click();
+    await expect(nav.locator(".wx-srv-search-pos")).toHaveText("1 of 1");
+    await expect
+      .poll(async () => {
+        const bubble = (await bubbleWith(page, `${stamp} lastword #1`).first().boundingBox())!;
+        return bubble.y + bubble.height <= (await nav.boundingBox())!.y + 0.5;
+      }, { message: "the newest message is clear of the bar" })
+      .toBe(true);
+
+    // Back to the list.
+    await humanPause(page);
+    await nav.locator(".wx-srv-search-pos").click();
+    await expect(page.locator(".wx-srv-search-view")).toBeVisible();
+    await input.fill(`NEEDLE ${stamp}`);
     await expect(items).toHaveCount(3);
 
     // Nothing lingers once it is closed.
@@ -266,6 +295,7 @@ for (const viewport of [
     await bubble.locator(".wx-srv-message-actions-trigger").click();
     const menu = bubble.locator(".wx-srv-message-actions");
     await expect(menu).toBeVisible();
+    await expectFits(page, menu.locator(".wx-srv-message-action-info"), "Message info");
     await menu.locator(".wx-srv-message-action-info").click();
 
     const info = menu.locator(".wx-srv-message-info");

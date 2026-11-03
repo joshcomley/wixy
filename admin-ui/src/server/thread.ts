@@ -1792,7 +1792,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     },
     onNavChange: () => {
       if (search.navActive()) closeUnheardNav();
-      threadWrap.classList.toggle("wx-srv-thread-wrap-search-nav", search.navActive());
+      syncBottomBarRoom();
       updateUnheard();
     },
   });
@@ -1955,6 +1955,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   function syncUnheardNav(unheard: readonly Message[]): void {
     if (unheardNavSeq !== null && unheard.length === 0) unheardNavSeq = null;
     const at = unheardNavSeq;
+    syncBottomBarRoom();
     if (at === null) {
       unheardNav.hidden = true;
       return;
@@ -1969,11 +1970,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     unheardNav.hidden = false;
   }
 
+  /** A bar floating over the bottom of the thread makes room for itself, so the newest message can
+   * still be read, and moves the jump pill above it. */
+  function syncBottomBarRoom(): void {
+    threadWrap.classList.toggle("wx-srv-thread-wrap-bottom-bar", search.navActive() || unheardNavSeq !== null);
+  }
+
   /** Shows the unheard note `seq` in the chat, in context: scrolled to and highlighted. */
   function goToUnheard(seq: number): void {
     search.reset();
     closeUnheardView();
     unheardNavSeq = seq;
+    syncBottomBarRoom();
     if (!renderedMessages.has(seq) && detachedView !== null) {
       leaveDetachedView();
       renderThreadList(false);
@@ -3541,12 +3549,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * Never re-renders a whole bubble — the same voice/video cut-off trap as
    * reactions. */
   function removeQuotesTargeting(seq: number): void {
-    // Held but not on screen (the newest messages during a detached view) is still held: its bubble
-    // will be built from this copy, and must not bring the deleted words back.
+    // The held copies as well as the bubbles: a detached view tears bubbles down and rebuilds them
+    // from these, which must not bring the deleted words back.
     for (const [heldSeq, held] of confirmedBySeq) {
-      if (held.replyTo?.seq === seq && !renderedMessages.has(heldSeq)) {
-        confirmedBySeq.set(heldSeq, { ...held, replyTo: null });
-      }
+      if (held.replyTo?.seq === seq) confirmedBySeq.set(heldSeq, { ...held, replyTo: null });
     }
     for (const rendered of renderedMessages.values()) {
       if (rendered.message.replyTo?.seq === seq) {
@@ -3558,6 +3564,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         rendered.element.querySelector(".wx-srv-quote")?.remove();
       }
     }
+    pendingEchoes = pendingEchoes.map((echo) => {
+      if (echo.replyTo?.seq !== seq) return echo;
+      const cleared = { ...echo, replyTo: null };
+      const shown = renderedEchoes.get(echo.clientId);
+      if (shown !== undefined) renderedEchoes.set(echo.clientId, { echo: cleared, element: shown.element });
+      return cleared;
+    });
     if (pendingReply?.seq === seq) setPendingReply(null);
   }
 
@@ -3569,52 +3582,22 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   async function scrollToOriginal(seq: number, button: HTMLButtonElement): Promise<void> {
     scrollToOriginalGeneration += 1;
     const generation = scrollToOriginalGeneration;
+    const wasOnScreen = renderedMessages.has(seq);
     button.classList.add("wx-srv-quote-busy");
     button.setAttribute("aria-busy", "true");
     try {
-      // In a detached view paging older can't reach a target above the gap, and running out would
-      // read as the original being deleted (a quote in a game's pop-up or the unheard list).
-      if (detachedView !== null && !renderedMessages.has(seq)) {
+      // Any original not on screen is shown in its own neighbourhood, one request however old it is
+      // (decisions/00208). Only the server saying it is gone removes the quote; a network or auth
+      // failure leaves it alone, since the original may well still exist (audit F6).
+      if (!renderedMessages.has(seq)) {
         revealToken += 1;
         const outcome = await showMessage(seq, () => generation === scrollToOriginalGeneration);
         if (generation !== scrollToOriginalGeneration) return;
         if (outcome === "gone") removeQuotesTargeting(seq);
-        const shown = renderedMessages.get(seq);
-        if (outcome === "shown" && shown !== undefined) revealMessage(shown.element, true);
-        return;
+        if (outcome !== "shown") return;
       }
-      // Audit F6: only "exhausted" (paging genuinely ran out of history) means
-      // the target was deleted — a network/auth "error" must leave the quote
-      // alone, since `loadOlderPage` swallows every exception and the original
-      // may well still exist.
-      let genuinelyNotFound = false;
-      while (!renderedMessages.has(seq)) {
-        if (!hasMoreHistory) {
-          genuinelyNotFound = true;
-          break;
-        }
-        const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
-        if (generation !== scrollToOriginalGeneration) return;
-        if (result === "loaded") continue;
-        if (result === "blocked") {
-          // A sibling load (ordinary scroll paging, or another
-          // scrollToOriginal run) owns the single history-load slot right
-          // now — yield to a REAL macrotask and retry rather than treating
-          // this as exhausted (audit F2: a microtask-only yield never lets
-          // the sibling's in-flight fetch actually resolve).
-          await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
-          continue;
-        }
-        if (result === "exhausted") genuinelyNotFound = true;
-        break; // "exhausted" -> genuinely not found; "error" -> give up silently.
-      }
-      if (generation !== scrollToOriginalGeneration) return;
       const rendered = renderedMessages.get(seq);
-      if (rendered === undefined) {
-        if (genuinelyNotFound) removeQuotesTargeting(seq);
-        return;
-      }
-      revealMessage(rendered.element);
+      if (rendered !== undefined) revealMessage(rendered.element, !wasOnScreen);
     } finally {
       button.classList.remove("wx-srv-quote-busy");
       button.removeAttribute("aria-busy");
@@ -3721,11 +3704,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     try {
       const page = await getHistory(session, { around: seq, limit: JUMP_PAGE_SIZE });
       if (!wanted()) return "cancelled";
-      if (!page.messages.some((message) => message.seq === seq)) return "gone";
+      // Deleted while the request was out: before anything changes, or the page would land beside
+      // the newest messages and hide the gap.
+      if (deletedSeqs.has(seq) || !page.messages.some((message) => message.seq === seq)) return "gone";
       const mainFloor = detachedView?.mainFloor ?? oldestLoadedSeq() ?? Number.POSITIVE_INFINITY;
       leaveDetachedView();
       for (const message of page.messages) addConfirmed(message);
-      if (!confirmedBySeq.has(seq)) return "gone";
       const newest = page.messages[page.messages.length - 1]?.seq ?? seq;
       detachedView = page.hasNewer === true && newest < mainFloor ? { high: newest, mainFloor } : null;
       hasMoreHistory = page.hasMore;
@@ -3744,6 +3728,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     scrollToOriginalGeneration += 1;
     revealToken += 1;
     const token = revealToken;
+    // During a live call the menu is reachable from a game's tab, where the thread isn't showing.
+    if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
     const wasOnScreen = renderedMessages.has(seq);
     const outcome = await showMessage(seq, () => token === revealToken);
     if (outcome !== "shown") return outcome;
@@ -4143,7 +4129,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Everything held is refreshed below, back to the oldest: never across a gap. A renewed token
     // arrives here without a lock, so this can't be left to `detach`.
     revealToken += 1;
-    if (detachedView !== null) {
+    const leftDetachedView = detachedView !== null;
+    if (leftDetachedView) {
       scrollToOriginalGeneration += 1;
       leaveDetachedView();
     }
@@ -4230,6 +4217,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       for (const message of refreshedMessages.values()) addConfirmed(message);
       historyLoaded = true;
       renderThreadList();
+      // Not wherever the old stretch's scroll position happens to fall among the newest messages.
+      if (leftDetachedView) threadScroll.scrollToBottom();
       ensureObserver();
       if (pendingVoiceNote !== null) void sendVoiceNote();
       return cursor;
@@ -4255,13 +4244,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     setCallLive(live: boolean): void { element.classList.toggle("wx-srv-call-live", live); },
     attach,
     detach(): void {
-      // The next unlock refreshes everything held, back to the oldest: never across the gap.
       revealToken += 1;
-      if (detachedView !== null) {
-        scrollToOriginalGeneration += 1;
-        leaveDetachedView();
-        renderThreadList(false);
-      }
       element.classList.remove("wx-srv-call-live");
       stopTranscriptionProbe();
       // First, while this unlock's token is still in hand: the pen turns off, a stroke in
@@ -4284,6 +4267,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       cookoutStart.close();
       cookoutOptions = null;
       wyrTopics.close();
+      // The next unlock refreshes everything held, back to the oldest: never across the gap. After
+      // the drawing layer has stood down above, so a stroke in progress was withdrawn properly.
+      if (detachedView !== null) {
+        scrollToOriginalGeneration += 1;
+        leaveDetachedView();
+        renderThreadList(false);
+        threadScroll.scrollToBottom();
+      }
       currentSession = null;
       endWipeReconcile("abandoned");
       // §(4): a lock aborts an in-flight scroll-to-original, but the pending

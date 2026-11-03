@@ -74,8 +74,9 @@ or read state, so none is offered.
 
 - A chat near 200,000 messages takes over a second per keystroke-pause, on a worker thread. If it
   ever gets there, fix the scan's constant (`fold` on non-ASCII text) before reconsidering an index.
-- Quote jumps and opening an old banked trip (`scrollToOriginal`, `ensureMessageLoaded`) still page 100 at a
-  time through the whole gap. They are older paths and were left alone; they could use the same neighbourhood.
+- Quote jumps (`scrollToOriginal`) moved to the neighbourhood too, replacing spec/server-chat's "paging backwards":
+  search makes replying to a months-old message routine, and tapping that quote would otherwise be the very cost
+  above. Opening an old banked trip (`ensureMessageLoaded`) still pages 100 at a time; it could use it as well.
 - A search's read transaction briefly holds back a WAL truncate; the scrub already retries
   (Inv 46), and the scan is tens of milliseconds at today's size.
 - A transcript the reader has hidden is found by search, and the list shows its excerpt. The bubble

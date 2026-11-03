@@ -748,6 +748,7 @@ button.wx-srv-quote:focus-visible {
   bottom: 12px;
   right: 16px;
   z-index: 2;
+  min-height: 44px;
   font: 600 0.75rem/1 system-ui, sans-serif;
   padding: 8px 14px;
   border-radius: 999px;
@@ -2297,6 +2298,10 @@ dialog.wx-srv-game-pictures[open] {
   text-align: left;
   font: 500 0.8125rem/1.3 system-ui, sans-serif;
   cursor: pointer;
+}
+
+.wx-srv-message-actions-list > button {
+  min-height: 44px;
 }
 
 .wx-srv-message-actions button:hover,
@@ -10057,9 +10062,14 @@ button.wx-srv-ck-heart {
   cursor: pointer;
 }
 
-/* The search bar takes the bottom of the thread, so the way back to the latest messages sits above it. */
-.wx-srv-thread-wrap-search-nav .wx-srv-jump-pill {
+/* A bar takes the bottom of the thread: the chat makes room for it, and the way back to the latest
+   messages sits above it. */
+.wx-srv-thread-wrap-bottom-bar .wx-srv-jump-pill {
   bottom: 76px;
+}
+
+.wx-srv-thread-wrap-bottom-bar .wx-srv-thread {
+  padding-bottom: 72px;
 }
 
 .wx-srv-thread-sentinel-newer[hidden] {
