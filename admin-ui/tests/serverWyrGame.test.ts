@@ -799,6 +799,7 @@ describe("thread wiring", () => {
   });
 
   it("a lock from a stretch of old history forgets the games like any other lock", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
     const reply = {
       ...chatMessage(10, 0, "a reply", "Purdy"),
       wyrRef: null,

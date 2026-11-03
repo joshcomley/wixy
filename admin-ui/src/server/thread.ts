@@ -3498,13 +3498,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return oldest;
   }
 
-  /** `"blocked"` — a DIFFERENT load (ordinary scroll paging, or a sibling
-   * `scrollToOriginal` run) is already in flight — is distinct from
-   * `"exhausted"` (`hasMoreHistory` is false) precisely so a caller racing
-   * another load (§(4): "another tap") can retell them apart: worth
-   * retrying vs. genuinely nothing more to page. `limit` defaults to the
-   * ordinary scroll-driven page size; `scrollToOriginal` passes its own
-   * larger one. */
+  /** `"blocked"` — a DIFFERENT load (ordinary scroll paging, or a sibling `ensureMessageLoaded`
+   * run) is already in flight — is distinct from `"exhausted"` (`hasMoreHistory` is false) so a
+   * caller racing another load can tell them apart: worth retrying vs. genuinely nothing more to
+   * page. `limit` defaults to the ordinary scroll-driven page size; `ensureMessageLoaded` passes
+   * its own larger one. */
   async function loadOlderPage(
     limit: number = HISTORY_PAGE_SIZE,
   ): Promise<"loaded" | "blocked" | "exhausted" | "error"> {
@@ -3588,10 +3586,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // Any original not on screen is shown in its own neighbourhood, one request however old it is
       // (decisions/00208). Only the server saying it is gone removes the quote; a network or auth
       // failure leaves it alone, since the original may well still exist (audit F6).
+      // A quote tapped in a game's pop-up: go to the original visibly, not behind the game.
+      if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
       if (!renderedMessages.has(seq)) {
         revealToken += 1;
-        // A quote tapped in a game's pop-up: go to the original visibly, not behind the game.
-        if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
         const outcome = await showMessage(seq, () => generation === scrollToOriginalGeneration);
         if (generation !== scrollToOriginalGeneration) return;
         if (outcome === "gone") removeQuotesTargeting(seq);
