@@ -2828,3 +2828,7 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   response, two-connection races, generation fencing, the swap archive, T4), `test_cookout_twists_catalogue.py` (the
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,
   `test_livechat_cookout_ai.py` and `test_livechat_cookout_images.py`, and `e2e/tests/server-cookout-twists.spec.ts`.
+
+## Sender hues
+
+Other members' bubbles carry a muted hue keyed on the sender name (`admin-ui/src/server/senderHue.ts`, 8 hues, FNV-1a over the trimmed lower-cased name; applied via `--wx-sender-hue` and `.wx-srv-bubble-hued` in `chat.css`, light and dark). Pure and stateless: the same name gets the same colour on every device. Own bubbles are unchanged.
