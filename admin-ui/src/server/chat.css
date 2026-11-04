@@ -2134,6 +2134,33 @@ dialog.wx-srv-game-pictures[open] {
   color: var(--wx-muted);
 }
 
+/* Other members each get a gentle hue keyed on their name (senderHue.ts sets
+   --wx-sender-hue), so a chat of three or more can be told apart. Low saturation
+   keeps it muted; the name label carries it and the bubble takes a faint tint. */
+.wx-srv-bubble-hued {
+  --wx-sender-ink: hsl(var(--wx-sender-hue) 38% 36%);
+  background: hsl(var(--wx-sender-hue) 40% 93%);
+  border-color: hsl(var(--wx-sender-hue) 28% 82%);
+}
+
+.wx-srv-bubble-hued .wx-srv-bubble-sender {
+  color: var(--wx-sender-ink);
+}
+
+:root[data-theme="dark"] .wx-srv-bubble-hued {
+  --wx-sender-ink: hsl(var(--wx-sender-hue) 42% 72%);
+  background: hsl(var(--wx-sender-hue) 22% 13%);
+  border-color: hsl(var(--wx-sender-hue) 20% 24%);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-bubble-hued {
+    --wx-sender-ink: hsl(var(--wx-sender-hue) 42% 72%);
+    background: hsl(var(--wx-sender-hue) 22% 13%);
+    border-color: hsl(var(--wx-sender-hue) 20% 24%);
+  }
+}
+
 /* The message text is plain text (thread.ts appends it as text nodes via
    linkify.ts, never markup), so a typed line break is a literal "\n". Under the
    default `white-space: normal` every one collapsed to a space and a message

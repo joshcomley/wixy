@@ -9,6 +9,7 @@
 import type { ChatComposer, ComposerDraft } from "../chatComposer";
 import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
+import { senderHue } from "./senderHue";
 import { mountLightbox, type Lightbox } from "../lightbox";
 import {
   ServerErasureOutcomeUnknownError,
@@ -2860,6 +2861,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.className = "wx-srv-bubble-sender";
       sender.textContent = message.sender;
       bubble.appendChild(sender);
+      // A muted per-name hue (chat.css) so several other members read apart.
+      bubble.style.setProperty("--wx-sender-hue", String(senderHue(message.sender)));
+      bubble.classList.add("wx-srv-bubble-hued");
     }
     if (typeof message.wyrRef === "number") {
       // Sent in a game item's chat (a would-you-rather round, ...): a small tag names the game and
