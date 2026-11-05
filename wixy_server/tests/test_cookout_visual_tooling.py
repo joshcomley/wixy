@@ -296,6 +296,96 @@ def test_gate_never_submits_while_busy_and_honours_pause(
     assert im.wait_for_idle(lambda: {}, pause_file=pause, sleep=lambda _s: None) is False
 
 
+def test_memory_guard_waits_below_the_floor_and_then_goes(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    readings: Iterator[float | None] = iter([3.7, 12.0, 19.9, 20.0])
+    sleeps: list[float] = []
+    proceed, free = im.wait_for_memory(lambda: next(readings), sleep=sleeps.append)
+    assert (proceed, free) == (True, 20.0)
+    assert sleeps == [im.MEMORY_POLL_GAP_S] * 3
+
+
+def test_memory_guard_unreadable_does_not_block_and_pause_wins(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    assert im.wait_for_memory(lambda: None, sleep=lambda _s: None) == (True, None)
+    pause = tmp_path / "PAUSE"
+    pause.write_text("")
+    assert im.wait_for_memory(lambda: 1.0, pause_file=pause, sleep=lambda _s: None) == (
+        False,
+        None,
+    )
+
+
+def test_pipeline_waits_for_memory_and_journals_it(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+    work = im.WorkDir(tmp_path / "work")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v tokA", "whole")}
+    readings: Iterator[float | None] = iter([4.0, 9.0, 31.5])
+    slept: list[float] = []
+    asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({"a": 30}, {}),
+            lambda: {},
+            FakeJudge({"a": 30}, {"a": "A"}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=slept.append,
+            render_only=True,
+            free_gb=lambda: next(readings),
+        )
+    )
+    entries = [json.loads(line) for line in work.journal.read_text("utf-8").splitlines()]
+    rendered = [e for e in entries if e["state"] == "rendered"]
+    assert len(rendered) == 1
+    assert rendered[0]["memFreeGb"] == 31.5 and rendered[0]["voice"] == {}
+    assert slept.count(im.MEMORY_POLL_GAP_S) == 2
+
+
+def test_voice_probes_parse_and_summarise(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    assert im.voice_probes_from_env(None) == {}
+    assert im.voice_probes_from_env("voice=http://h:1/x, util=http://h:2/y,junk") == {
+        "voice": "http://h:1/x",
+        "util": "http://h:2/y",
+    }
+    summary = im.summarise_latency({"voice": [10.0, None, 30.0, 20.0], "util": []})
+    assert summary["voice"] == {"n": 4, "failed": 1, "medianMs": 20.0, "maxMs": 30.0}
+    assert summary["util"] == {"n": 0, "failed": 0, "medianMs": None, "maxMs": None}
+
+
+def test_latency_sampler_records_each_probe_until_stopped(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+
+    async def go() -> dict[str, list[float | None]]:
+        samples: dict[str, list[float | None]] = {}
+        stop = asyncio.Event()
+        calls: list[str] = []
+
+        def probe(url: str) -> float | None:
+            calls.append(url)
+            if len(calls) >= 4:
+                stop.set()
+            return None if url.endswith("bad") else 5.0
+
+        await im.sample_latency(
+            {"voice": "http://h/ok", "util": "http://h/bad"}, samples, stop, probe=probe, gap_s=0.01
+        )
+        return samples
+
+    samples = asyncio.run(go())
+    assert samples["voice"][0] == 5.0 and samples["util"][0] is None
+
+
 def test_attempt_ladder(mods: dict[str, ModuleType]) -> None:
     im = mods["images"]
     assert [im.plan_attempt(n).rewrite_visual for n in range(1, 5)] == [False, False, True, False]
