@@ -76,6 +76,58 @@ def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) ->
     return out
 
 
+MIN_FREE_GB = 20.0
+MEMORY_POLL_GAP_S = 15.0
+
+
+def hub_free_gb() -> float | None:
+    """Free physical memory in GiB, or `None` where it cannot be read (not Windows). Hub runs the
+    voice and utility models next to ComfyUI; measured 31 Oct, a render pushed it into paging
+    when under ~4 GB was free and both models then stalled for 20-120 s."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    class _MemoryStatus(ctypes.Structure):
+        _fields_ = [  # noqa: RUF012 - ctypes layout
+            ("length", ctypes.c_ulong),
+            ("load", ctypes.c_ulong),
+            ("total", ctypes.c_ulonglong),
+            ("avail", ctypes.c_ulonglong),
+            ("totalPage", ctypes.c_ulonglong),
+            ("availPage", ctypes.c_ulonglong),
+            ("totalVirtual", ctypes.c_ulonglong),
+            ("availVirtual", ctypes.c_ulonglong),
+            ("availExtended", ctypes.c_ulonglong),
+        ]
+
+    status = _MemoryStatus()
+    status.length = ctypes.sizeof(_MemoryStatus)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):  # type: ignore[attr-defined,unused-ignore]
+        return None
+    return float(status.avail) / 2**30
+
+
+def wait_for_memory(
+    free_gb: Callable[[], float | None],
+    *,
+    min_gb: float = MIN_FREE_GB,
+    pause_file: Path | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    gap_s: float = MEMORY_POLL_GAP_S,
+) -> tuple[bool, float | None]:
+    """Block while the machine's free memory is under `min_gb`, so a render never starts into
+    paging. Returns `(proceed, last_free_gb)`; `proceed` is False when `pause_file` appears. An
+    unreadable figure (`None`) does not block: the journal records it as unknown."""
+    while True:
+        if pause_file is not None and pause_file.exists():
+            return False, None
+        free = free_gb()
+        if free is None or free >= min_gb:
+            return True, free
+        sleep(gap_s)
+
+
 def wait_for_idle(
     get_queue: Callable[[], Mapping[str, Any]],
     *,
@@ -526,6 +578,65 @@ async def sample_foreign_jobs(
             continue
 
 
+def voice_probes_from_env(value: str | None) -> dict[str, str]:
+    """`name=url,name=url` -> {name: url}. These are the hub services a render must not slow down
+    (the voice model, the utility model); empty or unset means no probing."""
+    out: dict[str, str] = {}
+    for part in (value or "").split(","):
+        name, sep, url = part.strip().partition("=")
+        if sep and name and url:
+            out[name] = url
+    return out
+
+
+def probe_ms(url: str, timeout_s: float = 10.0) -> float | None:
+    """Milliseconds for one GET of `url`, or `None` if it failed or timed out (a stall)."""
+    import urllib.request
+
+    started = time.monotonic()
+    try:
+        with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 - local URL
+            response.read(1)
+    except OSError:
+        return None
+    return (time.monotonic() - started) * 1000
+
+
+def summarise_latency(samples: Mapping[str, list[float | None]]) -> dict[str, dict[str, Any]]:
+    """Per probe: how many answers, how many failures, median and worst milliseconds."""
+    out: dict[str, dict[str, Any]] = {}
+    for name, values in samples.items():
+        ok = sorted(v for v in values if v is not None)
+        out[name] = {
+            "n": len(values),
+            "failed": len(values) - len(ok),
+            "medianMs": round(ok[len(ok) // 2], 1) if ok else None,
+            "maxMs": round(ok[-1], 1) if ok else None,
+        }
+    return out
+
+
+async def sample_latency(
+    probes: Mapping[str, str],
+    samples: dict[str, list[float | None]],
+    stop: asyncio.Event,
+    *,
+    probe: Callable[[str], float | None] = probe_ms,
+    gap_s: float = 5.0,
+) -> None:
+    """While one of our pictures renders, time each probe every `gap_s` seconds."""
+    while not stop.is_set():
+        for name, url in probes.items():
+            try:
+                samples.setdefault(name, []).append(await asyncio.to_thread(probe, url))
+            except Exception:  # noqa: BLE001 - a failed look must never fail the render
+                samples.setdefault(name, []).append(None)
+        try:
+            await asyncio.wait_for(stop.wait(), gap_s)
+        except TimeoutError:
+            continue
+
+
 def render_one(
     generator: Any,
     ident: str,
@@ -949,10 +1060,14 @@ async def run_pipeline(
     rng: random.Random | None = None,
     sleep: Callable[[float], None] = time.sleep,
     render_only: bool = False,
+    free_gb: Callable[[], float | None] = hub_free_gb,
+    min_free_gb: float = MIN_FREE_GB,
+    voice_probes: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     """Render and check `ids` to completion: render a chunk (one picture at a time, only when
-    ComfyUI is idle), check it, regenerate failures along the attempt ladder, send persistent
-    failures to Opus. Resumable from the journal. Returns counts."""
+    ComfyUI is idle and the machine has `min_free_gb` of free memory), check it, regenerate
+    failures along the attempt ladder, send persistent failures to Opus. Resumable from the
+    journal. Returns counts."""
     rng = rng or random.Random()
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
@@ -992,7 +1107,10 @@ async def run_pipeline(
                     saw[signature] = saw.get(signature, 0) + 1
                 return queue
 
-            if not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
+            proceed, mem_free = wait_for_memory(
+                free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
+            )
+            if not proceed or not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
                 return totals  # PAUSE file: stop between pictures
             gate_s = time.monotonic() - picture_started
             attempt = next_attempt(work, ident)
@@ -1006,6 +1124,10 @@ async def run_pipeline(
             sampler = asyncio.create_task(
                 sample_foreign_jobs(get_queue, prompt, render_saw, stop_sampling)
             )
+            latency: dict[str, list[float | None]] = {}
+            latency_sampler = asyncio.create_task(
+                sample_latency(voice_probes or {}, latency, stop_sampling)
+            )
             try:
                 split = await asyncio.to_thread(
                     render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
@@ -1013,6 +1135,7 @@ async def run_pipeline(
             finally:
                 stop_sampling.set()
                 await sampler
+                await latency_sampler
             rendered[ident] = work.card(ident, attempt)
             journal_append(
                 work.journal,
@@ -1035,6 +1158,10 @@ async def run_pipeline(
                         "gate": dict(sorted(gate_saw.items(), key=lambda kv: -kv[1])[:3]),
                         "render": dict(sorted(render_saw.items(), key=lambda kv: -kv[1])[:3]),
                     },
+                    # free memory at the start (None: unreadable) and how the hub's voice and
+                    # utility services answered while this picture rendered
+                    "memFreeGb": None if mem_free is None else round(mem_free, 1),
+                    "voice": summarise_latency(latency),
                 },
             )
             totals["rendered"] += 1
@@ -1209,6 +1336,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _check.SOL,
             _check.OPUS,
             render_only=args.render_only,
+            voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
         )
     )
     print(json.dumps(totals))
