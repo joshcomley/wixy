@@ -531,9 +531,17 @@ test.describe("server-media.spec.ts (P6b)", () => {
   });
 
   test("voice recordings shorter than one second are discarded", async ({ page }) => {
+    // A voice note is uploaded live while it is recorded (spec/server-chat/06), so a too-short
+    // one has already started an upload: discarding it must DELETE that upload, never complete
+    // it, and never send a message.
     const uploadRequests: string[] = [];
+    const messagePosts: string[] = [];
     page.on("request", (request) => {
-      if (request.url().includes("/api/admin/server/uploads")) uploadRequests.push(request.url());
+      const url = new URL(request.url());
+      if (url.pathname.startsWith("/api/admin/server/uploads") && url.pathname !== "/api/admin/server/uploads/unsent") {
+        uploadRequests.push(`${request.method()} ${url.pathname}`);
+      }
+      if (request.method() === "POST" && url.pathname === "/api/admin/server/messages") messagePosts.push(url.pathname);
     });
     await unlockServer(page, "Quick tester");
     await page.getByRole("button", { name: "Record a voice note" }).click();
@@ -543,7 +551,14 @@ test.describe("server-media.spec.ts (P6b)", () => {
 
     await expect(page.locator(".wx-chat-composer-error")).toContainText("Too short");
     await expect(page.locator(".wx-chat-attachment-chip")).toHaveCount(0);
-    expect(uploadRequests).toEqual([]);
+    await expect.poll(() => uploadRequests.at(-1) ?? "").toMatch(/^DELETE \/api\/admin\/server\/uploads\/[0-9a-f]{32}$/);
+    // Exactly one live upload: its init, its slice(s), then its deletion. Never a /complete.
+    const id = uploadRequests.at(-1)?.split("/").at(-1) ?? "";
+    expect(uploadRequests[0]).toBe("POST /api/admin/server/uploads");
+    for (const request of uploadRequests.slice(1, -1)) {
+      expect(request).toMatch(new RegExp(`^PUT /api/admin/server/uploads/${id}/chunks/\\d+$`));
+    }
+    expect(messagePosts).toEqual([]);
   });
 
   test("confirm before playing audio messages preference gates voice playback on a phone", async ({ page }) => {
