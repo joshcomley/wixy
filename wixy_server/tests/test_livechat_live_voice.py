@@ -995,7 +995,9 @@ class TestRestartRecovery:
         self, tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         with live_env(tmp_path, repo, monkeypatch, media_worker=False) as first:
-            first.store.create_attachment(att_id="d" * 32, kind="voice", now=1.0)
+            # Created NOW: an unlinked attachment older than a day is the janitor's to sweep at
+            # startup (ORPHAN_ATTACHMENT_AGE_S), which made a 1970 timestamp race the assertion.
+            first.store.create_attachment(att_id="d" * 32, kind="voice", now=time.time())
         with live_env(tmp_path, repo, monkeypatch, media_worker=False) as second:
             row = second.store.get_attachment("d" * 32)
             assert row is not None and (row.status, row.live_state) == ("processing", None)
