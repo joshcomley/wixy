@@ -288,4 +288,91 @@ describe("server attachment rendering", () => {
       expect(root.querySelector(".wx-srv-transcript-text")?.textContent).toBe("seeded text");
     });
   });
+
+  describe("failed attachment retry", () => {
+    const failed: Attachment = { ...base, kind: "voice", status: "failed", retryable: true };
+    const flush = async (): Promise<void> => {
+      await Promise.resolve();
+      await Promise.resolve();
+    };
+
+    it("shows Try again only when retryable and a callback is supplied", () => {
+      const retryAttachment = vi.fn(async () => ({ kind: "started" as const }));
+      const withButton = renderAttachment(failed, { ...context(), retryAttachment });
+      expect(withButton.querySelector("button")?.textContent).toBe("Try again");
+      expect(withButton.textContent).toContain("Couldn't process this file");
+      expect(renderAttachment(failed, context()).querySelector("button")).toBeNull();
+      expect(
+        renderAttachment({ ...failed, retryable: false }, { ...context(), retryAttachment }).querySelector("button"),
+      ).toBeNull();
+      const { retryable: _omit, ...unflagged } = failed;
+      expect(
+        renderAttachment(unflagged, { ...context(), retryAttachment }).querySelector("button"),
+      ).toBeNull();
+    });
+
+    it("disables and relabels on click, calls the callback once, and does not bubble", async () => {
+      const retryAttachment = vi.fn(async () => ({ kind: "started" as const }));
+      const parent = document.createElement("div");
+      const parentClick = vi.fn();
+      parent.addEventListener("click", parentClick);
+      const root = renderAttachment(failed, { ...context(), retryAttachment });
+      parent.appendChild(root);
+      const button = root.querySelector<HTMLButtonElement>("button")!;
+      expect(button.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+      button.click();
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe("Trying again…");
+      await flush();
+      expect(retryAttachment).toHaveBeenCalledTimes(1);
+      expect(retryAttachment).toHaveBeenCalledWith("a1");
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe("Trying again…");
+      expect(parentClick).not.toHaveBeenCalled();
+    });
+
+    it("stays disabled when the server says it is already being processed", async () => {
+      const retryAttachment = vi.fn(async () => ({ kind: "in_progress" as const }));
+      const root = renderAttachment(failed, { ...context(), retryAttachment });
+      const button = root.querySelector<HTMLButtonElement>("button")!;
+      button.click();
+      await flush();
+      expect(button.disabled).toBe(true);
+      expect(button.textContent).toBe("Trying again…");
+    });
+
+    it("shows the gone text and removes the button on a 410", async () => {
+      const retryAttachment = vi.fn(async () => ({ kind: "gone" as const }));
+      const root = renderAttachment(failed, { ...context(), retryAttachment });
+      root.querySelector<HTMLButtonElement>("button")!.click();
+      await flush();
+      expect(root.querySelector("button")).toBeNull();
+      expect(root.textContent).toBe("This file is no longer kept, so it can't be tried again.");
+    });
+
+    it("restores the button and shows an error line after a failure or a thrown error", async () => {
+      for (const retryAttachment of [
+        vi.fn(async () => ({ kind: "failed" as const })),
+        vi.fn(async (): Promise<{ kind: "failed" }> => {
+          throw new Error("offline");
+        }),
+      ]) {
+        const root = renderAttachment(failed, { ...context(), retryAttachment });
+        const button = root.querySelector<HTMLButtonElement>("button")!;
+        const note = root.querySelector<HTMLElement>(".wx-srv-attachment-retry-note")!;
+        expect(note.hidden).toBe(true);
+        button.click();
+        await flush();
+        expect(button.disabled).toBe(false);
+        expect(button.textContent).toBe("Try again");
+        expect(note.hidden).toBe(false);
+        expect(note.textContent).toBe("Couldn't try again — please try once more.");
+        // A second click works and hides the error line while retrying.
+        button.click();
+        expect(button.textContent).toBe("Trying again…");
+        expect(note.hidden).toBe(true);
+        await flush();
+      }
+    });
+  });
 });

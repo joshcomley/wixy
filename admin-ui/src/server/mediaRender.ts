@@ -33,7 +33,21 @@ export interface Attachment {
   /** True for a ready animated GIF: the bubble shows the moving `full` rendition, not the
    * still `thumb`. Absent on a server that predates the flag. */
   readonly animated?: boolean;
+  /** True when the attachment is `failed` and its original is still kept, so it can be tried
+   * again. Absent on a server that predates the flag. */
+  readonly retryable?: boolean;
 }
+
+/** What asking the server to process a failed attachment again came back as. */
+export type RetryResult =
+  /** 202: the attachment is processing again; a `message_updated` event follows. */
+  | { readonly kind: "started" }
+  /** 410: the original is no longer kept, so it can never be tried again. */
+  | { readonly kind: "gone" }
+  /** 409: it is no longer failed (already processing or ready). */
+  | { readonly kind: "in_progress" }
+  /** Anything else, including a dropped connection. */
+  | { readonly kind: "failed" };
 
 export interface MediaRenderHooks {
   suspend(reason: SuspendReason): () => void;
@@ -48,6 +62,8 @@ export interface MediaRenderContext {
   /** Called once per voice note when playback reaches `HEARD_THRESHOLD` of its length (or it
    * ends) — the "listened to" signal behind the unheard-voice-notes list. */
   readonly onVoiceListened?: (attachmentId: string) => void;
+  /** When present, a failed attachment whose original is still kept gets a "Try again" button. */
+  readonly retryAttachment?: (attachmentId: string) => Promise<RetryResult>;
   readonly document?: Document;
   readonly win?: Window;
 }
@@ -110,7 +126,11 @@ export function renderAttachment(
 ): HTMLElement {
   if (attachment.status === "processing") return stateElement("Processing…", "processing", documentRef);
   if (attachment.status === "failed") {
-    return stateElement("Couldn't process this file", "failed", documentRef);
+    const failed = stateElement(FAILED_TEXT, "failed", documentRef);
+    if (attachment.retryable === true && context.retryAttachment) {
+      return renderRetryableFailure(attachment.id, failed, context.retryAttachment, documentRef);
+    }
+    return failed;
   }
 
   if (attachment.kind === "photo") return renderPhoto(attachment, context, documentRef);
@@ -470,6 +490,63 @@ export function wireMediaSuspension(element: HTMLMediaElement, hooks: MediaRende
   element.addEventListener("pause", releaseMedia);
   element.addEventListener("ended", releaseMedia);
   element.addEventListener("emptied", releaseMedia);
+}
+
+const FAILED_TEXT = "Couldn't process this file";
+const RETRY_LABEL = "Try again";
+const RETRYING_LABEL = "Trying again…";
+const GONE_TEXT = "This file is no longer kept, so it can't be tried again.";
+const RETRY_ERROR_TEXT = "Couldn't try again — please try once more.";
+
+/** The failed-state text plus a "Try again" button. The button gives instant feedback, then
+ * asks the server to reprocess; the `message_updated` event that follows a 202 re-renders the
+ * whole bubble, so success needs no work here. */
+function renderRetryableFailure(
+  attachmentId: string,
+  failed: HTMLElement,
+  retry: (attachmentId: string) => Promise<RetryResult>,
+  documentRef: Document,
+): HTMLElement {
+  const wrap = documentRef.createElement("div");
+  wrap.className = "wx-srv-attachment-retry";
+  const button = documentRef.createElement("button");
+  button.type = "button";
+  button.className = "wx-srv-attachment-retry-btn";
+  button.dataset["srvGestureBoundary"] = "";
+  button.textContent = RETRY_LABEL;
+  const note = documentRef.createElement("span");
+  note.className = "wx-srv-attachment-retry-note";
+  note.setAttribute("role", "status");
+  note.hidden = true;
+  const restore = (): void => {
+    button.disabled = false;
+    button.textContent = RETRY_LABEL;
+    note.textContent = RETRY_ERROR_TEXT;
+    note.hidden = false;
+  };
+  button.addEventListener("pointerdown", (event) => event.stopPropagation());
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = RETRYING_LABEL;
+    note.hidden = true;
+    retry(attachmentId).then(
+      (result) => {
+        if (result.kind === "gone") {
+          failed.textContent = GONE_TEXT;
+          button.remove();
+          note.remove();
+        } else if (result.kind === "failed") {
+          restore();
+        }
+        // "started" / "in_progress": stay in "Trying again…"; the live update re-renders.
+      },
+      restore,
+    );
+  });
+  wrap.append(failed, button, note);
+  return wrap;
 }
 
 function stateElement(text: string, state: "processing" | "failed", documentRef: Document): HTMLElement {

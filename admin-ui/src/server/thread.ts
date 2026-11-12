@@ -29,6 +29,7 @@ import {
   type SendCanvasResult,
   type SendViewOnceResult,
   setReaction,
+  retryAttachment,
   transcribeAttachment,
   wipeChat,
   type Message,
@@ -111,7 +112,7 @@ import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { createHeardStore } from "./heardStore";
 import { FRY_GIF_URL, GifFetchError, fetchGifFile, findGifLinks, removeGifLinks } from "./gifLink";
-import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
+import { disposeAttachmentMedia, renderAttachments, type RetryResult } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
 import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
 import { renderReplyQuoteContent, replyToFromMessage } from "./replyTo";
@@ -2320,6 +2321,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     messageActionControllers.delete(seq);
   }
 
+  async function retryFailedAttachment(attachmentId: string): Promise<RetryResult> {
+    const session = currentSession;
+    if (session === null) return { kind: "failed" };
+    try {
+      return await retryAttachment(session, attachmentId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return { kind: "failed" };
+    }
+  }
+
   function renderAttachmentsFor(message: Message, timeElement?: HTMLElement): HTMLElement | null {
     if (message.attachments.length === 0) return null;
     return renderAttachments(message.attachments, {
@@ -2327,6 +2339,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       openLightbox: (src, alt) => lightbox.open(src, alt),
       transcription,
       onVoiceListened: (attachmentId) => markHeard(attachmentId),
+      retryAttachment: retryFailedAttachment,
       document: documentRef,
       win,
     }, timeElement);

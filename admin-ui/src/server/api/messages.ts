@@ -9,7 +9,7 @@ import type { AdventureSummary } from "../adventure/api";
 import type { CookoutSummary } from "../cookout/api";
 import type { ServerSession } from "../types";
 
-import type { AttachmentTranscript } from "../mediaRender";
+import type { AttachmentTranscript, RetryResult } from "../mediaRender";
 
 export type AttachmentKind = "photo" | "video" | "voice";
 export type AttachmentStatus = "processing" | "ready" | "failed";
@@ -34,6 +34,8 @@ export interface Attachment {
   /** True for a ready animated GIF: the bubble shows the moving `full` rendition, not the
    * still `thumb`. Absent on a server that predates the flag. */
   readonly animated?: boolean;
+  /** True when `failed` and the original is still kept, so it can be tried again. */
+  readonly retryable?: boolean;
 }
 
 /** One emoji on one message: who reacted, oldest first (spec/server-chat/04-reactions.md). */
@@ -389,6 +391,30 @@ export async function transcribeAttachment(
     const retryAfterS = typeof body?.retryAfterS === "number" ? body.retryAfterS : 60;
     return { kind: "rate_limited", retryAfterS };
   }
+  return { kind: "failed" };
+}
+
+/** `POST /attachments/{id}/retry` — no body. 202: reprocessing started (a `message_updated`
+ * event follows); 410: the original is gone; 409: not failed any more. A 401 propagates as a
+ * lock. */
+export async function retryAttachment(
+  session: ServerSession,
+  attachmentId: string,
+): Promise<RetryResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      `/attachments/${encodeURIComponent(attachmentId)}/retry`,
+      { method: "POST" },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { kind: "failed" };
+  }
+  if (response.status === 202) return { kind: "started" };
+  if (response.status === 410) return { kind: "gone" };
+  if (response.status === 409) return { kind: "in_progress" };
   return { kind: "failed" };
 }
 

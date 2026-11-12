@@ -3026,6 +3026,37 @@ dialog.wx-srv-game-pictures[open] {
   color: var(--wx-danger-text);
 }
 
+.wx-srv-attachment-retry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+}
+
+.wx-srv-attachment-retry-btn {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.75rem;
+  cursor: pointer;
+}
+
+.wx-srv-attachment-retry-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.wx-srv-attachment-retry-note {
+  font-size: 0.75rem;
+  color: var(--wx-danger-text);
+  overflow-wrap: anywhere;
+}
+
 /* -- Name prompt (first unlock, types.ts's "chat" sub-step) --------------- */
 
 .wx-srv-name-prompt {
