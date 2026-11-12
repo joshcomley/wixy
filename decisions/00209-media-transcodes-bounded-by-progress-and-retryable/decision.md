@@ -70,3 +70,10 @@ not logged anywhere (`stderr.log` had no trace).
 - Recovery of the 2026-11-12 note: the original is hash-verified (SHA-256 `bc9ddea6…`) and
   copied to `D:\Recovery\wixy-voice-2026-11-12\` outside the janitor's reach. In production it
   is re-run with the new "Try again".
+- The queue marks a row `failed` *before* moving its original to `failed/<id>/` (and on a
+  Windows sharing violation keeps it staged for the janitor to retry). The retry route therefore
+  accepts an original in either place, and `_do_work` processes whichever exists. Tests must wait
+  for the archive move rather than assume it is done when the status flips.
+- On POSIX every child runs through `nice`, which exits 126/127 for a missing or
+  non-executable binary instead of raising, so `_checked` maps those exits to
+  `media_unavailable`.

@@ -797,6 +797,15 @@ class TestMediaRoute:
 # ---------------------------------------------------------------------------
 
 
+def _wait_for_archive(paths: ProjectPaths, att_id: str) -> None:
+    """The queue marks the row `failed` first and archives the original right after."""
+    archived = paths.server_failed_dir(att_id) / "original.jpg"
+    deadline = time.monotonic() + 20
+    while not archived.is_file() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert archived.is_file()
+
+
 def test_retry_route_brings_a_failed_photo_back(
     storage_root: Path,
     wixy_repo_root: Path,
@@ -816,7 +825,7 @@ def test_retry_route_brings_a_failed_photo_back(
         paths: ProjectPaths = app.state.paths
         att_id, _seq = _seed_sent_photo(store, paths, now=time.time())
         anyio.run(_wait_for_status, store, att_id, "failed")
-        assert (paths.server_failed_dir(att_id) / "original.jpg").is_file()
+        _wait_for_archive(paths, att_id)
 
         messages = client.get("/api/admin/server/messages", headers=headers)
         assert messages.status_code == 200
@@ -863,6 +872,7 @@ def test_retry_route_reports_a_gone_original_and_unknown_ids(
         paths: ProjectPaths = app.state.paths
         att_id, _seq = _seed_sent_photo(store, paths, now=time.time())
         anyio.run(_wait_for_status, store, att_id, "failed")
+        _wait_for_archive(paths, att_id)
         (paths.server_failed_dir(att_id) / "original.jpg").unlink()
 
         gone = client.post(f"/api/admin/server/attachments/{att_id}/retry", headers=headers)

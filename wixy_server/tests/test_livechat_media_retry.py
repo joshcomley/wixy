@@ -21,6 +21,7 @@ from PIL import Image
 from wixy_server.livechat import media_queue, processing, uploads
 from wixy_server.livechat.models import (
     FAILED_ORIGINAL_RETENTION_S,
+    AttachmentResult,
     attachment_retryable,
 )
 from wixy_server.livechat.store import LiveChatStore
@@ -233,3 +234,42 @@ async def _wait_for_status(store: LiveChatStore, att_id: str, status: str) -> No
             if row is not None and row.status == status:
                 return
             await anyio.sleep(0.05)
+
+
+def test_a_retry_before_the_archive_move_processes_the_staged_original(
+    store: LiveChatStore, paths: ProjectPaths
+) -> None:
+    """Failed but not yet archived (the move comes right after, or Windows is holding it
+    off): the staged original is still there, and a retry processes it from `uploads/`."""
+    att_id, _seq = _seed_sent_photo(store, paths, now=time.time())
+    claimed = _claim(store, att_id, "first")
+    store.finish_attachment(
+        att_id=att_id,
+        owner="first",
+        result=AttachmentResult(
+            status="failed",
+            mime=None,
+            width=None,
+            height=None,
+            duration_s=None,
+            peaks=None,
+            renditions=(),
+            bytes_on_disk=0,
+            failure="timeout",
+        ),
+        now=time.time(),
+    )
+    assert claimed is not None
+    assert (paths.server_upload_dir(att_id) / "assembled").is_file()
+    assert media_queue.failed_original_path(paths, att_id) is None
+
+    assert store.requeue_failed_attachment(att_id, now=time.time()) is not None
+    assert media_queue._do_work(
+        store=store,
+        paths=paths,
+        config=_UNUSED_CONFIG,
+        owner="second",
+        att=_claim(store, att_id, "second"),
+    )
+    row = store.get_attachment(att_id)
+    assert row is not None and row.status == "ready"

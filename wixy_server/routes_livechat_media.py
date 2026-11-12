@@ -443,7 +443,13 @@ async def retry_attachment(att_id: str, request: Request) -> JSONResponse:
         if att.status != "failed" or att.message_seq is None:
             return "not_failed"
         now = time.time()
-        if not attachment_retryable(att, now=now) or failed_original_path(paths, att_id) is None:
+        # The original is either archived, or — in the moment between the row turning
+        # `failed` and the archive move, or while Windows holds that move off — still
+        # staged; the queue processes whichever exists.
+        staged = paths.server_upload_dir(att_id) / "assembled"
+        if not attachment_retryable(att, now=now) or (
+            failed_original_path(paths, att_id) is None and not staged.is_file()
+        ):
             return "gone"
         requeued = store.requeue_failed_attachment(att_id, now=now)
         return requeued if requeued is not None else "not_failed"
