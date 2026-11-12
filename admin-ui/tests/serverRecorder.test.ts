@@ -162,7 +162,7 @@ describe("server voice recorder", () => {
     expect(second.stream.track.stopped).toBe(true);
   });
 
-  it("auto-stops at fifteen minutes", async () => {
+  it("auto-stops at four hours (a runaway guard, not the old fifteen-minute limit)", async () => {
     vi.useFakeTimers();
     const onStop = vi.fn();
     const { recorder } = setup();
@@ -174,6 +174,8 @@ describe("server voice recorder", () => {
     });
     await withCallback.start();
     await vi.advanceTimersByTimeAsync(15 * 60 * 1000);
+    expect(withCallback.state).toBe("recording");
+    await vi.advanceTimersByTimeAsync(4 * 60 * 60 * 1000 - 15 * 60 * 1000);
     expect(withCallback.state).toBe("idle");
     expect(onStop).toHaveBeenCalledTimes(1);
     expect(recorder.state).toBe("idle");
@@ -302,5 +304,144 @@ describe("server voice recorder", () => {
       mediaRecorder: NoPauseRecorder as unknown as typeof FakeRecorder,
     });
     expect(recorder.supportsPause).toBe(false);
+  });
+});
+
+describe("server voice recorder: live slices (spec/server-chat/06 §2.3)", () => {
+  class SliceRecorder {
+    static supported = new Set<string>(VOICE_MIME_PREFERENCES);
+    static isTypeSupported = (mime: string) => SliceRecorder.supported.has(mime);
+    static last: SliceRecorder | null = null;
+    static constructed: Array<MediaRecorderOptions | undefined> = [];
+    static rejectBitrate = false;
+    readonly mimeType: string;
+    state = "inactive";
+    ondataavailable: ((event: BlobEvent) => void) | null = null;
+    onstop: (() => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    start = vi.fn((_timeslice?: number) => { this.state = "recording"; });
+    pause = vi.fn();
+    resume = vi.fn();
+    stop = vi.fn(() => {
+      this.state = "inactive";
+      this.emit("tail");
+      this.onstop?.();
+    });
+
+    constructor(_stream: MediaStream, options?: MediaRecorderOptions) {
+      SliceRecorder.constructed.push(options);
+      if (SliceRecorder.rejectBitrate && options?.audioBitsPerSecond !== undefined) {
+        throw new TypeError("audioBitsPerSecond is not supported");
+      }
+      this.mimeType = options?.mimeType ?? "audio/webm";
+      SliceRecorder.last = this;
+    }
+
+    emit(text: string): void {
+      this.ondataavailable?.({ data: new Blob([text], { type: this.mimeType }) } as BlobEvent);
+    }
+  }
+
+  afterEach(() => {
+    SliceRecorder.constructed = [];
+    SliceRecorder.rejectBitrate = false;
+    SliceRecorder.supported = new Set(VOICE_MIME_PREFERENCES);
+    SliceRecorder.last = null;
+  });
+
+  type RecorderOptions = Parameters<typeof createVoiceRecorder>[0];
+
+  function make(extra: Partial<RecorderOptions> = {}) {
+    let clock = 1000;
+    const recorder = createVoiceRecorder({
+      hooks: { suspend: vi.fn(() => () => undefined) },
+      mediaDevices: { getUserMedia: vi.fn(async () => new FakeStream() as unknown as MediaStream) },
+      mediaRecorder: SliceRecorder as unknown as NonNullable<RecorderOptions["mediaRecorder"]>,
+      now: () => clock,
+      ...extra,
+    });
+    return { recorder, advance: (ms: number) => { clock += ms; } };
+  }
+
+  it("asks for a 15 s timeslice and 64 kbit/s, and says which container it recorded", async () => {
+    const onStart = vi.fn();
+    const { recorder } = make({ onStart });
+    await recorder.start();
+    expect(SliceRecorder.last?.start).toHaveBeenCalledWith(15000);
+    expect(SliceRecorder.constructed[0]).toMatchObject({ mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 64000 });
+    expect(onStart).toHaveBeenCalledWith({ mimeType: "audio/webm;codecs=opus" });
+    recorder.cancel();
+  });
+
+  it("carries on without the bitrate when the constructor rejects the option", async () => {
+    SliceRecorder.rejectBitrate = true;
+    const onError = vi.fn();
+    const { recorder } = make({ onError });
+    await recorder.start();
+    expect(recorder.state).toBe("recording");
+    expect(SliceRecorder.constructed).toHaveLength(2);
+    expect(SliceRecorder.constructed[1]).toEqual({ mimeType: "audio/webm;codecs=opus" });
+    expect(onError).not.toHaveBeenCalled();
+    recorder.cancel();
+  });
+
+  it("hands over every slice in order with the elapsed time, including the last one at stop", async () => {
+    const slices: Array<[number, number, number]> = [];
+    const onStop = vi.fn();
+    const { recorder, advance } = make({
+      onSlice: (blob, index, elapsedMs) => { slices.push([blob.size, index, elapsedMs]); },
+      onStop,
+    });
+    await recorder.start();
+    advance(15000);
+    SliceRecorder.last?.emit("aaaa");
+    advance(15000);
+    SliceRecorder.last?.emit("bbbbbb");
+    advance(4000);
+    recorder.stop();
+    expect(slices).toEqual([[4, 0, 15000], [6, 1, 30000], [4, 2, 34000]]);
+    // The whole recording is still there for the upload-at-stop fallback.
+    const recording = onStop.mock.calls[0]?.[0] as { blob: Blob; durationMs: number };
+    expect(recording.blob.size).toBe(4 + 6 + 4);
+    expect(recording.durationMs).toBe(34000);
+  });
+
+  it("excludes paused time from a slice's elapsed figure", async () => {
+    const elapsed: number[] = [];
+    const { recorder, advance } = make({ onSlice: (_blob, _index, ms) => { elapsed.push(ms); } });
+    await recorder.start();
+    advance(10000);
+    recorder.pause();
+    advance(60000);
+    recorder.resume();
+    advance(5000);
+    SliceRecorder.last?.emit("x");
+    expect(elapsed).toEqual([15000]);
+    recorder.cancel();
+  });
+
+  it("emits no slice for a cancelled recording and still releases the microphone", async () => {
+    const onSlice = vi.fn();
+    const stream = new FakeStream();
+    const { recorder } = make({
+      onSlice,
+      mediaDevices: { getUserMedia: vi.fn(async () => stream as unknown as MediaStream) },
+    });
+    await recorder.start();
+    recorder.cancel();
+    expect(onSlice).not.toHaveBeenCalled();
+    expect(stream.track.stopped).toBe(true);
+  });
+
+  it("a throwing slice consumer never costs the recording", async () => {
+    const onError = vi.fn();
+    const onStop = vi.fn();
+    const { recorder } = make({ onSlice: () => { throw new Error("boom"); }, onError, onStop });
+    await recorder.start();
+    SliceRecorder.last?.emit("a");
+    expect(recorder.state).toBe("recording");
+    recorder.stop();
+    expect(onStop).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalled();
   });
 });

@@ -1,6 +1,11 @@
 /** MediaRecorder controller for the Server voice-note composer. */
 
-export const VOICE_MAX_DURATION_MS = 15 * 60 * 1000;
+/** A runaway guard for a phone left recording, not a product limit (spec/server-chat/06 §1). */
+export const VOICE_MAX_DURATION_MS = 4 * 60 * 60 * 1000;
+/** How often MediaRecorder hands over a slice for the live upload (spec/server-chat/06 §2). */
+export const VOICE_SLICE_MS = 15_000;
+/** Voice quality; a browser may ignore it, and the size caps hold either way. */
+export const VOICE_BITS_PER_SECOND = 64_000;
 export const VOICE_MIME_PREFERENCES = [
   "audio/webm;codecs=opus",
   "audio/mp4",
@@ -20,7 +25,7 @@ interface MediaRecorderLike {
   ondataavailable: ((event: BlobEvent) => void) | null;
   onstop: (() => void) | null;
   onerror: ((event: Event) => void) | null;
-  start(): void;
+  start(timeslice?: number): void;
   stop(): void;
   pause?(): void;
   resume?(): void;
@@ -45,6 +50,14 @@ export interface VoiceRecorderOptions {
    * background the page (which locks the chat and discards the note). Defaults to
    * `navigator.wakeLock`; absent or refused is silently fine. */
   readonly wakeLock?: Pick<WakeLock, "request">;
+  /** The recording really began (the microphone is open and the recorder is running). The
+   * recorder's actual `mimeType` is known now, which is what the live upload is opened with. */
+  readonly onStart?: (info: { readonly mimeType: string }) => void;
+  /** One 15 s slice, in order, as the browser emits it (the last one arrives just before
+   * `onStop`). `elapsedMs` is the recording time so far, paused time excluded. The slices stay
+   * in memory in the recorder until the finished `VoiceRecording` is dropped, so a failed live
+   * upload can still upload the whole blob. */
+  readonly onSlice?: (blob: Blob, index: number, elapsedMs: number) => void;
   readonly onStop?: (recording: VoiceRecording) => void;
   readonly onCancel?: () => void;
   readonly onTimer?: (elapsedMs: number) => void;
@@ -97,6 +110,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
   let timerId: ReturnType<typeof setInterval> | null = null;
   let maxDurationId: ReturnType<typeof setTimeout> | null = null;
   let chunks: Blob[] = [];
+  let sliceIndex = 0;
   let cancelled = false;
   let detached = false;
   let cancelNotified = false;
@@ -155,11 +169,21 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     stream = acquiredStream;
     const mimeType = chooseMimeType(MediaRecorderCtor);
     try {
-      recorder = mimeType
-        ? new MediaRecorderCtor(stream, { mimeType })
-        : new MediaRecorderCtor(stream);
+      recorder = constructRecorder(MediaRecorderCtor, stream, mimeType);
+      sliceIndex = 0;
       recorder.ondataavailable = (event) => {
-        if (event.data.size > 0) chunks.push(event.data);
+        if (event.data.size === 0) return;
+        chunks.push(event.data);
+        const index = sliceIndex;
+        sliceIndex += 1;
+        // A cancelled or detached recording is being thrown away: nothing more to upload.
+        if (cancelled || detached) return;
+        try {
+          options.onSlice?.(event.data, index, currentElapsed());
+        } catch (error) {
+          // A consumer fault must never cost the recording itself.
+          options.onError?.(error);
+        }
       };
       recorder.onerror = (event) => {
         options.onError?.(event);
@@ -167,7 +191,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
       };
       recorder.onstop = finish;
       releaseRecording = options.hooks.suspend("recording");
-      recorder.start();
+      recorder.start(VOICE_SLICE_MS);
     } catch (error) {
       options.onError?.(error);
       releaseRecording?.();
@@ -181,12 +205,23 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
 
     state = "recording";
     segmentStartedAt = now();
+    try {
+      options.onStart?.({ mimeType: recorder.mimeType || mimeType || "audio/webm" });
+    } catch (error) {
+      options.onError?.(error);
+    }
     holdScreenAwake();
     timerId = setIntervalFn(() => {
       elapsed = Math.min(accumulatedMs + Math.max(0, now() - segmentStartedAt), VOICE_MAX_DURATION_MS);
       options.onTimer?.(elapsed);
     }, 1000);
     maxDurationId = setTimeoutFn(() => stop(), VOICE_MAX_DURATION_MS);
+  }
+
+  /** Recording time so far, paused time excluded. */
+  function currentElapsed(): number {
+    const running = state === "recording" ? Math.max(0, now() - segmentStartedAt) : 0;
+    return Math.min(accumulatedMs + running, VOICE_MAX_DURATION_MS);
   }
 
   function pause(): void {
@@ -328,6 +363,21 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
   }
 
   return controller;
+}
+
+/** Ask for the voice bitrate, and carry on without it if this browser's constructor rejects the
+ * option (a recorder that cannot honour a bitrate is still a recorder). */
+function constructRecorder(
+  ctor: MediaRecorderConstructor,
+  stream: MediaStream,
+  mimeType: string | undefined,
+): MediaRecorderLike {
+  const base: MediaRecorderOptions = mimeType ? { mimeType } : {};
+  try {
+    return new ctor(stream, { ...base, audioBitsPerSecond: VOICE_BITS_PER_SECOND });
+  } catch {
+    return mimeType ? new ctor(stream, base) : new ctor(stream);
+  }
 }
 
 function chooseMimeType(ctor: MediaRecorderConstructor): string | undefined {
