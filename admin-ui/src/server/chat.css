@@ -10204,3 +10204,280 @@ button.wx-srv-ck-heart {
 .wx-srv-thread-sentinel-newer[hidden] {
   display: none;
 }
+
+/* -- Live voice notes (spec/server-chat/07-live-voice-notes.md) ---------------------------------
+   The red LIVE dot, the mic's live-mode tint, the live recording row, the "Delete for everyone"
+   confirm, the mode menu, and the listener's live bubble. Everything wraps or shrinks at a 320 px
+   phone and uses the shared colour tokens (the danger tokens re-theme for dark mode on their own). */
+
+.wx-srv-live-dot {
+  flex: none;
+  display: inline-block;
+  box-sizing: border-box;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wx-danger);
+  animation: wx-srv-live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes wx-srv-live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wx-srv-live-dot {
+    animation: none;
+  }
+}
+
+/* Live mode, idle: a red tint and a LIVE dot on the corner of the mic. */
+.wx-srv-record-button--live {
+  position: relative;
+  border-color: var(--wx-danger);
+  background: var(--wx-danger-tint);
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-record-button--live::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--wx-danger);
+  box-shadow: 0 0 0 2px var(--wx-danger-tint);
+}
+
+/* A long press opens the mode menu: no callout, no selection, no double-tap zoom on the button. */
+.wx-srv-record-button {
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+}
+
+/* "LIVE · 0:42" in the recording row. */
+.wx-srv-thread-view .wx-chatc-input-row.wx-srv-recording-row .wx-srv-record-status--live {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.wx-srv-record-cancel--delete {
+  border-color: var(--wx-danger);
+  color: var(--wx-danger-text);
+}
+
+.wx-srv-live-delete-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid var(--wx-danger);
+  border-radius: var(--wx-radius);
+  background: var(--wx-danger-tint);
+  color: var(--wx-ink);
+  font: 0.8125rem/1.4 system-ui, sans-serif;
+}
+
+.wx-srv-live-delete-confirm[hidden] {
+  display: none;
+}
+
+.wx-srv-live-delete-question {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-live-delete-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.wx-srv-live-delete-yes,
+.wx-srv-live-delete-no {
+  min-height: var(--wx-srv-control-h);
+  padding: 0 14px;
+  border-radius: var(--wx-radius);
+  border: 1px solid var(--wx-border);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: 600 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-live-delete-yes {
+  border-color: var(--wx-danger);
+  background: var(--wx-danger);
+  color: #fff;
+}
+
+.wx-srv-live-notice {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--wx-muted);
+  font: 0.75rem/1.4 system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-live-notice[hidden] {
+  display: none;
+}
+
+/* The mic's mode menu: fixed above the button (modeMenu.ts positions it), never wider than the screen. */
+.wx-srv-voice-mode-menu {
+  position: fixed;
+  z-index: 1100;
+  box-sizing: border-box;
+  max-width: calc(100vw - 16px);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border: 1px solid var(--wx-border);
+  border-radius: 12px;
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+
+.wx-srv-voice-mode-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* The menu sits on <body>, outside the thread's own `--wx-srv-control-h`: a full tap target. */
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: 500 0.9375rem/1.2 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.wx-srv-voice-mode-item[aria-checked="true"] {
+  background: var(--wx-brand-blue-tint);
+  color: var(--wx-brand-blue-text);
+}
+
+.wx-srv-voice-mode-item[aria-checked="true"]::after {
+  content: "\2713";
+  margin-left: auto;
+}
+
+.wx-srv-voice-mode-item:focus-visible {
+  outline: 2px solid var(--wx-ink);
+  outline-offset: -2px;
+}
+
+/* The listener's live bubble. */
+.wx-srv-voice-live-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 20px;
+}
+
+.wx-srv-live-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 6px;
+  border-radius: 999px;
+  background: var(--wx-danger-tint);
+  border: 1px solid var(--wx-danger);
+  color: var(--wx-danger-text);
+  font: 700 0.6875rem/1.4 system-ui, sans-serif;
+  letter-spacing: 0.04em;
+}
+
+.wx-srv-live-badge[hidden],
+.wx-srv-live-status[hidden],
+.wx-srv-voice-live-jump[hidden],
+.wx-srv-voice-live-playhead[hidden],
+.wx-srv-voice-live-controls .wx-srv-voice-play[hidden] {
+  display: none;
+}
+
+/* A steady width, so the first seconds of a note are not a few hair-thin bars in a shrunken bubble. */
+.wx-srv-voice-live {
+  min-width: min(240px, 58vw);
+}
+
+.wx-srv-live-status {
+  min-width: 0;
+  color: var(--wx-muted);
+  font: 0.75rem/1.3 system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-voice-live-scrub {
+  position: relative;
+  width: 100%;
+}
+
+.wx-srv-voice-live-waveform {
+  justify-content: flex-start;
+  gap: 1px;
+}
+
+/* A growing waveform: bars keep their width and fill left to right (the shared bar flexes to share
+   the row, which would stretch the first few seconds across the whole bubble). */
+.wx-srv-voice-live-waveform .wx-srv-voice-waveform-bar {
+  flex: 0 0 calc((100% - 63px) / 64);
+  min-width: 1px;
+}
+
+.wx-srv-voice-live-waveform .wx-srv-voice-waveform-bar--edge {
+  background: var(--wx-danger);
+  opacity: 1;
+}
+
+.wx-srv-voice-live-playhead {
+  --wx-srv-live-playhead: 0;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--wx-srv-live-playhead) * 100%);
+  width: 2px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--wx-ink);
+  pointer-events: none;
+}
+
+.wx-srv-voice-live-controls {
+  flex-wrap: wrap;
+}
+
+.wx-srv-voice-live-jump {
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--wx-danger);
+  background: var(--wx-btn-bg);
+  color: var(--wx-danger-text);
+  font: 600 0.75rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* The live transcript: finished sentences normally, the provisional tail greyed. */
+.wx-srv-transcript-tail {
+  color: var(--wx-muted);
+  font-style: italic;
+}
