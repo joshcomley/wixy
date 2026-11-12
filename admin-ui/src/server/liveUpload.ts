@@ -16,6 +16,7 @@
 import { ServerLockedError } from "./api/http";
 import {
   putChunkWithRetry,
+  UploadError,
   type OutOfOrderResult,
   type UploadAttachment,
   type UploadInit,
@@ -31,15 +32,44 @@ export interface LiveVoiceUploaderOptions {
   readonly mimeType: string;
   readonly deviceId: string;
   readonly endpoint?: string;
+  /**
+   * A live voice note others hear while it is recorded (spec/server-chat/07 §6.1): the init
+   * carries `listen: true`, the server creates the attachment (status `live`) at once, and this
+   * uploader then behaves differently in two ways. It never deletes the upload on its own once
+   * the message references it (the caller decides: `cancel()` or Delete for everyone), and it is
+   * patient: a slice that cannot be sent because the network is down or the server is struggling
+   * is retried with backoff for up to `patienceMs`, not given up after three tries, because
+   * listeners are hearing the recording right now and the server only ends the note on its own
+   * after 60 s of silence.
+   */
+  readonly listen?: boolean;
+  /** How long a listened-to upload keeps retrying one slice (default 45 s). */
+  readonly patienceMs?: number;
   /** A slice upload found the session dead (401) while no caller was waiting on it. */
   readonly onLocked?: () => void;
   readonly retryDelayMs?: number;
   readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly now?: () => number;
 }
+
+/** How the init of a live upload came out (the first thing a listened-to recording needs to know). */
+export type LiveOpenResult =
+  /** `attachment` is the server's `live` attachment of a listened-to upload; `null` for a plain one. */
+  | { readonly kind: "opened"; readonly attachment: UploadAttachment | null }
+  /** The chat already has two live recordings (409 `too_many_live`): record a normal note instead. */
+  | { readonly kind: "too_many_live" }
+  | { readonly kind: "failed" };
 
 export interface LiveVoiceUploader {
   /** The server's id for the live upload, once it has been opened. */
   readonly uploadId: string | null;
+  /** True for a listened-to upload (`listen: true`). */
+  readonly listening: boolean;
+  /** Settles once the init has been answered. Never rejects. */
+  opened(): Promise<LiveOpenResult>;
+  /** Tell the server whether the sender is recording or paused (listened-to uploads only). The
+   * latest wish wins; failures are retried a few times and a note that has ended is ignored. */
+  setLiveState(state: "recording" | "paused"): void;
   /** Queue the next slice. Slices must arrive as index 0, 1, 2, ... */
   push(blob: Blob, index: number, elapsedMs: number): void;
   /**
@@ -56,6 +86,9 @@ export interface LiveVoiceUploader {
   abandon(): void;
 }
 
+const DEFAULT_LISTEN_PATIENCE_MS = 45_000;
+const MAX_LISTEN_BACKOFF_MS = 4_000;
+const MAX_STATE_ATTEMPTS = 5;
 const MAX_RESYNCS = 5;
 const MAX_COMPLETE_ATTEMPTS = 3;
 const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
@@ -77,6 +110,16 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
   };
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   const retryDelayMs = opts.retryDelayMs ?? 250;
+  const listen = opts.listen === true;
+  const patienceMs = opts.patienceMs ?? DEFAULT_LISTEN_PATIENCE_MS;
+  const now = opts.now ?? (() => Date.now());
+  let outcome: LiveOpenResult = { kind: "failed" };
+  let desiredState: "recording" | "paused" = "recording";
+  let sentState: "recording" | "paused" = "recording";
+  let statePump: Promise<void> | null = null;
+  let stateRerun = false;
+  /** The server answered that the note is not live any more: no more state updates. */
+  let stateDead = false;
 
   // Read through functions, not bare variables: these change across awaits and in closures,
   // which flow analysis cannot see.
@@ -102,9 +145,16 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
       const response = await opts.fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "voice", mimeType: opts.mimeType, live: true, deviceId: opts.deviceId }),
+        body: JSON.stringify({
+          kind: "voice",
+          mimeType: opts.mimeType,
+          live: true,
+          deviceId: opts.deviceId,
+          ...(listen ? { listen: true } : {}),
+        }),
       });
       if (!response.ok) {
+        if (listen && response.status === 409 && await isTooManyLive(response)) outcome = { kind: "too_many_live" };
         fail();
         return null;
       }
@@ -120,6 +170,20 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
         if (phase() === "cancelled" || phase() === "failed") deletion ??= deleteRemote(body.uploadId);
         return null;
       }
+      const found = (body as unknown as Record<string, unknown>)["attachment"];
+      outcome = {
+        kind: "opened",
+        attachment: listen && isRecord(found) && typeof found["id"] === "string"
+          ? (found as unknown as UploadAttachment)
+          : null,
+      };
+      if (listen && outcome.attachment === null) {
+        // A listened-to upload without the attachment the message needs cannot be used.
+        outcome = { kind: "failed" };
+        fail();
+        deletion ??= deleteRemote(body.uploadId);
+        return null;
+      }
       return body;
     } catch (error) {
       if (error instanceof ServerLockedError) opts.onLocked?.();
@@ -133,7 +197,10 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
     if (phase() !== "open") return;
     phaseValue = "failed";
     // Before the init answered there is nothing to delete yet: `open()` removes it if it lands.
-    if (remoteId !== null) deletion ??= deleteRemote(remoteId);
+    // A listened-to upload that is already open is NOT deleted: a message references it and
+    // people may be hearing it, so what the server holds stays until the caller decides (the
+    // server ends a note nobody feeds after 60 s and processes what arrived).
+    if (remoteId !== null && !listen) deletion ??= deleteRemote(remoteId);
   }
 
   async function deleteRemote(id: string): Promise<void> {
@@ -161,27 +228,44 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
     while (phase() === "open" && nextToSend < slices.length) {
       const slice = slices[nextToSend];
       if (slice === undefined) return;
-      let result: OutOfOrderResult | null;
-      try {
-        result = await putChunkWithRetry({
-          request,
-          endpoint,
-          uploadId: init.uploadId,
-          index: nextToSend,
-          chunk: slice.blob,
-          signal: undefined,
-          options: chunkOptions,
-          durationMs: slice.elapsedMs,
-        });
-      } catch (error) {
-        if (phase() !== "open") return;
-        if (error instanceof ServerLockedError) {
-          haltedValue = error;
-          opts.onLocked?.();
+      let result: OutOfOrderResult | null = null;
+      let firstFailureAt: number | null = null;
+      let waits = 0;
+      for (;;) {
+        try {
+          result = await putChunkWithRetry({
+            request,
+            endpoint,
+            uploadId: init.uploadId,
+            index: nextToSend,
+            chunk: slice.blob,
+            signal: undefined,
+            options: chunkOptions,
+            durationMs: slice.elapsedMs,
+          });
+          break;
+        } catch (error) {
+          if (phase() !== "open") return;
+          if (error instanceof ServerLockedError) {
+            haltedValue = error;
+            opts.onLocked?.();
+            return;
+          }
+          // A listened-to recording outlasts a network blip: keep trying this slice (backing
+          // off) while the failure looks temporary, rather than abandoning a note people hear.
+          if (listen && isTransient(error)) {
+            const at = now();
+            firstFailureAt ??= at;
+            if (at - firstFailureAt < patienceMs) {
+              await sleep(Math.min(MAX_LISTEN_BACKOFF_MS, 500 * 2 ** waits));
+              waits += 1;
+              if (phase() !== "open") return;
+              continue;
+            }
+          }
+          fail();
           return;
         }
-        fail();
-        return;
       }
       if (phase() !== "open") return;
       if (result === null) {
@@ -263,9 +347,78 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
     return null;
   }
 
+  /** `POST /uploads/{id}/live-state`. `done`: stored (204) or repeated; `gone`: the note is not live any more. */
+  async function postState(id: string, state: "recording" | "paused"): Promise<"done" | "gone" | "retry"> {
+    try {
+      const response = await opts.fetch(`${endpoint}/${id}/live-state`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ state }),
+      });
+      if (response.ok) return "done";
+      if (response.status === 404 || response.status === 409) return "gone";
+      return RETRYABLE_STATUSES.has(response.status) ? "retry" : "gone";
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        opts.onLocked?.();
+        return "gone";
+      }
+      return "retry";
+    }
+  }
+
+  async function runStatePump(): Promise<void> {
+    await ready;
+    let attempts = 0;
+    while (remoteId !== null && phase() === "open" && sentState !== desiredState) {
+      const target = desiredState;
+      const answer = await postState(remoteId, target);
+      if (answer === "done") {
+        sentState = target;
+        attempts = 0;
+      } else if (answer === "gone") {
+        stateDead = true;
+        return;
+      } else if ((attempts += 1) >= MAX_STATE_ATTEMPTS) {
+        return;
+      } else {
+        await sleep(retryDelayMs * 2 ** attempts);
+      }
+    }
+  }
+
+  function kickStatePump(): void {
+    if (stateDead) return;
+    if (statePump !== null) {
+      // A wish that arrives while a request is in flight is picked up when it finishes.
+      stateRerun = true;
+      return;
+    }
+    statePump = runStatePump().finally(() => {
+      statePump = null;
+      if (stateRerun) {
+        stateRerun = false;
+        kickStatePump();
+      }
+    });
+  }
+
   return {
     get uploadId() {
       return remoteId;
+    },
+
+    listening: listen,
+
+    async opened(): Promise<LiveOpenResult> {
+      await ready;
+      return outcome;
+    },
+
+    setLiveState(state): void {
+      if (!listen) return;
+      desiredState = state;
+      kickStatePump();
     },
 
     push(blob, index, elapsedMs): void {
@@ -323,6 +476,20 @@ export function createLiveVoiceUploader(opts: LiveVoiceUploaderOptions): LiveVoi
       slices.length = 0;
     },
   };
+}
+
+/** A failure that may pass: the network, a timeout, or a server that is busy or restarting. */
+function isTransient(error: unknown): boolean {
+  return error instanceof UploadError && (error.status === null || RETRYABLE_STATUSES.has(error.status));
+}
+
+async function isTooManyLive(response: Response): Promise<boolean> {
+  try {
+    const body: unknown = await response.clone().json();
+    return isRecord(body) && body["error"] === "too_many_live";
+  } catch {
+    return false;
+  }
 }
 
 async function readJson(response: Response): Promise<unknown> {

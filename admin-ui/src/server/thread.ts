@@ -48,6 +48,9 @@ import {
   type UnsentUpload,
 } from "./api/uploads";
 import type { LiveVoiceUploader } from "./liveUpload";
+import { differOnlyInLiveOrTranscript, patchLiveVoiceBlocks } from "./liveVoice/bubble";
+import { createLiveVoiceHub, type LiveVoiceHub } from "./liveVoice/hub";
+import { createVoiceModeMenu, type VoiceMode, type VoiceModeMenu } from "./liveVoice/modeMenu";
 import { createUnsentVoiceCards } from "./unsentVoice";
 import { formatVoiceTime } from "./voiceTime";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
@@ -124,11 +127,11 @@ import { createHeardStore } from "./heardStore";
 import { FRY_GIF_URL, GifFetchError, fetchGifFile, findGifLinks, removeGifLinks } from "./gifLink";
 import { disposeAttachmentMedia, renderAttachments, type RetryResult } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
-import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
+import { createVoiceRecorder, LIVE_SLICE_MS, VOICE_SLICE_MS, type VoiceRecorder } from "./recorder";
 import { renderReplyQuoteContent, replyToFromMessage } from "./replyTo";
 import type { ServerStreamEvent } from "./stream";
 import {
-  differOnlyInTranscripts,
+  isTranscribableVoice,
   patchTranscriptBlocks,
   refreshTranscriptBlocks,
   type TranscriptionContext,
@@ -183,6 +186,8 @@ export interface ServerThreadDeps {
   fileViewOnceSettings?: WeakMap<File, ViewOnceDraftSettings>;
   /** Fetches GIFs (keyboard GIF links and the bundled Fry GIF). Defaults to `win.fetch`. */
   fetch?: typeof fetch;
+  /** The page's live-voice listener hub (spec/server-chat/07). Defaults to the real one; tests inject a fake. */
+  liveVoiceHub?: LiveVoiceHub;
 }
 
 export interface ServerThreadView {
@@ -276,6 +281,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const documentRef = deps.document ?? document;
   const fetchImpl: typeof fetch = deps.fetch ?? ((input, init) => win.fetch(input, init));
   const now = (): number => Date.now();
+  // One listener socket per page for every live voice note on screen (spec/server-chat/07 §6.2).
+  const liveVoiceHub: LiveVoiceHub = deps.liveVoiceHub ?? createLiveVoiceHub({
+    win,
+    getLabel: () => identity.getName() ?? "Device",
+    lockNow: () => hooks.lockNow("unauthorized"),
+  });
 
   const element = documentRef.createElement("div");
   element.className = "wx-srv-thread-view";
@@ -723,7 +734,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingVoiceNote:
     | {
         readonly file: File;
-        readonly clientId: string;
+        /** Replaced only when a live note's upload could not be finished and the whole recording
+         * goes out as a new message. */
+        clientId: string;
         attachmentId: string | null;
         readonly replyTo: PendingReplyTarget | null;
         /** The game chat this note was recorded for (a round's anchor seq), fixed when recording
@@ -734,11 +747,39 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         /** The live upload this recording was streamed to while it was made, until it either
          * completed (then `attachmentId` is set) or failed for good and was deleted. */
         live: LiveVoiceUploader | null;
+        /** A live voice note (spec/server-chat/07) whose message went out when recording began:
+         * `finish()` then only completes the upload, and nothing is posted again. */
+        liveMessage: Message | null;
       }
     | null = null;
   let voiceSendBusy = false;
   /** The live upload of the recording in progress (spec/server-chat/06 §2.3). */
   let liveUploader: LiveVoiceUploader | null = null;
+
+  // -- Live voice notes: the sender (spec/server-chat/07 §1, §6.1) ----------------------------
+  /** What the next recording is: a voice note, or a live voice note others hear as it is made.
+   * Chosen by long-pressing the mic and kept in memory only, for the life of the page (never in
+   * browser storage, per the round-2 ruling). */
+  let voiceMode: VoiceMode = "voice";
+  /** The recording in progress is a live one. */
+  let recordingLive = false;
+  let recordingMimeType = "audio/webm";
+  /** One live voice note being recorded: its message, sent the moment the server opened it. */
+  interface LiveSend {
+    readonly clientId: string;
+    /** The reply target and game chat, fixed when recording began (the message goes out then). */
+    readonly replyTo: PendingReplyTarget | null;
+    wyrSeq: number | null;
+    /** The message, once it has been sent. */
+    message: Message | null;
+    /** The person threw the note away (or it was too short): a message still in flight is deleted. */
+    cancelled: boolean;
+    /** Slices kept only until the init is answered, so a refused live note (409 `too_many_live`)
+     * can carry on as a normal recording without losing them. `null` once not needed. */
+    slices: Array<{ readonly blob: Blob; readonly index: number; readonly elapsedMs: number }> | null;
+  }
+  let liveSend: LiveSend | null = null;
+  const LIVE_MESSAGE_RETRY_MS = [1_000, 2_000, 4_000] as const;
 
   const MIC_LINE_ICON =
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
@@ -800,6 +841,53 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   voiceFailureRow.className = "wx-srv-voice-failure-row";
   voiceFailureRow.hidden = true;
   voiceFailureRow.append(retryVoiceButton, discardVoiceButton);
+
+  // A live note may already have been heard, so its Cancel becomes "Delete for everyone", behind
+  // a confirm (spec/server-chat/07 §1). The recording carries on while the question is open.
+  const TRASH_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+  const liveDeleteConfirm = documentRef.createElement("div");
+  liveDeleteConfirm.className = "wx-srv-live-delete-confirm";
+  liveDeleteConfirm.hidden = true;
+  liveDeleteConfirm.setAttribute("role", "alertdialog");
+  liveDeleteConfirm.setAttribute("aria-label", "Delete live voice note for everyone");
+  liveDeleteConfirm.setAttribute("data-srv-gesture-boundary", "");
+  const liveDeleteQuestion = documentRef.createElement("p");
+  liveDeleteQuestion.className = "wx-srv-live-delete-question";
+  liveDeleteQuestion.textContent = "Delete this live voice note for everyone? They may already have heard part of it.";
+  const liveDeleteYes = documentRef.createElement("button");
+  liveDeleteYes.type = "button";
+  liveDeleteYes.className = "wx-srv-live-delete-yes";
+  liveDeleteYes.textContent = "Delete for everyone";
+  const liveDeleteNo = documentRef.createElement("button");
+  liveDeleteNo.type = "button";
+  liveDeleteNo.className = "wx-srv-live-delete-no";
+  liveDeleteNo.textContent = "Keep recording";
+  const liveDeleteButtons = documentRef.createElement("div");
+  liveDeleteButtons.className = "wx-srv-live-delete-buttons";
+  liveDeleteButtons.append(liveDeleteYes, liveDeleteNo);
+  liveDeleteConfirm.append(liveDeleteQuestion, liveDeleteButtons);
+  // A short neutral line about what happened to a live note (refused, or cut short and re-sent).
+  const liveNotice = documentRef.createElement("p");
+  liveNotice.className = "wx-srv-live-notice";
+  liveNotice.hidden = true;
+  liveNotice.setAttribute("role", "status");
+  function showLiveNotice(text: string | null): void {
+    liveNotice.textContent = text ?? "";
+    liveNotice.hidden = text === null;
+  }
+  // Long-press the mic to choose Voice note or Live voice note (spec/server-chat/07 §1).
+  const modeMenu: VoiceModeMenu = createVoiceModeMenu({
+    document: documentRef,
+    win,
+    button: recordButton,
+    getMode: () => voiceMode,
+    setMode: (mode) => {
+      voiceMode = mode;
+      updateRecorderUi();
+    },
+    isBusy: () => callBusy || voiceSendBusy || pendingVoiceNote !== null || (voiceRecorder?.state ?? "idle") !== "idle",
+  });
 
   // Operator report (round 2): the original entry point was a ~20px "①" badge in the corner of
   // a 56px thumbnail chip, and its picker was appended INSIDE that chip — a box with
@@ -1097,6 +1185,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     cancelRecordingButton.hidden = !recordingRowActive;
     cancelRecordingButton.disabled = voiceSendBusy;
     pauseRecordingButton.disabled = voiceSendBusy;
+    // A live note that listeners may already be hearing cannot just be cancelled (spec 07 §1).
+    const deleteForEveryoneOffered = recordingLive && liveSend?.message != null && isRecordingOrPaused;
+    cancelRecordingButton.innerHTML = deleteForEveryoneOffered ? TRASH_LINE_ICON : CANCEL_LINE_ICON;
+    cancelRecordingButton.title = deleteForEveryoneOffered ? "Delete for everyone" : "Cancel recording";
+    cancelRecordingButton.setAttribute("aria-label", deleteForEveryoneOffered ? "Delete for everyone" : "Cancel recording");
+    cancelRecordingButton.classList.toggle("wx-srv-record-cancel--delete", deleteForEveryoneOffered);
+    if (!isRecordingOrPaused) liveDeleteConfirm.hidden = true;
+    const liveRow = recordingLive && isRecordingOrPaused;
     recordButton.disabled = callBusy || voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
 
@@ -1115,23 +1211,46 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     composer?.element?.classList.toggle("wx-srv-recording-row", recordingRowActive);
     // Blue indicates the button's stop-and-send action in these two states.
     recordButton.classList.toggle("wx-srv-record-button--send", isRecordingOrPaused);
+    // In live mode the idle mic carries a red LIVE dot and a red tint (spec 07 §1).
+    const liveIdle = voiceMode === "live" && !active && !voiceSendBusy;
+    recordButton.classList.toggle("wx-srv-record-button--live", liveIdle);
+    inputRow?.classList.toggle("wx-srv-recording-live", liveRow);
+    function setRecordingStatus(text: string, live = false): void {
+      recordingStatus.classList.toggle("wx-srv-record-status--live", live);
+      if (!live) {
+        recordingStatus.textContent = text;
+        return;
+      }
+      const dot = documentRef.createElement("span");
+      dot.className = "wx-srv-live-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const label = documentRef.createElement("span");
+      label.textContent = text;
+      recordingStatus.replaceChildren(dot, label);
+    }
 
     if (state === "recording") {
       recordButton.innerHTML = SEND_LINE_ICON;
-      recordButton.title = "Stop and send recording";
-      recordButton.setAttribute("aria-label", "Stop and send recording");
+      recordButton.title = recordingLive ? "Stop live voice note" : "Stop and send recording";
+      recordButton.setAttribute("aria-label", recordingLive ? "Stop live voice note" : "Stop and send recording");
       recordingStatus.hidden = false;
-      recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
+      setRecordingStatus(
+        recordingLive ? `LIVE · ${formatRecordingTime(elapsedMs)}` : `Recording ${formatRecordingTime(elapsedMs)}`,
+        recordingLive,
+      );
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
       pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
       pauseRecordingButton.title = "Pause recording";
       pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else if (state === "paused") {
       recordButton.innerHTML = SEND_LINE_ICON;
-      recordButton.title = "Stop and send recording";
-      recordButton.setAttribute("aria-label", "Stop and send recording");
+      recordButton.title = recordingLive ? "Stop live voice note" : "Stop and send recording";
+      recordButton.setAttribute("aria-label", recordingLive ? "Stop live voice note" : "Stop and send recording");
       recordingStatus.hidden = false;
-      recordingStatus.textContent = `Paused ${formatRecordingTime(elapsedMs)}`;
+      setRecordingStatus(
+        recordingLive ? `LIVE · Paused ${formatRecordingTime(elapsedMs)}` : `Paused ${formatRecordingTime(elapsedMs)}`,
+        recordingLive,
+      );
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
       pauseRecordingButton.innerHTML = RESUME_LINE_ICON;
       pauseRecordingButton.title = "Resume recording";
@@ -1163,8 +1282,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else {
       recordButton.innerHTML = MIC_LINE_ICON;
-      recordButton.title = "Record a voice note";
-      recordButton.setAttribute("aria-label", "Record a voice note");
+      const idleLabel = voiceMode === "live" ? "Record a live voice note" : "Record a voice note";
+      recordButton.title = `${idleLabel} (press and hold to change)`;
+      recordButton.setAttribute("aria-label", idleLabel);
+      recordButton.setAttribute(
+        "aria-description",
+        "Press and hold, or press the up or down arrow key, to choose a voice note or a live voice note.",
+      );
       recordingStatus.hidden = true;
       recordingStatus.removeAttribute("aria-label");
       recordingStatus.textContent = "";
@@ -1172,26 +1296,152 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
+  function waitMs(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      win.setTimeout(resolve, milliseconds);
+    });
+  }
+
+  /** A live voice note was refused (409 `too_many_live`): carry on as an ordinary recording,
+   * with the slices so far handed to an ordinary live upload so nothing is lost. */
+  function continueAsNormalRecording(send: LiveSend): void {
+    const slices = send.slices ?? [];
+    send.slices = null;
+    liveSend = null;
+    recordingLive = false;
+    if (send.replyTo !== null) setPendingReply(send.replyTo);
+    showLiveNotice("Two live voice notes are already going in this chat, so this one is a normal voice note.");
+    const normal = createServerLiveUploader(() => currentSession, {
+      mimeType: recordingMimeType,
+      deviceId: identity.getDeviceId(),
+      onLocked: () => hooks.lockNow("unauthorized"),
+    });
+    for (const slice of slices) normal.push(slice.blob, slice.index, slice.elapsedMs);
+    liveUploader = normal;
+    updateRecorderUi();
+  }
+
+  /** Send the live note's message at once, with the attachment the server created (spec 07 §6.1).
+   * A message that cannot be sent is not lost: the stop path sends it (same `clientId`). */
+  async function postLiveMessage(send: LiveSend, attachmentId: string): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      const session = currentSession;
+      if (session === null) return;
+      let result: Awaited<ReturnType<typeof sendMessage>>;
+      try {
+        result = await sendMessage(session, {
+          clientId: send.clientId,
+          sender: identity.getName() ?? "",
+          deviceId: identity.getDeviceId(),
+          text: null,
+          attachmentIds: [attachmentId],
+          ...(send.replyTo !== null ? { replyToSeq: send.replyTo.seq } : {}),
+          ...(send.wyrSeq !== null ? { wyrSeq: send.wyrSeq } : {}),
+        });
+      } catch (error) {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return;
+      }
+      if (result.ok) {
+        if (send.cancelled) {
+          // The person threw the note away while this was in flight: nobody should keep it.
+          void deleteForEveryone(result.message);
+          return;
+        }
+        send.message = result.message;
+        addConfirmed(result.message);
+        renderThreadList();
+        gameFloat.noteSent(result.message.wyrRef ?? null);
+        updateRecorderUi();
+        return;
+      }
+      if (result.kind === "rejected" && result.status === 404 && send.wyrSeq !== null) {
+        // The game round it was recorded for is gone: the main chat instead.
+        send.wyrSeq = null;
+        continue;
+      }
+      if (result.kind !== "unavailable" || attempt >= LIVE_MESSAGE_RETRY_MS.length) return;
+      await waitMs(LIVE_MESSAGE_RETRY_MS[attempt] ?? 4_000);
+      if (send.cancelled) return;
+    }
+  }
+
+  /** Recording began in live mode: the server has been asked to open a listened-to upload; once
+   * it has, the message goes out immediately so the others see (and can listen to) it. */
+  function beginLiveSend(uploader: LiveVoiceUploader): void {
+    const send: LiveSend = {
+      clientId: cryptoRandomId(win),
+      replyTo: pendingReply,
+      wyrSeq: chatTargetNow(),
+      message: null,
+      cancelled: false,
+      slices: [],
+    };
+    setPendingReply(null);
+    liveSend = send;
+    void (async () => {
+      const result = await uploader.opened();
+      if (liveSend !== send || liveUploader !== uploader) return;
+      if (result.kind === "too_many_live") {
+        continueAsNormalRecording(send);
+        return;
+      }
+      send.slices = null;
+      if (result.kind !== "opened" || result.attachment === null) {
+        // No live note could be opened: this becomes an ordinary voice note when recording stops
+        // (the kept recording is uploaded whole).
+        liveSend = null;
+        recordingLive = false;
+        if (send.replyTo !== null) setPendingReply(send.replyTo);
+        updateRecorderUi();
+        return;
+      }
+      await postLiveMessage(send, result.attachment.id);
+    })();
+  }
+
   function createRecorder(): VoiceRecorder {
     return createVoiceRecorder({
       hooks,
+      sliceMs: () => (voiceMode === "live" ? LIVE_SLICE_MS : VOICE_SLICE_MS),
+      flushOnPause: () => recordingLive,
       onTimer: (elapsedMs) => updateRecorderUi(elapsedMs),
       onStart: ({ mimeType }) => {
         // The recording is uploaded while it is made. A server that refuses a live upload just
         // means this note goes the ordinary way at stop (the kept recording is uploaded whole).
         void liveUploader?.cancel();
+        liveSend = null;
+        showLiveNotice(null);
+        recordingLive = voiceMode === "live";
+        recordingMimeType = mimeType.split(";")[0] || "audio/webm";
         liveUploader = createServerLiveUploader(() => currentSession, {
-          mimeType: mimeType.split(";")[0] || "audio/webm",
+          mimeType: recordingMimeType,
           deviceId: identity.getDeviceId(),
+          ...(recordingLive ? { listen: true } : {}),
           onLocked: () => hooks.lockNow("unauthorized"),
         });
+        if (recordingLive) beginLiveSend(liveUploader);
+        updateRecorderUi();
       },
-      onSlice: (blob, index, elapsedMs) => liveUploader?.push(blob, index, elapsedMs),
+      onSlice: (blob, index, elapsedMs) => {
+        liveSend?.slices?.push({ blob, index, elapsedMs });
+        liveUploader?.push(blob, index, elapsedMs);
+      },
       onStop: (recording) => {
         const live = liveUploader;
         liveUploader = null;
+        const send = liveSend;
+        liveSend = null;
+        recordingLive = false;
         if (recording.durationMs < MIN_VOICE_DURATION_MS) {
-          void live?.cancel();
+          if (send !== null) send.cancelled = true;
+          if (send?.message != null) {
+            // Nobody can have heard a second of it, but it is in the chat: take it out.
+            live?.abandon();
+            void deleteForEveryone(send.message);
+          } else {
+            void live?.cancel();
+          }
           composer.setError("Too short. Record for at least one second.");
           updateRecorderUi();
           return;
@@ -1205,16 +1455,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const file = new File([recording.blob], `voice-note.${extension}`, { type: mimeType });
         voiceDurations.set(file, recording.durationMs / 1000);
         // §(4): "A voice note captures the reply target at the moment
-        // recording stops: the note becomes a reply and the bar clears."
-        const capturedReplyTo = pendingReply;
-        setPendingReply(null);
+        // recording stops: the note becomes a reply and the bar clears." A live note's message
+        // went out when recording began, so it keeps the target it captured then.
+        const capturedReplyTo = send !== null ? send.replyTo : pendingReply;
+        if (send === null) setPendingReply(null);
         pendingVoiceNote = {
           file,
-          clientId: cryptoRandomId(win),
+          // The live message's own clientId, so a retry can never post a second message for it.
+          clientId: send?.clientId ?? cryptoRandomId(win),
           attachmentId: null,
           replyTo: capturedReplyTo,
-          wyrSeq: chatTargetNow(),
+          wyrSeq: send !== null ? send.wyrSeq : chatTargetNow(),
           live,
+          liveMessage: send?.message ?? null,
         };
         void sendVoiceNote();
         updateRecorderUi();
@@ -1224,7 +1477,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         // this — `detach` has already abandoned the live upload, to be offered back as unsent.
         const live = liveUploader;
         liveUploader = null;
-        void live?.cancel();
+        const send = liveSend;
+        liveSend = null;
+        recordingLive = false;
+        if (send !== null) send.cancelled = true;
+        if (send?.message != null) {
+          // A live note that went out is deleted for everyone: the normal message delete ends the
+          // server's decoder, closes the listeners and removes the upload (spec 07 §6.1).
+          live?.abandon();
+          void deleteForEveryone(send.message);
+        } else {
+          void live?.cancel();
+        }
         updateRecorderUi();
       },
       onError: () => {
@@ -1240,6 +1504,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   recordButton.addEventListener("click", () => {
+    // The press that opened the mode menu must not also start a recording.
+    if (modeMenu.consumeClickSuppression()) return;
+    if (modeMenu.isOpen()) {
+      modeMenu.close();
+      return;
+    }
     if (callBusy) return;
     if (currentSession === null) return;
     const recorder = activeRecorder();
@@ -1257,15 +1527,33 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const recorder = activeRecorder();
     if (recorder.state === "recording") {
       recorder.pause();
+      // Listeners are told (the bubble says "Paused") and the server stops its silence clock.
+      if (recordingLive) liveUploader?.setLiveState("paused");
       updateRecorderUi();
     } else if (recorder.state === "paused") {
+      if (recordingLive) liveUploader?.setLiveState("recording");
       recorder.resume();
       updateRecorderUi();
     }
   });
   cancelRecordingButton.addEventListener("click", () => {
+    if (recordingLive && liveSend?.message != null) {
+      // Others may already have heard part of it: ask before deleting it for everyone.
+      liveDeleteConfirm.hidden = false;
+      liveDeleteYes.focus();
+      return;
+    }
     voiceRecorder?.cancel();
     updateRecorderUi();
+  });
+  liveDeleteYes.addEventListener("click", () => {
+    liveDeleteConfirm.hidden = true;
+    voiceRecorder?.cancel();
+    updateRecorderUi();
+  });
+  liveDeleteNo.addEventListener("click", () => {
+    liveDeleteConfirm.hidden = true;
+    cancelRecordingButton.focus();
   });
 
   composer = mountChatComposer({
@@ -1359,6 +1647,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attachButton.setAttribute("aria-label", "Attach a photo or video");
   }
   composer.element.appendChild(voiceFailureRow);
+  composer.element.appendChild(liveDeleteConfirm);
+  composer.element.appendChild(liveNotice);
 
   // -- Reply bar (round 2 ruling item 10 §(4)) ------------------------------
   // Above the input row. Hidden by default (mount/hide, not append/remove —
@@ -2046,8 +2336,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           }
         }
       } else if (current !== item.message) {
-        if (differOnlyInTranscripts(item.message, current)) {
+        if (differOnlyInLiveOrTranscript(item.message, current)) {
           patchTranscriptBlocks(item.element, current.attachments);
+          patchLiveVoiceBlocks(item.element, current.attachments);
           item.message = current;
         } else {
           const replacement = buildUnheardItem(current);
@@ -2368,14 +2659,29 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (pending.attachmentId === null && pending.live !== null) {
         // Throws ServerLockedError if the session died: the note stays pending and the next
         // unlock calls this again, carrying on where the live upload stopped.
+        const listened = pending.live.listening === true;
         const completed = await pending.live.finish();
+        pending.live = null;
         if (completed !== null) {
           pending.attachmentId = completed.id;
-          pending.live = null;
-        } else {
-          // The live upload failed for good and is already deleted: upload the kept recording.
-          pending.live = null;
+          if (pending.liveMessage !== null) {
+            // A live note: its message went out when recording began and now holds the finished
+            // attachment (the server follows with message_updated). Nothing more to send.
+            if (pendingVoiceNote === pending) pendingVoiceNote = null;
+            return;
+          }
+        } else if (listened) {
+          // The live upload could not be finished (the connection was lost for good, or the
+          // server had already ended the note): what listeners heard stays, and the whole kept
+          // recording is sent once more as a NEW voice note, so no audio is lost. (A new
+          // clientId: the live message must not be mistaken for this one.)
+          pending.clientId = cryptoRandomId(win);
+          if (pending.liveMessage !== null) {
+            showLiveNotice("The live voice note was cut short, so the whole recording was sent again as a new voice note.");
+            pending.liveMessage = null;
+          }
         }
+        // Otherwise the live upload failed for good and is already deleted: upload the kept recording.
       }
       if (pending.attachmentId === null) {
         const durationS = voiceDurations.get(pending.file);
@@ -2487,6 +2793,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       transcription,
       onVoiceListened: (attachmentId) => markHeard(attachmentId),
       retryAttachment: retryFailedAttachment,
+      liveVoice: liveVoiceHub,
+      ownMessage: identity.isMine(message.sender),
       document: documentRef,
       win,
     }, timeElement);
@@ -3150,7 +3458,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         bubble.appendChild(textEl);
       }
 
-      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
+      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => isTranscribableVoice(a));
       const attachmentsEl = renderAttachmentsFor(message, hasTranscribableVoice ? time : undefined);
       if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
     }
@@ -3272,11 +3580,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (
         rendered !== undefined &&
         rendered.message !== message &&
-        differOnlyInTranscripts(rendered.message, message)
+        differOnlyInLiveOrTranscript(rendered.message, message)
       ) {
-        // Only a transcript changed: patch its block in place. Rebuilding the bubble would
-        // dispose the `<audio>` and cut off a voice note that is playing right now.
+        // Only a transcript (or a live note's status / pause state) changed: patch it in place.
+        // Rebuilding the bubble would dispose the `<audio>` and cut off a voice note that is
+        // playing right now, or the live stream someone is listening to.
         patchTranscriptBlocks(rendered.element, message.attachments);
+        patchLiveVoiceBlocks(rendered.element, message.attachments);
         rendered = { message, element: rendered.element };
         renderedMessages.set(message.seq, rendered);
       }
@@ -4289,6 +4599,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     stopTranscriptionProbe(false);
     const availabilityOwner = transcriptionOwner;
     currentSession = session;
+    // The live-voice socket follows the session: opened for the live notes on screen, and
+    // reconnected (resuming any stream) on a renewed token.
+    liveVoiceHub.attach(session);
     // Everything held is refreshed below, back to the oldest: never across a gap. A renewed token
     // arrives here without a lock, so this can't be left to `detach`.
     revealToken += 1;
@@ -4451,11 +4764,20 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // the server, to be offered back as an unsent voice note after the next unlock.
       liveUploader?.abandon();
       liveUploader = null;
+      // A lock does not take back what listeners already heard: the live note stays in the chat
+      // and the server ends it by itself after 60 s without audio, keeping what arrived.
+      liveSend = null;
+      recordingLive = false;
       voiceRecorder?.detach();
       voiceRecorder = null;
       unsentCards.clear();
+      modeMenu.close();
+      liveDeleteConfirm.hidden = true;
       updateRecorderUi();
       disposeAttachmentMedia(messageList);
+      // A lock closes the live-voice socket and stops any live audio (bubbles still on screen
+      // stay registered and come back on the next unlock).
+      liveVoiceHub.detach();
       lightbox.teardown();
       goodnight.stop();
       if (activeViewOnceViewer !== null) {
@@ -4576,6 +4898,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       pendingReactions.clear();
       liveUploader?.abandon();
       liveUploader = null;
+      liveSend = null;
+      recordingLive = false;
       pendingVoiceNote?.live?.abandon();
       voiceRecorder?.detach();
       voiceRecorder = null;
@@ -4592,6 +4916,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       cookoutOptions = null;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
+      liveVoiceHub.dispose();
+      modeMenu.dispose();
       observer?.disconnect();
       lightbox.teardown();
       goodnight.stop();

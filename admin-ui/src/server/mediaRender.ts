@@ -2,23 +2,32 @@
 
 import { isAudioConfirmEnabled } from "./audioConfirmPreference";
 import { HEARD_THRESHOLD } from "./heardStore";
-import { renderTranscriptBlock, type TranscriptionContext } from "./transcript";
+import type { LiveVoiceHub } from "./liveVoice/hub";
+import { disposeLiveVoice, renderLiveVoice } from "./liveVoice/bubble";
+import { isTranscribableVoice, renderTranscriptBlock, type TranscriptionContext } from "./transcript";
 
 export type AttachmentKind = "photo" | "video" | "voice";
-export type AttachmentStatus = "processing" | "ready" | "failed";
+/** `live`: a voice note still being recorded (spec/server-chat/07-live-voice-notes.md §6.1). */
+export type AttachmentStatus = "live" | "processing" | "ready" | "failed";
+/** Whether the sender of a `live` note is recording or has paused. */
+export type LiveState = "recording" | "paused";
 export type SuspendReason = "recording" | "micPermission" | "filePicker" | "mediaPlaying";
 
 /** A voice note's opt-in transcript (spec/server-chat/05-voice-transcription.md): absent/`null`
- * until someone asks; `text` only once `done`. */
+ * until someone asks; `text` only once `done`. `live` (spec 07 §6.3): the finalised text so far
+ * and the provisional `tail`, rewritten on every pass until the final `done` object replaces it. */
 export type AttachmentTranscript =
   | { readonly status: "pending"; readonly text?: string | null }
   | { readonly status: "failed"; readonly text?: string | null }
-  | { readonly status: "done"; readonly text: string };
+  | { readonly status: "done"; readonly text: string }
+  | { readonly status: "live"; readonly text: string; readonly tail: string };
 
 export interface Attachment {
   readonly id: string;
   readonly kind: AttachmentKind;
   readonly status: AttachmentStatus;
+  /** Only while `status` is `live`. */
+  readonly liveState?: LiveState;
   readonly width: number | null;
   readonly height: number | null;
   readonly durationS: number | null;
@@ -64,6 +73,12 @@ export interface MediaRenderContext {
   readonly onVoiceListened?: (attachmentId: string) => void;
   /** When present, a failed attachment whose original is still kept gets a "Try again" button. */
   readonly retryAttachment?: (attachmentId: string) => Promise<RetryResult>;
+  /** The page's live-voice listener hub (spec/server-chat/07): without it a `live` voice note is
+   * drawn as a static "Live voice note" line. It also supplies the position a finished note is
+   * handed over at when a live bubble is replaced by the file. */
+  readonly liveVoice?: LiveVoiceHub;
+  /** The message was sent from this device: its live bubble has no Play / Jump to live. */
+  readonly ownMessage?: boolean;
   readonly document?: Document;
   readonly win?: Window;
 }
@@ -79,7 +94,7 @@ export function renderAttachments(
   const container = documentRef.createElement("div");
   container.className = "wx-srv-attachments";
   let photoGrid: HTMLElement | null = null;
-  const lastTranscribable = timeElement ? [...attachments].reverse().find(a => a.kind === "voice" && a.status === "ready" && context.transcription) : undefined;
+  const lastTranscribable = timeElement ? [...attachments].reverse().find(a => isTranscribableVoice(a) && context.transcription) : undefined;
   for (const attachment of attachments) {
     if (attachment.kind === "photo" && attachment.status === "ready") {
       if (!photoGrid) {
@@ -90,7 +105,7 @@ export function renderAttachments(
       photoGrid.appendChild(renderPhotoButton(attachment, context, documentRef));
     } else {
       container.appendChild(renderAttachment(attachment, context, documentRef));
-      if (attachment.kind === "voice" && attachment.status === "ready" && context.transcription) {
+      if (isTranscribableVoice(attachment) && context.transcription) {
         container.appendChild(renderTranscriptBlock(attachment, context.transcription, documentRef, attachment === lastTranscribable ? timeElement : undefined));
       }
     }
@@ -102,6 +117,8 @@ export function renderAttachments(
  * node is removed during a thread redraw or lock detach. Pause events are
  * asynchronous in browsers, so release the tracked suspension synchronously. */
 export function disposeAttachmentMedia(root: ParentNode): void {
+  // Live voice bubbles hold a socket registration and maybe a stream, not an element.
+  disposeLiveVoice(root);
   for (const media of root.querySelectorAll<HTMLMediaElement>("audio, video")) {
     try {
       media.pause();
@@ -124,6 +141,12 @@ export function renderAttachment(
   context: MediaRenderContext,
   documentRef: Document = context.document ?? document,
 ): HTMLElement {
+  if (attachment.status === "live") {
+    if (attachment.kind === "voice" && context.liveVoice) {
+      return renderLiveVoice(attachment, context, context.liveVoice, documentRef);
+    }
+    return stateElement("Live voice note…", "processing", documentRef);
+  }
   if (attachment.status === "processing") return stateElement("Processing…", "processing", documentRef);
   if (attachment.status === "failed") {
     const failed = stateElement(FAILED_TEXT, "failed", documentRef);
@@ -210,7 +233,10 @@ function renderVoice(
   const root = documentRef.createElement("div");
   root.className = "wx-srv-voice";
   const audio = documentRef.createElement("audio");
-  audio.preload = "none";
+  // A live note this device was listening to has just become this finished file: its position is
+  // carried over below (spec/server-chat/07 §1). That needs the file's metadata, so load it.
+  const handover = context.liveVoice?.takeHandover(attachment.id) ?? null;
+  audio.preload = handover !== null && attachment.urls.play ? "metadata" : "none";
   if (attachment.urls.play) audio.src = attachment.urls.play;
   audio.setAttribute("aria-hidden", "true");
   const playButton = documentRef.createElement("button");
@@ -370,6 +396,18 @@ function renderVoice(
   controls.className = "wx-srv-voice-controls";
   controls.append(backButton, playButton, forwardButton, elapsed);
   root.append(scrub, controls, audio, confirmBox);
+
+  // Carry on at the position the live bubble had reached, playing again if it was playing.
+  if (handover !== null && attachment.urls.play) {
+    const apply = () => {
+      const total = knownDuration();
+      audio.currentTime = total > 0 ? Math.min(handover.positionS, total) : handover.positionS;
+      syncSeekBar();
+      if (handover.playing) startPlayback();
+    };
+    if (audio.readyState >= 1) apply();
+    else audio.addEventListener("loadedmetadata", apply, { once: true });
+  }
   return root;
 }
 

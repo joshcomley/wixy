@@ -42,6 +42,17 @@ const MESSAGES = {
   empty: "No speech was picked up.",
 } as const;
 
+/**
+ * Whether a voice note carries the Transcribe control: a finished note, a note still being
+ * recorded (spec/server-chat/07 §3), or one just stopped whose live transcript is still showing
+ * while it is processed. Never a plain note that is still processing: the server would answer 409.
+ */
+export function isTranscribableVoice(attachment: Attachment): boolean {
+  if (attachment.kind !== "voice") return false;
+  if (attachment.status === "ready" || attachment.status === "live") return true;
+  return attachment.status === "processing" && attachment.transcript?.status === "live";
+}
+
 function rateLimitedMessage(retryAfterS: number): string {
   const seconds = Math.max(1, Math.ceil(retryAfterS));
   return `That's a lot of transcripts — try again in ${seconds} second${seconds === 1 ? "" : "s"}.`;
@@ -155,6 +166,54 @@ export function renderTranscriptBlock(
       label.textContent = "Transcribing…";
       line.append(spinner, label);
       children.push(line);
+    } else if (server?.status === "live") {
+      // A note still being recorded (spec/server-chat/07 §3): the finished sentences, then the
+      // provisional tail greyed. Every pass rewrites the tail (and may move the line between
+      // them), so the whole paragraph is repainted; nothing here owns media.
+      const hidden = context.isHidden(attachment.id);
+      state = hidden ? "hidden" : "live";
+      if (server.text === "" && server.tail === "") {
+        const line = documentRef.createElement("div");
+        line.className = "wx-srv-transcript-pending";
+        line.setAttribute("role", "status");
+        const spinner = documentRef.createElement("span");
+        spinner.className = "wx-srv-transcript-spinner";
+        spinner.setAttribute("aria-hidden", "true");
+        const label = documentRef.createElement("span");
+        label.textContent = "Listening…";
+        line.append(spinner, label);
+        children.push(line);
+      } else {
+        if (!hidden) {
+          const body = documentRef.createElement("p");
+          body.className = "wx-srv-transcript-text wx-srv-transcript-live";
+          if (server.text !== "") {
+            const finalised = documentRef.createElement("span");
+            finalised.className = "wx-srv-transcript-final";
+            finalised.textContent = server.text;
+            body.appendChild(finalised);
+          }
+          if (server.tail !== "") {
+            if (server.text !== "") body.appendChild(documentRef.createTextNode(" "));
+            const tail = documentRef.createElement("span");
+            tail.className = "wx-srv-transcript-tail";
+            tail.textContent = server.tail;
+            body.appendChild(tail);
+          }
+          children.push(body);
+        }
+        const toggle = action(
+          documentRef,
+          "wx-srv-transcript-toggle",
+          hidden ? "Show transcript" : "Hide transcript",
+          hidden ? "Show transcript" : "Hide transcript",
+        );
+        toggle.addEventListener("click", () => {
+          context.setHidden(attachment.id, !hidden);
+          paint();
+        });
+        children.push(toggle);
+      }
     } else if (server?.status === "done") {
       const text = server.text;
       const hidden = context.isHidden(attachment.id);

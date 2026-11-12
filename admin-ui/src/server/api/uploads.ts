@@ -39,11 +39,18 @@ export function uploadServerAttachment(
  * reuse a dead one. */
 export function createServerLiveUploader(
   getSession: () => ServerSession | null,
-  options: { readonly mimeType: string; readonly deviceId: string; readonly onLocked?: () => void },
+  options: {
+    readonly mimeType: string;
+    readonly deviceId: string;
+    /** A live voice note people hear while it is recorded (spec/server-chat/07). */
+    readonly listen?: boolean;
+    readonly onLocked?: () => void;
+  },
 ): LiveVoiceUploader {
   return createLiveVoiceUploader({
     mimeType: options.mimeType,
     deviceId: options.deviceId,
+    ...(options.listen === true ? { listen: true } : {}),
     ...(options.onLocked === undefined ? {} : { onLocked: options.onLocked }),
     fetch: (path, init) => {
       const session = getSession();
