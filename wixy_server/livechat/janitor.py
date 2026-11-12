@@ -44,8 +44,9 @@ class JanitorReport:
 
 def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> JanitorReport:
     stale_uploads = 0
-    for upload_id in store.stale_upload_ids(older_than=now - STALE_UPLOAD_AGE_S):
-        if store.delete_stale_upload_if_unpromoted(upload_id, now=now):
+    stale_before = now - STALE_UPLOAD_AGE_S
+    for upload_id in store.stale_upload_ids(older_than=stale_before):
+        if store.delete_stale_upload_if_unpromoted(upload_id, now=now, older_than=stale_before):
             cleanup_deleted_storage_once(
                 store=store, paths=paths, only_items={("upload", upload_id)}
             )

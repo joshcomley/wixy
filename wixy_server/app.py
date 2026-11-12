@@ -458,6 +458,7 @@ def create_app(
         paths=paths,
         notifier=livechat_notifier,
         transcriber=resolved_transcriber,
+        ffmpeg=livechat_queue_config.ffmpeg if livechat_queue_config is not None else None,
     )
 
     jwks = JwksCache(

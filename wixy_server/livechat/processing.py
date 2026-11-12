@@ -213,7 +213,9 @@ poster) — never for a transcode, whose cost grows with the recording's length.
 # A transcode is killed only when ffmpeg stops reporting progress for `_STALL_S`, or
 # when it passes the generous per-kind ceiling (a last-resort bound on a trickle).
 _STALL_S = 120.0
-_VOICE_CEILING_S = 60 * 60.0
+# spec/server-chat/06 §1: a voice note may now run four hours, so its ceiling is 6 h — the
+# 120 s no-progress stall rule above is still the real bound; this is only the last resort.
+_VOICE_CEILING_S = 6 * 60 * 60.0
 _VIDEO_CEILING_S = 3 * 60 * 60.0
 _WATCH_POLL_S = 1.0
 
@@ -675,12 +677,29 @@ def reencode_still_as_jpeg(image: Image.Image, *, long_edge: int, quality: int) 
 # Voice (§7)
 # ---------------------------------------------------------------------------
 
-_VOICE_DURATION_CAP_S = 15 * 60.0
+_VOICE_DURATION_CAP_S = 4 * 60 * 60.0
 VOICE_DURATION_CAP_S = _VOICE_DURATION_CAP_S
-"""R11's 15-minute voice cap, exported for the transcription job's own bounds."""
+"""The voice duration cap (spec/server-chat/06 §1: 4 hours, a runaway guard — it was R11's 15
+minutes), exported for the transcription job's own bounds."""
 _VOICE_PEAK_BUCKETS = 64
 _VOICE_PEAK_SAMPLE_RATE = 8000
+_VOICE_PEAK_MAX_SAMPLES = 7_200_000
+"""8000 Hz x 900 s: the most PCM samples the peaks pass may decode, however long the note."""
+_VOICE_PEAK_MIN_SAMPLE_RATE = 100
 _DURATION_TOLERANCE_S = 0.5
+
+
+def voice_peak_sample_rate(duration_s: float) -> int:
+    """The PCM rate of the peaks pass: `clamp(floor(7_200_000 / duration_s), 100, 8000)`
+    (spec/server-chat/06 §2.4). Up to 15 minutes it is the full 8 kHz; past that it falls so a
+    four-hour note still decodes at most 7.2 million samples (500 Hz), which is plenty for 64
+    loudness buckets."""
+    if duration_s <= 0:
+        return _VOICE_PEAK_SAMPLE_RATE
+    return max(
+        _VOICE_PEAK_MIN_SAMPLE_RATE,
+        min(_VOICE_PEAK_SAMPLE_RATE, math.floor(_VOICE_PEAK_MAX_SAMPLES / duration_s)),
+    )
 
 
 def _rms_peaks(pcm_s16le: bytes, *, buckets: int) -> list[float]:
@@ -793,7 +812,7 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         "-ac",
         "1",
         "-ar",
-        str(_VOICE_PEAK_SAMPLE_RATE),
+        str(voice_peak_sample_rate(duration_s)),
         "-f",
         "s16le",
         "-",
@@ -819,6 +838,40 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         renditions=renditions,
         bytes_on_disk=bytes_on_disk,
     )
+
+
+def cut_voice_stretch(
+    src: Path, dest: Path, *, ffmpeg: str, start_s: float, length_s: float | None
+) -> None:
+    """Copy `length_s` seconds of a processed voice rendition (`play.m4a`), from `start_s`, into
+    `dest` (an `.m4a` path) without re-encoding; `length_s=None` runs to the end. Used to
+    transcribe a long note in consecutive stretches (spec/server-chat/06 §2.4). Every AAC frame
+    is a sync point, so the cut is accurate to a frame (~23 ms). Raises `MediaProcessingError`
+    on failure; the caller owns `dest` and deletes it."""
+    progress_path = _progress_path_for(dest)
+    argv = [
+        ffmpeg,
+        *_watch_flags(progress_path),
+        "-y",
+        "-f",
+        "mp4",
+        "-protocol_whitelist",
+        "file",
+        "-ss",
+        f"{start_s:.3f}",
+        *(["-t", f"{length_s:.3f}"] if length_s is not None else []),
+        "-i",
+        str(src),
+        "-map_metadata",
+        "-1",
+        "-vn",
+        "-c:a",
+        "copy",
+        str(dest),
+    ]
+    proc = _run_transcode(argv, progress_path=progress_path, ceiling_s=_VOICE_CEILING_S)
+    if proc.returncode != 0:
+        raise MediaProcessingError("corrupt", proc.stderr.decode("utf-8", "replace")[:500])
 
 
 def make_thumbnail(src: Path, *, output_dir: Path) -> Path:

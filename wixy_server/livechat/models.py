@@ -573,6 +573,14 @@ class UploadRow:
     filename: str | None
     by_email: str | None
     created_at: float
+    live: bool = False
+    """A voice recording still being uploaded slice by slice (spec/server-chat/06 §2.1):
+    `size_bytes` is then the running total of the slices stored so far, not a declared size."""
+    device_id: str | None = None
+    last_chunk_at: float | None = None
+    duration_ms: int | None = None
+    """The client's own elapsed-recording figure at its latest slice; only the "unsent voice
+    note" list reads it."""
 
 
 @dataclass(frozen=True, slots=True)

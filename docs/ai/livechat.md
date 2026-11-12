@@ -549,7 +549,10 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    transparency, not the source format — see the photo table below.
 3. **Voice**: AAC-LC mono 64kb/s `m4a`, duration from the **output** (MediaRecorder webm has
    none in its own header), 64-bucket RMS peaks normalized against the clip's own loudest
-   bucket.
+   bucket. A voice note may run **4 hours** (`VOICE_DURATION_CAP_S`; it was 15 minutes — R11,
+   spec/server-chat/06). The peaks pass decodes PCM at `voice_peak_sample_rate(duration)` =
+   `clamp(floor(7_200_000 / duration_s), 100, 8000)` Hz — the full 8 kHz up to 15 minutes, 500 Hz at
+   4 hours — so it never decodes more than 7.2 million samples.
 4. **Video**: remux (`-c copy`) iff h264/yuv420p/long-edge≤1920/fps≤60/audio is aac-or-absent
    — the display-matrix rotation side data survives untouched (`-map_metadata -1` strips
    metadata *tags*, not stream side data). Otherwise transcode (libx264 veryfast crf23, same
@@ -564,7 +567,7 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    *transcode* (voice encode, voice peaks pass, video encode/remux) runs through
    `_run_transcode` with `-nostdin -nostats -progress <file>` and is killed only when ffmpeg's
    `out_time_us` stops advancing for `_STALL_S` (120 s) or it passes a per-kind ceiling
-   (`_VOICE_CEILING_S` 1 h, `_VIDEO_CEILING_S` 3 h) — never on a fixed wall clock, because the
+   (`_VOICE_CEILING_S` 6 h, `_VIDEO_CEILING_S` 3 h) — never on a fixed wall clock, because the
    low-priority child is starved, not stuck, on a host at 100% CPU. Only the small fixed-cost
    steps (ffprobe, the one-frame poster) keep the 5-minute `_DEFAULT_TIMEOUT_S`. Every failure is
    logged by the queue as a WARNING (kind, id, seconds taken, reason, ffmpeg's own diagnostic —
@@ -591,7 +594,7 @@ media-pipeline gate (ffmpeg **and** ffprobe **and** `pillow-heif` all available 
 `resolve_binaries` below), the declared MIME type against a per-kind allowlist, the declared
 size (`sizeBytes` must be at least 1: the route's request model rejects 0 or a negative value
 with a 422, and `init_upload` itself refuses it as defence in depth, so such a size cannot
-bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB / video
+bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 512MiB / video
 1GiB), then quota
 (`media_bytes_used + pending_upload_bytes + size > quota`) and the free-space floor
 (injectable `disk_usage`, default `shutil.disk_usage`). `write_chunk` is idempotent
@@ -600,6 +603,25 @@ bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB
 **idempotent on retry** — a `/complete` replay after the first one already promoted the
 upload returns the same attachment rather than re-assembling or erroring (same posture as
 `create_message`'s `clientId` replay).
+
+**Live uploads (spec/server-chat/06, decisions/00210).** A voice note is uploaded *while it is recorded*:
+`POST /uploads` with `live: true` + `deviceId` (voice only, 422 otherwise; `sizeBytes` omitted/ignored,
+ the row starts at 0 and quota/free space are checked against zero bytes). The recorder's 15 s slices are
+ `PUT`  as chunks, **strictly in order** (`prepare_live_chunk`): the index must be the next missing
+ one (count of contiguous chunk files) or an existing one (idempotent overwrite); a gap is 409
+ `out_of_order` with `next`. The running total over the kind's cap is 413 `too_large` and
+ quota/free-space is 507 `storage_full`, both before the slice is written. Each accepted slice
+ (`store.record_live_chunk`) sets the row's `size_bytes` (sum of the slices), `last_chunk_at` and
+ (`?durationMs=`) `duration_ms`. `complete` takes an optional `{"chunkCount": n}` (omitted = every
+ present contiguous chunk; slices missing below it are 409 `incomplete`) and `assemble` joins them by
+ plain concatenation — slices of one `MediaRecorder` session are one continuous WebM/MP4 stream — settling
+ the row's size to the bytes joined (a live upload has no declared size to mismatch). `GET
+ /uploads/unsent?deviceId=` (`store.unsent_live_uploads`) lists this device's live uploads that were
+ never promoted and have stored no slice for ≥ 20 s (`UNSENT_IDLE_S`), newest first — the client
+ offers them as an "Unsent voice note" to Send (`complete`) or Discard (`DELETE`); nothing is ever
+ sent automatically. Schema v22 adds `uploads.live` / `device_id` / `last_chunk_at` /
+ `duration_ms` (existing rows migrate as ordinary uploads). Wipe and the deletion journal treat a live
+ upload exactly like any upload.
 
 **The upload id becomes the attachment id.** There is no separate "original file path"
 column on `AttachmentRow` — the convention *is* the pointer: the media queue looks for its
@@ -652,7 +674,8 @@ all (nothing valid to run it with), and text chat is unaffected. The janitor sti
 DB/filesystem housekeeping, no ffmpeg dependency).
 
 **Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
-uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
+uploads >24h (`stale_upload_ids`; measured from `COALESCE(last_chunk_at, created_at)`, so a live
+recording is never swept while it is still sending slices, and rechecked in the delete transaction), unreferenced attachments >24h (`orphan_attachment_ids`,
 keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
 its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
 DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
@@ -1219,6 +1242,22 @@ could not be recorded) is restarted by the next request (`begin_transcript(resta
 `media/<id[:2]>/<id>/play.m4a`, asks cmd afresh whether it still promises private mode, sends it with a budget of **60 s + 0.5 × the
 note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
 `Attachment.transcript` to every device. `GET /usage` gains `transcriptionAvailable`.
+
+**A note longer than 15 minutes (spec/server-chat/06 §2.4).** One request to cmd never carries more
+than `TRANSCRIBE_STRETCH_S` (15 minutes) of audio, so the 60 s + 0.5 × seconds budget stays per
+request. `plan_stretches(duration)` cuts the note into consecutive stretches (all but the last exactly
+15 minutes, the last running to the end; a note within 15 minutes + 0.5 s tolerance is one stretch and
+is sent whole, exactly as before). For each stretch `processing.cut_voice_stretch` copies
+`-ss/-t` of `play.m4a` (`-c:a copy`, under the progress watchdog) into a temporary file at
+`server/transcribe-tmp/<job>/stretch.m4a` in the server's private storage; the file is deleted as soon
+as it is read, the job directory is removed in a `finally` (so also on failure and cancellation), and
+`reset_loop_state` empties `transcribe-tmp/` at startup. Before **every** stretch cmd is asked afresh
+that it still promises private mode (Inv 50), then the stretch goes through the same
+`Transcriber.transcribe` call. The texts are joined with one space in order (an empty stretch — pure
+silence — adds nothing); one failed stretch fails the whole transcript with that stretch's failure
+code (`error` if the cut itself failed), retryable as ever. `TranscriptionRuntime` takes the ffmpeg
+path (`ffmpeg=`; `None` when the media pipeline is unavailable). The 200 000-character response bound
+of `transcribe.py` applies per stretch; the joined text has no further bound.
 
 **Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
 Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →

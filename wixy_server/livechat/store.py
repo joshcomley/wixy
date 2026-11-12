@@ -434,6 +434,17 @@ _ADVENTURE_PICTURE_COLUMNS = {
     "images_started_at": "ALTER TABLE adv_rounds ADD COLUMN images_started_at REAL",
     "images_tries": "ALTER TABLE adv_rounds ADD COLUMN images_tries INTEGER NOT NULL DEFAULT 0",
 }
+# Live voice uploads (spec/server-chat/06-long-voice-notes.md §2.2, decisions/00210): a recording is
+# uploaded slice by slice while it is made. `live` marks such a row (every existing row migrates as
+# 0, an ordinary upload), `device_id` is the device that is recording, `last_chunk_at` the arrival
+# of its latest slice (the janitor's stale clock and the "unsent" idle test) and `duration_ms` the
+# client's own elapsed-recording figure at that slice.
+_UPLOAD_LIVE_COLUMNS = {
+    "live": "ALTER TABLE uploads ADD COLUMN live INTEGER NOT NULL DEFAULT 0",
+    "device_id": "ALTER TABLE uploads ADD COLUMN device_id TEXT",
+    "last_chunk_at": "ALTER TABLE uploads ADD COLUMN last_chunk_at REAL",
+    "duration_ms": "ALTER TABLE uploads ADD COLUMN duration_ms INTEGER",
+}
 # Cookout (workspace 00058, spec/server-chat/09-cookout.md §4.1): the two-player cooking game.
 # `cookout_rounds` follows `wyr_rounds`/`adv_rounds` (Inv 54/56): keyed by its anchor message,
 # `ON DELETE CASCADE` so even an older blue/green-overlap process that has never heard of the
@@ -546,7 +557,7 @@ Moved = tuple[CookoutRoundRow, bool]
 MAX_PICTURE_TRIES = 3
 """How many times a round's picture hunt may begin (the first, then re-claims after a hunt died)
 before the wait is ended as `failed`."""
-_LATEST_SCHEMA_VERSION = 21
+_LATEST_SCHEMA_VERSION = 22
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
 """Spec §3.4: the country roulette starts this long after the second spin stops (glide + zoom)."""
@@ -842,6 +853,10 @@ def _row_to_upload(row: sqlite3.Row) -> UploadRow:
         filename=row["filename"],
         by_email=row["by_email"],
         created_at=row["created_at"],
+        live=bool(row["live"]),
+        device_id=row["device_id"],
+        last_chunk_at=row["last_chunk_at"],
+        duration_ms=row["duration_ms"],
     )
 
 
@@ -1674,6 +1689,18 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 21")
                 current = 21
+
+            if current < 22:
+                existing_upload_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info(uploads)")
+                }
+                # A hand-built partial database without the table has nothing to alter.
+                if existing_upload_cols:
+                    for column, statement in _UPLOAD_LIVE_COLUMNS.items():
+                        if column not in existing_upload_cols:
+                            conn.execute(statement)
+                conn.execute("PRAGMA user_version = 22")
+                current = 22
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -6550,8 +6577,9 @@ class LiveChatStore:
             if self._is_deleted_storage(conn, kind="upload", storage_id=row.id):
                 raise LiveChatStoreError("upload id has already been deleted")
             conn.execute(
-                "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at, "
+                "live, device_id, last_chunk_at, duration_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     row.id,
                     row.kind,
@@ -6560,6 +6588,10 @@ class LiveChatStore:
                     row.filename,
                     row.by_email,
                     row.created_at,
+                    1 if row.live else 0,
+                    row.device_id,
+                    row.last_chunk_at,
+                    row.duration_ms,
                 ),
             )
 
@@ -6568,18 +6600,61 @@ class LiveChatStore:
             row = conn.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
             return _row_to_upload(row) if row is not None else None
 
+    def record_live_chunk(
+        self, upload_id: str, *, size_bytes: int, duration_ms: int | None, now: float
+    ) -> bool:
+        """A live upload accepted a slice: its running size, the arrival time and (when the client
+        sent one) its elapsed-recording figure. `False` when the row is gone (deleted or wiped
+        while the slice was being stored) or is not a live upload."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE uploads SET size_bytes = ?, last_chunk_at = ?, "
+                "duration_ms = COALESCE(?, duration_ms) WHERE id = ? AND live = 1",
+                (size_bytes, now, duration_ms, upload_id),
+            )
+            return cursor.rowcount == 1
+
+    def set_live_upload_size(self, upload_id: str, size_bytes: int) -> bool:
+        """Settle a live upload's size to the bytes that were actually assembled."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE uploads SET size_bytes = ? WHERE id = ? AND live = 1",
+                (size_bytes, upload_id),
+            )
+            return cursor.rowcount == 1
+
+    def unsent_live_uploads(self, *, device_id: str, idle_before: float) -> list[UploadRow]:
+        """Live voice uploads of one device that were never completed (never promoted to an
+        attachment) and have gone quiet: their latest slice arrived at or before `idle_before`.
+        A recording that has not stored a slice yet has nothing to send and is left out. Newest
+        first."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM uploads AS u WHERE u.live = 1 AND u.device_id = ? "
+                "AND u.last_chunk_at IS NOT NULL AND u.last_chunk_at <= ? "
+                "AND NOT EXISTS (SELECT 1 FROM attachments AS a WHERE a.id = u.id) "
+                "ORDER BY u.created_at DESC, u.id DESC",
+                (device_id, idle_before),
+            ).fetchall()
+            return [_row_to_upload(row) for row in rows]
+
     def delete_upload(self, upload_id: str) -> None:
         with self._write_txn() as conn:
             self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=time.time())
             conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
 
-    def delete_stale_upload_if_unpromoted(self, upload_id: str, *, now: float) -> bool:
-        """Delete and journal an upload only if it has not been promoted meanwhile."""
+    def delete_stale_upload_if_unpromoted(
+        self, upload_id: str, *, now: float, older_than: float | None = None
+    ) -> bool:
+        """Delete and journal an upload only if it has not been promoted meanwhile — and, when
+        `older_than` is given, only if it is still that stale: a live recording that stored a
+        slice between the sweep's scan and this delete is active again and is kept."""
         with self._write_txn() as conn:
             cursor = conn.execute(
                 "DELETE FROM uploads WHERE id = ? "
-                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?)",
-                (upload_id, upload_id),
+                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?) "
+                "AND (? IS NULL OR COALESCE(last_chunk_at, created_at) < ?)",
+                (upload_id, upload_id, older_than, older_than),
             )
             if cursor.rowcount != 1:
                 return False
@@ -6596,9 +6671,12 @@ class LiveChatStore:
             return cursor.rowcount
 
     def stale_upload_ids(self, *, older_than: float) -> list[str]:
+        """Uploads whose last activity is older than `older_than`: for a live recording that is
+        its latest slice (`last_chunk_at`), so a four-hour recording is never swept mid-way."""
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT id FROM uploads WHERE created_at < ?", (older_than,)
+                "SELECT id FROM uploads WHERE COALESCE(last_chunk_at, created_at) < ?",
+                (older_than,),
             ).fetchall()
             return [row["id"] for row in rows]
 
