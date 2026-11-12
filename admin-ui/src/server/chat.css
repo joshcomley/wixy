@@ -344,6 +344,77 @@
   cursor: default;
 }
 
+/* Unsent voice notes (thread.ts / unsentVoice.ts): one card per recording this device made but
+   never sent, just above the composer. Everything wraps, so a 360px phone never scrolls sideways. */
+.wx-srv-unsent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px 0;
+}
+
+.wx-srv-unsent-list[hidden] {
+  display: none;
+}
+
+.wx-srv-unsent-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 0.875rem/1.3 system-ui, sans-serif;
+}
+
+.wx-srv-unsent-label {
+  flex: 1 1 11rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-unsent-send,
+.wx-srv-unsent-discard {
+  flex: none;
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-surface);
+  color: var(--wx-ink);
+  font: 0.8125rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.wx-srv-unsent-send {
+  border-color: var(--wx-brand-blue);
+  background: var(--wx-brand-blue);
+  color: #fff;
+}
+
+.wx-srv-unsent-send:disabled,
+.wx-srv-unsent-discard:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.wx-srv-unsent-error {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--wx-danger-text, #b00020);
+  font-size: 0.8125rem;
+  overflow-wrap: anywhere;
+}
+
+.wx-srv-unsent-error[hidden] {
+  display: none;
+}
+
 .wx-srv-record-status {
   align-self: center;
   color: var(--wx-muted);

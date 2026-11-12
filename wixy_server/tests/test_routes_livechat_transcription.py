@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -25,6 +26,7 @@ from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
 from wixy_server.livechat import media_queue as livechat_media_queue
+from wixy_server.livechat import transcription as livechat_transcription
 from wixy_server.livechat.models import AttachmentResult
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier
@@ -1054,3 +1056,61 @@ class TestStartupRecovery:
         with TestClient(env.app) as client:
             headers = _unlock(client)
             assert _message_attachment(client, headers, voice.att_id)["transcript"] is None
+
+
+class TestLongNotes:
+    """spec/server-chat/06 §2.4: a note longer than one 15-minute stretch is cut into stretches,
+    each sent to cmd through the same private-mode call, and the texts are joined in order."""
+
+    def test_a_note_past_one_stretch_reaches_cmd_in_stretches_and_comes_back_joined(
+        self,
+        make_env: Callable[..., Env],
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            pytest.fail("ffmpeg not found on PATH; this test runs real ffmpeg by design")
+        rendition = tmp_path / "play.m4a"
+        subprocess.run(
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "sine=frequency=300:duration=35",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "32k",
+                str(rendition),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        # A stretch of 10 s stands in for 15 minutes: 35 s is four stretches (10, 10, 10, 5).
+        monkeypatch.setattr(livechat_transcription, "TRANSCRIBE_STRETCH_S", 10.0)
+        env = make_env()
+        voice = _seed_voice(env, duration_s=35.0, audio=rendition.read_bytes())
+
+        with TestClient(env.app) as client:
+            headers = _unlock(client)
+            response = client.post(TRANSCRIBE.format(voice.att_id), headers=headers)
+            assert response.status_code == 202
+            # Returns the moment it is done; the long bound only matters on a saturated host.
+            _wait_for(_finished(env, voice.att_id), timeout_s=180.0)
+            attachment = _message_attachment(client, headers, voice.att_id)
+
+        assert attachment["transcript"] == {"status": "done", "text": " ".join([SENTINEL] * 4)}
+        assert len(env.state.transcribe_requests) == 4
+        for request in env.state.transcribe_requests:
+            assert request.fields == {"private": "1", "cleanup": "0"}
+            assert (request.filename, request.content_type) == ("play.m4a", "audio/mp4")
+            assert 0 < len(request.audio) < len(rendition.read_bytes())  # a stretch, not the note
+        assert env.state.transcribe_retained == []
+        tmp_root = env.paths.server_dir / livechat_transcription.TRANSCRIBE_TMP_DIRNAME
+        assert not tmp_root.exists() or not list(tmp_root.iterdir())

@@ -1169,7 +1169,11 @@ Inv 46's delete and wipe (with `secure_delete` and the WAL scrub) erase it with 
 that arrives after the message was deleted updates no row and is discarded. The text is never logged,
 never in a push payload and never in an error message. The job runs on the contained group (Inv 47),
 one at a time, single-flight per note, at most 6 new jobs a minute per identity; a `pending` row found
-at startup becomes `failed`.
+at startup becomes `failed`. A note longer than 15 minutes is transcribed in consecutive 15-minute
+stretches cut into temporary files inside the server's private storage (spec/server-chat/06 §2.4):
+each stretch is a separate request with its own fresh private-mode check immediately before it is
+sent, the files are deleted when read and again when the job ends however it ends, and nothing else
+leaves the server.
 *Enforced by:* `wixy_server/tests/test_livechat_transcribe.py` (probe strictness and 60 s cache; the
 exact request fields; response mapping; no text in any log line),
 `test_routes_livechat_transcription.py` (nothing sent to a cmd that is not private, on every

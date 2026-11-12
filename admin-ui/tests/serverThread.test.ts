@@ -8,10 +8,13 @@ import { UploadError, type UploadAttachment } from "../src/server/upload";
 import type { ServerStreamEvent } from "../src/server/stream";
 import type { LockHooks, ServerSession } from "../src/server/types";
 
-const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, sendViewOnceMessage, setReaction, transcribeAttachment, wipeChat, uploadServerAttachment } = vi.hoisted(() => ({
+const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, sendViewOnceMessage, setReaction, transcribeAttachment, wipeChat, uploadServerAttachment, createServerLiveUploader, listUnsentUploads, completeUnsentUpload, discardUpload } = vi.hoisted(() => ({
   createVoiceRecorder: vi.fn((options: {
     onStop?: (recording: { blob: Blob; durationMs: number; mimeType: string }) => void;
     onCancel?: () => void;
+    onStart?: (info: { mimeType: string }) => void;
+    onSlice?: (blob: Blob, index: number, elapsedMs: number) => void;
+    onTimer?: (elapsedMs: number) => void;
   }) => {
     let state: "idle" | "starting" | "recording" | "paused" | "stopping" = "idle";
     return {
@@ -39,6 +42,10 @@ const { createVoiceRecorder, deleteMessage, getHistory, getUsage, sendMessage, s
   transcribeAttachment: vi.fn(),
   wipeChat: vi.fn(),
   uploadServerAttachment: vi.fn(),
+  createServerLiveUploader: vi.fn(),
+  listUnsentUploads: vi.fn(async () => []),
+  completeUnsentUpload: vi.fn(),
+  discardUpload: vi.fn(),
 }));
 vi.mock("../src/server/recorder", () => ({ createVoiceRecorder }));
 vi.mock("../src/server/api/messages", async (importOriginal) => ({
@@ -55,6 +62,10 @@ vi.mock("../src/server/api/messages", async (importOriginal) => ({
 vi.mock("../src/server/api/uploads", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../src/server/api/uploads")>()),
   uploadServerAttachment,
+  createServerLiveUploader,
+  listUnsentUploads,
+  completeUnsentUpload,
+  discardUpload,
 }));
 
 const SESSION: ServerSession = { token: "tok", expiresAt: 9_999_999_999 };
@@ -152,6 +163,10 @@ describe("mountServerThread", () => {
     deleteMessage.mockReset();
     wipeChat.mockReset();
     uploadServerAttachment.mockReset();
+    createServerLiveUploader.mockReset();
+    listUnsentUploads.mockReset();
+    completeUnsentUpload.mockReset();
+    discardUpload.mockReset();
     sendViewOnceMessage.mockReset();
   });
   afterEach(() => {
@@ -2819,6 +2834,10 @@ describe("reply to a message (round 2 ruling item 10)", () => {
     deleteMessage.mockReset();
     wipeChat.mockReset();
     uploadServerAttachment.mockReset();
+    createServerLiveUploader.mockReset();
+    listUnsentUploads.mockReset();
+    completeUnsentUpload.mockReset();
+    discardUpload.mockReset();
     sendViewOnceMessage.mockReset();
   });
   afterEach(() => {

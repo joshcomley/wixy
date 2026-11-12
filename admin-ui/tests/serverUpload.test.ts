@@ -112,6 +112,22 @@ describe("server upload", () => {
       .rejects.toMatchObject({ message, status });
   });
 
+  it("allows a voice note up to 512 MiB and four hours, and rejects anything beyond before a request", async () => {
+    const sizeOnly = (size: number) => ({ size, type: "audio/webm", slice: () => new Blob() }) as unknown as Blob;
+    const fetchMock = vi.fn(async () => response({ error: "stop here" }, 500));
+
+    await expect(uploadFile(sizeOnly(512 * 1024 * 1024 + 1), "voice", { fetch: fetchMock }))
+      .rejects.toMatchObject({ message: "This voice is too large (maximum 512 MiB)." });
+    await expect(uploadFile(new Blob(["x"]), "voice", { fetch: fetchMock, durationS: 4 * 3600 + 1 }))
+      .rejects.toMatchObject({ message: "This voice is too long (maximum 4 hours)." });
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    // Exactly at the caps goes through to the server (which here refuses for its own reasons).
+    await expect(uploadFile(sizeOnly(512 * 1024 * 1024), "voice", { fetch: fetchMock, durationS: 4 * 3600 }))
+      .rejects.toMatchObject({ status: 500 });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it("rejects a file over the client cap before starting a request", async () => {
     const fetchMock = vi.fn();
     await expect(uploadFile(new Blob([new Uint8Array(30 * 1024 * 1024 + 1)]), "photo", { fetch: fetchMock }))

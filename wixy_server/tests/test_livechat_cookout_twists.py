@@ -20,6 +20,7 @@ from wixy_server.livechat.cookout_game import CookoutSetup, EncoreSpec, cookout_
 from wixy_server.livechat.models import AttachmentResult, CookoutRoundRow
 from wixy_server.livechat.reactions import reactor_key
 from wixy_server.livechat.store import (
+    _LATEST_SCHEMA_VERSION,
     CookoutBadStateError,
     CookoutExhaustedError,
     CookoutInvalidError,
@@ -334,7 +335,7 @@ class TestSchemaFinalShape:
             "encore_from_seq", "encore_generation", "encore_concept_id",
         ):  # fmt: skip
             assert name in cols, name
-        assert raw(db_path, "PRAGMA user_version") == [(21,)]
+        assert raw(db_path, "PRAGMA user_version") == [(_LATEST_SCHEMA_VERSION,)]
 
     def test_recipes_are_keyed_by_generation_with_both_indexes(
         self, store: LiveChatStore, db_path: Path
