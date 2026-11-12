@@ -150,7 +150,7 @@ class SlidingWindowRateLimiter:
 
 
 @dataclass(frozen=True, slots=True)
-class _JobResult:
+class JobResult:
     status: Literal["done", "failed"]
     text: str | None = None
     failure: str | None = None
@@ -198,31 +198,52 @@ class TranscriptionRuntime:
             self._limiter = anyio.CapacityLimiter(1)
         return self._limiter
 
+    async def transcribe_audio(
+        self, *, audio: bytes, filename: str, content_type: str, duration_s: float
+    ) -> JobResult:
+        """One private-mode request for audio the caller already holds (the live transcription's
+        windows, spec/server-chat/07 §3): the same one-at-a-time limiter as every other job, and
+        cmd asked afresh immediately before the audio leaves (Inv 50). Never raises for a
+        transcription failure: the result says `failed` and why."""
+        transcriber = self.transcriber
+        if transcriber is None:
+            return JobResult("failed", failure="unavailable")
+        async with self._global_limiter():
+            if not await transcriber.available(fresh=True):
+                return JobResult("failed", failure="unavailable")
+            response = await transcriber.transcribe(
+                audio=audio,
+                filename=filename,
+                content_type=content_type,
+                timeout_s=transcribe_timeout_s(duration_s),
+            )
+        return _result_from(response)
+
     async def run_job(self, att_id: str) -> None:
         """Run one job to a recorded outcome. A job failure never raises: the row becomes `failed`.
         Cancellation (shutdown, or a slot swap stopping this process) marks the row `failed`
         (`interrupted`) under a shield — so no spinner outlives its process, even when no later
         startup would sweep it — and then propagates."""
-        result: _JobResult | None
+        result: JobResult | None
         try:
             async with self._global_limiter():
                 result = await self._transcribe(att_id)
         except anyio.get_cancelled_exc_class():
             with anyio.CancelScope(shield=True):
                 await self._record(
-                    att_id, _JobResult("failed", failure="interrupted"), only_if_pending=True
+                    att_id, JobResult("failed", failure="interrupted"), only_if_pending=True
                 )
             raise
         except Exception:
             _LOGGER.exception("livechat: transcription job for %s failed unexpectedly", att_id)
-            result = _JobResult("failed", failure="error")
+            result = JobResult("failed", failure="error")
         finally:
             self.inflight.discard(att_id)
         if result is not None:  # None: the attachment was deleted while the job ran
             await self._record(att_id, result)
 
     async def _record(
-        self, att_id: str, result: _JobResult, *, only_if_pending: bool = False
+        self, att_id: str, result: JobResult, *, only_if_pending: bool = False
     ) -> None:
         try:
             stored = await anyio.to_thread.run_sync(
@@ -244,16 +265,16 @@ class TranscriptionRuntime:
         if stored:
             self.notifier.publish()
 
-    async def _transcribe(self, att_id: str) -> _JobResult | None:
+    async def _transcribe(self, att_id: str) -> JobResult | None:
         transcriber = self.transcriber
         if transcriber is None:
-            return _JobResult("failed", failure="unavailable")
+            return JobResult("failed", failure="unavailable")
         attachment = await anyio.to_thread.run_sync(self.store.get_attachment, att_id)
         if attachment is None or attachment.kind != "voice":
             return None
         duration_s = attachment.duration_s
         if duration_s is not None and duration_s > VOICE_DURATION_CAP_S + _DURATION_TOLERANCE_S:
-            return _JobResult("failed", failure="too_long")
+            return JobResult("failed", failure="too_long")
 
         path = self.paths.server_attachment_media_dir(att_id) / VOICE_RENDITION_FILENAME
         if duration_s is not None and duration_s > TRANSCRIBE_STRETCH_S + _DURATION_TOLERANCE_S:
@@ -264,13 +285,13 @@ class TranscriptionRuntime:
             # A deleted message removes the row first and its files after: only a row that
             # still exists makes a missing file a real failure.
             gone = await anyio.to_thread.run_sync(self.store.get_attachment, att_id) is None
-            return None if gone else _JobResult("failed", failure="media_missing")
+            return None if gone else JobResult("failed", failure="media_missing")
 
         # Asked of cmd NOW, not answered from the 60 s cache: a cmd that stopped promising private
         # mode since the request was accepted (a rollback to a retaining build) must not receive
         # the audio.
         if not await transcriber.available(fresh=True):
-            return _JobResult("failed", failure="unavailable")
+            return JobResult("failed", failure="unavailable")
         response = await transcriber.transcribe(
             audio=audio,
             filename=VOICE_RENDITION_FILENAME,
@@ -281,7 +302,7 @@ class TranscriptionRuntime:
 
     async def _transcribe_in_stretches(
         self, transcriber: Transcriber, att_id: str, path: Path, duration_s: float
-    ) -> _JobResult | None:
+    ) -> JobResult | None:
         """A note longer than one stretch (spec/server-chat/06 §2.4): consecutive stretches of at
         most `TRANSCRIBE_STRETCH_S`, each cut by ffmpeg into a temporary file in the server's
         private storage, sent through the same private-mode call as a short note, and joined with
@@ -289,7 +310,7 @@ class TranscriptionRuntime:
         fails the whole transcript (the person's Retry runs it again)."""
         ffmpeg = self.ffmpeg
         if ffmpeg is None:
-            return _JobResult("failed", failure="error")
+            return JobResult("failed", failure="error")
         work_dir = self.paths.server_dir / TRANSCRIBE_TMP_DIRNAME / uuid.uuid4().hex
         texts: list[str] = []
         engine: str | None = None
@@ -325,10 +346,10 @@ class TranscriptionRuntime:
                     if gone:
                         return None
                     exists = await anyio.to_thread.run_sync(path.is_file)
-                    return _JobResult("failed", failure="error" if exists else "media_missing")
+                    return JobResult("failed", failure="error" if exists else "media_missing")
                 # Asked of cmd NOW before EVERY stretch, exactly as for a short note.
                 if not await transcriber.available(fresh=True):
-                    return _JobResult("failed", failure="unavailable")
+                    return JobResult("failed", failure="unavailable")
                 response = await transcriber.transcribe(
                     audio=audio,
                     filename=VOICE_RENDITION_FILENAME,
@@ -346,12 +367,12 @@ class TranscriptionRuntime:
             # Synchronous on purpose: a cancelled job must still clean up, and an `await` here
             # would be cancelled too. It is one small directory.
             shutil.rmtree(work_dir, ignore_errors=True)
-        return _JobResult("done", text=" ".join(texts), engine=engine)
+        return JobResult("done", text=" ".join(texts), engine=engine)
 
 
-def _result_from(response: TranscribeResult) -> _JobResult:
+def _result_from(response: TranscribeResult) -> JobResult:
     if response.outcome == "ok":
-        return _JobResult(
+        return JobResult(
             "done", text=response.text if response.text is not None else "", engine=response.engine
         )
-    return _JobResult("failed", failure=_FAILURE_BY_OUTCOME.get(response.outcome, "error"))
+    return JobResult("failed", failure=_FAILURE_BY_OUTCOME.get(response.outcome, "error"))

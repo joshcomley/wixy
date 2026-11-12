@@ -789,6 +789,15 @@ def main() -> None:
             "lastFields": last.fields if last is not None else None,
             "lastAudioBytes": len(last.audio) if last is not None else 0,
             "lastAudioIsMp4": bool(last is not None and last.audio[4:8] == b"ftyp"),
+            # A live voice note's passes (spec/server-chat/07 §3) are sent as a private temp WAV.
+            "lastAudioIsWav": bool(
+                last is not None and last.audio[:4] == b"RIFF" and last.audio[8:12] == b"WAVE"
+            ),
+            "wavRequests": sum(
+                1
+                for request in fake_cmd_state.transcribe_requests
+                if request.audio[:4] == b"RIFF" and request.audio[8:12] == b"WAVE"
+            ),
         }
 
     @app.post("/test/server/transcribe-config", include_in_schema=False)

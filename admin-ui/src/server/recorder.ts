@@ -4,6 +4,8 @@
 export const VOICE_MAX_DURATION_MS = 4 * 60 * 60 * 1000;
 /** How often MediaRecorder hands over a slice for the live upload (spec/server-chat/06 §2). */
 export const VOICE_SLICE_MS = 15_000;
+/** A live voice note (spec/server-chat/07 §2): a slice every second, so listeners hear it almost at once. */
+export const LIVE_SLICE_MS = 1_000;
 /** Voice quality; a browser may ignore it, and the size caps hold either way. */
 export const VOICE_BITS_PER_SECOND = 64_000;
 export const VOICE_MIME_PREFERENCES = [
@@ -29,6 +31,7 @@ interface MediaRecorderLike {
   stop(): void;
   pause?(): void;
   resume?(): void;
+  requestData?(): void;
 }
 
 interface MediaRecorderConstructor {
@@ -53,6 +56,13 @@ export interface VoiceRecorderOptions {
   /** The recording really began (the microphone is open and the recorder is running). The
    * recorder's actual `mimeType` is known now, which is what the live upload is opened with. */
   readonly onStart?: (info: { readonly mimeType: string }) => void;
+  /** The slice length for the recording that is about to begin, read at each `start()`:
+   * `VOICE_SLICE_MS` (15 s) for an ordinary voice note, `LIVE_SLICE_MS` (1 s) for a live one
+   * (spec/server-chat/07 §2). */
+  readonly sliceMs?: () => number;
+  /** Ask the browser for the audio recorded so far just before pausing, so a listener to a live
+   * note is not left missing the last moment before the pause until the sender resumes. */
+  readonly flushOnPause?: () => boolean;
   /** One 15 s slice, in order, as the browser emits it (the last one arrives just before
    * `onStop`). `elapsedMs` is the recording time so far, paused time excluded. The slices stay
    * in memory in the recorder until the finished `VoiceRecording` is dropped, so a failed live
@@ -191,7 +201,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
       };
       recorder.onstop = finish;
       releaseRecording = options.hooks.suspend("recording");
-      recorder.start(VOICE_SLICE_MS);
+      recorder.start(options.sliceMs?.() ?? VOICE_SLICE_MS);
     } catch (error) {
       options.onError?.(error);
       releaseRecording?.();
@@ -234,6 +244,7 @@ export function createVoiceRecorder(options: VoiceRecorderOptions): VoiceRecorde
     timerId = null;
     maxDurationId = null;
     try {
+      if (options.flushOnPause?.() === true) recorder?.requestData?.();
       recorder?.pause?.();
     } catch (error) {
       options.onError?.(error);

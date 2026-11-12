@@ -12,13 +12,15 @@ import type { ServerSession } from "../types";
 import type { AttachmentTranscript, RetryResult } from "../mediaRender";
 
 export type AttachmentKind = "photo" | "video" | "voice";
-export type AttachmentStatus = "processing" | "ready" | "failed";
+export type AttachmentStatus = "live" | "processing" | "ready" | "failed";
 export type { AttachmentTranscript };
 
 export interface Attachment {
   readonly id: string;
   readonly kind: AttachmentKind;
   readonly status: AttachmentStatus;
+  /** Only while `status` is `live` (spec/server-chat/07-live-voice-notes.md §6.1). */
+  readonly liveState?: "recording" | "paused";
   readonly width: number | null;
   readonly height: number | null;
   readonly durationS: number | null;
@@ -345,9 +347,13 @@ export type TranscribeAnswer =
   /** Anything else, including a dropped connection: nothing is known to have started. */
   | { readonly kind: "failed" };
 
-function parseTranscript(value: unknown): AttachmentTranscript | null {
+/** A transcript object off the wire, or `null` when it is not one. Exported for tests. */
+export function parseTranscript(value: unknown): AttachmentTranscript | null {
   if (typeof value !== "object" || value === null) return null;
-  const record = value as { status?: unknown; text?: unknown };
+  const record = value as { status?: unknown; text?: unknown; tail?: unknown };
+  if (record.status === "live" && typeof record.text === "string") {
+    return { status: "live", text: record.text, tail: typeof record.tail === "string" ? record.tail : "" };
+  }
   if (record.status === "pending" || record.status === "failed") {
     const text = typeof record.text === "string" ? record.text : undefined;
     return text !== undefined ? { status: record.status, text } : { status: record.status };

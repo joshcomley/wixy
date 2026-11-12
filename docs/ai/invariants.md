@@ -1,5 +1,20 @@
 # Invariants
 
+### Inv 59 — Live voice audio goes only to the chat's authenticated participants, lives only in memory, and ends with its note
+A voice note recorded live (spec/server-chat/07, decisions/00211/00212) is relayed over `/api/admin/server/live-voice/ws`
+only after BOTH gates the call socket needs (Inv 55): the Cloudflare Access assertion verified before the socket is
+accepted, and an unlock token (re-checked against its device grant every two seconds) in the first frame; 4401 on a
+refused, expired or revoked credential. A note not yet sent in a message is `forbidden` to every listener. Decoded
+audio exists only in a bounded ring and in short-lived bounded buffers; peaks, state and the provisional transcript
+tail are memory only; nothing is written to the database or the event stream except the persistent `liveState`,
+status and finalised-transcript changes (Inv 50's row). Resources are bounded: 2 live notes per chat, 4 audio streams
+per note, 8 sockets, credit-limited frames, a bounded control queue, 60 s without a slice / 30 min paused auto-ends the
+note. Delete-for-everyone, wipe, auto-end and a server restart each end the decoder and tell the listeners; a
+note left `live` by a dead server is processed from its stored slices at startup. Live transcription is Inv 50's
+private mode only (a temporary private file, cmd asked afresh before every window).
+*Enforced by:* `test_livechat_live_voice_auth.py`, `test_livechat_live_voice.py`,
+`test_livechat_live_transcription.py`.
+
 ### Inv 58 — Chat search keeps no copy of anything, never sees view-once, and its words are never in a URL
 `LiveChatStore.search_messages` reads the live `messages` and `attachment_transcripts` rows on every search. There is no
 index or other table of chat text, so Inv 46's delete and wipe need to know nothing about search. A view-once message is
@@ -1173,7 +1188,9 @@ at startup becomes `failed`. A note longer than 15 minutes is transcribed in con
 stretches cut into temporary files inside the server's private storage (spec/server-chat/06 §2.4):
 each stretch is a separate request with its own fresh private-mode check immediately before it is
 sent, the files are deleted when read and again when the job ends however it ends, and nothing else
-leaves the server.
+leaves the server. A voice note still being recorded may be transcribed live (spec/server-chat/07 §3, Inv 59)
+through the same private mode: windows of at most 90 s as temporary private WAV files, cmd asked afresh before
+each, only the finalised text stored and the provisional tail kept in memory.
 *Enforced by:* `wixy_server/tests/test_livechat_transcribe.py` (probe strictness and 60 s cache; the
 exact request fields; response mapping; no text in any log line),
 `test_routes_livechat_transcription.py` (nothing sent to a cmd that is not private, on every

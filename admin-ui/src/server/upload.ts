@@ -29,7 +29,9 @@ export interface UploadInit {
 export interface UploadAttachment {
   readonly id: string;
   readonly kind: UploadKind;
-  readonly status: "processing" | "ready" | "failed";
+  readonly status: "live" | "processing" | "ready" | "failed";
+  /** Only while `status` is `live` (a listened-to live voice note: spec/server-chat/07 §6.1). */
+  readonly liveState?: "recording" | "paused";
   readonly width: number | null;
   readonly height: number | null;
   readonly durationS: number | null;

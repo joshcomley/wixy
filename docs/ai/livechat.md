@@ -1031,6 +1031,118 @@ keeps the note. An uploaded attachment left
 behind by a discard is reaped by the server's janitor. Covered by
 `admin-ui/tests/serverThread.test.ts`.
 
+### Live voice notes: the client (spec/server-chat/07, decisions/00211)
+
+Wire contract: [`07-live-voice-notes.md`](../../spec/server-chat/07-live-voice-notes.md) §6 (this section
+is the client's side of it; the server's is built against the same text).
+
+**Mode switch (`liveVoice/modeMenu.ts`, `thread.ts`).** Long-pressing the mic (500 ms, a move of more
+than 10 px cancels it) opens a small `role="menu"` of **Voice note** / **Live voice note** (menuitemradio),
+fixed above the button and kept inside the viewport (320 px included). The press that opened it must not
+also record: `consumeClickSuppression()` swallows the click that follows (and expires after 700 ms, so a
+finger slid off the button never eats the next tap). Other ways in: `contextmenu` (a right click, the
+ContextMenu key, Shift+F10, Android's touch long-press) and ArrowUp/ArrowDown on the focused button;
+Escape, an outside press, Tab, a resize and every lock close it; it cannot open while recording, sending
+or in a call. The mic button carries `aria-haspopup="menu"`, `aria-expanded` and an `aria-description`.
+The choice (`voiceMode` in `thread.ts`) lives **in memory only, for the life of the page**: it survives a
+lock/unlock (the view instance does) but never touches localStorage, sessionStorage or IndexedDB.
+In live mode the idle mic is red-tinted with a pulsing LIVE dot (`wx-srv-record-button--live`) and is named
+"Record a live voice note".
+
+**Sender (`thread.ts`, `liveUpload.ts`, `recorder.ts`).** The recorder's `sliceMs()` is read at each start:
+`VOICE_SLICE_MS` (15 s) or `LIVE_SLICE_MS` (1 s). On `onStart` in live mode the thread creates a
+**listened-to** live uploader (`createServerLiveUploader(..., { listen: true })`: the init also carries
+`listen:true` and returns the live `attachment`). `uploader.opened()` settles to `opened` (with the
+attachment), `too_many_live` (409) or `failed`. On `opened` the message goes out **at once** through the
+ordinary `POST /messages` with `attachmentIds:[uploadId]` (reply target and game chat captured at that
+moment; retried 1/2/4 s with the same `clientId` while the network answers `unavailable`). The recording
+row reads **LIVE · 0:42** (**LIVE · Paused 0:05**) with a pulsing dot. **Pause/Resume** call
+`uploader.setLiveState` (`POST /uploads/{id}/live-state`, the latest wish wins, a few retries, ignored once
+the server says 404/409) and the recorder flushes the audio so far with `requestData()` just before pausing,
+so listeners are not left missing the last second until the resume. **Stop** is spec 06's `complete`;
+nothing is posted again because the message already exists (a retry after a lock or failure reuses the
+upload, never a second message). **Cancel** becomes **Delete for everyone** (a trash icon) once the message
+exists, behind a confirm ("They may already have heard part of it", Keep recording / Delete for everyone);
+confirming runs the existing message delete (`deleteForEveryone`), which ends the decoder, closes
+listeners and removes the upload on the server, so the client does not also `DELETE /uploads/{id}`. Before
+the message exists nobody can have heard anything, so Cancel is the plain cancel (and a message that lands
+afterwards is deleted at once). A recording under one second is taken out of the chat the same way.
+
+**What happens when it goes wrong (decisions taken, never losing audio).**
+- *409 `too_many_live`*: the same recording carries on as an ordinary spec 06 live upload; the slices
+  recorded so far (kept only until the init is answered) are replayed into it, and a short neutral notice
+  says why. Any other failure to open: no live message; Stop uploads the kept recording whole as before.
+- *A listened-to upload is patient.* A slice that cannot be sent because of the network or a 5xx is retried
+  with backoff for up to 45 s (`patienceMs`, inside the server's 60 s no-chunk auto-end) instead of giving
+  up after three tries; a definite refusal (`not_live`, 4xx) fails at once. It **never deletes** what the
+  server holds when it fails (a message references it and people may be listening): the server ends it
+  after 60 s and processes what arrived.
+- *If it cannot be finished* (`finish()` resolves `null`: the connection stayed down, or the server had
+  already ended the note), the **whole kept recording** is uploaded as an ordinary voice note and sent as a
+  **new** message (a new `clientId`, so it cannot be mistaken for the live one) with the notice "The live
+  voice note was cut short, so the whole recording was sent again". Listeners keep the live note with what
+  they heard; the sender loses nothing. (Only the remainder cannot be uploaded alone: later slices of one
+  MediaRecorder stream are not decodable without the first one's header.)
+- *A lock mid-recording* abandons the uploader and deletes nothing: the live note stays in the chat and the
+  server ends it itself after 60 s without audio.
+
+**Listener (`liveVoice/`).** `renderAttachment` draws a voice attachment with status `live` through
+`liveVoice/bubble.ts` (without a hub it is a plain "Live voice note…" line). The bubble has a **LIVE** badge,
+a waveform of the newest 64 seconds (one bar per second from the hub's `peaks`, the newest bar red while
+recording), **Play** (from the start), **Jump to live**, ordinary pause/resume (pause = `stop`, resume =
+`play` from the position reached), a time `0:09 / 0:23`, and a status line: **Paused** while the sender is
+paused, **Finishing…** after the sender stops, **Reconnecting…** when the socket dropped, or why audio did
+not start (`too_many_listeners` and so on). The sender's own device shows the same growing waveform without
+Play or Jump to live (`ownMessage`): it must not play the microphone it is recording into. Audio holds the
+`mediaPlaying` idle suspension; the per-device "ask before playing" confirm applies. A `message_updated` for
+a live note that changes only its status (`live`/`processing`), `liveState`, peaks, duration or transcript
+is **patched into the same bubble** (`differOnlyInLiveOrTranscript` + `patchLiveVoiceBlocks`), never a
+rebuild, so a stream that is playing is not cut off. When the note becomes `ready` the thread rebuilds the
+bubble as the ordinary player; the disposed live bubble leaves a **handover** in the hub (position and
+whether it was playing), which the new file bubble takes (`takeHandover`): it loads the file's metadata,
+seeks to the same position and plays on if it was playing (a browser that refuses `play()` without a tap
+leaves it paused at that position). A listener whose stream reaches `eof` simply hears the tail play out
+(the position is the note's end; the note is marked heard).
+
+**The hub (`liveVoice/hub.ts`, `protocol.ts`).** One WebSocket per page, `/api/admin/server/live-voice/ws`,
+subprotocol `wixy-live-voice-v1`, opened only while something watches or plays. First frame
+`{"type":"auth","v":1,"token","label"}`; after `ready` it sends `watch` for every registered bubble (peaks
+are accumulated from `state` messages; a gap in `peaksFrom` re-watches once). `play` is called from the
+user's tap (that is what starts the AudioContext on iOS) and is followed by `credit` 50; the hub then tops
+up so that **frames buffered + credit granted and not yet received never exceeds 100 (2 s)**, in grants of
+10-500 once outstanding credit falls under 25. A frame the server had no credit for, a repeat, a wrong
+attachment, a call frame (byte 1 = 1) or one not contiguous with the last is never played. One audio
+stream at a time (a new `play` replaces the old); `error` frames reach the bubble; `ping` is answered with
+`pong`. A drop reconnects with backoff (0.5 s doubling to 15 s), re-authenticates, re-watches and resumes
+an audio stream from the sample after the last frame received, keeping what is queued. Close code 4401
+locks the chat. A renewed token reconnects (resuming the stream); `detach()` (every lock) closes the socket
+and stops audio but keeps the registrations of bubbles still on screen for the next `attach()`.
+
+**Audio (`liveVoice/worklet.ts`, `player.ts`).** The call's worklet processor keeps a 200 ms ring under
+300 ms leases, which cannot hold the up-to-2 s a credit window allows, so live voice has a sibling
+processor, `wixy-live-voice`, **in the same self-hosted module** (`call/worklet.ts` imports it, so the one
+fingerprinted `call-worklet.js` carries both and the call's processor is still registered last). It has a
+fixed 3 s ring (never grows; a frame that does not fit is dropped and reported), starts after 100 ms
+queued, resamples 24 kHz to the context rate, reports samples played about every 65 ms (that is what the
+credit and the position are computed from) and `drained` once an `eof`-marked stream has played out.
+`LiveVoiceAudio` owns the context and node; epochs make a report from before a `clear` harmless. The audio
+frame decoding is the call's header (`!BBH16sIQII8s`) with byte 1 = 2.
+
+**Transcript.** The transcript object gains `{"status":"live","text","tail"}` (spec 07 §6.3). Transcribe is
+offered on a `live` note (and on a stopped note still showing its live transcript: `isTranscribableVoice`),
+the finished sentences render normally and the unfinished tail greyed italic, repainted on every pass
+(possibly shorter, when the engine decides a sentence ended earlier); "Listening…" until words arrive;
+Hide/Show work; after Stop the normal `done` object replaces it. Text is set with `textContent`.
+
+**Layout.** Every piece works at 320-360 px and on desktop (rendered and screenshotted at 320, 360 and
+1200 px in light and dark: no horizontal overflow; the menu, the live row, the confirm and the bubble all
+wrap). New styles are at the end of `server/chat.css` and use the shared tokens (`--wx-danger*`).
+
+**Tests.** `tests/server/liveVoice{Protocol,Worklet,Player,Hub,Bubble}.test.ts`,
+`tests/serverThreadLive{Send,Listen}.test.ts` (mode switch, the sender flow, the fallbacks, patch-in-place
+and the handover), `tests/serverLiveUploadListen.test.ts`, `tests/serverRecorderLive.test.ts`,
+`tests/serverTranscriptLive.test.ts`.
+
 `server/api/uploads.ts` adapts `server/upload.ts` to the authenticated `serverFetch` wrapper.
 It captures the current `ServerSession` when an upload starts, sends the chunked
 `POST /uploads` → `PUT /uploads/{id}/chunks/{index}` → `POST /uploads/{id}/complete` sequence,
@@ -2901,6 +3013,64 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   response, two-connection races, generation fencing, the swap archive, T4), `test_cookout_twists_catalogue.py` (the
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,
   `test_livechat_cookout_ai.py` and `test_livechat_cookout_images.py`, and `e2e/tests/server-cookout-twists.spec.ts`.
+
+## 25. Live voice notes (spec `spec/server-chat/07-live-voice-notes.md`, decisions/00211 + 00212, Inv 59)
+
+A voice note recorded in live mode is heard while it is made. The sender uses spec 06's live upload with a 1 s
+timeslice and `listen:true`; the other people listen over `/api/admin/server/live-voice/ws`.
+
+**Rows.** `POST /uploads {live, listen}` creates the `uploads` row AND the `attachments` row in one transaction
+(`LiveChatStore.create_live_upload`, at most `uploads.MAX_LIVE_PER_CHAT` = 2 live at once, else `TooManyLiveError`
+-> 409 `too_many_live`). Schema v23 adds `attachments.live_state` (`recording`/`paused`). The `status` column stays
+`processing` while live (its `CHECK` cannot be widened, and every `status IN ('processing','ready')` rule and an
+older blue/green process keep working); `_row_to_attachment` presents it as `status:"live"` and
+`attachment_json` adds `liveState`. `claim_processing` and the orphan sweep skip `live_state IS NOT NULL`.
+`POST /messages` accepts the live attachment unchanged. `durationS` is 0 and `peaks` `[]` on the wire while live:
+growth travels only on the socket (the stored peaks stay 0..1 floats, 64 buckets, set by the finished note).
+`message_updated` fires only for a status / `liveState` change and a transcript pass.
+
+**End of the live phase** (`LiveVoiceHub.finish`, used by `complete`, auto-end and startup recovery):
+`uploads.assemble` joins the slices and calls `store.end_live` (`live -> processing`, `message_updated`), holding
+the media queue off with a lease (`uploads.LIVE_DRAIN_LEASE_OWNER`) while the decoder drains the last slices from
+the assembled file; `_drain` then releases it, flushes the last partial peak bucket, marks the note `ended` and
+the listeners get `state ended` and (streams) `eof`. A note with no stored slice is `failed`
+(`empty_recording`). A late slice is 409 `not_live` (`uploads.LiveEndedError`); a `complete` for a note this
+process ended itself is 409 `not_live` (`hub.server_ended`), the sender's own repeat stays 202.
+
+**Auto-end** (`hub.tick`, once a second, injected `clock`): no slice for 60 s while recording, or paused for
+30 min, ends the note exactly like `complete` with every contiguous slice. Startup (`hub.recover`, before the
+media queue starts) ends every note still `live` the same way: nothing is lost, nothing hangs. A DB backstop
+every 5 ticks notices a note deleted by a process this hub never heard from.
+
+**Decoder** (`live_voice.Decoder`): one long-lived ffmpeg per note (and one per catch-up listener or live
+transcription), stdin <- slices (chunk files, or `assembled` once joined), stdout -> 24 kHz mono s16le in 960-byte
+frames, below-normal priority. decisions/00209's rules: killed only when no decoded output follows pending input for
+`STALL_S` (120 s; the clock is frozen while paused or while a consumer holds output back) or past the 6 h voice
+ceiling (`StallClock`), then restarted from slice 0 (deterministic, frames already delivered are skipped) up to 3
+times, after which the note is `decoder_dead` (its listeners get `error not_live`; the upload and the finished
+note are unaffected). `LiveNote` keeps per-second peaks (0..255), the decoded duration and a 1500-frame ring.
+
+**Listeners.** `Listener` (one per socket) has a bounded control queue (16; overflow drops the socket), lazily
+built coalesced `state` messages and credit-limited audio. A stream reads the ring; one behind it (or `from:"start"`
+on a long note) gets its own catch-up decode over the stored slices through a 16-frame bounded buffer, so its
+credit holds ffmpeg back, and hands over to the ring when it reaches it (and back if it falls behind). At most 4
+streams per note. Auth, close codes, capacity (8 sockets, 4 pending) and the grant refresh are the call socket's
+(`routes_livechat_live_voice.py` reuses `access_identity` / `upgrade_allowed`).
+
+**Live transcription** (`livechat/live_transcription.py`, started by `POST /attachments/{id}/transcribe` on a
+`live` note): see Inv 50 and 59. A bounded in-memory PCM window (<= 300 s; best effort, the final pass is
+authoritative), a pass every ~8 s of new audio over `[last finalised point, edge)` capped at 90 s, sent as a
+private temp WAV (`transcribe-tmp/<uuid>/live.wav`, deleted after) through `TranscriptionRuntime.transcribe_audio`
+(the same one-at-a-time limiter, cmd asked afresh first). Split at the last sentence end; the engine gives no
+timestamps, so the finalised point is placed by character proportion and settled on the quietest 20 ms within 3 s.
+A window of 90 s with no sentence end is finalised whole. The finalised text goes in the transcript row (status
+stays `pending`; `record_live_transcript`), the tail only in `models.live_tail` memory; the wire shape is
+`{"status":"live","text","tail"}`. Three consecutive failed passes fail the transcript (text kept). After Stop one
+full-note pass (`run_job`, spec 06 stretches) runs once the finished file is `ready` and replaces the live text.
+
+Tests: `test_livechat_live_voice.py` (wire shapes, store, upload and state routes, real-ffmpeg sockets, end,
+delete, auto-end, recovery, client contract), `test_livechat_live_voice_auth.py` (real JWTs),
+`test_livechat_live_transcription.py`.
 
 ## Sender hues
 
