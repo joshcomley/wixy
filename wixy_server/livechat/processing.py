@@ -230,9 +230,24 @@ def _niced(argv: list[str]) -> list[str]:
     return argv if sys.platform == "win32" else ["nice", "-n", "10", *argv]
 
 
+_NICE_COULD_NOT_RUN = (126, 127)
+"""POSIX `nice` exits 127 when the program does not exist and 126 when it cannot be run —
+the same "binary unavailable" a direct exec reports as FileNotFoundError on Windows."""
+
+
+def _checked(
+    proc: subprocess.CompletedProcess[bytes], argv: list[str]
+) -> subprocess.CompletedProcess[bytes]:
+    if sys.platform != "win32" and proc.returncode in _NICE_COULD_NOT_RUN:
+        raise MediaProcessingError(
+            "media_unavailable", proc.stderr.decode("utf-8", "replace")[:300] or argv[0]
+        )
+    return proc
+
+
 def _run(argv: list[str], *, timeout_s: float) -> subprocess.CompletedProcess[bytes]:
     try:
-        return subprocess.run(
+        proc = subprocess.run(
             _niced(argv),
             stdin=subprocess.DEVNULL,
             capture_output=True,
@@ -244,6 +259,7 @@ def _run(argv: list[str], *, timeout_s: float) -> subprocess.CompletedProcess[by
         raise MediaProcessingError("timeout", f"{argv[0]} exceeded {timeout_s:.0f}s") from exc
     except FileNotFoundError as exc:
         raise MediaProcessingError("media_unavailable", str(exc)) from exc
+    return _checked(proc, argv)
 
 
 class _ProgressReader:
@@ -330,7 +346,8 @@ def _run_transcode(
                 proc.kill()
                 proc.communicate()
                 raise MediaProcessingError("timeout", reason) from None
-            return subprocess.CompletedProcess(full, proc.returncode, stdout, stderr)
+            done = subprocess.CompletedProcess(full, proc.returncode, stdout, stderr)
+            return _checked(done, full)
     finally:
         if proc.poll() is None:
             proc.kill()

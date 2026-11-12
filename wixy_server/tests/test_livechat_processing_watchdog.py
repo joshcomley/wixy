@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -55,20 +56,37 @@ def _child(script: str, progress: Path, *args: str) -> list[str]:
     return [sys.executable, "-c", script, str(progress), *args]
 
 
+def _clock_from_first_write(progress: Path) -> Callable[[], float]:
+    """A clock that stands still until the child has written its first progress line, then
+    runs in real time — so interpreter start-up on a saturated test host (which can take
+    longer than the stall window) is not mistaken for a stall. The watchdog's own handling of
+    start-up is ffmpeg's 120 s `_STALL_S`, far above any interpreter launch."""
+    started: list[float] = []
+
+    def now() -> float:
+        if not started:
+            if not progress.exists():
+                return 0.0
+            started.append(time.monotonic())
+        return time.monotonic() - started[0]
+
+    return now
+
+
 def test_slow_but_progressing_transcode_runs_to_completion(tmp_path: Path) -> None:
     progress = tmp_path / ".progress.txt"
-    started = time.monotonic()
+    clock = _clock_from_first_write(progress)
     proc = processing._run_transcode(
-        _child(_PROGRESSING_CHILD, progress, "16", "0.5"),
+        _child(_PROGRESSING_CHILD, progress, "20", "0.4"),
         progress_path=progress,
         ceiling_s=120.0,
         stall_s=5.0,
         poll_s=0.05,
+        clock=clock,
     )
     # It ran well past the stall window in total, yet was never killed: only a
-    # gap with NO progress counts, not the overall duration. (The window allows
-    # for interpreter start-up on a loaded box, like ffmpeg's own start-up.)
-    assert time.monotonic() - started > 5.0
+    # gap with NO progress counts, not the overall duration.
+    assert clock() > 5.0
     assert proc.returncode == 0
     assert proc.stdout == b"done"
     assert not progress.exists()
@@ -187,3 +205,18 @@ def test_voice_note_outlasting_the_fixed_budget_still_processes(
     )
     assert result.duration_s == pytest.approx(20.0, abs=0.5)
     assert sorted(p.name for p in (tmp_path / "out").iterdir()) == ["play.m4a"]
+
+
+@pytest.mark.parametrize("code", [126, 127])
+def test_posix_nice_could_not_run_is_media_unavailable(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    """On POSIX every child is launched through `nice`, which exits 127 (missing) or 126
+    (not executable) instead of raising — that is an unavailable binary, not corrupt media."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    done = subprocess.CompletedProcess(["nice"], code, b"", b"nice: 'ffmpeg': No such file")
+    with pytest.raises(processing.MediaProcessingError) as exc:
+        processing._checked(done, ["ffmpeg"])
+    assert exc.value.reason == "media_unavailable"
+    ok = subprocess.CompletedProcess(["nice"], 1, b"", b"Invalid data")
+    assert processing._checked(ok, ["ffmpeg"]) is ok  # an ordinary ffmpeg failure passes through
