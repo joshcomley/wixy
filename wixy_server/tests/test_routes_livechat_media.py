@@ -832,6 +832,11 @@ def test_retry_route_brings_a_failed_photo_back(
         assert response.json()["attachment"]["retryable"] is False
 
         anyio.run(_wait_for_status, store, att_id, "ready")
+        # The archive is removed only AFTER the row is ready (never lose the original
+        # before the renditions are recorded), so wait for that second step too.
+        deadline = time.monotonic() + 20
+        while paths.server_failed_dir(att_id).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
         assert not paths.server_failed_dir(att_id).exists()
 
         again = client.post(f"/api/admin/server/attachments/{att_id}/retry", headers=headers)
