@@ -45,10 +45,12 @@ const ERROR_TEXT: Readonly<Record<LiveVoiceErrorCode | "audio_failed", string>> 
   audio_failed: "Couldn't play audio. Tap play to try again.",
 };
 
-/** Peaks arrive as 0..255 integers over the socket; a stored note's are 0..1. Both become 0..1. */
-export function normalizePeaks(peaks: readonly number[] | null | undefined): number[] {
+/** Peaks arrive as 0..255 integers over the socket; a stored note's are 0..1. Both become 0..1.
+ * The caller names the source: guessing it from the values would read a quiet room's socket
+ * buckets (all 0 or 1) as full-height floats. */
+export function normalizePeaks(peaks: readonly number[] | null | undefined, source: "socket" | "stored"): number[] {
   if (peaks === null || peaks === undefined || peaks.length === 0) return [];
-  const scale = peaks.some((value) => value > 1) ? 255 : 1;
+  const scale = source === "socket" ? 255 : 1;
   return peaks.map((value) => (Number.isFinite(value) ? Math.max(0, Math.min(1, value / scale)) : 0));
 }
 
@@ -153,7 +155,7 @@ export function renderLiveVoice(
   const positionSamples = (): number => audio.positionSamples ?? resumeSamples ?? lastPositionSamples;
 
   function currentPeaks(): number[] {
-    return model !== null ? normalizePeaks(model.peaks) : normalizePeaks(current.peaks);
+    return model !== null ? normalizePeaks(model.peaks, "socket") : normalizePeaks(current.peaks, "stored");
   }
 
   function paintWaveform(): void {

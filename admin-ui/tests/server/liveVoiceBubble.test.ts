@@ -312,10 +312,16 @@ describe("replacing the live bubble with the finished file (spec 07 §1)", () =>
 });
 
 describe("normalizePeaks", () => {
-  it("reads 0..255 integers and 0..1 floats alike", () => {
-    expect(normalizePeaks([0, 255, 51])).toEqual([0, 1, 0.2]);
-    expect(normalizePeaks([0, 0.5, 1])).toEqual([0, 0.5, 1]);
-    expect(normalizePeaks(null)).toEqual([]);
-    expect(normalizePeaks([])).toEqual([]);
+  it("scales socket peaks (0..255) and keeps stored peaks (0..1)", () => {
+    expect(normalizePeaks([0, 255, 51], "socket")).toEqual([0, 1, 0.2]);
+    expect(normalizePeaks([0, 0.5, 1], "stored")).toEqual([0, 0.5, 1]);
+    expect(normalizePeaks(null, "stored")).toEqual([]);
+    expect(normalizePeaks([], "socket")).toEqual([]);
+  });
+
+  it("draws a near-silent live note near silent, not at full height", () => {
+    // Every socket bucket of a quiet room is 0 or 1 out of 255. Guessing the scale from the values
+    // read those as 0..1 floats and drew full-height bars.
+    expect(normalizePeaks([0, 1, 1, 0], "socket")).toEqual([0, 1 / 255, 1 / 255, 0]);
   });
 });
