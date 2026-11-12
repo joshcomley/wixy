@@ -13,7 +13,7 @@ from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
 from wixy_server.auth import AccessVerificationError
-from wixy_server.livechat.call_broker import CallBroker, CallCapacityError, Peer
+from wixy_server.livechat.call_broker import CallBroker, CallCapacityError, CallWork, Peer
 from wixy_server.livechat.call_protocol import COMMAND, PROTOCOL, Authenticate
 from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S
 from wixy_server.livechat.store import LiveChatStore
@@ -23,20 +23,18 @@ from wixy_server.settings import Settings
 router = APIRouter()
 
 
-def upgrade_allowed(ws: WebSocket, origins: frozenset[str]) -> bool:
+def upgrade_allowed(ws: WebSocket, origins: frozenset[str], protocol: str = PROTOCOL) -> bool:
     return (
         not ws.scope.get("query_string")
         and len(ws.headers.getlist("origin")) == 1
         and ws.headers["origin"] in origins
         and len(ws.headers.getlist("cf-access-jwt-assertion")) <= 1
         and ws.headers.get("sec-fetch-site", "same-origin") == "same-origin"
-        and ws.scope.get("subprotocols") == [PROTOCOL]
+        and ws.scope.get("subprotocols") == [protocol]
     )
 
 
-async def access_identity(
-    ws: WebSocket, settings: Settings, broker: CallBroker
-) -> tuple[str, float]:
+async def access_identity(ws: WebSocket, settings: Settings, work: CallWork) -> tuple[str, float]:
     if settings.dev_no_auth:
         # Same explicit development-only bypass as HTTP; never enabled in production.
         return ws.headers.get("cf-access-authenticated-user-email", ""), time.time() + 43200
@@ -47,7 +45,7 @@ async def access_identity(
     # Bounded wait so a hung JWKS fetch cannot hold a pre-accept socket forever; the
     # job itself keeps its admission permit until it actually returns.
     async with asyncio.timeout(10):
-        claims: dict[str, Any] = await broker.admission_work.run(lambda: verify(token))
+        claims: dict[str, Any] = await work.run(lambda: verify(token))
     email, exp = claims.get("email"), claims.get("exp")
     if (
         not isinstance(email, str)
@@ -159,7 +157,7 @@ async def calls_socket(ws: WebSocket) -> None:
         settings: Settings = ws.app.state.settings
         # Socket slots bound sockets; broker's CallWork owners separately bound the
         # synchronous verifier/grant jobs, which outlive a cancelled or timed-out awaiter.
-        email, access_exp = await access_identity(ws, settings, broker)
+        email, access_exp = await access_identity(ws, settings, broker.admission_work)
         await ws.accept(subprotocol=PROTOCOL)
         accepted = True
         async with asyncio.timeout(5):

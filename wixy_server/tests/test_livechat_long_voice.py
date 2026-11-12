@@ -278,10 +278,10 @@ class TestSchema:
         db = tmp_path / "server" / "server.db"
         store = LiveChatStore(db)
         store.pending_upload_bytes()
-        assert _LATEST_SCHEMA_VERSION == 22
+        assert _LATEST_SCHEMA_VERSION >= 22  # v23 (live voice notes) is additive on top
         conn = sqlite3.connect(str(db))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             info = {row[1]: row for row in conn.execute("PRAGMA table_info(uploads)")}
         finally:
             conn.close()
@@ -319,7 +319,7 @@ class TestSchema:
         )
         conn = sqlite3.connect(str(db))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
@@ -335,7 +335,7 @@ class TestSchema:
         LiveChatStore(db).pending_upload_bytes()
         conn = sqlite3.connect(str(db))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 22
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
         finally:
             conn.close()
 
