@@ -17,11 +17,12 @@ from typing import Annotated, Literal
 import anyio
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from builder.jsontypes import JsonObject
 from wixy_server.livechat import uploads
 from wixy_server.livechat.grants import GRANT_ID_RE, GRANT_IDLE_EXPIRY_S
+from wixy_server.livechat.live_voice import LiveVoiceHub
 from wixy_server.livechat.media_queue import failed_original_path
 from wixy_server.livechat.models import (
     AttachmentRow,
@@ -30,7 +31,7 @@ from wixy_server.livechat.models import (
     attachment_retryable,
 )
 from wixy_server.livechat.notifier import LiveChatNotifier
-from wixy_server.livechat.store import LiveChatStore
+from wixy_server.livechat.store import LiveChatStore, TooManyLiveError
 from wixy_server.livechat.tokens import MediaSigner, require_server_token, verify_media_signature
 from wixy_server.settings import Settings
 from wixy_server.storage import ProjectPaths
@@ -52,6 +53,9 @@ class InitUploadIn(BaseModel):
     """spec/server-chat/06 §2.1: a voice recording uploaded slice by slice while it is made."""
     deviceId: str | None = None
     """Required for a live upload: the device recording (the id `POST /messages` also takes)."""
+    listen: bool = False
+    """spec/server-chat/07 §6.1: other people may hear the recording as it is made. Needs `live`;
+    the attachment row (status `live`) is created with the upload."""
 
 
 @router.post("/uploads", response_model=None)
@@ -69,6 +73,8 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
             raise HTTPException(status_code=422, detail="deviceId must be 8-64 characters")
     elif body.sizeBytes is None or body.sizeBytes < 1:
         raise HTTPException(status_code=422, detail="sizeBytes must be a positive integer")
+    if body.listen and not body.live:
+        raise HTTPException(status_code=422, detail="listen needs a live upload")
     declared_size = body.sizeBytes if body.sizeBytes is not None else 0
 
     def _init() -> uploads.InitResult:
@@ -87,10 +93,13 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
             now=time.time(),
             live=body.live,
             device_id=body.deviceId,
+            listen=body.listen,
         )
 
     try:
         result = await anyio.to_thread.run_sync(_init)
+    except TooManyLiveError:
+        return JSONResponse(status_code=409, content={"error": "too_many_live"})
     except uploads.MediaUnavailableError:
         return JSONResponse(status_code=503, content={"error": "media_unavailable"})
     except uploads.UnsupportedTypeError:
@@ -102,14 +111,17 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
     except uploads.StorageFullError:
         return JSONResponse(status_code=507, content={"error": "storage_full"})
 
-    return JSONResponse(
-        status_code=201,
-        content={
-            "uploadId": result.upload_id,
-            "chunkBytes": result.chunk_bytes,
-            "maxBytes": result.max_bytes,
-        },
-    )
+    content: JsonObject = {
+        "uploadId": result.upload_id,
+        "chunkBytes": result.chunk_bytes,
+        "maxBytes": result.max_bytes,
+    }
+    if result.attachment is not None:
+        hub: LiveVoiceHub = request.app.state.livechat_live_voice
+        hub.begin(result.attachment)
+        signer = MediaSigner.for_auth(request.app.state.livechat_secret, auth)
+        content["attachment"] = attachment_json(result.attachment, signer)
+    return JSONResponse(status_code=201, content=content)
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +235,8 @@ async def put_chunk(
             )
         except uploads.StorageFullError:
             return JSONResponse(status_code=507, content={"error": "storage_full"})
+        except uploads.LiveEndedError:
+            return JSONResponse(status_code=409, content={"error": "not_live"})
     else:
         running_size = None
 
@@ -261,6 +275,47 @@ async def put_chunk(
             raise HTTPException(status_code=404, detail="unknown upload") from write_error
         if write_error is not None:
             raise write_error
+    if upload.live:
+        # A recording others are listening to: hand the slice to its decoder (spec 07 §2).
+        listened = await anyio.to_thread.run_sync(lambda: store.get_attachment(upload_id))
+        if listened is not None and listened.live_state is not None:
+            hub: LiveVoiceHub = request.app.state.livechat_live_voice
+            hub.slice_stored(upload_id, index, len(data))
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# POST /uploads/{id}/live-state (spec/server-chat/07 §6.1).
+# ---------------------------------------------------------------------------
+
+
+class LiveStateIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["recording", "paused"]
+
+
+@router.post("/uploads/{upload_id}/live-state", response_model=None)
+async def set_live_state(upload_id: str, body: LiveStateIn, request: Request) -> Response:
+    """The sender pauses or resumes a note others are listening to. 204 (a repeat is idempotent);
+    404 for an unknown upload or one that is not a live-listened note; 409 `not_live` once the
+    recording has ended. A real change is one `message_updated` event."""
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    if _ATTACHMENT_ID_RE.fullmatch(upload_id) is None:
+        raise HTTPException(status_code=404, detail="unknown upload")
+    outcome = await anyio.to_thread.run_sync(
+        lambda: store.set_live_state(upload_id, body.state, now=time.time())
+    )
+    if outcome == "gone":
+        raise HTTPException(status_code=404, detail="unknown upload")
+    if outcome == "not_live":
+        return JSONResponse(status_code=409, content={"error": "not_live"})
+    hub.set_state(upload_id, body.state)
+    if outcome == "changed":
+        notifier.publish()
     return Response(status_code=204)
 
 
@@ -325,8 +380,23 @@ async def complete_upload(upload_id: str, request: Request) -> JSONResponse:
             chunk_count=chunk_count,
         )
 
+    hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    if upload_id in hub.server_ended:
+        # The server already ended this live note (auto-end / recovery): the sender did not.
+        return JSONResponse(status_code=409, content={"error": "not_live"})
+    live_note = (
+        await anyio.to_thread.run_sync(lambda: store.get_attachment(upload_id))
+        if upload is not None and upload.live
+        else None
+    )
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
     try:
-        attachment = await anyio.to_thread.run_sync(_assemble)
+        if live_note is not None and live_note.live_state is not None:
+            # A note others are listening to: the live phase ends (decoder drained, listeners told).
+            attachment = await hub.finish(upload_id, chunk_count=chunk_count)
+            notifier.publish()
+        else:
+            attachment = await anyio.to_thread.run_sync(_assemble)
     except uploads.UnknownUploadError:
         raise HTTPException(status_code=404, detail="unknown upload") from None
     except uploads.IncompleteUploadError as exc:
@@ -353,10 +423,19 @@ async def delete_upload(upload_id: str, request: Request) -> Response:
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
 
-    def _cancel() -> None:
+    def _cancel() -> bool:
+        # A live note whose message was never sent has no one to delete it for: discarding the
+        # upload discards its (unsent) attachment too.
+        att = store.get_attachment(upload_id) if _ATTACHMENT_ID_RE.fullmatch(upload_id) else None
+        unsent_live = att is not None and att.live_state is not None and att.message_seq is None
+        if unsent_live:
+            store.delete_attachment(upload_id)
         uploads.cancel_upload(store=store, paths=paths, upload_id=upload_id)
+        return unsent_live
 
-    await anyio.to_thread.run_sync(_cancel)
+    if await anyio.to_thread.run_sync(_cancel):
+        hub: LiveVoiceHub = request.app.state.livechat_live_voice
+        hub.deleted([upload_id])
     return Response(status_code=204)
 
 

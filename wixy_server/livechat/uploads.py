@@ -40,6 +40,13 @@ _UPLOAD_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 UNSENT_IDLE_S = 20.0
 """A live upload is offered back as an "unsent voice note" only after this long without a slice
 (spec/server-chat/06 §2.1), so a recording still going in another tab is never offered."""
+MAX_LIVE_PER_CHAT = 2
+"""spec/server-chat/07 §2: at most this many voice notes may be recorded live at once."""
+LIVE_DRAIN_LEASE_OWNER = "live-drain"
+LIVE_DRAIN_LEASE_S = 120.0
+"""When a live note ends it turns `processing` at once, but the media queue is held off with this
+lease while the live decoder drains the last slices from the assembled file (the decoder releases
+it; a crash lets it lapse and the queue takes the note)."""
 MAX_LIVE_CHUNK_COUNT = 100_000
 """Bound on the `chunkCount` a client may claim at `/complete` (a four-hour recording at one
 slice every 15 s is 960): keeps the missing-slice scan bounded for a hostile value."""
@@ -187,6 +194,15 @@ class NotLiveUploadError(UploadError):
         self.upload_id = upload_id
 
 
+class LiveEndedError(UploadError):
+    """A slice arrived for a live upload whose recording has already ended (completed, auto-ended
+    or recovered after a restart): it is not stored (spec/server-chat/07 §6.1, 409 `not_live`)."""
+
+    def __init__(self, upload_id: str) -> None:
+        super().__init__(f"live upload {upload_id!r} has already ended")
+        self.upload_id = upload_id
+
+
 # ---------------------------------------------------------------------------
 # Init (POST /uploads)
 # ---------------------------------------------------------------------------
@@ -197,6 +213,8 @@ class InitResult:
     upload_id: str
     chunk_bytes: int
     max_bytes: int
+    attachment: AttachmentRow | None = None
+    """Only for a `listen` init: the attachment row created with the upload (status `live`)."""
 
 
 DiskUsage = Callable[[str], tuple[int, int, int]]
@@ -221,6 +239,7 @@ def init_upload(
     disk_usage: DiskUsage = shutil.disk_usage,
     live: bool = False,
     device_id: str | None = None,
+    listen: bool = False,
 ) -> InitResult:
     """§5.5's `POST /uploads`. Check order (unspecified by the frozen contract,
     chosen for cheapest-rejection-first): the systemic media-pipeline gate, then
@@ -229,11 +248,17 @@ def init_upload(
 
     A `live` upload (spec/server-chat/06 §2.1, voice only) declares no size — it is a recording
     still being made, uploaded slice by slice — so `size_bytes` is ignored, the row starts at
-    zero, and quota/free space are checked against zero bytes here (and per slice later)."""
+    zero, and quota/free space are checked against zero bytes here (and per slice later).
+
+    `listen` (spec/server-chat/07 §6.1, needs `live`) also creates the attachment row at once, in
+    status `live`, so the other person can hear the note while it is recorded; a chat already
+    recording `MAX_LIVE_PER_CHAT` notes raises `store.TooManyLiveError`."""
     if not media_available:
         raise MediaUnavailableError()
     if mime_type not in ALLOWED_MIME_TYPES[kind]:
         raise UnsupportedTypeError(mime_type)
+    if listen and not live:
+        raise ValueError("listen needs a live upload")
     if live:
         if kind != "voice":
             raise ValueError("live uploads are voice only")
@@ -254,19 +279,26 @@ def init_upload(
         raise StorageFullError()
 
     upload_id = uuid.uuid4().hex
-    store.create_upload(
-        UploadRow(
-            id=upload_id,
-            kind=kind,
-            mime=mime_type,
-            size_bytes=size_bytes,
-            filename=filename,
-            by_email=by_email,
-            created_at=now,
-            live=live,
-            device_id=device_id if live else None,
-        )
+    row = UploadRow(
+        id=upload_id,
+        kind=kind,
+        mime=mime_type,
+        size_bytes=size_bytes,
+        filename=filename,
+        by_email=by_email,
+        created_at=now,
+        live=live,
+        device_id=device_id if live else None,
     )
+    if listen:
+        attachment = store.create_live_upload(row, now=now, max_live=MAX_LIVE_PER_CHAT)
+        return InitResult(
+            upload_id=upload_id,
+            chunk_bytes=chunk_bytes,
+            max_bytes=max_bytes,
+            attachment=attachment,
+        )
+    store.create_upload(row)
     return InitResult(upload_id=upload_id, chunk_bytes=chunk_bytes, max_bytes=max_bytes)
 
 
@@ -344,6 +376,11 @@ def prepare_live_chunk(
     `StorageFullError` — in both cases before anything is written."""
     if not upload.live:
         raise NotLiveUploadError(upload.id)
+    promoted = store.get_attachment(upload.id)
+    if promoted is not None and promoted.live_state is None:
+        # The recording was completed (or auto-ended / recovered) and its attachment promoted: a
+        # late slice must not recreate chunk files beside the assembled original.
+        raise LiveEndedError(upload.id)
     if index < 0:
         raise InvalidChunkIndexError(index)
     sizes = _contiguous_chunk_sizes(upload_dir)
@@ -390,7 +427,7 @@ def assemble(
     chunk, and its size is whatever those chunks add up to (settled onto the row). `chunk_count`
     is ignored for an ordinary upload."""
     existing = store.get_attachment(upload_id)
-    if existing is not None:
+    if existing is not None and existing.live_state is None:
         return existing
 
     upload = store.get_upload(upload_id)
@@ -457,6 +494,17 @@ def assemble(
             raise UnknownUploadError(upload_id) from None
         raise
 
+    if existing is not None:
+        # A note that was being recorded live (spec/server-chat/07): its attachment row already
+        # exists; the live phase ends here and the normal pipeline takes over. The queue is held
+        # off while the live decoder drains (`LIVE_DRAIN_LEASE_*`).
+        ended = store.end_live(
+            upload_id, now=now, lease_owner=LIVE_DRAIN_LEASE_OWNER, lease_s=LIVE_DRAIN_LEASE_S
+        )
+        if ended is None:
+            cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)
+            raise UnknownUploadError(upload_id)
+        return ended
     attachment = store.create_attachment_from_upload(att_id=upload_id, kind=upload.kind, now=now)
     if attachment is None:
         cleanup_deleted_upload(store=store, paths=paths, upload_id=upload_id)

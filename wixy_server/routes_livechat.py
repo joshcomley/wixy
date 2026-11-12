@@ -57,6 +57,7 @@ from wixy_server.livechat.grants import (
     new_grant,
     secret_hash_from_wire,
 )
+from wixy_server.livechat.live_voice import LiveVoiceHub, LiveVoiceUnavailableError
 from wixy_server.livechat.models import (
     LEGACY_TEASE_WIRE_KEY,
     DrawingRow,
@@ -67,6 +68,7 @@ from wixy_server.livechat.models import (
     SearchHit,
     TranscriptRow,
     drawing_json,
+    live_tail,
     message_json,
     transcript_json,
 )
@@ -1056,6 +1058,10 @@ async def delete_message(seq: int, request: Request) -> Response:
     attachment_ids, _pending_token = await anyio.to_thread.run_sync(
         lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
     )
+    # A live voice note being recorded and heard (spec/server-chat/07 §6.1): stop its decoder and
+    # tell its listeners it is over, before the erasure removes its files.
+    live_hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live_hub.deleted(attachment_ids)
     commit_returned_at = time.monotonic()
     return await _finish_committed_erasure(
         store=store,
@@ -1078,6 +1084,8 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     attachment_ids, upload_ids, _pending_token, wipe_token = await anyio.to_thread.run_sync(
         lambda: store.wipe_for_scrub(now=time.time())
     )
+    live_hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live_hub.deleted(attachment_ids)
     commit_returned_at = time.monotonic()
     return await _finish_committed_erasure(
         store=store,
@@ -1980,6 +1988,8 @@ async def transcribe_attachment(
     attachment = await anyio.to_thread.run_sync(store.get_attachment, att_id)
     if attachment is None or attachment.kind != "voice" or attachment.message_seq is None:
         return _not_found()
+    if attachment.status == "live":
+        return await _transcribe_live(request, auth.email, att_id)
     if attachment.status != "ready":
         return JSONResponse(status_code=409, content={"error": "not_ready"})
 
@@ -2030,6 +2040,61 @@ async def transcribe_attachment(
     if begin.state == "done":
         return _stored(begin.transcript, status_code=200)
     return _not_found()  # "gone": deleted while we were deciding
+
+
+async def _transcribe_live(request: Request, identity: str, att_id: str) -> JSONResponse:
+    """`transcribe` on a voice note that is still being recorded (spec/server-chat/07 §3): the same
+    opt-in, private-mode, rate-limited request, but the job is the live transcription loop, and the
+    answer is always the live transcript shape `{"status":"live","text","tail"}` (202)."""
+    store: LiveChatStore = request.app.state.livechat_store
+    runtime: TranscriptionRuntime = request.app.state.livechat_transcription
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live = hub.transcriber
+    assert live is not None
+
+    def _live_shape(text: str) -> JSONResponse:
+        return JSONResponse(
+            status_code=202,
+            content={"transcript": {"status": "live", "text": text, "tail": live_tail(att_id)}},
+        )
+
+    if att_id in live.active:
+        current = await anyio.to_thread.run_sync(store.get_attachment, att_id)
+        text = current.transcript.text if current is not None and current.transcript else None
+        return _live_shape(text or "")  # single-flight: a loop is already running for the note
+    if not await runtime.available():
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    retry_after = runtime.rate_limiter.hit(identity)
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+    begin = await anyio.to_thread.run_sync(
+        lambda: store.begin_transcript(att_id=att_id, now=time.time(), restart_pending=True)
+    )
+    if begin.state != "started":
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    try:
+        live.start(att_id)
+    except LiveVoiceUnavailableError:
+        await anyio.to_thread.run_sync(
+            lambda: store.finish_transcript(
+                att_id=att_id,
+                status="failed",
+                text=None,
+                failure="unavailable",
+                engine=None,
+                now=time.time(),
+            )
+        )
+        notifier.publish()
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    notifier.publish()  # the other device's live transcript
+    return _live_shape("")
 
 
 # ---------------------------------------------------------------------------

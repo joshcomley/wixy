@@ -2902,6 +2902,64 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,
   `test_livechat_cookout_ai.py` and `test_livechat_cookout_images.py`, and `e2e/tests/server-cookout-twists.spec.ts`.
 
+## 25. Live voice notes (spec `spec/server-chat/07-live-voice-notes.md`, decisions/00211 + 00212, Inv 59)
+
+A voice note recorded in live mode is heard while it is made. The sender uses spec 06's live upload with a 1 s
+timeslice and `listen:true`; the other people listen over `/api/admin/server/live-voice/ws`.
+
+**Rows.** `POST /uploads {live, listen}` creates the `uploads` row AND the `attachments` row in one transaction
+(`LiveChatStore.create_live_upload`, at most `uploads.MAX_LIVE_PER_CHAT` = 2 live at once, else `TooManyLiveError`
+-> 409 `too_many_live`). Schema v23 adds `attachments.live_state` (`recording`/`paused`). The `status` column stays
+`processing` while live (its `CHECK` cannot be widened, and every `status IN ('processing','ready')` rule and an
+older blue/green process keep working); `_row_to_attachment` presents it as `status:"live"` and
+`attachment_json` adds `liveState`. `claim_processing` and the orphan sweep skip `live_state IS NOT NULL`.
+`POST /messages` accepts the live attachment unchanged. `durationS` is 0 and `peaks` `[]` on the wire while live:
+growth travels only on the socket (the stored peaks stay 0..1 floats, 64 buckets, set by the finished note).
+`message_updated` fires only for a status / `liveState` change and a transcript pass.
+
+**End of the live phase** (`LiveVoiceHub.finish`, used by `complete`, auto-end and startup recovery):
+`uploads.assemble` joins the slices and calls `store.end_live` (`live -> processing`, `message_updated`), holding
+the media queue off with a lease (`uploads.LIVE_DRAIN_LEASE_OWNER`) while the decoder drains the last slices from
+the assembled file; `_drain` then releases it, flushes the last partial peak bucket, marks the note `ended` and
+the listeners get `state ended` and (streams) `eof`. A note with no stored slice is `failed`
+(`empty_recording`). A late slice is 409 `not_live` (`uploads.LiveEndedError`); a `complete` for a note this
+process ended itself is 409 `not_live` (`hub.server_ended`), the sender's own repeat stays 202.
+
+**Auto-end** (`hub.tick`, once a second, injected `clock`): no slice for 60 s while recording, or paused for
+30 min, ends the note exactly like `complete` with every contiguous slice. Startup (`hub.recover`, before the
+media queue starts) ends every note still `live` the same way: nothing is lost, nothing hangs. A DB backstop
+every 5 ticks notices a note deleted by a process this hub never heard from.
+
+**Decoder** (`live_voice.Decoder`): one long-lived ffmpeg per note (and one per catch-up listener or live
+transcription), stdin <- slices (chunk files, or `assembled` once joined), stdout -> 24 kHz mono s16le in 960-byte
+frames, below-normal priority. decisions/00209's rules: killed only when no decoded output follows pending input for
+`STALL_S` (120 s; the clock is frozen while paused or while a consumer holds output back) or past the 6 h voice
+ceiling (`StallClock`), then restarted from slice 0 (deterministic, frames already delivered are skipped) up to 3
+times, after which the note is `decoder_dead` (its listeners get `error not_live`; the upload and the finished
+note are unaffected). `LiveNote` keeps per-second peaks (0..255), the decoded duration and a 1500-frame ring.
+
+**Listeners.** `Listener` (one per socket) has a bounded control queue (16; overflow drops the socket), lazily
+built coalesced `state` messages and credit-limited audio. A stream reads the ring; one behind it (or `from:"start"`
+on a long note) gets its own catch-up decode over the stored slices through a 16-frame bounded buffer, so its
+credit holds ffmpeg back, and hands over to the ring when it reaches it (and back if it falls behind). At most 4
+streams per note. Auth, close codes, capacity (8 sockets, 4 pending) and the grant refresh are the call socket's
+(`routes_livechat_live_voice.py` reuses `access_identity` / `upgrade_allowed`).
+
+**Live transcription** (`livechat/live_transcription.py`, started by `POST /attachments/{id}/transcribe` on a
+`live` note): see Inv 50 and 59. A bounded in-memory PCM window (<= 300 s; best effort, the final pass is
+authoritative), a pass every ~8 s of new audio over `[last finalised point, edge)` capped at 90 s, sent as a
+private temp WAV (`transcribe-tmp/<uuid>/live.wav`, deleted after) through `TranscriptionRuntime.transcribe_audio`
+(the same one-at-a-time limiter, cmd asked afresh first). Split at the last sentence end; the engine gives no
+timestamps, so the finalised point is placed by character proportion and settled on the quietest 20 ms within 3 s.
+A window of 90 s with no sentence end is finalised whole. The finalised text goes in the transcript row (status
+stays `pending`; `record_live_transcript`), the tail only in `models.live_tail` memory; the wire shape is
+`{"status":"live","text","tail"}`. Three consecutive failed passes fail the transcript (text kept). After Stop one
+full-note pass (`run_job`, spec 06 stretches) runs once the finished file is `ready` and replaces the live text.
+
+Tests: `test_livechat_live_voice.py` (wire shapes, store, upload and state routes, real-ffmpeg sockets, end,
+delete, auto-end, recovery, client contract), `test_livechat_live_voice_auth.py` (real JWTs),
+`test_livechat_live_transcription.py`.
+
 ## Sender hues
 
 Other members' bubbles carry a muted hue keyed on the sender name (`admin-ui/src/server/senderHue.ts`, 8 hues, FNV-1a over the trimmed lower-cased name; applied via `--wx-sender-hue` and `.wx-srv-bubble-hued` in `chat.css`, light and dark). Pure and stateless: the same name gets the same colour on every device. Own bubbles are unchanged.

@@ -73,6 +73,8 @@ from wixy_server.livechat.cookout_game import (
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
 from wixy_server.livechat.grants import GrantFailureLimiter
+from wixy_server.livechat.live_transcription import LiveTranscriber
+from wixy_server.livechat.live_voice import LiveVoiceHub
 from wixy_server.livechat.models import MessageHook, MessageRow
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.pinclient import CmdPinVerifier, PinVerifier
@@ -114,6 +116,7 @@ from wixy_server.routes_livechat import router as livechat_router
 from wixy_server.routes_livechat_adventure import router as livechat_adventure_router
 from wixy_server.routes_livechat_calls import router as livechat_calls_router
 from wixy_server.routes_livechat_cookout import router as livechat_cookout_router
+from wixy_server.routes_livechat_live_voice import router as livechat_live_voice_router
 from wixy_server.routes_livechat_media import router as livechat_media_router
 from wixy_server.routes_preview import DEFAULT_PREVIEW_STALENESS_THRESHOLD_S
 from wixy_server.routes_preview import router as preview_router
@@ -460,6 +463,21 @@ def create_app(
         transcriber=resolved_transcriber,
         ffmpeg=livechat_queue_config.ffmpeg if livechat_queue_config is not None else None,
     )
+    # Live voice notes (spec/server-chat/07): the decoders, the listener sockets and the live
+    # transcription that rides on the private transcription runtime above.
+    livechat_live_voice = LiveVoiceHub(
+        store=livechat_store,
+        paths=paths,
+        notifier=livechat_notifier,
+        ffmpeg=livechat_queue_config.ffmpeg if livechat_queue_config is not None else None,
+        chunk_bytes=settings.server_upload_chunk_bytes,
+    )
+    livechat_live_voice.transcriber = LiveTranscriber(
+        hub=livechat_live_voice,
+        store=livechat_store,
+        runtime=livechat_transcription,
+        notifier=livechat_notifier,
+    )
 
     jwks = JwksCache(
         fetch=functools.partial(_fetch_jwks, settings.cf_access_team_domain),
@@ -505,6 +523,10 @@ def create_app(
         await anyio.to_thread.run_sync(
             lambda: livechat_store.fail_stale_pending_transcripts(now=time.time())
         )
+        # A voice note left `live` belongs to a recording whose server died: end it and let the
+        # normal pipeline process the slices that were stored (spec/server-chat/07: nothing lost,
+        # nothing hangs). Before the media queue starts, so the lease dance is race-free.
+        await livechat_live_voice.recover()
         if resolved_adventure_researcher is not None:
             # The empty, non-git folder cmd runs the holiday-pack research in (it must exist
             # before cmd is asked to use it as a working directory).
@@ -581,6 +603,7 @@ def create_app(
                 if livechat_media_available:
                     background.supervise("livechat-media", _run_media_queue)
                 background.supervise("livechat-janitor", _run_janitor)
+                background.supervise("livechat-live-voice", livechat_live_voice.run)
                 if resolved_image_generator is not None:
                     background.supervise("livechat-wyr-sweep", _run_wyr_sweep)
                 if wyr_pool is not None:
@@ -602,6 +625,7 @@ def create_app(
                 tg.cancel_scope.cancel()
         finally:
             livechat_call_broker.shutdown()
+            livechat_live_voice.shutdown()
             await livechat_push_client.aclose()
             await chat_client.aclose()
             await gh_client.aclose()
@@ -662,6 +686,7 @@ def create_app(
     app.state.livechat_pin_verifier = resolved_pin_verifier
     app.state.livechat_grant_limiter = GrantFailureLimiter()
     app.state.livechat_transcription = livechat_transcription
+    app.state.livechat_live_voice = livechat_live_voice
     app.state.livechat_drawing_broker = livechat_drawing_broker
     app.state.livechat_wyr_questions = wyr_questions
     app.state.livechat_wyr_image_generator = resolved_image_generator
@@ -705,6 +730,7 @@ def create_app(
     app.include_router(livechat_adventure_router)
     app.include_router(livechat_cookout_router)
     app.include_router(livechat_calls_router)
+    app.include_router(livechat_live_voice_router)
     app.include_router(livechat_media_router)
 
     @app.get("/admin", response_class=HTMLResponse, include_in_schema=False)

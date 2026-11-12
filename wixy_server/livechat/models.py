@@ -14,7 +14,12 @@ from typing import Any, Literal, Protocol
 from builder.jsontypes import JsonObject, JsonValue
 
 AttachmentKind = Literal["photo", "video", "voice"]
-AttachmentStatus = Literal["processing", "ready", "failed"]
+AttachmentStatus = Literal["live", "processing", "ready", "failed"]
+"""`live` is spec/server-chat/07's voice note still being recorded and heard as it is made. The
+database column stays `processing` for it (its `CHECK` cannot be widened in place; the separate
+`live_state` column marks it), so every `status IN ('processing','ready')` rule keeps accepting a
+live note, while `claim_processing` skips it until the live phase ends."""
+LiveState = Literal["recording", "paused"]
 TranscriptStatus = Literal["pending", "done", "failed"]
 EventType = Literal["message", "message_updated", "message_deleted", "wiped"]
 """§17.2 amendment A1: `message_deleted`/`wiped` are P8's future events (delete a
@@ -127,6 +132,9 @@ class AttachmentRow:
     updated_at: float
     transcript: TranscriptRow | None = None
     view_once_renditions: tuple[str, ...] | None = None
+    live_state: LiveState | None = None
+    """Set only while the note is being recorded (`status == "live"`): the sender is `recording` or
+    `paused` (spec/server-chat/07 §6.1)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -640,6 +648,28 @@ def transcript_json(row: TranscriptRow | None) -> JsonObject | None:
     return data
 
 
+_LIVE_TAILS: dict[str, str] = {}
+"""spec/server-chat/07 §3: the provisional, still-being-rewritten tail of a live voice note's
+transcript. Process memory only, never stored (the finalised text alone goes in the transcript
+row), keyed by attachment id; the live-voice hub writes it and clears it when the live phase ends.
+A plain dict: every access is one atomic operation."""
+
+
+def set_live_tail(att_id: str, tail: str) -> None:
+    if tail:
+        _LIVE_TAILS[att_id] = tail
+    else:
+        _LIVE_TAILS.pop(att_id, None)
+
+
+def clear_live_tail(att_id: str) -> None:
+    _LIVE_TAILS.pop(att_id, None)
+
+
+def live_tail(att_id: str) -> str:
+    return _LIVE_TAILS.get(att_id, "")
+
+
 FAILED_ORIGINAL_RETENTION_S = 7 * 24 * 60 * 60.0
 """§4: a failed attachment's original is archived under `failed/<id>/` this long after its
 (latest) failure, then the janitor removes it. While it is kept, the attachment can be tried
@@ -669,7 +699,16 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     # GIF into PNG), so this marks a photo whose `full` rendition moves — the bubble shows
     # `full` instead of the still `thumb` (decisions/00180).
     animated = row.status == "ready" and row.mime == "image/gif" and "full" in row.renditions
-    return {
+    transcript = transcript_json(row.transcript)
+    if row.status == "live" and row.transcript is not None and row.transcript.status == "pending":
+        # §6.3: a transcript still being made WHILE the note is recorded: the finalised text
+        # (stored) and the provisional tail (memory only).
+        transcript = {
+            "status": "live",
+            "text": row.transcript.text or "",
+            "tail": live_tail(row.id),
+        }
+    data: JsonObject = {
         "id": row.id,
         "kind": row.kind,
         "status": row.status,
@@ -680,8 +719,11 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
         "urls": urls,
         "animated": animated,
         "retryable": attachment_retryable(row, now=time.time()),
-        "transcript": transcript_json(row.transcript),
+        "transcript": transcript,
     }
+    if row.status == "live" and row.live_state is not None:
+        data["liveState"] = row.live_state
+    return data
 
 
 _REPLY_QUOTE_TEXT_MAX_CODEPOINTS = 300
