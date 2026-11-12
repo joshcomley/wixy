@@ -95,3 +95,69 @@ transcription only when someone has asked for it.
 Synthetic two-browser proof through real local sockets, then the physical-device gate: the
 sender's phone and Bubble's iPhone over the real tunnel. That gate has to be observed before this
 is called production quality. It is the same rule as the calls feature.
+
+## 6. Wire contract (fixed for the build; both sides implement exactly this)
+
+### 6.1 Sender (HTTP, extends spec 06 §2.1)
+
+- `POST /api/admin/server/uploads` `{"kind":"voice","mimeType",…,"live":true,"deviceId","listen":true}`.
+  `listen` requires `live` (422 otherwise). The response is 201 `{"uploadId","chunkBytes","maxBytes",
+  "attachment"}`, where `attachment` is the normal attachment JSON with `id == uploadId`, `status:"live"`,
+  `durationS` (0 at first), `peaks` (`[]`) and a new `liveState: "recording" | "paused"`. The attachment row
+  exists from this moment. A chat that already has 2 live attachments answers 409
+  `{"error":"too_many_live"}`, and the client falls back to a normal (spec 06) recording.
+- The client then sends the message at once through the existing `POST /messages` with
+  `attachmentIds:[uploadId]`. That route accepts an attachment in status `live`. Push goes out as for
+  any message.
+- Slices go up exactly as in spec 06, with a 1000 ms timeslice. Every accepted slice feeds the decoder.
+- `POST /uploads/{id}/live-state` `{"state":"recording"|"paused"}` answers 204. A repeat is
+  idempotent. It is 404 for an unknown or not-live upload, and 409 `{"error":"not_live"}` once
+  ended.
+- `complete` (spec 06) ends the live phase: the decoder drains, the attachment goes `live → processing`
+  and then follows the normal pipeline to `ready`, with `message_updated` at each status change. The
+  m4a it produces is the finished note.
+- Delete for everyone is the existing message delete. It also ends the decoder, closes listeners
+  (`ended` then close) and removes the upload. Wipe and the journal are unchanged.
+- **Persistent events.** `message_updated` fires only on status or `liveState` changes and on
+  transcript passes. The once-a-second growth (duration, peaks, audio) travels only over §6.2,
+  never through the events table.
+
+### 6.2 Listener socket `/api/admin/server/live-voice/ws`
+
+- Subprotocol `wixy-live-voice-v1`. The first frame is `{"type":"auth","v":1,"token","label"}`,
+  authorised exactly as the call socket (Inv 55). The server then answers `{"type":"ready"}`. Each
+  page uses one socket and multiplexes every live attachment it shows.
+- Client → server (strict JSON, unknown fields rejected):
+  - `{"type":"watch","attachmentId"}` / `{"type":"unwatch","attachmentId"}`: state and peaks only, no
+    audio.
+  - `{"type":"play","attachmentId","from":"start"|"live"|<sampleIndex int ≥ 0>}`: start audio, which
+    implies watch. Only one audio stream per socket; a new `play` replaces the old one.
+  - `{"type":"stop","attachmentId"}`: stop audio.
+  - `{"type":"credit","attachmentId","frames":<1..500>}`: the server may send that many more audio
+    frames. The client grants 50 at `play` and tops up as its player drains, keeping ≤ 2 s buffered.
+    The server never exceeds the credit.
+  - `{"type":"pong"}` in answer to `{"type":"ping"}`.
+- Server → client text:
+  - `{"type":"state","attachmentId","state":"recording"|"paused"|"ended","durationMs","peaksFrom":<int>,"peaks":[<int 0..255>…]}`.
+    This is sent on `watch`/`play` with `peaksFrom:0` and the whole array (one bucket per second).
+    After that it is sent about once a second while anything changed, carrying only the new buckets
+    from `peaksFrom`.
+  - `{"type":"eof","attachmentId","sampleIndex"}`: the last audio frame of an `ended` note has been
+    sent. The client switches to the finished file at that position (its `status` becomes
+    `processing`, then `ready`; until `ready` it shows "Finishing…").
+  - `{"type":"error","attachmentId"?,"code":"not_found"|"forbidden"|"not_live"|"too_many_listeners"|"bad_request"}`.
+    `too_many_listeners` applies above 4 audio streams per attachment.
+- Server → client binary: exactly the call's 1008-byte frame (`call_protocol.HEADER`
+  `!BBH16sIQII8s` + 480 s16le samples at 24 kHz):
+  - byte 0 = 1, byte 1 = **2** (live voice), bytes 2–3 = 0;
+  - the 16-byte id = the attachment id (hex → bytes);
+  - u32 at 20 = per-`play` sequence from 0;
+  - u64 at 24 = the absolute sample index within the note (a multiple of 480);
+  - u32 at 32 and 36 = 0; bytes 40–47 = 0.
+  The client plays it through the existing bounded AudioWorklet player (`admin-ui/src/server/call/`).
+
+### 6.3 Live transcript on the wire
+
+The attachment's `transcript` object gains status `"live"`: `{"status":"live","text":<finalised>,
+"tail":<provisional>}`. It is pushed by `message_updated` after every pass, and becomes the normal
+`done` object after the final pass.
