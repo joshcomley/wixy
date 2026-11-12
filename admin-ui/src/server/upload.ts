@@ -6,12 +6,13 @@ export type UploadKind = "photo" | "video" | "voice";
 
 export const UPLOAD_MAX_BYTES: Readonly<Record<UploadKind, number>> = {
   photo: 30 * 1024 * 1024,
-  voice: 25 * 1024 * 1024,
+  // A runaway guard for a four-hour note, not a product limit (spec/server-chat/06 §1).
+  voice: 512 * 1024 * 1024,
   video: 1024 * 1024 * 1024,
 };
 
 export const UPLOAD_MAX_DURATION_S: Readonly<Partial<Record<UploadKind, number>>> = {
-  voice: 15 * 60,
+  voice: 4 * 60 * 60,
   video: 10 * 60,
 };
 
@@ -175,7 +176,7 @@ export async function uploadFile(
 /** Alias matching the terminology used by the server-chat composer. */
 export const uploadAttachment = uploadFile;
 
-interface ChunkRequest {
+export interface ChunkRequest {
   readonly request: typeof globalThis.fetch;
   readonly endpoint: string;
   readonly uploadId: string;
@@ -183,9 +184,19 @@ interface ChunkRequest {
   readonly chunk: Blob;
   readonly signal: AbortSignal | undefined;
   readonly options: UploadOptions;
+  /** A live upload only (spec/server-chat/06 §2.1): the client's own elapsed-recording figure,
+   * sent as `?durationMs=`. Its presence also makes a 409 `out_of_order` come back as a
+   * result instead of an error, so the caller can resync to the server's `next`. */
+  readonly durationMs?: number;
 }
 
-async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
+/** The server's answer to a live chunk that skipped ahead: the next index it wants. */
+export interface OutOfOrderResult {
+  readonly outOfOrderNext: number;
+}
+
+/** One chunk PUT with the shared retry policy. Resolves `null` when stored. */
+export async function putChunkWithRetry(input: ChunkRequest): Promise<OutOfOrderResult | null> {
   const delayMs = input.options.retryDelayMs ?? 250;
   const sleep = input.options.sleep ?? ((milliseconds: number) => new Promise<void>((resolve) => {
     setTimeout(resolve, milliseconds);
@@ -196,14 +207,20 @@ async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
     throwIfAborted(input.signal);
     try {
       const response = await input.request(
-        `${input.endpoint}/${input.uploadId}/chunks/${input.index}`,
+        `${input.endpoint}/${input.uploadId}/chunks/${input.index}${
+          input.durationMs === undefined ? "" : `?durationMs=${Math.max(0, Math.round(input.durationMs))}`
+        }`,
         withSignal({
           method: "PUT",
           headers: { "Content-Type": "application/octet-stream" },
           body: input.chunk,
         }, input.signal),
       );
-      if (response.ok) return;
+      if (response.ok) return null;
+      if (input.durationMs !== undefined && response.status === 409) {
+        const next = await outOfOrderNext(response);
+        if (next !== null) return { outOfOrderNext: next };
+      }
       const error = await uploadResponseError(response);
       if (!RETRYABLE_STATUSES.has(response.status) || attempt === MAX_CHUNK_ATTEMPTS - 1) {
         throw error;
@@ -225,7 +242,23 @@ async function putChunkWithRetry(input: ChunkRequest): Promise<void> {
   throw new UploadError(UPLOAD_GENERIC_FAILURE_MESSAGE, null);
 }
 
-async function uploadResponseError(response: Response): Promise<UploadError> {
+async function outOfOrderNext(response: Response): Promise<number | null> {
+  try {
+    const body: unknown = await response.clone().json();
+    if (body && typeof body === "object") {
+      const record = body as Record<string, unknown>;
+      if (record.error === "out_of_order" && typeof record.next === "number"
+        && Number.isInteger(record.next) && record.next >= 0) {
+        return record.next;
+      }
+    }
+  } catch {
+    // Not JSON: an ordinary 409.
+  }
+  return null;
+}
+
+export async function uploadResponseError(response: Response): Promise<UploadError> {
   const messageByStatus: Readonly<Record<number, string>> = {
     413: "This file is too large.",
     415: "This file type isn't supported.",
@@ -307,6 +340,10 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDuration(seconds: number): string {
+  if (seconds >= 3600 && seconds % 3600 === 0) {
+    const hours = seconds / 3600;
+    return hours === 1 ? "1 hour" : `${hours} hours`;
+  }
   const minutes = Math.floor(seconds / 60);
   const remainder = seconds % 60;
   return remainder === 0 ? `${minutes} minutes` : `${minutes} minutes ${remainder} seconds`;

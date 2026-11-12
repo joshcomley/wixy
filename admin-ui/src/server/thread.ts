@@ -39,7 +39,17 @@ import {
 import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
 import { createGoodnightController, type GoodnightController } from "./goodnight";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
-import { uploadServerAttachment } from "./api/uploads";
+import {
+  completeUnsentUpload,
+  createServerLiveUploader,
+  discardUpload,
+  listUnsentUploads,
+  uploadServerAttachment,
+  type UnsentUpload,
+} from "./api/uploads";
+import type { LiveVoiceUploader } from "./liveUpload";
+import { createUnsentVoiceCards } from "./unsentVoice";
+import { formatVoiceTime } from "./voiceTime";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./api/wyr";
 import { createWyrCards, type WyrCards } from "./wyrCard";
@@ -721,9 +731,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
          * can never move it to the other chat. The ONE exception: if that round has been deleted
          * (the server answers 404) the recording is kept and goes to the main chat instead. */
         wyrSeq: number | null;
+        /** The live upload this recording was streamed to while it was made, until it either
+         * completed (then `attachmentId` is set) or failed for good and was deleted. */
+        live: LiveVoiceUploader | null;
       }
     | null = null;
   let voiceSendBusy = false;
+  /** The live upload of the recording in progress (spec/server-chat/06 §2.3). */
+  let liveUploader: LiveVoiceUploader | null = null;
 
   const MIC_LINE_ICON =
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
@@ -1071,10 +1086,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openViewOncePicker();
   });
 
-  function formatRecordingTime(milliseconds: number): string {
-    const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  }
+  // m:ss, and h:mm:ss from one hour up: a note can now run for four hours.
+  const formatRecordingTime = formatVoiceTime;
 
   function updateRecorderUi(elapsedMs = voiceRecorder?.elapsedMs ?? 0): void {
     const state = voiceRecorder?.state ?? "idle";
@@ -1163,8 +1176,22 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return createVoiceRecorder({
       hooks,
       onTimer: (elapsedMs) => updateRecorderUi(elapsedMs),
+      onStart: ({ mimeType }) => {
+        // The recording is uploaded while it is made. A server that refuses a live upload just
+        // means this note goes the ordinary way at stop (the kept recording is uploaded whole).
+        void liveUploader?.cancel();
+        liveUploader = createServerLiveUploader(() => currentSession, {
+          mimeType: mimeType.split(";")[0] || "audio/webm",
+          deviceId: identity.getDeviceId(),
+          onLocked: () => hooks.lockNow("unauthorized"),
+        });
+      },
+      onSlice: (blob, index, elapsedMs) => liveUploader?.push(blob, index, elapsedMs),
       onStop: (recording) => {
+        const live = liveUploader;
+        liveUploader = null;
         if (recording.durationMs < MIN_VOICE_DURATION_MS) {
+          void live?.cancel();
           composer.setError("Too short. Record for at least one second.");
           updateRecorderUi();
           return;
@@ -1187,11 +1214,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           attachmentId: null,
           replyTo: capturedReplyTo,
           wyrSeq: chatTargetNow(),
+          live,
         };
         void sendVoiceNote();
         updateRecorderUi();
       },
-      onCancel: () => updateRecorderUi(),
+      onCancel: () => {
+        // The person threw the recording away: so does the server (best effort). A lock is not
+        // this — `detach` has already abandoned the live upload, to be offered back as unsent.
+        const live = liveUploader;
+        liveUploader = null;
+        void live?.cancel();
+        updateRecorderUi();
+      },
       onError: () => {
         composer.setError("Microphone access failed. Check the browser permission and try again.");
         updateRecorderUi();
@@ -1345,7 +1380,105 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   replyBarCancel.addEventListener("click", () => setPendingReply(null));
   replyBar.append(replyBarLabel, replyBarQuote, replyBarCancel);
 
+  // -- Unsent voice notes (spec/server-chat/06 §2.3) ---------------------------------------
+  // A recording uploaded live but never sent (a crash, a killed tab, a lock) is offered back to
+  // this device as a card next to the composer: Send or Discard, never sent on its own.
+  /** What a card has already done, so a Send that failed AFTER completing the upload retries
+   * from the message, never completing twice (the upload is gone once it has completed). */
+  const unsentProgress = new Map<string, { attachmentId: string; clientId: string }>();
+  const unsentCards = createUnsentVoiceCards({
+    document: documentRef,
+    send: (entry) => sendUnsentVoiceNote(entry),
+    discard: (entry) => discardUnsentVoiceNote(entry),
+  });
+
+  async function sendUnsentVoiceNote(entry: UnsentUpload): Promise<void> {
+    const session = currentSession;
+    if (session === null) throw new Error("Unlock the chat to send this voice note.");
+    let progress = unsentProgress.get(entry.uploadId);
+    try {
+      if (progress === undefined) {
+        const attachment = await completeUnsentUpload(session, entry.uploadId);
+        progress = { attachmentId: attachment.id, clientId: cryptoRandomId(win) };
+        unsentProgress.set(entry.uploadId, progress);
+      }
+      const known = progress;
+      const sendSession = currentSession;
+      if (sendSession === null) throw new Error("Unlock the chat to send this voice note.");
+      const post = (wyrSeq: number | null): ReturnType<typeof sendMessage> =>
+        sendMessage(sendSession, {
+          clientId: known.clientId,
+          sender: identity.getName() ?? "",
+          deviceId: identity.getDeviceId(),
+          text: null,
+          attachmentIds: [known.attachmentId],
+          ...(wyrSeq !== null ? { wyrSeq } : {}),
+        });
+      const target = chatTargetNow();
+      let result = await post(target);
+      if (!result.ok && result.kind === "rejected" && result.status === 404 && target !== null) {
+        // The game round it would have gone to is gone: send it to the main chat instead.
+        result = await post(null);
+      }
+      if (!result.ok) {
+        throw new Error(result.kind === "invalid" || result.kind === "rejected"
+          ? "The server couldn't accept this voice note. You can discard it."
+          : "Couldn't send. Try again.");
+      }
+      unsentProgress.delete(entry.uploadId);
+      addConfirmed(result.message);
+      renderThreadList();
+      gameFloat.noteSent(result.message.wyrRef ?? null);
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+        throw new Error("The chat locked. Unlock it and try again.");
+      }
+      if (error instanceof UploadError) {
+        throw new Error(error.status === 404 || error.status === 409
+          ? "This voice note is no longer on the server. You can discard it."
+          : "Couldn't send. Try again.");
+      }
+      throw error instanceof Error && error.message !== "" ? error : new Error("Couldn't send. Try again.");
+    }
+  }
+
+  async function discardUnsentVoiceNote(entry: UnsentUpload): Promise<void> {
+    const session = currentSession;
+    if (session === null) throw new Error("Unlock the chat to discard this voice note.");
+    try {
+      await discardUpload(session, entry.uploadId);
+      unsentProgress.delete(entry.uploadId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+        throw new Error("The chat locked. Unlock it and try again.");
+      }
+      throw new Error("Couldn't discard. Try again.");
+    }
+  }
+
+  /** Ask the server which voice notes of this device were never sent and show a card for each.
+   * An older server (404) or any failure shows nothing: this is a convenience, never a blocker. */
+  async function refreshUnsentVoiceNotes(session: ServerSession): Promise<void> {
+    try {
+      const entries = await listUnsentUploads(session, identity.getDeviceId());
+      if (currentSession !== session) return;
+      // This device's own recording in progress (paused longer than the server's quiet window)
+      // or a note still being sent is not "unsent".
+      const mine = new Set<string>();
+      const recordingId = liveUploader?.uploadId;
+      if (recordingId) mine.add(recordingId);
+      const pendingId = pendingVoiceNote?.live?.uploadId;
+      if (pendingId) mine.add(pendingId);
+      unsentCards.setEntries(entries.filter((entry) => !mine.has(entry.uploadId)));
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    }
+  }
+
   element.appendChild(replyBar);
+  element.appendChild(unsentCards.element);
   element.appendChild(composer.element);
 
   // -- The game frame: tabs + per-item chat, and the would-you-rather pane (workspace 00045) ----
@@ -2210,6 +2343,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * the cancel route takes the upload id. */
   function discardPendingVoiceNote(message: string | null): void {
     const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
+    // A live upload still on the server (the send never got as far as completing it) goes too.
+    void pendingVoiceNote?.live?.cancel();
     pendingVoiceNote = null;
     setVoiceRetryOffered(false);
     composer.setError(message);
@@ -2230,6 +2365,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     composer.setError(null);
     updateRecorderUi();
     try {
+      if (pending.attachmentId === null && pending.live !== null) {
+        // Throws ServerLockedError if the session died: the note stays pending and the next
+        // unlock calls this again, carrying on where the live upload stopped.
+        const completed = await pending.live.finish();
+        if (completed !== null) {
+          pending.attachmentId = completed.id;
+          pending.live = null;
+        } else {
+          // The live upload failed for good and is already deleted: upload the kept recording.
+          pending.live = null;
+        }
+      }
       if (pending.attachmentId === null) {
         const durationS = voiceDurations.get(pending.file);
         const attachment = await uploadServerAttachment(
@@ -4237,6 +4384,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (leftDetachedView) threadScroll.scrollToBottom();
       ensureObserver();
       if (pendingVoiceNote !== null) void sendVoiceNote();
+      void refreshUnsentVoiceNotes(session);
       return cursor;
     } catch (error) {
       if (requestGeneration !== contentGeneration) return null;
@@ -4299,8 +4447,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // "A lock keeps it in memory exactly like the draft text").
       scrollToOriginalGeneration += 1;
       for (const controller of messageActionControllers.values()) controller.close();
+      // A lock ends the recording and the token that could delete it: leave what was uploaded on
+      // the server, to be offered back as an unsent voice note after the next unlock.
+      liveUploader?.abandon();
+      liveUploader = null;
       voiceRecorder?.detach();
       voiceRecorder = null;
+      unsentCards.clear();
       updateRecorderUi();
       disposeAttachmentMedia(messageList);
       lightbox.teardown();
@@ -4421,8 +4574,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       reactionErrorTimers.clear();
       reactionErrors.clear();
       pendingReactions.clear();
+      liveUploader?.abandon();
+      liveUploader = null;
+      pendingVoiceNote?.live?.abandon();
       voiceRecorder?.detach();
       voiceRecorder = null;
+      unsentCards.clear();
       closeUnheardView();
       closeUnheardNav();
       closeMoreMenu();
