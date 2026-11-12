@@ -21,7 +21,14 @@ from pydantic import BaseModel, Field
 from builder.jsontypes import JsonObject
 from wixy_server.livechat import uploads
 from wixy_server.livechat.grants import GRANT_ID_RE, GRANT_IDLE_EXPIRY_S
-from wixy_server.livechat.models import AttachmentRow, UploadRow, attachment_json
+from wixy_server.livechat.media_queue import failed_original_path
+from wixy_server.livechat.models import (
+    AttachmentRow,
+    UploadRow,
+    attachment_json,
+    attachment_retryable,
+)
+from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import MediaSigner, require_server_token, verify_media_signature
 from wixy_server.settings import Settings
@@ -405,3 +412,50 @@ async def get_gallery(request: Request, before: str | None = None, limit: int = 
         lambda: store.list_gallery(before=cursor, limit=limit)
     )
     return {"items": [gallery_item_json(att, signer) for att in rows], "hasMore": has_more}
+
+
+# ---------------------------------------------------------------------------
+# POST /attachments/{attId}/retry (decisions/00209).
+# ---------------------------------------------------------------------------
+
+_RetryOutcome = AttachmentRow | Literal["unknown", "not_failed", "gone"]
+
+
+@router.post("/attachments/{att_id}/retry", response_model=None)
+async def retry_attachment(att_id: str, request: Request) -> JSONResponse:
+    """ "Try again" on a failed photo, video or voice note: put it back in the processing
+    queue, which re-runs it from the original archived when it failed. 202 with the
+    attachment (now `processing`); 404 unknown; 409 `not_failed` (already processing or
+    ready); 410 `original_gone` (its retention window has passed); 503 `media_unavailable`."""
+    auth = await require_server_token(request)
+    if _ATTACHMENT_ID_RE.fullmatch(att_id) is None:
+        raise HTTPException(status_code=404, detail="unknown attachment")
+    if not request.app.state.livechat_media_available:
+        return JSONResponse(status_code=503, content={"error": "media_unavailable"})
+    store: LiveChatStore = request.app.state.livechat_store
+    paths: ProjectPaths = request.app.state.paths
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+
+    def _retry() -> _RetryOutcome:
+        att = store.get_attachment(att_id)
+        if att is None:
+            return "unknown"
+        if att.status != "failed" or att.message_seq is None:
+            return "not_failed"
+        now = time.time()
+        if not attachment_retryable(att, now=now) or failed_original_path(paths, att_id) is None:
+            return "gone"
+        requeued = store.requeue_failed_attachment(att_id, now=now)
+        return requeued if requeued is not None else "not_failed"
+
+    outcome = await anyio.to_thread.run_sync(_retry)
+    if outcome == "unknown":
+        raise HTTPException(status_code=404, detail="unknown attachment")
+    if outcome == "not_failed":
+        return JSONResponse(status_code=409, content={"error": "not_failed"})
+    if outcome == "gone":
+        return JSONResponse(status_code=410, content={"error": "original_gone"})
+    assert not isinstance(outcome, str)
+    notifier.publish()
+    signer = MediaSigner.for_auth(request.app.state.livechat_secret, auth)
+    return JSONResponse(status_code=202, content={"attachment": attachment_json(outcome, signer)})

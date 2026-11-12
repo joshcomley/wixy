@@ -31,7 +31,9 @@ import math
 import os
 import subprocess
 import sys
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, cast
@@ -200,30 +202,153 @@ def _demuxer_for(container: str, *, kind: Literal["video", "voice"]) -> str:
 # Subprocess hygiene
 # ---------------------------------------------------------------------------
 
-_VIDEO_TIMEOUT_S = 30 * 60.0
 _DEFAULT_TIMEOUT_S = 5 * 60.0
+"""Wall-clock bound for the SMALL, fixed-cost steps only (ffprobe, the one-frame video
+poster) — never for a transcode, whose cost grows with the recording's length."""
+
+# decisions/00209: a transcode is bounded by PROGRESS, not by a fixed wall clock. The
+# subprocess runs below normal priority (§7), so on a host at 100% CPU it is starved
+# and slows down without ever stopping — a fixed 5-minute limit then killed a healthy
+# 15-minute voice note (2026-11-12, failure "timeout", 10 s of work on an idle box).
+# A transcode is killed only when ffmpeg stops reporting progress for `_STALL_S`, or
+# when it passes the generous per-kind ceiling (a last-resort bound on a trickle).
+_STALL_S = 120.0
+_VOICE_CEILING_S = 60 * 60.0
+_VIDEO_CEILING_S = 3 * 60 * 60.0
+_WATCH_POLL_S = 1.0
+
+
+def _creationflags() -> int:
+    """§7: below-normal priority + no console window on Windows (POSIX uses `nice`,
+    and `creationflags` must be 0 there)."""
+    if sys.platform == "win32":
+        return subprocess.BELOW_NORMAL_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW
+    return 0
+
+
+def _niced(argv: list[str]) -> list[str]:
+    return argv if sys.platform == "win32" else ["nice", "-n", "10", *argv]
 
 
 def _run(argv: list[str], *, timeout_s: float) -> subprocess.CompletedProcess[bytes]:
-    def invoke() -> subprocess.CompletedProcess[bytes]:
-        if sys.platform == "win32":
-            return subprocess.run(
-                argv,
-                capture_output=True,
-                timeout=timeout_s,
-                check=False,
-                creationflags=subprocess.BELOW_NORMAL_PRIORITY_CLASS | subprocess.CREATE_NO_WINDOW,
-            )
-        return subprocess.run(
-            ["nice", "-n", "10", *argv], capture_output=True, timeout=timeout_s, check=False
-        )
-
     try:
-        return invoke()
+        return subprocess.run(
+            _niced(argv),
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=timeout_s,
+            check=False,
+            creationflags=_creationflags(),
+        )
     except subprocess.TimeoutExpired as exc:
         raise MediaProcessingError("timeout", f"{argv[0]} exceeded {timeout_s:.0f}s") from exc
     except FileNotFoundError as exc:
         raise MediaProcessingError("media_unavailable", str(exc)) from exc
+
+
+class _ProgressReader:
+    """Incrementally reads an ffmpeg `-progress` file and reports whether the
+    encoded position (`out_time_us`) has moved forward since the last read."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._offset = 0
+        self._partial = b""
+        self._best = -1
+
+    def advanced(self) -> bool:
+        try:
+            with self._path.open("rb") as fh:
+                fh.seek(self._offset)
+                data = fh.read()
+        except FileNotFoundError:
+            return False
+        self._offset += len(data)
+        lines = (self._partial + data).split(b"\n")
+        self._partial = lines.pop()
+        moved = False
+        for line in lines:
+            key, _, value = line.strip().partition(b"=")
+            if key not in (b"out_time_us", b"out_time_ms"):
+                continue
+            try:
+                position = int(value)
+            except ValueError:
+                continue  # "N/A" before the first packet is written
+            if position > self._best:
+                self._best = position
+                moved = True
+        return moved
+
+
+def _run_transcode(
+    argv: list[str],
+    *,
+    progress_path: Path,
+    ceiling_s: float,
+    stall_s: float = _STALL_S,
+    poll_s: float = _WATCH_POLL_S,
+    clock: Callable[[], float] | None = None,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run one transcode under the progress watchdog (decisions/00209).
+
+    `argv` must make the child report progress into `progress_path` — for ffmpeg,
+    `_watch_flags(progress_path)` right after the binary. stdout and stderr are
+    drained throughout (the PCM peaks pass streams megabytes to stdout), so a
+    slow consumer can never deadlock the child."""
+    full = list(argv)
+    clock = clock or _monotonic
+    try:
+        proc = subprocess.Popen(
+            _niced(full),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            creationflags=_creationflags(),
+        )
+    except FileNotFoundError as exc:
+        raise MediaProcessingError("media_unavailable", str(exc)) from exc
+
+    reader = _ProgressReader(progress_path)
+    started = clock()
+    last_progress = started
+    reason: str | None = None
+    try:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=poll_s)
+            except subprocess.TimeoutExpired:
+                now = clock()
+                if reader.advanced():
+                    last_progress = now
+                if now - last_progress > stall_s:
+                    reason = f"{argv[0]} made no progress for {stall_s:.0f}s"
+                elif now - started > ceiling_s:
+                    reason = f"{argv[0]} exceeded the {ceiling_s:.0f}s ceiling"
+                if reason is None:
+                    continue
+                proc.kill()
+                proc.communicate()
+                raise MediaProcessingError("timeout", reason) from None
+            return subprocess.CompletedProcess(full, proc.returncode, stdout, stderr)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+        _unlink_quietly(progress_path)
+
+
+_monotonic = time.monotonic
+
+
+def _progress_path_for(output: Path) -> Path:
+    return output.with_name(f".progress-{uuid.uuid4().hex}.txt")
+
+
+def _watch_flags(progress_path: Path) -> list[str]:
+    """ffmpeg global options for a watched transcode: never read stdin, no console
+    stats line, machine-readable progress (`out_time_us=`) into `progress_path`."""
+    return ["-nostdin", "-nostats", "-progress", str(progress_path)]
 
 
 def _as_object(value: JsonValue) -> JsonObject:
@@ -593,8 +718,10 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
     # ".m4a" as its suffix (the "ipod"/m4a muxer) rather than getting a bare
     # ".tmp-<hex>" that would make it default to some other container.
     tmp_play = play_path.with_name(f"play.tmp-{uuid.uuid4().hex}.m4a")
+    progress_path = _progress_path_for(play_path)
     argv = [
         ffmpeg,
+        *_watch_flags(progress_path),
         "-y",
         "-f",
         demuxer,
@@ -615,7 +742,11 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         "+faststart",
         str(tmp_play),
     ]
-    proc = _run(argv, timeout_s=_DEFAULT_TIMEOUT_S)
+    try:
+        proc = _run_transcode(argv, progress_path=progress_path, ceiling_s=_VOICE_CEILING_S)
+    except MediaProcessingError:
+        _unlink_quietly(tmp_play)
+        raise
     if proc.returncode != 0:
         _unlink_quietly(tmp_play)
         raise MediaProcessingError("corrupt", proc.stderr.decode("utf-8", "replace")[:500])
@@ -630,8 +761,10 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         _unlink_quietly(play_path)
         raise MediaProcessingError("duration_exceeded", f"{duration_s:.1f}s exceeds the voice cap")
 
+    pcm_progress_path = _progress_path_for(play_path)
     pcm_argv = [
         ffmpeg,
+        *_watch_flags(pcm_progress_path),
         "-f",
         "mp4",
         "-protocol_whitelist",
@@ -648,7 +781,13 @@ def process_voice(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
         "s16le",
         "-",
     ]
-    pcm_proc = _run(pcm_argv, timeout_s=_DEFAULT_TIMEOUT_S)
+    try:
+        pcm_proc = _run_transcode(
+            pcm_argv, progress_path=pcm_progress_path, ceiling_s=_VOICE_CEILING_S
+        )
+    except MediaProcessingError:
+        _unlink_quietly(play_path)
+        raise
     if pcm_proc.returncode != 0:
         _unlink_quietly(play_path)
         raise MediaProcessingError("corrupt", pcm_proc.stderr.decode("utf-8", "replace")[:500])
@@ -760,10 +899,12 @@ def process_video(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
     poster_path = output_dir / "poster.jpg"
     play_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_play = play_path.with_name(f"play.tmp-{uuid.uuid4().hex}.mp4")
+    progress_path = _progress_path_for(play_path)
 
     if _can_remux(video_stream, audio_stream):
         argv = [
             ffmpeg,
+            *_watch_flags(progress_path),
             "-y",
             "-f",
             demuxer,
@@ -786,6 +927,7 @@ def process_video(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
     else:
         argv = [
             ffmpeg,
+            *_watch_flags(progress_path),
             "-y",
             "-f",
             demuxer,
@@ -825,7 +967,11 @@ def process_video(src: Path, *, output_dir: Path, ffmpeg: str, ffprobe: str) -> 
             "2",
             str(tmp_play),
         ]
-    proc = _run(argv, timeout_s=_VIDEO_TIMEOUT_S)
+    try:
+        proc = _run_transcode(argv, progress_path=progress_path, ceiling_s=_VIDEO_CEILING_S)
+    except MediaProcessingError:
+        _unlink_quietly(tmp_play)
+        raise
     if proc.returncode != 0:
         _unlink_quietly(tmp_play)
         raise MediaProcessingError("corrupt", proc.stderr.decode("utf-8", "replace")[:500])
