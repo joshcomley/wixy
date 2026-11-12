@@ -7,16 +7,17 @@ except `GET /media/*` (which uses a signed query string instead — an
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 import anyio
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from builder.jsontypes import JsonObject
 from wixy_server.livechat import uploads
@@ -44,8 +45,13 @@ router = APIRouter(prefix="/api/admin/server")
 class InitUploadIn(BaseModel):
     kind: Literal["photo", "video", "voice"]
     mimeType: str
-    sizeBytes: int = Field(ge=1)
+    sizeBytes: int | None = None
+    """Required (>= 1) for an ordinary upload; ignored for a live one."""
     filename: str | None = None
+    live: bool = False
+    """spec/server-chat/06 §2.1: a voice recording uploaded slice by slice while it is made."""
+    deviceId: str | None = None
+    """Required for a live upload: the device recording (the id `POST /messages` also takes)."""
 
 
 @router.post("/uploads", response_model=None)
@@ -56,12 +62,21 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
     settings: Settings = request.app.state.settings
     media_available: bool = request.app.state.livechat_media_available
 
+    if body.live:
+        if body.kind != "voice":
+            raise HTTPException(status_code=422, detail="live uploads are voice only")
+        if body.deviceId is None or not (8 <= len(body.deviceId) <= 64):
+            raise HTTPException(status_code=422, detail="deviceId must be 8-64 characters")
+    elif body.sizeBytes is None or body.sizeBytes < 1:
+        raise HTTPException(status_code=422, detail="sizeBytes must be a positive integer")
+    declared_size = body.sizeBytes if body.sizeBytes is not None else 0
+
     def _init() -> uploads.InitResult:
         return uploads.init_upload(
             store=store,
             kind=body.kind,
             mime_type=body.mimeType,
-            size_bytes=body.sizeBytes,
+            size_bytes=declared_size,
             filename=body.filename,
             by_email=auth.email or None,
             chunk_bytes=settings.server_upload_chunk_bytes,
@@ -70,6 +85,8 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
             media_available=media_available,
             disk_check_path=paths.root,
             now=time.time(),
+            live=body.live,
+            device_id=body.deviceId,
         )
 
     try:
@@ -96,12 +113,57 @@ async def init_upload(body: InitUploadIn, request: Request) -> JSONResponse:
 
 
 # ---------------------------------------------------------------------------
+# GET /uploads/unsent (spec/server-chat/06 §2.1) — declared BEFORE every `/uploads/{upload_id}`
+# route so "unsent" can never be read as an upload id.
+# ---------------------------------------------------------------------------
+
+
+@router.get("/uploads/unsent", response_model=None)
+async def list_unsent_uploads(
+    request: Request, deviceId: Annotated[str, Query(min_length=8, max_length=64)]
+) -> JSONResponse:
+    """The live voice recordings of THIS device that were never completed and have had no slice
+    for 20 s or more (a recording still going in another tab is not offered), newest first:
+    `{"unsent": [{"uploadId", "durationMs", "sizeBytes", "startedAt", "lastChunkAt"}]}`, times in
+    epoch seconds. Nothing about the content."""
+    await require_server_token(request)
+    store: LiveChatStore = request.app.state.livechat_store
+    idle_before = time.time() - uploads.UNSENT_IDLE_S
+    rows = await anyio.to_thread.run_sync(
+        lambda: store.unsent_live_uploads(device_id=deviceId, idle_before=idle_before)
+    )
+    return JSONResponse(
+        content={
+            "unsent": [
+                {
+                    "uploadId": row.id,
+                    "durationMs": row.duration_ms if row.duration_ms is not None else 0,
+                    "sizeBytes": row.size_bytes,
+                    "startedAt": row.created_at,
+                    "lastChunkAt": row.last_chunk_at,
+                }
+                for row in rows
+            ]
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # PUT /uploads/{id}/chunks/{index} (§5.5).
 # ---------------------------------------------------------------------------
 
 
 @router.put("/uploads/{upload_id}/chunks/{index}", response_model=None)
-async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
+async def put_chunk(
+    upload_id: str,
+    index: int,
+    request: Request,
+    durationMs: Annotated[int | None, Query(ge=0)] = None,
+) -> Response:
+    """One chunk of an upload. For a live upload (spec/server-chat/06 §2.1) the index must be the
+    next missing one or an existing one; a gap is 409 `out_of_order` with `next`, a running size
+    over the cap 413 `too_large`, quota / free space 507 `storage_full` (nothing stored), and
+    `durationMs` is the client's elapsed-recording figure, recorded with the arrival time."""
     await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
@@ -114,10 +176,16 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
     if upload is None:
         raise HTTPException(status_code=404, detail="unknown upload")
 
-    try:
-        uploads.validate_chunk_index(index, upload.size_bytes, settings.server_upload_chunk_bytes)
-    except uploads.InvalidChunkIndexError:
-        raise HTTPException(status_code=422, detail="chunk index out of range") from None
+    if upload.live:
+        if index < 0:
+            raise HTTPException(status_code=422, detail="chunk index out of range")
+    else:
+        try:
+            uploads.validate_chunk_index(
+                index, upload.size_bytes, settings.server_upload_chunk_bytes
+            )
+        except uploads.InvalidChunkIndexError:
+            raise HTTPException(status_code=422, detail="chunk index out of range") from None
 
     try:
         data = await uploads.read_capped(request.stream(), cap=settings.server_upload_chunk_bytes)
@@ -128,8 +196,42 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
 
     upload_dir = paths.server_upload_dir(upload_id)
 
+    if upload.live:
+        live_upload = upload
+
+        def _admit() -> int:
+            return uploads.prepare_live_chunk(
+                store=store,
+                upload=live_upload,
+                upload_dir=upload_dir,
+                index=index,
+                data_len=len(data),
+                quota_bytes=settings.server_media_quota_bytes,
+                min_free_bytes=settings.server_min_free_bytes,
+                disk_check_path=paths.root,
+            )
+
+        try:
+            running_size = await anyio.to_thread.run_sync(_admit)
+        except uploads.OutOfOrderChunkError as exc:
+            return JSONResponse(
+                status_code=409, content={"error": "out_of_order", "next": exc.next_index}
+            )
+        except uploads.TooLargeError as exc:
+            return JSONResponse(
+                status_code=413, content={"error": "too_large", "maxBytes": exc.max_bytes}
+            )
+        except uploads.StorageFullError:
+            return JSONResponse(status_code=507, content={"error": "storage_full"})
+    else:
+        running_size = None
+
     def _write() -> None:
         uploads.write_chunk(upload_dir, index, data)
+        if running_size is not None:
+            store.record_live_chunk(
+                upload_id, size_bytes=running_size, duration_ms=durationMs, now=time.time()
+            )
 
     # Keep the filesystem write and its post-write row check in one shielded
     # operation. A disconnect after the write must not skip the cleanup check.
@@ -167,13 +269,51 @@ async def put_chunk(upload_id: str, index: int, request: Request) -> Response:
 # ---------------------------------------------------------------------------
 
 
+_COMPLETE_BODY_MAX_BYTES = 1024
+
+
+def _parse_chunk_count(raw: bytes) -> int | None | Literal["invalid"]:
+    """The optional `{"chunkCount": int}` body of a live upload's `/complete`: `None` when there
+    is no body (or no count) — every present contiguous chunk is then used — `"invalid"` for
+    anything else that is not a positive integer within bounds."""
+    if not raw.strip():
+        return None
+    if len(raw) > _COMPLETE_BODY_MAX_BYTES:
+        return "invalid"
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return "invalid"
+    if not isinstance(data, dict):
+        return "invalid"
+    count = data.get("chunkCount")
+    if count is None:
+        return None
+    if isinstance(count, bool) or not isinstance(count, int):
+        return "invalid"
+    if not (1 <= count <= uploads.MAX_LIVE_CHUNK_COUNT):
+        return "invalid"
+    return count
+
+
 @router.post("/uploads/{upload_id}/complete", response_model=None)
 async def complete_upload(upload_id: str, request: Request) -> JSONResponse:
+    """Promote an upload to a `processing` attachment. A live upload (spec/server-chat/06 §2.1)
+    takes an optional `{"chunkCount": int}` body — omitted means every present contiguous chunk;
+    chunks missing below `chunkCount` are 409 `incomplete`. An ordinary upload ignores any body."""
     auth = await require_server_token(request)
     store: LiveChatStore = request.app.state.livechat_store
     paths: ProjectPaths = request.app.state.paths
     settings: Settings = request.app.state.settings
     secret: bytes = request.app.state.livechat_secret
+
+    upload = await anyio.to_thread.run_sync(lambda: store.get_upload(upload_id))
+    chunk_count: int | None = None
+    if upload is not None and upload.live:
+        parsed = _parse_chunk_count(await request.body())
+        if isinstance(parsed, str):
+            raise HTTPException(status_code=422, detail="chunkCount must be a positive integer")
+        chunk_count = parsed
 
     def _assemble() -> AttachmentRow:
         return uploads.assemble(
@@ -182,6 +322,7 @@ async def complete_upload(upload_id: str, request: Request) -> JSONResponse:
             upload_id=upload_id,
             chunk_bytes=settings.server_upload_chunk_bytes,
             now=time.time(),
+            chunk_count=chunk_count,
         )
 
     try:

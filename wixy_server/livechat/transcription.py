@@ -20,17 +20,25 @@ module ever formats it.
 from __future__ import annotations
 
 import logging
+import math
+import shutil
 import time
+import uuid
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Final, Literal
 
 import anyio
 from anyio import CapacityLimiter
 
 from wixy_server.livechat.notifier import LiveChatNotifier
-from wixy_server.livechat.processing import VOICE_DURATION_CAP_S
+from wixy_server.livechat.processing import (
+    VOICE_DURATION_CAP_S,
+    MediaProcessingError,
+    cut_voice_stretch,
+)
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.transcribe import Transcriber, TranscribeResult
 from wixy_server.storage import ProjectPaths
@@ -44,6 +52,35 @@ TIMEOUT_PER_AUDIO_SECOND_S: Final = 0.5
 RATE_LIMIT_MAX_JOBS: Final = 6
 RATE_LIMIT_WINDOW_S: Final = 60.0
 _DURATION_TOLERANCE_S: Final = 0.5
+TRANSCRIBE_STRETCH_S = 15 * 60.0
+"""The longest audio one request to cmd carries (spec/server-chat/06 §2.4). A note longer than
+this is transcribed in consecutive stretches of at most this long, each through the same
+private-mode call. A module attribute (not `Final`) so a test can shrink it."""
+TRANSCRIBE_TMP_DIRNAME: Final = "transcribe-tmp"
+"""Under the server's private storage (`ProjectPaths.server_dir`): the stretch files of a job in
+flight. Each job's files are deleted when it ends, however it ends, and the whole directory is
+emptied at startup (no job can be in flight in a process that has only just started)."""
+
+
+@dataclass(frozen=True, slots=True)
+class Stretch:
+    start_s: float
+    length_s: float | None
+    """`None`: to the end of the note."""
+
+
+def plan_stretches(duration_s: float, *, stretch_s: float | None = None) -> list[Stretch]:
+    """Cut a note into consecutive stretches of at most `stretch_s` (default
+    `TRANSCRIBE_STRETCH_S`). A note within one stretch (plus the usual half-second duration
+    tolerance) is a single stretch. Otherwise every stretch but the last is exactly `stretch_s`
+    and the last runs to the end of the note, so nothing is dropped to rounding and no sliver is
+    sent on its own."""
+    limit = TRANSCRIBE_STRETCH_S if stretch_s is None else stretch_s
+    if duration_s <= limit + _DURATION_TOLERANCE_S:
+        return [Stretch(0.0, None)]
+    count = max(1, math.ceil((duration_s - _DURATION_TOLERANCE_S) / limit))
+    return [Stretch(index * limit, limit if index < count - 1 else None) for index in range(count)]
+
 
 _FAILURE_BY_OUTCOME: Final[dict[str, str]] = {
     "warming": "warming",
@@ -55,9 +92,10 @@ _FAILURE_BY_OUTCOME: Final[dict[str, str]] = {
 
 
 def transcribe_timeout_s(duration_s: float | None) -> float:
-    """cmd's whole-request budget: 60 s plus half the note's length — a 15-minute note on the
-    CPU engine cannot finish in a flat 60 s."""
-    bounded = min(max(duration_s or 0.0, 0.0), VOICE_DURATION_CAP_S)
+    """cmd's whole-request budget: 60 s plus half the audio's length — a 15-minute stretch on the
+    CPU engine cannot finish in a flat 60 s. A longer note is sent in stretches of at most
+    `TRANSCRIBE_STRETCH_S`, so the budget is per request and never grows past that stretch's."""
+    bounded = min(max(duration_s or 0.0, 0.0), TRANSCRIBE_STRETCH_S)
     return BASE_TIMEOUT_S + TIMEOUT_PER_AUDIO_SECOND_S * bounded
 
 
@@ -131,20 +169,26 @@ class TranscriptionRuntime:
         notifier: LiveChatNotifier,
         transcriber: Transcriber | None,
         rate_limiter: SlidingWindowRateLimiter | None = None,
+        ffmpeg: str | None = None,
     ) -> None:
         self.store = store
         self.paths = paths
         self.notifier = notifier
         self.transcriber = transcriber
         self.rate_limiter = rate_limiter if rate_limiter is not None else SlidingWindowRateLimiter()
+        self.ffmpeg = ffmpeg
+        """The ffmpeg binary that cuts a long note into stretches (`None`: media pipeline
+        unavailable, so a note past one stretch cannot be transcribed)."""
         self.inflight: set[str] = set()
         self._limiter: CapacityLimiter | None = None
 
     def reset_loop_state(self) -> None:
         """Called at app startup: the limiter belongs to one event loop, and no job can be in
-        flight in a process that has only just started."""
+        flight in a process that has only just started — so any stretch file a killed process
+        left behind is removed."""
         self._limiter = None
         self.inflight.clear()
+        shutil.rmtree(self.paths.server_dir / TRANSCRIBE_TMP_DIRNAME, ignore_errors=True)
 
     async def available(self) -> bool:
         return self.transcriber is not None and await self.transcriber.available()
@@ -212,6 +256,8 @@ class TranscriptionRuntime:
             return _JobResult("failed", failure="too_long")
 
         path = self.paths.server_attachment_media_dir(att_id) / VOICE_RENDITION_FILENAME
+        if duration_s is not None and duration_s > TRANSCRIBE_STRETCH_S + _DURATION_TOLERANCE_S:
+            return await self._transcribe_in_stretches(transcriber, att_id, path, duration_s)
         try:
             audio = await anyio.to_thread.run_sync(path.read_bytes)
         except OSError:
@@ -232,6 +278,75 @@ class TranscriptionRuntime:
             timeout_s=transcribe_timeout_s(duration_s),
         )
         return _result_from(response)
+
+    async def _transcribe_in_stretches(
+        self, transcriber: Transcriber, att_id: str, path: Path, duration_s: float
+    ) -> _JobResult | None:
+        """A note longer than one stretch (spec/server-chat/06 §2.4): consecutive stretches of at
+        most `TRANSCRIBE_STRETCH_S`, each cut by ffmpeg into a temporary file in the server's
+        private storage, sent through the same private-mode call as a short note, and joined with
+        one space. The files are deleted when the job ends however it ends; one failed stretch
+        fails the whole transcript (the person's Retry runs it again)."""
+        ffmpeg = self.ffmpeg
+        if ffmpeg is None:
+            return _JobResult("failed", failure="error")
+        work_dir = self.paths.server_dir / TRANSCRIBE_TMP_DIRNAME / uuid.uuid4().hex
+        texts: list[str] = []
+        engine: str | None = None
+        try:
+            for stretch in plan_stretches(duration_s):
+                length_s = (
+                    stretch.length_s
+                    if stretch.length_s is not None
+                    else duration_s - stretch.start_s
+                )
+                stretch_file = work_dir / "stretch.m4a"
+
+                def _cut_and_read(
+                    start_s: float = stretch.start_s,
+                    cut_length_s: float | None = stretch.length_s,
+                    target: Path = stretch_file,
+                ) -> bytes:
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    cut_voice_stretch(
+                        path, target, ffmpeg=ffmpeg, start_s=start_s, length_s=cut_length_s
+                    )
+                    try:
+                        return target.read_bytes()
+                    finally:
+                        target.unlink(missing_ok=True)
+
+                try:
+                    audio = await anyio.to_thread.run_sync(_cut_and_read)
+                except OSError, MediaProcessingError:
+                    # A deleted message removes the row first and its files after: only a row that
+                    # still exists makes a missing file a real failure.
+                    gone = await anyio.to_thread.run_sync(self.store.get_attachment, att_id) is None
+                    if gone:
+                        return None
+                    exists = await anyio.to_thread.run_sync(path.is_file)
+                    return _JobResult("failed", failure="error" if exists else "media_missing")
+                # Asked of cmd NOW before EVERY stretch, exactly as for a short note.
+                if not await transcriber.available(fresh=True):
+                    return _JobResult("failed", failure="unavailable")
+                response = await transcriber.transcribe(
+                    audio=audio,
+                    filename=VOICE_RENDITION_FILENAME,
+                    content_type=VOICE_CONTENT_TYPE,
+                    timeout_s=transcribe_timeout_s(length_s),
+                )
+                result = _result_from(response)
+                if result.status != "done":
+                    return result
+                if result.text:
+                    texts.append(result.text)
+                if engine is None:
+                    engine = result.engine
+        finally:
+            # Synchronous on purpose: a cancelled job must still clean up, and an `await` here
+            # would be cancelled too. It is one small directory.
+            shutil.rmtree(work_dir, ignore_errors=True)
+        return _JobResult("done", text=" ".join(texts), engine=engine)
 
 
 def _result_from(response: TranscribeResult) -> _JobResult:
