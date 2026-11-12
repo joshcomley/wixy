@@ -988,10 +988,26 @@ The 🎤 control uses `server/recorder.ts`. It requests microphone permission, h
 text input and Send button in favour of a dedicated recording row, provides a Pause/Resume button
 that freezes the elapsed recording timer and excludes paused intervals from the delivered audio
 duration, supports stop and cancel, and passes the resulting `File` into the same staged-upload
-flow. Locking calls the recorder's `detach()` to discard an unfinished recording and release
+flow. Locking calls the recorder's `detach()` to end an unfinished recording and release
 the microphone. A new recorder is created on the next attach because a detached recorder is
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
 uploaded.
+
+A voice note is uploaded **while it is recorded** (spec/server-chat/06, decisions/00210):
+`recorder.start(15000)` emits a slice every 15 s (`onSlice(blob, index, elapsedMs)`, 64 kbit/s
+requested, `VOICE_MAX_DURATION_MS` = 4 h as a runaway guard only — there is no 15:00 auto-stop,
+and the timer shows h:mm:ss past an hour). `liveUpload.ts` inits a live upload at start, PUTs
+slices strictly in order with one in flight (resyncing to the server's `next` on a 409
+`out_of_order`), and on Stop sends the last slice then `complete` with `chunkCount` (retried on a
+transient failure or a 409 `incomplete`). The recorder still keeps every slice in memory until the
+upload is confirmed, so if the live upload fails permanently the Stop path uploads the kept blob
+the ordinary way and nothing is lost. **Cancel** deletes the live upload (`DELETE /uploads/{id}`);
+a **lock or page loss mid-recording abandons it instead**, leaving it on the server. On the next
+attach `unsentVoice.ts` asks `GET /uploads/unsent` for this device (excluding its own upload still
+in progress) and shows an "Unsent voice note · 12:31" card beside the composer with **Send**
+(`complete` without `chunkCount`, then the ordinary message send; it sends to the main chat if the
+original thread is gone) and **Discard**. Nothing is ever sent automatically, and nothing is kept
+in browser storage — the recording lives on the server.
 
 The Server-chat composer and the AI chat composer share cmd's key rules (`chatComposer.ts`): on a
 keyboard device Enter sends while the draft is a single line; Shift+Enter or Ctrl/Cmd+Enter inserts
