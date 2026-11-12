@@ -1510,7 +1510,7 @@ class TestPoliteness:
             w.serve(
                 "slow.example.com",
                 "/",
-                Reply(body=b"<html></html>", content_type="text/html", delay_s=30.0),
+                Reply(body=b"<html></html>", content_type="text/html", delay_s=600.0),
             )
 
         plan = plan_of(
@@ -1522,9 +1522,12 @@ class TestPoliteness:
             },
             wikipedia=None,
         )
+        # The budget must outlast the fast venue's few local fetches even on a saturated test
+        # host (a 2 s budget lost them under load), while the slow venue answers only after ten
+        # minutes — so ending well inside a minute still proves the budget, not the venue, ended it.
         started = time.monotonic()
-        pictures, _, _ = run_find(configure, plan, budget_s=2.0)
-        assert time.monotonic() - started < 10.0
+        pictures, _, _ = run_find(configure, plan, budget_s=12.0)
+        assert time.monotonic() - started < 60.0
         assert [p.slot for p in pictures] == ["food:0"]
 
     def test_nothing_is_fetched_once_the_round_no_longer_wants_pictures(self) -> None:
