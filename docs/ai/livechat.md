@@ -559,9 +559,16 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    The video's renditions are therefore `play`, `poster`, `thumb`. Media sent before this
    existed is caught up by `livechat/thumbnails.py` (see §21).
 5. **Subprocess hygiene**: Windows `BELOW_NORMAL_PRIORITY_CLASS|CREATE_NO_WINDOW`, POSIX
-   `nice -n 10`; hard timeouts (30min video / 5min else) with kill-on-timeout; every
-   ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
-   atomic (temp name, then `os.replace`).
+   `nice -n 10`; every ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every
+   rendition write is atomic (temp name, then `os.replace`). **Timeouts (decisions/00209):** a
+   *transcode* (voice encode, voice peaks pass, video encode/remux) runs through
+   `_run_transcode` with `-nostdin -nostats -progress <file>` and is killed only when ffmpeg's
+   `out_time_us` stops advancing for `_STALL_S` (120 s) or it passes a per-kind ceiling
+   (`_VOICE_CEILING_S` 1 h, `_VIDEO_CEILING_S` 3 h) — never on a fixed wall clock, because the
+   low-priority child is starved, not stuck, on a host at 100% CPU. Only the small fixed-cost
+   steps (ffprobe, the one-frame poster) keep the 5-minute `_DEFAULT_TIMEOUT_S`. Every failure is
+   logged by the queue as a WARNING (kind, id, seconds taken, reason, ffmpeg's own diagnostic —
+   never message content).
 
 **Photo renditions** (`processing.process_photo`; the first matching row applies):
 
@@ -599,7 +606,18 @@ column on `AttachmentRow` — the convention *is* the pointer: the media queue l
 source at `uploads/<attachmentId>/assembled`. The `uploads` DB row stays alive (for
 `pending_upload_bytes` accounting) until the queue resolves the attachment, success or
 failure, at which point it — and the staged file — are removed (success) or the original is
-archived to `failed/<id>/original.<ext>` (failure, kept 7 days).
+archived to `failed/<id>/original.<ext>` (failure, kept 7 days after the latest failure).
+
+**Try again (decisions/00209).** `POST /attachments/{id}/retry` puts a `failed` attachment of
+a sent message back to `processing` (`store.requeue_failed_attachment`, which emits the same
+`message_updated` events as `finish_attachment`). The queue's `_do_work` then finds no staged
+`uploads/<id>/assembled` and processes `failed/<id>/original.<ext>` **in place**
+(`media_queue.failed_original_path`) — never moved back under `uploads/`, whose id is already
+tombstoned for cleanup. Success removes the archive; a further failure leaves it untouched and
+`utime`s its folder, restarting the seven-day window; neither file present fails
+`original_missing`. The wire's `Attachment.retryable` (`models.attachment_retryable`) is true for
+a failed attachment of a sent message inside `FAILED_ORIGINAL_RETENTION_S`; the admin UI shows a
+"Try again" button only then.
 
 **The queue (`livechat/media_queue.py`, P2b) — `run_forever`, one app-lifetime task.**
 Claims via `store.claim_processing` (`owner=f"{pid}-{uuid}"`, 120s lease), spawns one child

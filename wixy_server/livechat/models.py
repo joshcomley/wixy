@@ -6,6 +6,7 @@ stale row across an `anyio.to_thread.run_sync` boundary and mutate it in place.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -631,6 +632,22 @@ def transcript_json(row: TranscriptRow | None) -> JsonObject | None:
     return data
 
 
+FAILED_ORIGINAL_RETENTION_S = 7 * 24 * 60 * 60.0
+"""§4: a failed attachment's original is archived under `failed/<id>/` this long after its
+(latest) failure, then the janitor removes it. While it is kept, the attachment can be tried
+again (decisions/00209)."""
+
+
+def attachment_retryable(row: AttachmentRow, *, now: float) -> bool:
+    """Whether "Try again" is offered: a failed attachment of a sent message whose archived
+    original is still inside its retention window (the route re-checks the file itself)."""
+    return (
+        row.status == "failed"
+        and row.message_seq is not None
+        and now - row.updated_at < FAILED_ORIGINAL_RETENTION_S
+    )
+
+
 def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Attachment` wire shape. `urls` carries only READY renditions — a
     processing/failed attachment has nothing safe to link to yet (Inv 41: a token in
@@ -654,6 +671,7 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
         "peaks": list(row.peaks) if row.peaks is not None else None,
         "urls": urls,
         "animated": animated,
+        "retryable": attachment_retryable(row, now=time.time()),
         "transcript": transcript_json(row.transcript),
     }
 

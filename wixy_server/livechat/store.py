@@ -6254,38 +6254,61 @@ class LiveChatStore:
             )
             message_seq = row["message_seq"]
             if message_seq is not None:
-                # A holiday-pack picture becoming ready changes the Adventure Time round's view
-                # (its pictures list only READY attachments), so the round's `rev` — the signal the
-                # client re-fetches on — moves too. A no-op for every other message.
-                conn.execute(
-                    "UPDATE adv_rounds SET rev = rev + 1, updated_at = ? "
-                    "WHERE anchor_message_seq = ?",
-                    (now, message_seq),
-                )
-                # Likewise a Cookout dish picture: the round's `rev` moves when one is ready.
-                conn.execute(
-                    "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? "
-                    "WHERE anchor_message_seq = ?",
-                    (now, message_seq),
-                )
-                conn.execute(
-                    "INSERT INTO events (type, message_seq, created_at) "
-                    "VALUES ('message_updated', ?, ?)",
-                    (message_seq, now),
-                )
-                # §(3): a quote's media summary is derived from the target's
-                # LIVE attachment state, so a reply's rendered quote must
-                # refresh too once processing finishes (e.g. it gains a
-                # thumbnail). `idx_messages_reply_to` serves this lookup.
-                reply_rows = conn.execute(
-                    "SELECT seq FROM messages WHERE reply_to_seq = ?", (message_seq,)
-                ).fetchall()
-                for reply_row in reply_rows:
-                    conn.execute(
-                        "INSERT INTO events (type, message_seq, created_at) "
-                        "VALUES ('message_updated', ?, ?)",
-                        (reply_row["seq"], now),
-                    )
+                self._emit_attachment_changed(conn, int(message_seq), now)
+
+    def requeue_failed_attachment(self, att_id: str, *, now: float) -> AttachmentRow | None:
+        """decisions/00209: put a FAILED attachment of a sent message back in the processing
+        queue, so the media queue re-runs it from its archived original. Returns the row (now
+        `processing`), or `None` when it is gone, not failed, or belongs to no message."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT message_seq FROM attachments WHERE id = ? AND status = 'failed' "
+                "AND message_seq IS NOT NULL",
+                (att_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "UPDATE attachments SET status = 'processing', failure = NULL, "
+                "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
+                (now, att_id),
+            )
+            self._emit_attachment_changed(conn, int(row["message_seq"]), now)
+            return _load_attachment(conn, att_id)
+
+    @staticmethod
+    def _emit_attachment_changed(conn: sqlite3.Connection, message_seq: int, now: float) -> None:
+        """An attachment's state moved (processed, failed, or put back in the queue), so its
+        message — and every reply quoting it — re-renders."""
+        # A holiday-pack picture becoming ready changes the Adventure Time round's view
+        # (its pictures list only READY attachments), so the round's `rev` — the signal the
+        # client re-fetches on — moves too. A no-op for every other message.
+        conn.execute(
+            "UPDATE adv_rounds SET rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+            (now, message_seq),
+        )
+        # Likewise a Cookout dish picture: the round's `rev` moves when one is ready.
+        conn.execute(
+            "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+            (now, message_seq),
+        )
+        conn.execute(
+            "INSERT INTO events (type, message_seq, created_at) VALUES ('message_updated', ?, ?)",
+            (message_seq, now),
+        )
+        # §(3): a quote's media summary is derived from the target's
+        # LIVE attachment state, so a reply's rendered quote must
+        # refresh too once processing finishes (e.g. it gains a
+        # thumbnail). `idx_messages_reply_to` serves this lookup.
+        reply_rows = conn.execute(
+            "SELECT seq FROM messages WHERE reply_to_seq = ?", (message_seq,)
+        ).fetchall()
+        for reply_row in reply_rows:
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (reply_row["seq"], now),
+            )
 
     def get_attachment(self, att_id: str) -> AttachmentRow | None:
         with self._read_txn() as conn:

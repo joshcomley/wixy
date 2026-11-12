@@ -18,13 +18,14 @@ from pathlib import Path
 import anyio
 
 from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S, REVOKED_ROW_RETENTION_S
+from wixy_server.livechat.models import FAILED_ORIGINAL_RETENTION_S
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
 
 STALE_UPLOAD_AGE_S = 24 * 60 * 60.0
 ORPHAN_ATTACHMENT_AGE_S = 24 * 60 * 60.0
-FAILED_RETENTION_S = 7 * 24 * 60 * 60.0
+FAILED_RETENTION_S = FAILED_ORIGINAL_RETENTION_S
 SWEEP_INTERVAL_S = 60 * 60.0
 SCRUB_INTERVAL_S = 2.0
 SCRUB_TICK_DEADLINE_S = 1.5

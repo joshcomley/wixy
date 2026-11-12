@@ -974,7 +974,9 @@ removed by rebuilding the image from those normalized pixels. Animated GIFs are 
 documented exception: they keep their original bytes as `full.gif`. The output format follows
 transparency, not the source format (table in [livechat.md](livechat.md) §8). Voice/video are
 normalized into private renditions and successful raw uploads are removed. Failed originals are
-diagnostic-only and expire after seven days. Enforce quota and the free-space floor at upload
+kept seven days after their latest failure, for diagnosis and for "Try again", which re-runs
+processing from them in place (decisions/00209); then they expire. A transcode is bounded by
+ffmpeg's progress, never by a fixed wall clock. Enforce quota and the free-space floor at upload
 initialization; a declared `sizeBytes` below 1 is rejected. Missing ffmpeg, ffprobe or
 `pillow-heif` makes media uploads, the media queue and the `mediaProcessing` status
 unavailable without disabling text chat. View-once attachments are delivered once through
