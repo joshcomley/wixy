@@ -419,6 +419,41 @@ def test_probe_asks_the_loaded_model_for_one_token(mods: dict[str, ModuleType]) 
     assert im.probe_ms("http://127.0.0.1:9", timeout_s=1.0) is None
 
 
+def test_probe_embeds_when_only_an_embedding_model_is_loaded(
+    mods: dict[str, ModuleType],
+) -> None:
+    import http.server
+    import threading
+
+    im = mods["images"]
+    posted: list[tuple[str, dict[str, Any]]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: object) -> None:
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"models":[{"name":"nomic-embed-text:latest"}]}')
+
+        def do_POST(self) -> None:  # noqa: N802
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            posted.append((self.path, json.loads(raw)))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        ms = im.probe_ms(f"http://127.0.0.1:{server.server_address[1]}")
+    finally:
+        server.shutdown()
+    assert ms is not None
+    assert posted == [("/api/embed", {"model": "nomic-embed-text:latest", "input": "Hi"})]
+
+
 def test_latency_sampler_records_each_probe_until_stopped(mods: dict[str, ModuleType]) -> None:
     im = mods["images"]
 

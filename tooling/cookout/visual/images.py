@@ -609,11 +609,20 @@ def probe_ms(url: str, timeout_s: float = 30.0) -> float | None:
     started = time.monotonic()
     try:
         if loaded:
-            body = json.dumps(
-                {"model": loaded, "prompt": "Hi", "stream": False, "options": {"num_predict": 1}}
-            ).encode()
+            if "embed" in loaded.lower():  # an embedding model cannot generate text
+                path, payload = "/api/embed", {"model": loaded, "input": "Hi"}
+            else:
+                path = "/api/generate"
+                payload = {
+                    "model": loaded,
+                    "prompt": "Hi",
+                    "stream": False,
+                    "options": {"num_predict": 1},
+                }
             request = urllib.request.Request(
-                f"{base}/api/generate", data=body, headers={"Content-Type": "application/json"}
+                f"{base}{path}",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
             )
             with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
                 response.read()
