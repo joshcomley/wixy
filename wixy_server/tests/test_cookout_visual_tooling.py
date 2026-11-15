@@ -749,9 +749,17 @@ class FakeComfy:
 class FakeJudge:
     """Reads the picture's grey level to decide what it shows, then answers like a checker."""
 
-    def __init__(self, level_of: dict[str, int], name_of: dict[str, str]) -> None:
+    def __init__(
+        self,
+        level_of: dict[str, int],
+        name_of: dict[str, str],
+        sol_rejects: dict[str, int] | None = None,
+    ) -> None:
         self.level_of, self.name_of = level_of, name_of
         self.opus_calls, self.rewrites = 0, 0
+        # name -> how many times Sol still says "wrong" about a picture Haiku accepted
+        self.sol_rejects = dict(sol_rejects or {})
+        self.models_seen: list[str] = []
 
     async def run(self, **kw: Any) -> str:
         import re
@@ -759,6 +767,7 @@ class FakeJudge:
         from PIL import Image
 
         prompt, cwd = str(kw["prompt"]), Path(str(kw["cwd"]))
+        self.models_seen.append(str(kw.get("model")))
         if "text-to-image model keeps failing" in prompt:
             self.rewrites += 1
             ids = re.findall(r"^id: (\w+)$", prompt, re.M)
@@ -788,6 +797,9 @@ class FakeJudge:
                 level = im.convert("RGB").getpixel((5, 5))[0]
             shown = min(self.level_of, key=lambda k: abs(self.level_of[k] - level))
             ok = abs(self.level_of[shown] - level) < 20 and self.name_of[shown] == m.group(2)
+            if ok and kw.get("model") == "gpt-6.1-sol" and self.sol_rejects.get(m.group(2), 0) > 0:
+                self.sol_rejects[m.group(2)] -= 1
+                ok = False
             rows.append(
                 (m.group(1), "correct", [], "")
                 if ok
@@ -797,7 +809,10 @@ class FakeJudge:
 
 
 def _pipeline(
-    tmp_path: Path, mods: dict[str, ModuleType], bad: dict[str, int]
+    tmp_path: Path,
+    mods: dict[str, ModuleType],
+    bad: dict[str, int],
+    sol_rejects: dict[str, int] | None = None,
 ) -> tuple[Any, Any, Any, Any, dict[str, int]]:
     im, c = mods["images"], mods["check"]
     levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
@@ -814,7 +829,7 @@ def _pipeline(
     }
     work = im.WorkDir(tmp_path / "work")
     comfy = FakeComfy(levels, bad)
-    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()}, sol_rejects)
     totals = asyncio.run(
         im.run_pipeline(
             sorted(subjects),
@@ -850,6 +865,44 @@ def test_pipeline_regenerates_a_failed_picture_then_accepts(
     # a re-run does nothing: accepted ids are skipped
     again = _pipeline(tmp_path, mods, {})[4]
     assert again["rendered"] == 0
+
+
+def test_sol_looks_again_at_every_haiku_accept_and_can_overrule_it(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """Decision 2150: Haiku checks, then Sol re-checks every picture Haiku accepts."""
+    im, work, comfy, judge, totals = _pipeline(tmp_path, mods, {}, sol_rejects={_NAMES[1]: 1})
+    assert totals["accepted"] == 6 and totals["pictureless"] == 0
+    # Sol said "wrong" about one picture Haiku had accepted: it was redrawn, then accepted
+    bravo = _NAMES[1].lower()
+    assert comfy.renders == 7
+    assert [a["attempt"] for a in work.read_attempts(bravo)] == [1, 2]
+    first, second = work.read_attempts(bravo)
+    assert (first["verdict"], first["by"]) == ("wrong", "sol-recheck")
+    assert (second["verdict"], second["by"]) == ("correct", "haiku+sol")
+    # every accepted picture was accepted by both models, and Sol was asked
+    accepted = [e for e in im.journal_state(work.journal).values() if e["state"] == "accepted"]
+    assert len(accepted) == 6 and all(e["by"] == "haiku+sol" for e in accepted)
+    assert "gpt-6.1-sol" in judge.models_seen and "claude-haiku-5-5" in judge.models_seen
+
+
+def test_second_look_without_a_trusted_verdict_regenerates_never_accepts(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+
+    class Silent:
+        async def run(self, **kw: Any) -> str:
+            raise AssertionError("no model should be asked for an empty list")
+
+    work = im.WorkDir(tmp_path / "work")
+    assert (
+        asyncio.run(
+            im.second_look(Silent(), c.SOL, [], lambda: None, tmp_path, random.Random(1), "t")
+        )
+        == {}
+    )
+    assert work  # the empty case needs no decoy and no model
 
 
 def test_pipeline_walks_the_ladder_to_opus_then_picture_less(

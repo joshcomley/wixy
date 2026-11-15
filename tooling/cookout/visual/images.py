@@ -773,8 +773,16 @@ async def check_chunk(
     pick_decoy: Callable[[], _check.Decoy],
     rng: random.Random,
     tag: str,
+    *,
+    recheck_accepts: bool = True,
 ) -> dict[str, str]:
-    """Check up to 10 rendered pictures. Returns ident -> `accepted` | `regenerate`."""
+    """Check up to 10 rendered pictures. Returns ident -> `accepted` | `regenerate`.
+
+    The operator's ruling (decision 2150): the first checker looks at everything, then the second
+    model (`tiebreaker`, Sol) looks again at every picture the first one alone accepted. A picture
+    is accepted only when both agree; a picture the second look rejects, or cannot give a trusted
+    verdict on, is regenerated. Pictures the second model has already seen (a tiebreak, or a batch
+    the first checker could not be trusted with) are not looked at a third time."""
     real = [
         _check.CheckImage(
             i,
@@ -788,6 +796,7 @@ async def check_chunk(
     attempt_of = dict(chunk)
     check_root = work.root / "check"
     result = await _check.check_images(runner, checker, tag, real, pick_decoy, check_root, rng)
+    seen_by_second: set[str] = set()
     if result.discarded:
         # the decoy was marked correct twice: this checker is not trusted for these pictures,
         # so each goes to the second checker (a different model) one at a time
@@ -796,10 +805,11 @@ async def check_chunk(
                 runner, tiebreaker, f"{tag}-alt-{img.ident}", [img], pick_decoy, check_root, rng
             )
             result.verdicts.update(single.verdicts)
-    outcome: dict[str, str] = {}
+            seen_by_second.update(single.verdicts)
+    decided: dict[str, tuple[str, str, _check.Verdict]] = {}  # ident -> (kind, by, verdict)
     for ident, verdict in result.verdicts.items():
         kind = _check.classify(verdict.verdict)
-        by = checker.label
+        by = tiebreaker.label if ident in seen_by_second else checker.label
         if kind == "tiebreak":
             img = next(r for r in real if r.ident == ident)
             second = await _check.check_images(
@@ -811,6 +821,20 @@ async def check_chunk(
             else:
                 kind = "regenerate"
                 verdict = sv if sv is not None else verdict
+            seen_by_second.add(ident)
+        decided[ident] = (kind, by, verdict)
+    if recheck_accepts and checker != tiebreaker:
+        again = [r for r in real if decided.get(r.ident, ("",))[0] == "accepted"]
+        again = [r for r in again if r.ident not in seen_by_second]
+        for ident, verdict in (
+            await second_look(runner, tiebreaker, again, pick_decoy, check_root, rng, tag)
+        ).items():
+            if _check.classify(verdict.verdict) == "accepted":
+                decided[ident] = ("accepted", f"{checker.label}+{tiebreaker.label}", verdict)
+            else:
+                decided[ident] = ("regenerate", f"{tiebreaker.label}-recheck", verdict)
+    outcome: dict[str, str] = {}
+    for ident, (kind, by, verdict) in decided.items():
         attempt = attempt_of[ident]
         record_verdict(work, ident, attempt, verdict.verdict, verdict.reason, by)
         outcome[ident] = "accepted" if kind == "accepted" else "regenerate"
@@ -824,6 +848,40 @@ async def check_chunk(
             },
         )
     return outcome
+
+
+async def second_look(
+    runner: _check.Runner,
+    model: _check.CheckerModel,
+    images: Sequence[_check.CheckImage],
+    pick_decoy: Callable[[], _check.Decoy],
+    check_root: Path,
+    rng: random.Random,
+    tag: str,
+) -> dict[str, _check.Verdict]:
+    """The second model's look at pictures the first one accepted. A batch whose decoy it misses
+    twice is redone one picture at a time; a picture still without a trusted verdict comes back
+    `unclear` (so it is regenerated, never accepted on the first checker's word alone)."""
+    if not images:
+        return {}
+    result = await _check.check_images(
+        runner, model, f"{tag}-recheck", list(images), pick_decoy, check_root, rng
+    )
+    verdicts = dict(result.verdicts)
+    if result.discarded:
+        for img in images:
+            single = await _check.check_images(
+                runner, model, f"{tag}-recheck-{img.ident}", [img], pick_decoy, check_root, rng
+            )
+            verdicts.update(single.verdicts)
+    for img in images:
+        verdicts.setdefault(
+            img.ident,
+            _check.Verdict(
+                "", "", "unclear", (), f"{model.label} gave no trusted verdict on the second look"
+            ),
+        )
+    return verdicts
 
 
 async def rewrite_visuals(
