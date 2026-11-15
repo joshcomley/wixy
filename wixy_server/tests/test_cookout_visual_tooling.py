@@ -1052,6 +1052,70 @@ def test_render_only_then_check_later(mods: dict[str, ModuleType], tmp_path: Pat
     assert second["rendered"] == 0 and second["accepted"] == 6 and comfy.renders == 6
 
 
+def _tiny_setup(
+    tmp_path: Path, mods: dict[str, ModuleType]
+) -> tuple[Any, Any, Any, Any, dict[str, Any], Any, Any]:
+    im, c = mods["images"], mods["check"]
+    levels = {"alpha": 30}
+    subjects = {
+        "alpha": im.Subject("alpha", "Alpha", "c", "w", "one whole alpha tokalpha", "whole")
+    }
+    work = im.WorkDir(tmp_path / "work")
+    work.images.mkdir(parents=True, exist_ok=True)
+    return im, c, levels, subjects, {}, work, FakeJudge(levels, {"alpha": "Alpha"})
+
+
+def test_an_attempt_that_never_rendered_is_used_again_not_counted(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """A run killed mid-picture leaves an attempt record with no picture; it must not use up a
+    rung of the ladder (the attempt-3 rewrite would then come one failed check too early)."""
+    im, _c, _levels, subjects, _x, work, _judge = _tiny_setup(tmp_path, mods)
+    im.record_attempt(work, "alpha", 1, 11, "v", "p")  # killed before the card was written
+    assert im.next_attempt(work, "alpha") == 1
+    work.card("alpha", 1).parent.mkdir(parents=True, exist_ok=True)
+    work.card("alpha", 1).write_bytes(b"x")  # now attempt 1 did render
+    im.record_attempt(work, "alpha", 2, 22, "v", "p")  # recorded, then killed again
+    assert im.next_attempt(work, "alpha") == 2
+    assert subjects  # the helper's subject exists
+
+
+def test_render_only_never_asks_for_a_rewrite(mods: dict[str, ModuleType], tmp_path: Path) -> None:
+    """Two failed attempts put an id at attempt 3, which normally starts with a Haiku rewrite of
+    its description. A render-only run has no checker (on Cherry, no cmd at all): it renders."""
+    im, c, levels, subjects, _x, work, judge = _tiny_setup(tmp_path, mods)
+    for attempt in (1, 2):
+        im.record_attempt(work, "alpha", attempt, attempt, "v", "p")
+        im.record_verdict(work, "alpha", attempt, "wrong", "not it", "haiku")
+        work.card("alpha", attempt).parent.mkdir(parents=True, exist_ok=True)
+        work.card("alpha", attempt).write_bytes(b"x")
+    im.journal_append(
+        work.journal, {"id": "alpha", "attempt": 2, "state": "regenerate", "by": None}
+    )
+    comfy = FakeComfy(levels, {})
+    totals = asyncio.run(
+        im.run_pipeline(
+            ["alpha"],
+            subjects,
+            work,
+            comfy,
+            lambda: {},
+            judge,
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "rev.json",
+            rng=random.Random(1),
+            sleep=lambda _s: None,
+            render_only=True,
+        )
+    )
+    assert totals["rendered"] == 1 and comfy.renders == 1
+    assert judge.rewrites == 0 and judge.models_seen == []
+    assert [a["attempt"] for a in work.read_attempts("alpha")] == [1, 2, 3]
+
+
 # --- the clean-environment history check (spec B.6) --------------------------------------------
 
 
