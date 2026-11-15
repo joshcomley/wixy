@@ -363,6 +363,62 @@ def test_voice_probes_parse_and_summarise(mods: dict[str, ModuleType]) -> None:
     assert summary["util"] == {"n": 0, "failed": 0, "medianMs": None, "maxMs": None}
 
 
+def test_queue_signatures_know_our_own_qwen_job(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+
+    def job(client: str, field: str, text: str, cls: str) -> list[Any]:
+        graph = {
+            "11": {"class_type": cls, "inputs": {field: text}},
+            "16": {"class_type": "SaveImage", "inputs": {"filename_prefix": "wyr_ab_a"}},
+        }
+        return [1, "id", graph, {"client_id": client}]
+
+    qwen = job("c1", "prompt", "a pear", "TextEncodeQwenImage21")
+    clip = job("c2", "text", "a dish", "CLIPTextEncode")
+    queue = {"queue_running": [qwen], "queue_pending": [clip]}
+    assert im.queue_signatures(queue, own_prompt="a pear") == ["pending|c2|a dish|wyr_"]
+    assert len(im.queue_signatures(queue)) == 2
+
+
+def test_probe_asks_the_loaded_model_for_one_token(mods: dict[str, ModuleType]) -> None:
+    import http.server
+    import threading
+
+    im = mods["images"]
+    seen: list[tuple[str, bytes]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: object) -> None:
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802
+            seen.append((self.path, b""))
+            body = b'{"models":[{"name":"voice-model"}]}' if self.path == "/api/ps" else b"{}"
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:  # noqa: N802
+            seen.append((self.path, self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        ms = im.probe_ms(f"http://127.0.0.1:{server.server_address[1]}")
+    finally:
+        server.shutdown()
+    assert ms is not None and ms >= 0
+    posted = [json.loads(body) for path, body in seen if path == "/api/generate"]
+    assert posted == [
+        {"model": "voice-model", "prompt": "Hi", "stream": False, "options": {"num_predict": 1}}
+    ]
+    assert im.probe_ms("http://127.0.0.1:9", timeout_s=1.0) is None
+
+
 def test_latency_sampler_records_each_probe_until_stopped(mods: dict[str, ModuleType]) -> None:
     im = mods["images"]
 

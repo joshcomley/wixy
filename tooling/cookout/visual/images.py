@@ -53,11 +53,13 @@ def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) ->
             try:
                 graph = item[2]
                 extra = (item[3] if len(item) > 3 else None) or {}
+                # CLIPTextEncode calls its prompt `text`; Qwen-Image 2.1's encoder calls it `prompt`
                 texts = [
-                    str(n["inputs"]["text"])
+                    str(n["inputs"][field])
                     for n in graph.values()
-                    if n.get("class_type") == "CLIPTextEncode"
-                    and isinstance(n.get("inputs", {}).get("text"), str)
+                    for field in ("text", "prompt")
+                    if n.get("class_type") in ("CLIPTextEncode", "TextEncodeQwenImage21")
+                    and isinstance(n.get("inputs", {}).get(field), str)
                 ]
                 prefixes = [
                     str(n["inputs"].get("filename_prefix", ""))
@@ -589,14 +591,35 @@ def voice_probes_from_env(value: str | None) -> dict[str, str]:
     return out
 
 
-def probe_ms(url: str, timeout_s: float = 10.0) -> float | None:
-    """Milliseconds for one GET of `url`, or `None` if it failed or timed out (a stall)."""
+def probe_ms(url: str, timeout_s: float = 30.0) -> float | None:
+    """Milliseconds for one reply from the service at `url`, or `None` if it failed or timed out
+    (a stall). An Ollama server (one whose `/api/ps` answers) is asked for ONE token from the
+    model it already has loaded, which is what a voice turn feels; asking never loads another
+    model. Anything else is timed with a plain GET."""
     import urllib.request
 
+    base = url.rstrip("/")
+    loaded = ""
+    try:
+        with urllib.request.urlopen(f"{base}/api/ps", timeout=timeout_s) as response:  # noqa: S310
+            models = json.loads(response.read()).get("models") or []
+            loaded = str(models[0].get("name", "")) if models else ""
+    except OSError, ValueError, AttributeError, IndexError:
+        loaded = ""
     started = time.monotonic()
     try:
-        with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310 - local URL
-            response.read(1)
+        if loaded:
+            body = json.dumps(
+                {"model": loaded, "prompt": "Hi", "stream": False, "options": {"num_predict": 1}}
+            ).encode()
+            request = urllib.request.Request(
+                f"{base}/api/generate", data=body, headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+                response.read()
+        else:
+            with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310
+                response.read(1)
     except OSError:
         return None
     return (time.monotonic() - started) * 1000
@@ -1240,6 +1263,11 @@ def _parser() -> Any:
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
     run.add_argument("--limit", type=int, default=None)
     run.add_argument(
+        "--model",
+        default=None,
+        help="ComfyUI recipe in wyr_images.IMAGE_MODELS (default: the server's default)",
+    )
+    run.add_argument(
         "--render-only",
         action="store_true",
         help="render and journal only; check later (the pilot, before calibration picks a checker)",
@@ -1302,8 +1330,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     # run
     from tooling.cookout.visual import cmdruns
-    from wixy_server.livechat.wyr_images import ComfyImageGenerator
+    from wixy_server.livechat.wyr_images import (
+        DEFAULT_IMAGE_MODEL,
+        IMAGE_MODELS,
+        ComfyImageGenerator,
+    )
 
+    model = args.model or DEFAULT_IMAGE_MODEL
+    if model not in IMAGE_MODELS:
+        print(f"unknown model {model!r}; known: {sorted(IMAGE_MODELS)}", file=sys.stderr)
+        return 2
     env = _load_env(Path(os.environ.get("WIXY_ENV_FILE", r"D:\Servers\Wixy\Storage\.env")))
     base_url = env.get("WIXY_COMFY_URL", "http://127.0.0.1:8199")
     out_dir = env.get("WIXY_COMFY_OUTPUT_DIR")
@@ -1328,7 +1364,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ids,
             subs,
             work,
-            ComfyImageGenerator(base_url, output_dir=Path(out_dir)),
+            ComfyImageGenerator(base_url, model=model, output_dir=Path(out_dir)),
             comfy_queue_getter(base_url),
             runner,
             checker,
