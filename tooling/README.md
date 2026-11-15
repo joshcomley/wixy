@@ -45,10 +45,18 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
     picture-less, renditions `card` 512 / `thumb` 160, a resumable journal, and `publish` (deterministic tar, GitHub Release
     `cookout-images-v<N>` via the full `gh.exe` path, download-back verify, manifest write, `install` under a pending pin,
     history check, and from v2 onward the clean-install check: a fresh-storage install of the oldest pinned manifest).
-    `run --phase pilot|rest|all --checker haiku|luna [--limit N] [--render-only]`; `--work-dir` defaults to
+    `run --phase pilot|rest|all --checker haiku|luna [--limit N] [--render-only] [--model <recipe>]` (`--model` names a
+    recipe in `wyr_images.IMAGE_MODELS`; the Cookout pictures use `qwen21-base-int8`, Qwen-Image 2.1 base, decision 2410);
+    `--work-dir` defaults to
     `%AIM_ROOT%\Servers\Wixy\Storage\cookout-images\work`. **`<work>/PAUSE` stops a run between pictures.** `run` needs
     `WIXY_COMFY_OUTPUT_DIR` (and optionally `WIXY_COMFY_URL`, default `http://127.0.0.1:8199`) in `WIXY_ENV_FILE`
     (default `D:\Servers\Wixy\Storage\.env`).
+    **Hub safety.** Before each picture the run waits while the machine has under 20 GB of free memory (`MIN_FREE_GB`;
+    measured 31 Oct: a render beside the voice models stalled them only when memory ran out), and with
+    `WIXY_VOICE_PROBES=name=url,name=url` (Ollama servers) it times a one-token reply from each service's loaded model
+    every 5 s during the render; the journal records `memFreeGb` and per-picture `voice` (n, failed, median, max ms).
+    **Checking** (decision 2150): the first checker looks at everything, then Sol looks again at every picture the first
+    one alone accepted; accepted means both agreed (`by: haiku+sol`), a Sol rejection or missing verdict is regenerated.
   - `check.py` (verdict schema, neutral-name batches of 10 + 1 decoy, vision proof) and `calibrate.py [--work-dir]
     [--catalogue] [--out-dir]` (the 100-picture spot check: sampler, Sol / Opus judge stages, scoring table, mechanical
     recommendation rule, report under `triad/cookout/r2/`).

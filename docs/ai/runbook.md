@@ -204,7 +204,7 @@ Server-chat settings are read by `wixy_server/settings.py`:
 | `WIXY_FFPROBE` | `ffprobe_path` | Empty means resolve `ffprobe` from `PATH`; otherwise must name an existing file. |
 | `WIXY_COMFY_URL` | `comfy_url` | Empty disables the would-you-rather pictures (rounds are text-only). Fleet: `http://127.0.0.1:8199`, the Devfleet `ComfyUi` child. |
 | `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | The folder ComfyUI writes to (its `--output-directory`); required with `WIXY_COMFY_URL` — wixy deletes its own pictures there after each run; unset means pictures stay disabled. |
-| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` (default) or `boogu-turbo-nvfp4`. |
+| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` (default), `boogu-turbo-nvfp4`, or `qwen21-base-int8` (Qwen-Image 2.1 base; ~25 s a picture on the 5060 Ti). |
 | `WIXY_WYR_POOL_SIZE` | `wyr_pool_size` | How many would-you-rather questions' pictures to paint AHEAD of time (default 100, `0` = off, clamped to 1000, a malformed value falls back to 100). Only meaningful with `WIXY_COMFY_URL` + `WIXY_COMFY_OUTPUT_DIR` set. About 2.7 MB per question under `Storage/projects/<slug>/server/wyr-pool/`; filling stops when free disk drops within 1 GiB of the chat's own free-space floor. Setting `0` removes the pool at the next start. |
 | `WIXY_COOKOUT_IMAGES_DIR` | `cookout_images_dir` | Optional path. An extra Cookout picture object directory searched FIRST (layout `<2 hex>/<sha256>.webp`); tests and the e2e fixture server use it. Unset on the fleet. |
 | `WIXY_COOKOUT_IMAGES_BAKED_DIR` | `cookout_images_baked_dir` | Optional path. The read-only baked pack searched LAST; the Docker image sets it to `/app/cookout-pack/objects`. See "Cookout ingredient pictures" below. |
