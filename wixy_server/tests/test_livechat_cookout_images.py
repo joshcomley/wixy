@@ -190,6 +190,24 @@ class TestGenerateMany:
             assert sampler["negative"] == [str(base + 1), 1]
             assert sampler["seed"] == [5, 6][chain]
 
+    def test_qwen_cache_lives_where_it_is_told_to(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        fake = FakeComfy(out)
+        gen = ComfyImageGenerator(
+            "http://comfy.invalid",
+            model="qwen21-base-int8",
+            output_dir=out,
+            transport=fake.transport,
+            cache_device="cpu",
+        )
+        gen.generate_many(["a pear"], work, seeds=[1])
+        assert fake.graph["4"]["inputs"]["device"] == "cpu"
+        with pytest.raises(ValueError):
+            ComfyImageGenerator("http://comfy.invalid", cache_device="vram")
+
     def test_a_missing_slot_is_none_and_the_others_are_kept(self, tmp_path: Path) -> None:
         gen, _fake, work = _generator(tmp_path, skip=("b",))
         a, b, c = gen.generate_many(["x", "y", "z"], work)

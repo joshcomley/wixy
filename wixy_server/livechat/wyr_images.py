@@ -96,6 +96,8 @@ IMAGE_MODELS: dict[str, ImageModelConfig] = {
     ),
 }
 DEFAULT_IMAGE_MODEL = "krea2-turbo-nvfp4"
+CACHE_DEVICES = ("auto", "gpu", "cpu", "off")
+"""Where `QwenImage21Cache` may keep its prefix cache (`ImageModelConfig.family == "qwen21"`)."""
 FILE_PREFIX = "wyr_"
 SLOT_TAGS = ("a", "b", "c")
 """Output-name suffix of sampling chains 0, 1, 2 (`<prefix>_a`, `_b`, `_c`; SaveImage 16/26/36)."""
@@ -121,9 +123,15 @@ class ComfyImageGenerator:
         model: str = DEFAULT_IMAGE_MODEL,
         output_dir: Path | None = None,
         transport: httpx.BaseTransport | None = None,
+        cache_device: str = "auto",
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._config = IMAGE_MODELS.get(model, IMAGE_MODELS[DEFAULT_IMAGE_MODEL])
+        if cache_device not in CACHE_DEVICES:
+            raise ValueError(f"cache_device must be one of {CACHE_DEVICES}, got {cache_device!r}")
+        # Where Qwen-Image 2.1 keeps its prefix cache: `auto` takes any spare VRAM first, which
+        # on a shared card grows the process to the whole card; `cpu` keeps it in RAM.
+        self._cache_device = cache_device
         self._output_dir = output_dir
         self._transport = transport
         # Sticky: once ComfyUI is seen writing somewhere other than `output_dir`, this server
@@ -388,7 +396,7 @@ class ComfyImageGenerator:
             # Qwen-Image 2.1 keeps a prefix cache per sampling pass; one node, shared by the chains.
             graph["4"] = {
                 "class_type": "QwenImage21Cache",
-                "inputs": {"model": ["1", 0], "device": "auto", "dtype": "default"},
+                "inputs": {"model": ["1", 0], "device": self._cache_device, "dtype": "default"},
             }
         model_ref: list[object] = ["4", 0] if qwen else ["1", 0]
         for index, (prompt, seed) in enumerate(zip(prompts, seeds, strict=True)):

@@ -1330,6 +1330,12 @@ def _parser() -> Any:
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
     run.add_argument("--limit", type=int, default=None)
     run.add_argument(
+        "--cache-device",
+        default="auto",
+        choices=["auto", "gpu", "cpu", "off"],
+        help="where Qwen-Image 2.1 keeps its prefix cache; `cpu` keeps the card's use bounded",
+    )
+    run.add_argument(
         "--model",
         default=None,
         help="ComfyUI recipe in wyr_images.IMAGE_MODELS (default: the server's default)",
@@ -1431,7 +1437,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             ids,
             subs,
             work,
-            ComfyImageGenerator(base_url, model=model, output_dir=Path(out_dir)),
+            ComfyImageGenerator(
+                base_url, model=model, output_dir=Path(out_dir), cache_device=args.cache_device
+            ),
             comfy_queue_getter(base_url),
             runner,
             checker,
