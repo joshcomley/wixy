@@ -768,8 +768,13 @@ def unchecked_attempt(work: WorkDir, ident: str, entry: Mapping[str, Any] | None
 
 
 def next_attempt(work: WorkDir, ident: str) -> int:
-    attempts = work.read_attempts(ident)
-    return max((a["attempt"] for a in attempts), default=0) + 1
+    """The attempt number the next picture of `ident` gets: one past the last attempt that made a
+    picture. An attempt that was recorded but never rendered (the run was killed mid-picture)
+    does not count against the ladder; its number is simply used again."""
+    rendered = [
+        a["attempt"] for a in work.read_attempts(ident) if work.card(ident, a["attempt"]).exists()
+    ]
+    return max(rendered, default=0) + 1
 
 
 async def check_chunk(
@@ -1175,7 +1180,16 @@ async def run_pipeline(
     batch_no = 0
     while pending:
         chunk_ids, pending = pending[:chunk_size], pending[chunk_size:]
-        rewrite = [i for i in chunk_ids if next_attempt(work, i) == 3]
+        # attempt 3 starts from a Haiku rewrite of the description; a picture that is already
+        # drawn and only waits for its check, and a render-only run (no checker), need none
+        state = journal_state(work.journal)
+        rewrite = [
+            i
+            for i in chunk_ids
+            if not render_only
+            and next_attempt(work, i) == 3
+            and unchecked_attempt(work, i, state.get(i)) is None
+        ]
         if rewrite:
             await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
         chunk: list[tuple[str, int]] = []
