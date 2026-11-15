@@ -155,6 +155,41 @@ class TestGenerateMany:
         sampler = graph["14"]["inputs"]
         assert (sampler["steps"], sampler["cfg"], sampler["sampler_name"]) == (8, 1.0, "euler")
 
+    def test_qwen_image_21_uses_its_own_cache_and_text_encoder(self, tmp_path: Path) -> None:
+        out = tmp_path / "comfy-out"
+        out.mkdir()
+        work = tmp_path / "work"
+        work.mkdir()
+        fake = FakeComfy(out)
+        gen = ComfyImageGenerator(
+            "http://comfy.invalid",
+            model="qwen21-base-int8",
+            output_dir=out,
+            transport=fake.transport,
+        )
+        paths = gen.generate_many(["a pear", "a plum"], work, seeds=[5, 6])
+        assert all(p is not None and p.read_bytes() == PNG for p in paths)
+        graph = fake.graph
+        assert graph["1"]["inputs"]["unet_name"] == "qwen_image_2.1_int8_convrot.safetensors"
+        assert graph["2"]["inputs"]["type"] == "qwen_image"
+        assert graph["3"]["inputs"]["vae_name"] == "qwen_image_2.1_vae_bf16.safetensors"
+        assert graph["4"]["class_type"] == "QwenImage21Cache"
+        assert graph["4"]["inputs"]["model"] == ["1", 0]
+        classes = [n["class_type"] for n in graph.values()]
+        assert classes.count("QwenImage21Cache") == 1 and "ConditioningZeroOut" not in classes
+        for chain, text in enumerate(("a pear", "a plum")):
+            base = 10 * (chain + 1)
+            encoder = graph[str(base + 1)]
+            assert encoder["class_type"] == "TextEncodeQwenImage21"
+            assert (
+                encoder["inputs"]["prompt"] == text and encoder["inputs"]["negative_prompt"] == ""
+            )
+            sampler = graph[str(base + 4)]["inputs"]
+            assert sampler["model"] == ["4", 0] and sampler["steps"] == 25
+            assert sampler["positive"] == [str(base + 1), 0]
+            assert sampler["negative"] == [str(base + 1), 1]
+            assert sampler["seed"] == [5, 6][chain]
+
     def test_a_missing_slot_is_none_and_the_others_are_kept(self, tmp_path: Path) -> None:
         gen, _fake, work = _generator(tmp_path, skip=("b",))
         a, b, c = gen.generate_many(["x", "y", "z"], work)

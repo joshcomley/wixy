@@ -683,7 +683,7 @@ nothing `inline` does not already.
 | `WIXY_COMFY_URL` | `comfy_url` | `""` (images off) | would-you-rather pictures (§19): base URL of the local ComfyUI (fleet: `http://127.0.0.1:8199`); empty or `WIXY_EDITION=standalone` means text-only rounds |
 | `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | `""` | the folder ComfyUI writes its output to (fleet: `E:\ImageGenLab\out-wyr`, its `--output-directory`); **required with `WIXY_COMFY_URL`** — this server deletes its own pictures there after each run (Inv 54), and without it pictures stay disabled |
 | `WIXY_WYR_POOL_SIZE` | `wyr_pool_size` | `100` | pictures for this many upcoming would-you-rather questions are painted ahead of time (§19); `0` = off (and a stale pool is removed at start), clamped to 1000, a malformed value means 100 |
-| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative) |
+| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative; `qwen21-base-int8` is Qwen-Image 2.1 base, 25 steps, the model the Cookout ingredient pictures were drawn with) |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),

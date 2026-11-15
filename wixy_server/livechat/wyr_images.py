@@ -57,9 +57,23 @@ class ImageModelConfig:
     cfg: float
     sampler: str
     scheduler: str
+    family: str = "ksampler"
+    """`ksampler`: CLIPTextEncode + ConditioningZeroOut + KSampler. `qwen21`: Qwen-Image 2.1's own
+    cache node and text encoder (which also yields the negative conditioning)."""
 
 
 IMAGE_MODELS: dict[str, ImageModelConfig] = {
+    "qwen21-base-int8": ImageModelConfig(
+        unet="qwen_image_2.1_int8_convrot.safetensors",
+        clip="qwen3vl_8b_int8_convrot.safetensors",
+        clip_type="qwen_image",
+        vae="qwen_image_2.1_vae_bf16.safetensors",
+        steps=25,
+        cfg=1.0,
+        sampler="euler",
+        scheduler="simple",
+        family="qwen21",
+    ),
     "krea2-turbo-nvfp4": ImageModelConfig(
         unet="krea2_turbo_nvfp4.safetensors",
         clip="qwen3vl_4b_fp8_scaled.safetensors",
@@ -369,17 +383,39 @@ class ComfyImageGenerator:
             },
             "3": {"class_type": "VAELoader", "inputs": {"vae_name": cfg.vae}},
         }
+        qwen = cfg.family == "qwen21"
+        if qwen:
+            # Qwen-Image 2.1 keeps a prefix cache per sampling pass; one node, shared by the chains.
+            graph["4"] = {
+                "class_type": "QwenImage21Cache",
+                "inputs": {"model": ["1", 0], "device": "auto", "dtype": "default"},
+            }
+        model_ref: list[object] = ["4", 0] if qwen else ["1", 0]
         for index, (prompt, seed) in enumerate(zip(prompts, seeds, strict=True)):
             tag = SLOT_TAGS[index]
             base = 10 * (index + 1)
-            graph[str(base + 1)] = {
-                "class_type": "CLIPTextEncode",
-                "inputs": {"text": prompt, "clip": ["2", 0]},
-            }
-            graph[str(base + 2)] = {
-                "class_type": "ConditioningZeroOut",
-                "inputs": {"conditioning": [str(base + 1), 0]},
-            }
+            if qwen:
+                graph[str(base + 1)] = {
+                    "class_type": "TextEncodeQwenImage21",
+                    "inputs": {
+                        "clip": ["2", 0],
+                        "prompt": prompt,
+                        "negative_prompt": "",
+                        "resolution": 1024,
+                        "images": {},
+                    },
+                }
+                negative: list[object] = [str(base + 1), 1]
+            else:
+                graph[str(base + 1)] = {
+                    "class_type": "CLIPTextEncode",
+                    "inputs": {"text": prompt, "clip": ["2", 0]},
+                }
+                graph[str(base + 2)] = {
+                    "class_type": "ConditioningZeroOut",
+                    "inputs": {"conditioning": [str(base + 1), 0]},
+                }
+                negative = [str(base + 2), 0]
             graph[str(base + 3)] = {
                 "class_type": "EmptyLatentImage",
                 "inputs": {"width": 1024, "height": 1024, "batch_size": 1},
@@ -387,14 +423,14 @@ class ComfyImageGenerator:
             graph[str(base + 4)] = {
                 "class_type": "KSampler",
                 "inputs": {
-                    "model": ["1", 0],
+                    "model": model_ref,
                     "seed": seed,
                     "steps": cfg.steps,
                     "cfg": cfg.cfg,
                     "sampler_name": cfg.sampler,
                     "scheduler": cfg.scheduler,
                     "positive": [str(base + 1), 0],
-                    "negative": [str(base + 2), 0],
+                    "negative": negative,
                     "latent_image": [str(base + 3), 0],
                     "denoise": 1.0,
                 },

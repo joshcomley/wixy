@@ -296,6 +296,187 @@ def test_gate_never_submits_while_busy_and_honours_pause(
     assert im.wait_for_idle(lambda: {}, pause_file=pause, sleep=lambda _s: None) is False
 
 
+def test_memory_guard_waits_below_the_floor_and_then_goes(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    readings: Iterator[float | None] = iter([3.7, 12.0, 19.9, 20.0])
+    sleeps: list[float] = []
+    proceed, free = im.wait_for_memory(lambda: next(readings), sleep=sleeps.append)
+    assert (proceed, free) == (True, 20.0)
+    assert sleeps == [im.MEMORY_POLL_GAP_S] * 3
+
+
+def test_memory_guard_unreadable_does_not_block_and_pause_wins(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    assert im.wait_for_memory(lambda: None, sleep=lambda _s: None) == (True, None)
+    pause = tmp_path / "PAUSE"
+    pause.write_text("")
+    assert im.wait_for_memory(lambda: 1.0, pause_file=pause, sleep=lambda _s: None) == (
+        False,
+        None,
+    )
+
+
+def test_pipeline_waits_for_memory_and_journals_it(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+    work = im.WorkDir(tmp_path / "work")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v tokA", "whole")}
+    readings: Iterator[float | None] = iter([4.0, 9.0, 31.5])
+    slept: list[float] = []
+    asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({"a": 30}, {}),
+            lambda: {},
+            FakeJudge({"a": 30}, {"a": "A"}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=slept.append,
+            render_only=True,
+            free_gb=lambda: next(readings),
+        )
+    )
+    entries = [json.loads(line) for line in work.journal.read_text("utf-8").splitlines()]
+    rendered = [e for e in entries if e["state"] == "rendered"]
+    assert len(rendered) == 1
+    assert rendered[0]["memFreeGb"] == 31.5 and rendered[0]["voice"] == {}
+    assert slept.count(im.MEMORY_POLL_GAP_S) == 2
+
+
+def test_voice_probes_parse_and_summarise(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+    assert im.voice_probes_from_env(None) == {}
+    assert im.voice_probes_from_env("voice=http://h:1/x, util=http://h:2/y,junk") == {
+        "voice": "http://h:1/x",
+        "util": "http://h:2/y",
+    }
+    summary = im.summarise_latency({"voice": [10.0, None, 30.0, 20.0], "util": []})
+    assert summary["voice"] == {"n": 4, "failed": 1, "medianMs": 20.0, "maxMs": 30.0}
+    assert summary["util"] == {"n": 0, "failed": 0, "medianMs": None, "maxMs": None}
+
+
+def test_queue_signatures_know_our_own_qwen_job(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+
+    def job(client: str, field: str, text: str, cls: str) -> list[Any]:
+        graph = {
+            "11": {"class_type": cls, "inputs": {field: text}},
+            "16": {"class_type": "SaveImage", "inputs": {"filename_prefix": "wyr_ab_a"}},
+        }
+        return [1, "id", graph, {"client_id": client}]
+
+    qwen = job("c1", "prompt", "a pear", "TextEncodeQwenImage21")
+    clip = job("c2", "text", "a dish", "CLIPTextEncode")
+    queue = {"queue_running": [qwen], "queue_pending": [clip]}
+    assert im.queue_signatures(queue, own_prompt="a pear") == ["pending|c2|a dish|wyr_"]
+    assert len(im.queue_signatures(queue)) == 2
+
+
+def test_probe_asks_the_loaded_model_for_one_token(mods: dict[str, ModuleType]) -> None:
+    import http.server
+    import threading
+
+    im = mods["images"]
+    seen: list[tuple[str, bytes]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: object) -> None:
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802
+            seen.append((self.path, b""))
+            body = b'{"models":[{"name":"voice-model"}]}' if self.path == "/api/ps" else b"{}"
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_POST(self) -> None:  # noqa: N802
+            seen.append((self.path, self.rfile.read(int(self.headers["Content-Length"]))))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        ms = im.probe_ms(f"http://127.0.0.1:{server.server_address[1]}")
+    finally:
+        server.shutdown()
+    assert ms is not None and ms >= 0
+    posted = [json.loads(body) for path, body in seen if path == "/api/generate"]
+    assert posted == [
+        {"model": "voice-model", "prompt": "Hi", "stream": False, "options": {"num_predict": 1}}
+    ]
+    assert im.probe_ms("http://127.0.0.1:9", timeout_s=1.0) is None
+
+
+def test_probe_embeds_when_only_an_embedding_model_is_loaded(
+    mods: dict[str, ModuleType],
+) -> None:
+    import http.server
+    import threading
+
+    im = mods["images"]
+    posted: list[tuple[str, dict[str, Any]]] = []
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *_a: object) -> None:
+            pass
+
+        def do_GET(self) -> None:  # noqa: N802
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"models":[{"name":"nomic-embed-text:latest"}]}')
+
+        def do_POST(self) -> None:  # noqa: N802
+            raw = self.rfile.read(int(self.headers["Content-Length"]))
+            posted.append((self.path, json.loads(raw)))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        ms = im.probe_ms(f"http://127.0.0.1:{server.server_address[1]}")
+    finally:
+        server.shutdown()
+    assert ms is not None
+    assert posted == [("/api/embed", {"model": "nomic-embed-text:latest", "input": "Hi"})]
+
+
+def test_latency_sampler_records_each_probe_until_stopped(mods: dict[str, ModuleType]) -> None:
+    im = mods["images"]
+
+    async def go() -> dict[str, list[float | None]]:
+        samples: dict[str, list[float | None]] = {}
+        stop = asyncio.Event()
+        calls: list[str] = []
+
+        def probe(url: str) -> float | None:
+            calls.append(url)
+            if len(calls) >= 4:
+                stop.set()
+            return None if url.endswith("bad") else 5.0
+
+        await im.sample_latency(
+            {"voice": "http://h/ok", "util": "http://h/bad"}, samples, stop, probe=probe, gap_s=0.01
+        )
+        return samples
+
+    samples = asyncio.run(go())
+    assert samples["voice"][0] == 5.0 and samples["util"][0] is None
+
+
 def test_attempt_ladder(mods: dict[str, ModuleType]) -> None:
     im = mods["images"]
     assert [im.plan_attempt(n).rewrite_visual for n in range(1, 5)] == [False, False, True, False]
@@ -603,9 +784,17 @@ class FakeComfy:
 class FakeJudge:
     """Reads the picture's grey level to decide what it shows, then answers like a checker."""
 
-    def __init__(self, level_of: dict[str, int], name_of: dict[str, str]) -> None:
+    def __init__(
+        self,
+        level_of: dict[str, int],
+        name_of: dict[str, str],
+        sol_rejects: dict[str, int] | None = None,
+    ) -> None:
         self.level_of, self.name_of = level_of, name_of
         self.opus_calls, self.rewrites = 0, 0
+        # name -> how many times Sol still says "wrong" about a picture Haiku accepted
+        self.sol_rejects = dict(sol_rejects or {})
+        self.models_seen: list[str] = []
 
     async def run(self, **kw: Any) -> str:
         import re
@@ -613,6 +802,7 @@ class FakeJudge:
         from PIL import Image
 
         prompt, cwd = str(kw["prompt"]), Path(str(kw["cwd"]))
+        self.models_seen.append(str(kw.get("model")))
         if "text-to-image model keeps failing" in prompt:
             self.rewrites += 1
             ids = re.findall(r"^id: (\w+)$", prompt, re.M)
@@ -642,6 +832,9 @@ class FakeJudge:
                 level = im.convert("RGB").getpixel((5, 5))[0]
             shown = min(self.level_of, key=lambda k: abs(self.level_of[k] - level))
             ok = abs(self.level_of[shown] - level) < 20 and self.name_of[shown] == m.group(2)
+            if ok and kw.get("model") == "gpt-6.1-sol" and self.sol_rejects.get(m.group(2), 0) > 0:
+                self.sol_rejects[m.group(2)] -= 1
+                ok = False
             rows.append(
                 (m.group(1), "correct", [], "")
                 if ok
@@ -651,7 +844,10 @@ class FakeJudge:
 
 
 def _pipeline(
-    tmp_path: Path, mods: dict[str, ModuleType], bad: dict[str, int]
+    tmp_path: Path,
+    mods: dict[str, ModuleType],
+    bad: dict[str, int],
+    sol_rejects: dict[str, int] | None = None,
 ) -> tuple[Any, Any, Any, Any, dict[str, int]]:
     im, c = mods["images"], mods["check"]
     levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
@@ -668,7 +864,7 @@ def _pipeline(
     }
     work = im.WorkDir(tmp_path / "work")
     comfy = FakeComfy(levels, bad)
-    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()}, sol_rejects)
     totals = asyncio.run(
         im.run_pipeline(
             sorted(subjects),
@@ -704,6 +900,44 @@ def test_pipeline_regenerates_a_failed_picture_then_accepts(
     # a re-run does nothing: accepted ids are skipped
     again = _pipeline(tmp_path, mods, {})[4]
     assert again["rendered"] == 0
+
+
+def test_sol_looks_again_at_every_haiku_accept_and_can_overrule_it(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """Decision 2150: Haiku checks, then Sol re-checks every picture Haiku accepts."""
+    im, work, comfy, judge, totals = _pipeline(tmp_path, mods, {}, sol_rejects={_NAMES[1]: 1})
+    assert totals["accepted"] == 6 and totals["pictureless"] == 0
+    # Sol said "wrong" about one picture Haiku had accepted: it was redrawn, then accepted
+    bravo = _NAMES[1].lower()
+    assert comfy.renders == 7
+    assert [a["attempt"] for a in work.read_attempts(bravo)] == [1, 2]
+    first, second = work.read_attempts(bravo)
+    assert (first["verdict"], first["by"]) == ("wrong", "sol-recheck")
+    assert (second["verdict"], second["by"]) == ("correct", "haiku+sol")
+    # every accepted picture was accepted by both models, and Sol was asked
+    accepted = [e for e in im.journal_state(work.journal).values() if e["state"] == "accepted"]
+    assert len(accepted) == 6 and all(e["by"] == "haiku+sol" for e in accepted)
+    assert "gpt-6.1-sol" in judge.models_seen and "claude-haiku-5-5" in judge.models_seen
+
+
+def test_second_look_without_a_trusted_verdict_regenerates_never_accepts(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+
+    class Silent:
+        async def run(self, **kw: Any) -> str:
+            raise AssertionError("no model should be asked for an empty list")
+
+    work = im.WorkDir(tmp_path / "work")
+    assert (
+        asyncio.run(
+            im.second_look(Silent(), c.SOL, [], lambda: None, tmp_path, random.Random(1), "t")
+        )
+        == {}
+    )
+    assert work  # the empty case needs no decoy and no model
 
 
 def test_pipeline_walks_the_ladder_to_opus_then_picture_less(

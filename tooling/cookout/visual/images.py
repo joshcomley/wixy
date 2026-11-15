@@ -53,11 +53,13 @@ def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) ->
             try:
                 graph = item[2]
                 extra = (item[3] if len(item) > 3 else None) or {}
+                # CLIPTextEncode calls its prompt `text`; Qwen-Image 2.1's encoder calls it `prompt`
                 texts = [
-                    str(n["inputs"]["text"])
+                    str(n["inputs"][field])
                     for n in graph.values()
-                    if n.get("class_type") == "CLIPTextEncode"
-                    and isinstance(n.get("inputs", {}).get("text"), str)
+                    for field in ("text", "prompt")
+                    if n.get("class_type") in ("CLIPTextEncode", "TextEncodeQwenImage21")
+                    and isinstance(n.get("inputs", {}).get(field), str)
                 ]
                 prefixes = [
                     str(n["inputs"].get("filename_prefix", ""))
@@ -74,6 +76,58 @@ def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) ->
             prefix = (prefixes[0] if prefixes else "")[:4]
             out.append(f"{kind[6:]}|{client}|{text}|{prefix}")
     return out
+
+
+MIN_FREE_GB = 20.0
+MEMORY_POLL_GAP_S = 15.0
+
+
+def hub_free_gb() -> float | None:
+    """Free physical memory in GiB, or `None` where it cannot be read (not Windows). Hub runs the
+    voice and utility models next to ComfyUI; measured 31 Oct, a render pushed it into paging
+    when under ~4 GB was free and both models then stalled for 20-120 s."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    class _MemoryStatus(ctypes.Structure):
+        _fields_ = [  # noqa: RUF012 - ctypes layout
+            ("length", ctypes.c_ulong),
+            ("load", ctypes.c_ulong),
+            ("total", ctypes.c_ulonglong),
+            ("avail", ctypes.c_ulonglong),
+            ("totalPage", ctypes.c_ulonglong),
+            ("availPage", ctypes.c_ulonglong),
+            ("totalVirtual", ctypes.c_ulonglong),
+            ("availVirtual", ctypes.c_ulonglong),
+            ("availExtended", ctypes.c_ulonglong),
+        ]
+
+    status = _MemoryStatus()
+    status.length = ctypes.sizeof(_MemoryStatus)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):  # type: ignore[attr-defined,unused-ignore]
+        return None
+    return float(status.avail) / 2**30
+
+
+def wait_for_memory(
+    free_gb: Callable[[], float | None],
+    *,
+    min_gb: float = MIN_FREE_GB,
+    pause_file: Path | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    gap_s: float = MEMORY_POLL_GAP_S,
+) -> tuple[bool, float | None]:
+    """Block while the machine's free memory is under `min_gb`, so a render never starts into
+    paging. Returns `(proceed, last_free_gb)`; `proceed` is False when `pause_file` appears. An
+    unreadable figure (`None`) does not block: the journal records it as unknown."""
+    while True:
+        if pause_file is not None and pause_file.exists():
+            return False, None
+        free = free_gb()
+        if free is None or free >= min_gb:
+            return True, free
+        sleep(gap_s)
 
 
 def wait_for_idle(
@@ -526,6 +580,95 @@ async def sample_foreign_jobs(
             continue
 
 
+def voice_probes_from_env(value: str | None) -> dict[str, str]:
+    """`name=url,name=url` -> {name: url}. These are the hub services a render must not slow down
+    (the voice model, the utility model); empty or unset means no probing."""
+    out: dict[str, str] = {}
+    for part in (value or "").split(","):
+        name, sep, url = part.strip().partition("=")
+        if sep and name and url:
+            out[name] = url
+    return out
+
+
+def probe_ms(url: str, timeout_s: float = 30.0) -> float | None:
+    """Milliseconds for one reply from the service at `url`, or `None` if it failed or timed out
+    (a stall). An Ollama server (one whose `/api/ps` answers) is asked for ONE token from the
+    model it already has loaded, which is what a voice turn feels; asking never loads another
+    model. Anything else is timed with a plain GET."""
+    import urllib.request
+
+    base = url.rstrip("/")
+    loaded = ""
+    try:
+        with urllib.request.urlopen(f"{base}/api/ps", timeout=timeout_s) as response:  # noqa: S310
+            models = json.loads(response.read()).get("models") or []
+            loaded = str(models[0].get("name", "")) if models else ""
+    except OSError, ValueError, AttributeError, IndexError:
+        loaded = ""
+    started = time.monotonic()
+    try:
+        if loaded:
+            if "embed" in loaded.lower():  # an embedding model cannot generate text
+                path, payload = "/api/embed", {"model": loaded, "input": "Hi"}
+            else:
+                path = "/api/generate"
+                payload = {
+                    "model": loaded,
+                    "prompt": "Hi",
+                    "stream": False,
+                    "options": {"num_predict": 1},
+                }
+            request = urllib.request.Request(
+                f"{base}{path}",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+                response.read()
+        else:
+            with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310
+                response.read(1)
+    except OSError:
+        return None
+    return (time.monotonic() - started) * 1000
+
+
+def summarise_latency(samples: Mapping[str, list[float | None]]) -> dict[str, dict[str, Any]]:
+    """Per probe: how many answers, how many failures, median and worst milliseconds."""
+    out: dict[str, dict[str, Any]] = {}
+    for name, values in samples.items():
+        ok = sorted(v for v in values if v is not None)
+        out[name] = {
+            "n": len(values),
+            "failed": len(values) - len(ok),
+            "medianMs": round(ok[len(ok) // 2], 1) if ok else None,
+            "maxMs": round(ok[-1], 1) if ok else None,
+        }
+    return out
+
+
+async def sample_latency(
+    probes: Mapping[str, str],
+    samples: dict[str, list[float | None]],
+    stop: asyncio.Event,
+    *,
+    probe: Callable[[str], float | None] = probe_ms,
+    gap_s: float = 5.0,
+) -> None:
+    """While one of our pictures renders, time each probe every `gap_s` seconds."""
+    while not stop.is_set():
+        for name, url in probes.items():
+            try:
+                samples.setdefault(name, []).append(await asyncio.to_thread(probe, url))
+            except Exception:  # noqa: BLE001 - a failed look must never fail the render
+                samples.setdefault(name, []).append(None)
+        try:
+            await asyncio.wait_for(stop.wait(), gap_s)
+        except TimeoutError:
+            continue
+
+
 def render_one(
     generator: Any,
     ident: str,
@@ -639,8 +782,16 @@ async def check_chunk(
     pick_decoy: Callable[[], _check.Decoy],
     rng: random.Random,
     tag: str,
+    *,
+    recheck_accepts: bool = True,
 ) -> dict[str, str]:
-    """Check up to 10 rendered pictures. Returns ident -> `accepted` | `regenerate`."""
+    """Check up to 10 rendered pictures. Returns ident -> `accepted` | `regenerate`.
+
+    The operator's ruling (decision 2150): the first checker looks at everything, then the second
+    model (`tiebreaker`, Sol) looks again at every picture the first one alone accepted. A picture
+    is accepted only when both agree; a picture the second look rejects, or cannot give a trusted
+    verdict on, is regenerated. Pictures the second model has already seen (a tiebreak, or a batch
+    the first checker could not be trusted with) are not looked at a third time."""
     real = [
         _check.CheckImage(
             i,
@@ -654,6 +805,7 @@ async def check_chunk(
     attempt_of = dict(chunk)
     check_root = work.root / "check"
     result = await _check.check_images(runner, checker, tag, real, pick_decoy, check_root, rng)
+    seen_by_second: set[str] = set()
     if result.discarded:
         # the decoy was marked correct twice: this checker is not trusted for these pictures,
         # so each goes to the second checker (a different model) one at a time
@@ -662,10 +814,11 @@ async def check_chunk(
                 runner, tiebreaker, f"{tag}-alt-{img.ident}", [img], pick_decoy, check_root, rng
             )
             result.verdicts.update(single.verdicts)
-    outcome: dict[str, str] = {}
+            seen_by_second.update(single.verdicts)
+    decided: dict[str, tuple[str, str, _check.Verdict]] = {}  # ident -> (kind, by, verdict)
     for ident, verdict in result.verdicts.items():
         kind = _check.classify(verdict.verdict)
-        by = checker.label
+        by = tiebreaker.label if ident in seen_by_second else checker.label
         if kind == "tiebreak":
             img = next(r for r in real if r.ident == ident)
             second = await _check.check_images(
@@ -677,6 +830,20 @@ async def check_chunk(
             else:
                 kind = "regenerate"
                 verdict = sv if sv is not None else verdict
+            seen_by_second.add(ident)
+        decided[ident] = (kind, by, verdict)
+    if recheck_accepts and checker != tiebreaker:
+        again = [r for r in real if decided.get(r.ident, ("",))[0] == "accepted"]
+        again = [r for r in again if r.ident not in seen_by_second]
+        for ident, verdict in (
+            await second_look(runner, tiebreaker, again, pick_decoy, check_root, rng, tag)
+        ).items():
+            if _check.classify(verdict.verdict) == "accepted":
+                decided[ident] = ("accepted", f"{checker.label}+{tiebreaker.label}", verdict)
+            else:
+                decided[ident] = ("regenerate", f"{tiebreaker.label}-recheck", verdict)
+    outcome: dict[str, str] = {}
+    for ident, (kind, by, verdict) in decided.items():
         attempt = attempt_of[ident]
         record_verdict(work, ident, attempt, verdict.verdict, verdict.reason, by)
         outcome[ident] = "accepted" if kind == "accepted" else "regenerate"
@@ -690,6 +857,40 @@ async def check_chunk(
             },
         )
     return outcome
+
+
+async def second_look(
+    runner: _check.Runner,
+    model: _check.CheckerModel,
+    images: Sequence[_check.CheckImage],
+    pick_decoy: Callable[[], _check.Decoy],
+    check_root: Path,
+    rng: random.Random,
+    tag: str,
+) -> dict[str, _check.Verdict]:
+    """The second model's look at pictures the first one accepted. A batch whose decoy it misses
+    twice is redone one picture at a time; a picture still without a trusted verdict comes back
+    `unclear` (so it is regenerated, never accepted on the first checker's word alone)."""
+    if not images:
+        return {}
+    result = await _check.check_images(
+        runner, model, f"{tag}-recheck", list(images), pick_decoy, check_root, rng
+    )
+    verdicts = dict(result.verdicts)
+    if result.discarded:
+        for img in images:
+            single = await _check.check_images(
+                runner, model, f"{tag}-recheck-{img.ident}", [img], pick_decoy, check_root, rng
+            )
+            verdicts.update(single.verdicts)
+    for img in images:
+        verdicts.setdefault(
+            img.ident,
+            _check.Verdict(
+                "", "", "unclear", (), f"{model.label} gave no trusted verdict on the second look"
+            ),
+        )
+    return verdicts
 
 
 async def rewrite_visuals(
@@ -949,10 +1150,14 @@ async def run_pipeline(
     rng: random.Random | None = None,
     sleep: Callable[[float], None] = time.sleep,
     render_only: bool = False,
+    free_gb: Callable[[], float | None] = hub_free_gb,
+    min_free_gb: float = MIN_FREE_GB,
+    voice_probes: Mapping[str, str] | None = None,
 ) -> dict[str, int]:
     """Render and check `ids` to completion: render a chunk (one picture at a time, only when
-    ComfyUI is idle), check it, regenerate failures along the attempt ladder, send persistent
-    failures to Opus. Resumable from the journal. Returns counts."""
+    ComfyUI is idle and the machine has `min_free_gb` of free memory), check it, regenerate
+    failures along the attempt ladder, send persistent failures to Opus. Resumable from the
+    journal. Returns counts."""
     rng = rng or random.Random()
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
@@ -992,7 +1197,10 @@ async def run_pipeline(
                     saw[signature] = saw.get(signature, 0) + 1
                 return queue
 
-            if not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
+            proceed, mem_free = wait_for_memory(
+                free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
+            )
+            if not proceed or not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
                 return totals  # PAUSE file: stop between pictures
             gate_s = time.monotonic() - picture_started
             attempt = next_attempt(work, ident)
@@ -1006,6 +1214,10 @@ async def run_pipeline(
             sampler = asyncio.create_task(
                 sample_foreign_jobs(get_queue, prompt, render_saw, stop_sampling)
             )
+            latency: dict[str, list[float | None]] = {}
+            latency_sampler = asyncio.create_task(
+                sample_latency(voice_probes or {}, latency, stop_sampling)
+            )
             try:
                 split = await asyncio.to_thread(
                     render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
@@ -1013,6 +1225,7 @@ async def run_pipeline(
             finally:
                 stop_sampling.set()
                 await sampler
+                await latency_sampler
             rendered[ident] = work.card(ident, attempt)
             journal_append(
                 work.journal,
@@ -1035,6 +1248,10 @@ async def run_pipeline(
                         "gate": dict(sorted(gate_saw.items(), key=lambda kv: -kv[1])[:3]),
                         "render": dict(sorted(render_saw.items(), key=lambda kv: -kv[1])[:3]),
                     },
+                    # free memory at the start (None: unreadable) and how the hub's voice and
+                    # utility services answered while this picture rendered
+                    "memFreeGb": None if mem_free is None else round(mem_free, 1),
+                    "voice": summarise_latency(latency),
                 },
             )
             totals["rendered"] += 1
@@ -1113,6 +1330,11 @@ def _parser() -> Any:
     run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
     run.add_argument("--limit", type=int, default=None)
     run.add_argument(
+        "--model",
+        default=None,
+        help="ComfyUI recipe in wyr_images.IMAGE_MODELS (default: the server's default)",
+    )
+    run.add_argument(
         "--render-only",
         action="store_true",
         help="render and journal only; check later (the pilot, before calibration picks a checker)",
@@ -1175,8 +1397,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 0
     # run
     from tooling.cookout.visual import cmdruns
-    from wixy_server.livechat.wyr_images import ComfyImageGenerator
+    from wixy_server.livechat.wyr_images import (
+        DEFAULT_IMAGE_MODEL,
+        IMAGE_MODELS,
+        ComfyImageGenerator,
+    )
 
+    model = args.model or DEFAULT_IMAGE_MODEL
+    if model not in IMAGE_MODELS:
+        print(f"unknown model {model!r}; known: {sorted(IMAGE_MODELS)}", file=sys.stderr)
+        return 2
     env = _load_env(Path(os.environ.get("WIXY_ENV_FILE", r"D:\Servers\Wixy\Storage\.env")))
     base_url = env.get("WIXY_COMFY_URL", "http://127.0.0.1:8199")
     out_dir = env.get("WIXY_COMFY_OUTPUT_DIR")
@@ -1201,7 +1431,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ids,
             subs,
             work,
-            ComfyImageGenerator(base_url, output_dir=Path(out_dir)),
+            ComfyImageGenerator(base_url, model=model, output_dir=Path(out_dir)),
             comfy_queue_getter(base_url),
             runner,
             checker,
@@ -1209,6 +1439,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _check.SOL,
             _check.OPUS,
             render_only=args.render_only,
+            voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
         )
     )
     print(json.dumps(totals))
