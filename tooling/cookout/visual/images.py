@@ -535,7 +535,9 @@ class PoolRunner:
         )
         outcome = None
         for attempt in range(1 + RUN_RETRIES):
-            outcome = await self._pool.run(key, f"image-{tool_profile}", [], spec)
+            # the journal's pass is the run's batch folder (b46-recheck-1, b47-tie-<id>-1 ...), so a
+            # hung run can be tied to its pictures; the tool profile alone said nothing
+            outcome = await self._pool.run(key, f"image-{cwd.name}", [cwd.name], spec)
             if outcome.ok and outcome.text is not None:
                 return str(outcome.text)
             # a run that died (`process exited before end_turn`, a timeout, a failed spawn) is

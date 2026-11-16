@@ -1563,9 +1563,11 @@ def test_pool_runner_retries_a_dead_run(
         def __init__(self, outcomes: list[Outcome]) -> None:
             self.outcomes = outcomes
             self.keys: list[str] = []
+            self.passes: list[tuple[str, list[str]]] = []
 
         async def run(self, key: str, pass_name: str, ids: list[str], spec: object) -> Outcome:
             self.keys.append(key)
+            self.passes.append((pass_name, ids))
             return self.outcomes.pop(0)
 
     def make(outcomes: list[Outcome]) -> tuple[Any, Pool]:
@@ -1584,6 +1586,10 @@ def test_pool_runner_retries_a_dead_run(
     runner, pool = make([Outcome("error", None), Outcome("completed", "answer")])
     assert asyncio.run(runner.run(**kw)) == "answer"
     assert len(pool.keys) == 2 and pool.keys[0] == pool.keys[1]  # same key: journal-resumable
+    # the run journal names the batch folder, so a hung run can be tied to its pictures
+    assert pool.passes[0] == (f"image-{tmp_path.name}", [tmp_path.name])
+    # a check batch that cmd never starts must not hold a lane for 15 minutes
+    assert mods["check"].BATCH_TIMEOUT_S <= 420
     runner, pool = make([Outcome("error", None)] * 3)
     with pytest.raises(mods["check"].VerdictError, match="process exited"):
         asyncio.run(runner.run(**kw))

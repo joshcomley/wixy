@@ -36,6 +36,12 @@ class VisionProofFailed(RuntimeError):
     """A model did not pass the vision proof; it must not check anything."""
 
 
+# One checker batch (10 pictures) measured 30-195 s over 182 runs (median 61 s, 16 Nov 2026); a run
+# cmd never actually starts (pid 0, no transcript) only ends at this deadline, so keep it near 2x
+# the slowest real run rather than 15 minutes.
+BATCH_TIMEOUT_S = 420
+
+
 class Runner(Protocol):
     async def run(
         self,
@@ -229,7 +235,7 @@ async def run_batch(runner: Runner, model: CheckerModel, batch: Batch) -> list[V
         effort=model.effort,
         cwd=batch.directory,
         tool_profile="replay_probe",
-        timeout_secs=900,
+        timeout_secs=BATCH_TIMEOUT_S,
     )
     try:
         return parse_verdicts(text, numbers)
@@ -241,7 +247,7 @@ async def run_batch(runner: Runner, model: CheckerModel, batch: Batch) -> list[V
             effort=model.effort,
             cwd=batch.directory,
             tool_profile="replay_probe",
-            timeout_secs=900,
+            timeout_secs=BATCH_TIMEOUT_S,
         )
         return parse_verdicts(retry, numbers)
 
@@ -312,7 +318,7 @@ async def vision_proof(
             effort=model.effort,
             cwd=directory,
             tool_profile="replay_probe",
-            timeout_secs=900,
+            timeout_secs=BATCH_TIMEOUT_S,
         )
         verdicts = parse_verdicts(text, [ln.number for ln in lines])
     except VerdictError as exc:
