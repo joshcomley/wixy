@@ -1215,8 +1215,17 @@ def test_check_only_asks_for_the_attempt_three_rewrite_once(
 class _OverlapJudge:
     """Wraps FakeJudge: every model run takes a moment, and we count how many were in flight."""
 
-    def __init__(self, inner: Any, fail_first: int = 0, fail_tag: str | None = None) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        fail_first: int = 0,
+        fail_tag: str | None = None,
+        slow_tag: str | None = None,
+    ) -> None:
         self.inner, self.in_flight, self.peak, self.fail_first = inner, 0, 0, fail_first
+        self.slow_tag = slow_tag  # the batch folder containing this is slow
+        self.slow_active = False
+        self.started_during_slow = 0  # runs of OTHER batches that began while the slow one ran
         self.fail_tag = fail_tag  # every run whose batch folder name contains this fails
 
     async def run(self, **kw: Any) -> str:
@@ -1225,13 +1234,19 @@ class _OverlapJudge:
         if self.fail_first > 0:
             self.fail_first -= 1
             raise RuntimeError("run spawn-failed: POST failed and is not safe to repeat")
+        slow = self.slow_tag is not None and self.slow_tag in str(kw.get("cwd"))
+        if self.slow_active and not slow:
+            self.started_during_slow += 1
         self.in_flight += 1
         self.peak = max(self.peak, self.in_flight)
+        self.slow_active = self.slow_active or slow
         try:
-            await asyncio.sleep(0.02)
+            await asyncio.sleep(0.5 if slow else 0.02)
             return str(await self.inner.run(**kw))
         finally:
             self.in_flight -= 1
+            if slow:
+                self.slow_active = False
 
 
 def _eight_subjects(im: Any) -> tuple[dict[str, Any], dict[str, int]]:
@@ -1287,6 +1302,46 @@ def test_check_only_checks_several_batches_at_once(
     assert totals["accepted"] == 8 and comfy.renders == 8
     assert judge.peak >= 2, "batches were checked one after the other"
     assert all(e["state"] == "accepted" for e in im.journal_state(work.journal).values())
+
+
+def test_one_slow_batch_does_not_hold_the_other_lanes_idle(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """A rolling pool: while one batch is slow, the other lane keeps taking batches (the old
+    group-of-N barrier waited for the slowest batch before starting the next group)."""
+    im, c = mods["images"], mods["check"]
+    subjects, levels = _eight_subjects(im)
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, {})
+    inner = FakeJudge(levels, {k: s.name for k, s in subjects.items()})
+    judge = _OverlapJudge(inner, slow_tag="b1-")
+
+    def run(**mode: Any) -> dict[str, int]:
+        return asyncio.run(
+            im.run_pipeline(
+                sorted(subjects),
+                subjects,
+                work,
+                comfy,
+                lambda: {},
+                judge,
+                c.HAIKU,
+                c.HAIKU,
+                c.SOL,
+                c.OPUS,
+                chunk_size=2,
+                review_path=tmp_path / "rev.json",
+                rng=random.Random(4),
+                sleep=lambda _s: None,
+                **mode,
+            )
+        )
+
+    run(render_only=True)
+    totals = run(check_only=True, check_concurrency=2)
+    assert totals["accepted"] == 8
+    assert judge.peak == 2
+    assert judge.started_during_slow >= 3, "the free lane waited for the slow batch"
 
 
 def test_a_batch_whose_run_fails_to_start_is_retried(
@@ -1362,9 +1417,9 @@ def test_a_batch_that_fails_for_good_does_not_drop_the_others_results(
         run(check_only=True, check_concurrency=3)
     state = im.journal_state(work.journal)
     done = [i for i, e in state.items() if e["state"] == "accepted"]
-    assert (
-        len(done) == 4
-    )  # batches 2 and 3 finished and were kept; batch 1 (2 ids) and 4 not reached
+    # batches 2 and 3 finished and were kept; batch 1 (2 ids) can never be accepted; once it had
+    # failed no new batch is taken, so batch 4 may or may not have started
+    assert 4 <= len(done) <= 6 and not {"itema", "itemb"} & set(done)
     assert (work.images / "status.json").exists()  # settle() and the status write still ran
     judge.fail_tag = None  # the cmd trouble is over: the next round finishes everything
     run(check_only=True, check_concurrency=3)
