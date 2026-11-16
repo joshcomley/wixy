@@ -341,7 +341,7 @@ def test_pipeline_waits_for_memory_and_journals_it(
             review_path=tmp_path / "r.json",
             sleep=slept.append,
             render_only=True,
-            free_gb=lambda: next(readings),
+            free_gb=lambda: next(readings, 31.5),
         )
     )
     entries = [json.loads(line) for line in work.journal.read_text("utf-8").splitlines()]
@@ -349,6 +349,40 @@ def test_pipeline_waits_for_memory_and_journals_it(
     assert len(rendered) == 1
     assert rendered[0]["memFreeGb"] == 31.5 and rendered[0]["voice"] == {}
     assert slept.count(im.MEMORY_POLL_GAP_S) == 2
+
+
+def test_pipeline_rechecks_memory_after_the_idle_wait(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """The idle wait can be long; if memory ran low meanwhile the render must not start on the old
+    figure. Readings: fine, then low right after the idle wait, then fine again."""
+    im, c = mods["images"], mods["check"]
+    work = im.WorkDir(tmp_path / "work")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v tokA", "whole")}
+    readings = iter([31.0, 5.0, 33.0, 34.0])
+    slept: list[float] = []
+    asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({"a": 30}, {}),
+            lambda: {},
+            FakeJudge({"a": 30}, {"a": "A"}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=slept.append,
+            render_only=True,
+            free_gb=lambda: next(readings, 40.0),
+        )
+    )
+    entries = [json.loads(x) for x in work.journal.read_text("utf-8").splitlines()]
+    rendered = [e for e in entries if e["state"] == "rendered"]
+    assert len(rendered) == 1 and rendered[0]["memFreeGb"] >= 20
+    assert slept.count(im.GATE_POLL_GAP_S) == 4  # two idle waits of 3 polls (2 sleeps each)
 
 
 def test_voice_probes_parse_and_summarise(mods: dict[str, ModuleType]) -> None:
@@ -1078,6 +1112,104 @@ def test_an_attempt_that_never_rendered_is_used_again_not_counted(
     im.record_attempt(work, "alpha", 2, 22, "v", "p")  # recorded, then killed again
     assert im.next_attempt(work, "alpha") == 2
     assert subjects  # the helper's subject exists
+
+
+def _round(
+    tmp_path: Path,
+    mods: dict[str, ModuleType],
+    comfy: Any,
+    judge: Any,
+    subjects: dict[str, Any],
+    work: Any,
+    **mode: bool,
+) -> dict[str, int]:
+    im, c = mods["images"], mods["check"]
+    return asyncio.run(
+        im.run_pipeline(
+            sorted(subjects),
+            subjects,
+            work,
+            comfy,
+            lambda: {},
+            judge,
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            chunk_size=3,
+            review_path=tmp_path / "rev.json",
+            rng=random.Random(4),
+            sleep=lambda _s: None,
+            **mode,
+        )
+    )
+
+
+def test_check_only_never_renders_and_rounds_with_render_only_converge(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """The hub checks (needs cmd), the render machine draws: alternating the two modes ends with
+    every picture accepted, and the hub rounds draw nothing."""
+    im = mods["images"]
+    levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
+    subjects = {
+        n.lower(): im.Subject(
+            n.lower(),
+            n,
+            f"cat{i % 3}",
+            f"A plain {n}.",
+            f"one whole raw plain {n} tok{n.lower()}",
+            "whole",
+        )
+        for i, n in enumerate(_NAMES)
+    }
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(
+        levels, {"bravo": 1, "delta": 1}
+    )  # first draw of two ids shows the wrong food
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+    first = _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)
+    assert first["rendered"] == 6 and comfy.renders == 6
+    check1 = _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert comfy.renders == 6, "a check-only round must not render"
+    assert check1["accepted"] == 4
+    state = im.journal_state(work.journal)
+    assert {i for i, e in state.items() if e["state"] == "regenerate"} == {"bravo", "delta"}
+    redraw = _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)
+    assert redraw["rendered"] == 2 and comfy.renders == 8
+    check2 = _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert check2["accepted"] == 2 and comfy.renders == 8
+    assert all(e["state"] == "accepted" for e in im.journal_state(work.journal).values())
+    assert [a["attempt"] for a in work.read_attempts("bravo")] == [1, 2]
+
+
+def test_check_only_asks_for_the_attempt_three_rewrite_once(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    names = ["Alpha", "Bravo", "Charlie"]
+    levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(names)}
+    subjects = {
+        n.lower(): im.Subject(
+            n.lower(), n, f"cat{i}", f"A plain {n}.", f"one whole plain {n} tok{n.lower()}", "whole"
+        )
+        for i, n in enumerate(names)
+    }
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, {"alpha": 2})  # attempts 1 and 2 of alpha show the wrong food
+    judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
+    for _ in range(2):
+        _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)
+        _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert judge.rewrites == 1  # asked as soon as attempt 3 was next
+    for _ in range(3):  # more hub rounds before the render machine gets to it: no more asks
+        _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert judge.rewrites == 1 and comfy.renders == 4  # 3 first draws + alpha's second
+    _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)  # draws attempt 3
+    assert comfy.renders == 5 and "alpha" in work.read_overrides()
+    # the lone redraw is checked with decoys taken from the accepted pictures of other categories
+    _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert im.journal_state(work.journal)["alpha"]["state"] == "accepted"
 
 
 def test_render_only_never_asks_for_a_rewrite(mods: dict[str, ModuleType], tmp_path: Path) -> None:

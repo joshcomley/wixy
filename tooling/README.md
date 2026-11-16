@@ -55,6 +55,9 @@ Default staff resource ("Business Owner"): `1c41ada4-0c28-47dc-8d76-bf31e0776abf
     measured 31 Oct: a render beside the voice models stalled them only when memory ran out), and with
     `WIXY_VOICE_PROBES=name=url,name=url` (Ollama servers) it times a one-token reply from each service's loaded model
     every 5 s during the render; the journal records `memFreeGb` and per-picture `voice` (n, failed, median, max ms).
+    **Two machines.** `run --render-only` draws (Cherry); `run --check-only` checks what is drawn, does the attempt-3 rewrite and the Opus
+    review, never renders, and leaves a failed picture in state `regenerate` for the next render round (the hub, which has cmd, checks;
+    the render machine draws). Alternate the two until nothing is pending; one machine writes the work folder at a time.
     **Checking** (decision 2150): the first checker looks at everything, then Sol looks again at every picture the first
     one alone accepted; accepted means both agreed (`by: haiku+sol`), a Sol rejection or missing verdict is regenerated.
   - `check.py` (verdict schema, neutral-name batches of 10 + 1 decoy, vision proof) and `calibrate.py [--work-dir]
