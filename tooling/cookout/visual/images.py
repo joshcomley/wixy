@@ -1158,6 +1158,8 @@ async def run_pipeline(
     sleep: Callable[[float], None] = time.sleep,
     render_only: bool = False,
     check_only: bool = False,
+    check_concurrency: int = 1,
+    retry_wait_s: float = 20.0,
     free_gb: Callable[[], float | None] = hub_free_gb,
     min_free_gb: float = MIN_FREE_GB,
     voice_probes: Mapping[str, str] | None = None,
@@ -1171,7 +1173,10 @@ async def run_pipeline(
     work that needs cmd: the attempt-3 rewrite, the Opus review) but never renders. A picture that
     needs another attempt is left in state `regenerate`; a `render_only` run (on the render
     machine) draws it, and the next `check_only` round checks it. This keeps the hub free of
-    rendering while the checks, which need cmd, stay where cmd is."""
+    rendering while the checks, which need cmd, stay where cmd is. With `check_only`,
+    `check_concurrency` batches are checked at the same time (the cmd run pool still caps the
+    runs in flight per provider). A batch whose model run fails to start is retried (3 tries,
+    `retry_wait_s` apart) instead of ending the round."""
     rng = rng or random.Random()
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
@@ -1194,6 +1199,95 @@ async def run_pipeline(
         if decisions.get(i, {}).get("decision") != "pictureless"
     ]
     batch_no = 0
+
+    async def checked(chunk: list[tuple[str, int]], tag: str) -> dict[str, str]:
+        for attempt in range(1, 4):
+            try:
+                return await check_chunk(
+                    runner, checker, tiebreaker, chunk, subjects_by_id, work, pick_decoy, rng, tag
+                )
+            except (_check.VerdictError, RuntimeError, OSError) as exc:
+                if attempt == 3:
+                    raise
+                print(f"check batch {tag} failed ({exc}); try {attempt + 1} of 3", file=sys.stderr)
+                await asyncio.sleep(retry_wait_s * attempt)
+        raise AssertionError("unreachable")
+
+    async def settle(outcome: Mapping[str, str]) -> None:
+        nonlocal decisions
+        for ident, result in outcome.items():
+            if result == "accepted":
+                totals["accepted"] += 1
+                continue
+            attempt = next_attempt(work, ident) - 1
+            reviewed = decisions.get(ident, {}).get("decision") == "retry"
+            step = after_failure(attempt, reviewed=reviewed)
+            if step == "retry":
+                pending.append(ident)
+            elif step == "review":
+                verdict = await review_failures(
+                    runner, opus, ident, subjects_by_id, work, review_path
+                )
+                decisions = _review.load_decisions(review_path)
+                if verdict.startswith("accepted:"):
+                    n = int(verdict.split(":")[1])
+                    journal_append(
+                        work.journal,
+                        {"id": ident, "attempt": n, "state": "accepted", "by": "opus-review"},
+                    )
+                    totals["accepted"] += 1
+                else:
+                    pending.append(ident)
+            else:
+                mark_pictureless(work, ident, "failed all six attempts", review_path)
+                totals["pictureless"] += 1
+
+    def write_status() -> None:
+        work.images.mkdir(parents=True, exist_ok=True)
+        (work.images / "status.json").write_text(
+            json.dumps(build_status(work, len(ids)), indent=1) + "\n", encoding="utf-8"
+        )
+
+    if check_only and check_concurrency > 1:
+        group_size = chunk_size * check_concurrency
+        while pending:
+            group, pending = pending[:group_size], pending[group_size:]
+            state = journal_state(work.journal)
+            overrides = work.read_overrides()
+            chunks: list[list[tuple[str, int]]] = []
+            for k in range(0, len(group), chunk_size):
+                ids_k = group[k : k + chunk_size]
+                rewrite = [
+                    i
+                    for i in ids_k
+                    if next_attempt(work, i) == 3
+                    and unchecked_attempt(work, i, state.get(i)) is None
+                    and i not in overrides
+                ]
+                if rewrite:
+                    await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
+                chunk_k: list[tuple[str, int]] = []
+                for ident in ids_k:
+                    waiting = unchecked_attempt(work, ident, state.get(ident))
+                    if waiting is not None:
+                        rendered[ident] = work.card(ident, waiting)
+                        chunk_k.append((ident, waiting))
+                if chunk_k:
+                    chunks.append(chunk_k)
+            if not chunks:
+                continue
+            tags = []
+            for _ in chunks:
+                batch_no += 1
+                tags.append(f"b{batch_no}")
+            outcomes = await asyncio.gather(
+                *(checked(c, t) for c, t in zip(chunks, tags, strict=True))
+            )
+            for outcome in outcomes:
+                await settle(outcome)
+            write_status()
+        return totals
+
     while pending:
         chunk_ids, pending = pending[:chunk_size], pending[chunk_size:]
         # attempt 3 starts from a Haiku rewrite of the description; a picture that is already
@@ -1302,47 +1396,8 @@ async def run_pipeline(
         if render_only or not chunk:
             continue
         batch_no += 1
-        outcome = await check_chunk(
-            runner,
-            checker,
-            tiebreaker,
-            chunk,
-            subjects_by_id,
-            work,
-            pick_decoy,
-            rng,
-            f"b{batch_no}",
-        )
-        for ident, result in outcome.items():
-            if result == "accepted":
-                totals["accepted"] += 1
-                continue
-            attempt = next_attempt(work, ident) - 1
-            reviewed = decisions.get(ident, {}).get("decision") == "retry"
-            step = after_failure(attempt, reviewed=reviewed)
-            if step == "retry":
-                pending.append(ident)
-            elif step == "review":
-                verdict = await review_failures(
-                    runner, opus, ident, subjects_by_id, work, review_path
-                )
-                decisions = _review.load_decisions(review_path)
-                if verdict.startswith("accepted:"):
-                    n = int(verdict.split(":")[1])
-                    journal_append(
-                        work.journal,
-                        {"id": ident, "attempt": n, "state": "accepted", "by": "opus-review"},
-                    )
-                    totals["accepted"] += 1
-                else:
-                    pending.append(ident)
-            else:
-                mark_pictureless(work, ident, "failed all six attempts", review_path)
-                totals["pictureless"] += 1
-        work.images.mkdir(parents=True, exist_ok=True)
-        (work.images / "status.json").write_text(
-            json.dumps(build_status(work, len(ids)), indent=1) + "\n", encoding="utf-8"
-        )
+        await settle(await checked(chunk, f"b{batch_no}"))
+        write_status()
     return totals
 
 
@@ -1387,6 +1442,12 @@ def _parser() -> Any:
         "--check-only",
         action="store_true",
         help="check what is drawn and never render (the hub); failures wait for a render round",
+    )
+    run.add_argument(
+        "--check-concurrency",
+        type=int,
+        default=3,
+        help="with --check-only: batches checked at once (the run pool caps runs per provider)",
     )
     run.add_argument(
         "--render-only",
@@ -1496,6 +1557,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _check.OPUS,
             render_only=args.render_only,
             check_only=args.check_only,
+            check_concurrency=args.check_concurrency,
             voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
         )
     )
