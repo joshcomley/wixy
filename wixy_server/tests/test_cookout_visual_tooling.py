@@ -1322,6 +1322,15 @@ def test_a_batch_whose_run_fails_to_start_is_retried(
     assert totals["accepted"] == 8
 
 
+def test_render_only_and_check_only_together_are_refused(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    with pytest.raises(SystemExit) as err:
+        im.main(["--work-dir", str(tmp_path), "run", "--render-only", "--check-only"])
+    assert err.value.code == 2
+
+
 def test_render_only_never_asks_for_a_rewrite(mods: dict[str, ModuleType], tmp_path: Path) -> None:
     """Two failed attempts put an id at attempt 3, which normally starts with a Haiku rewrite of
     its description. A render-only run has no checker (on Cherry, no cmd at all): it renders."""

@@ -1469,7 +1469,10 @@ def _parser() -> Any:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.cmd == "run" and args.render_only and args.check_only:
+        parser.error("--render-only and --check-only cannot be used together")
     work = WorkDir(Path(args.work_dir) if args.work_dir else default_work_dir())
     catalogue = Path(args.catalogue)
     if args.cmd == "status":
