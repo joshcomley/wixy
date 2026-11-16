@@ -1256,52 +1256,60 @@ async def run_pipeline(
         )
 
     if check_only and check_concurrency > 1:
-        group_size = chunk_size * check_concurrency
-        while pending:
-            group, pending = pending[:group_size], pending[group_size:]
-            state = journal_state(work.journal)
-            overrides = work.read_overrides()
-            chunks: list[list[tuple[str, int]]] = []
-            for k in range(0, len(group), chunk_size):
-                ids_k = group[k : k + chunk_size]
-                rewrite = [
-                    i
-                    for i in ids_k
-                    if next_attempt(work, i) == 3
-                    and unchecked_attempt(work, i, state.get(i)) is None
-                    and i not in overrides
-                ]
-                if rewrite:
-                    await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
-                chunk_k: list[tuple[str, int]] = []
-                for ident in ids_k:
-                    waiting = unchecked_attempt(work, ident, state.get(ident))
-                    if waiting is not None:
-                        rendered[ident] = work.card(ident, waiting)
-                        chunk_k.append((ident, waiting))
-                if chunk_k:
-                    chunks.append(chunk_k)
-            if not chunks:
-                continue
-            tags = []
-            for _ in chunks:
-                batch_no += 1
-                tags.append(f"b{batch_no}")
-            results = await asyncio.gather(
-                *(checked(c, t) for c, t in zip(chunks, tags, strict=True)),
-                return_exceptions=True,
-            )
-            # a batch that failed for good must not throw away the batches that finished beside
-            # it: settle every success (requeue, Opus review, counts), then raise the first error
-            failure: BaseException | None = None
-            for result in results:
-                if isinstance(result, BaseException):
-                    failure = failure or result
-                    continue
-                await settle(result)
-            write_status()
-            if failure is not None:
-                raise failure
+        # A rolling pool: `check_concurrency` workers each take the next batch the moment their
+        # last one is settled, so one slow batch (a hung run, a serial Sol re-check) never holds
+        # the other lanes idle. The old group-of-N barrier left ~36% of lane time idle (measured
+        # on the journal, 16 Nov 2026).
+        gate = asyncio.Condition()
+        active = 0
+        failure: BaseException | None = None
+
+        async def worker() -> None:
+            nonlocal batch_no, active, failure
+            while True:
+                async with gate:
+                    while not pending and active > 0 and failure is None:
+                        await gate.wait()  # a settle may still requeue a picture
+                    if failure is not None or not pending:
+                        return
+                    ids_k = pending[:chunk_size]
+                    del pending[:chunk_size]
+                    active += 1
+                try:
+                    state = journal_state(work.journal)
+                    overrides = work.read_overrides()
+                    rewrite = [
+                        i
+                        for i in ids_k
+                        if next_attempt(work, i) == 3
+                        and unchecked_attempt(work, i, state.get(i)) is None
+                        and i not in overrides
+                    ]
+                    if rewrite:
+                        await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
+                    chunk_k: list[tuple[str, int]] = []
+                    for ident in ids_k:
+                        waiting = unchecked_attempt(work, ident, state.get(ident))
+                        if waiting is not None:
+                            rendered[ident] = work.card(ident, waiting)
+                            chunk_k.append((ident, waiting))
+                    if chunk_k:
+                        batch_no += 1
+                        await settle(await checked(chunk_k, f"b{batch_no}"))
+                        write_status()
+                except Exception as exc:  # noqa: BLE001 - a batch that failed for good
+                    # must not throw away the batches that finish beside it: stop taking new
+                    # batches, let the others settle, then raise the first error
+                    failure = failure or exc
+                finally:
+                    async with gate:
+                        active -= 1
+                        gate.notify_all()
+
+        await asyncio.gather(*(worker() for _ in range(check_concurrency)))
+        write_status()
+        if failure is not None:
+            raise failure
         return totals
 
     while pending:
