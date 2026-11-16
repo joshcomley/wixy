@@ -208,6 +208,21 @@ def journal_state(path: Path) -> dict[str, dict[str, Any]]:
     return latest
 
 
+def read_only_ids(path: Path, known: Mapping[str, Any]) -> set[str]:
+    """The ids named in a `--only-ids` file (one per line, `#` comments and blanks ignored).
+    An id the catalogue does not know is an error, never silently skipped: a typo would
+    otherwise turn a targeted redraw into a no-op that looks like success."""
+    wanted = {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    unknown = sorted(wanted - set(known))
+    if unknown:
+        raise ValueError(f"--only-ids names unknown ids: {', '.join(unknown[:10])}")
+    return wanted
+
+
 def pending_work(
     ids: Sequence[str], state: Mapping[str, Mapping[str, Any]], masters_exist: Callable[[str], bool]
 ) -> list[str]:
@@ -1474,6 +1489,13 @@ def _parser() -> Any:
         help="with --check-only: batches checked at once (the run pool caps runs per provider)",
     )
     run.add_argument(
+        "--only-ids",
+        default=None,
+        metavar="FILE",
+        help="work only on the ids listed in FILE (one per line): a redraw round that must not "
+        "touch pictures another round is still checking",
+    )
+    run.add_argument(
         "--render-only",
         action="store_true",
         help="render and journal only; check later (the pilot, before calibration picks a checker)",
@@ -1563,6 +1585,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.phase
     ]
     ids = [i for i in order if i in subs]
+    if args.only_ids:
+        try:
+            only = read_only_ids(Path(args.only_ids), subs)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        ids = [i for i in ids if i in only]
     if args.limit:
         ids = ids[: args.limit]
     pool = cmdruns.RunPool(
