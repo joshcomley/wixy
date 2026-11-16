@@ -341,7 +341,7 @@ def test_pipeline_waits_for_memory_and_journals_it(
             review_path=tmp_path / "r.json",
             sleep=slept.append,
             render_only=True,
-            free_gb=lambda: next(readings),
+            free_gb=lambda: next(readings, 31.5),
         )
     )
     entries = [json.loads(line) for line in work.journal.read_text("utf-8").splitlines()]
@@ -349,6 +349,40 @@ def test_pipeline_waits_for_memory_and_journals_it(
     assert len(rendered) == 1
     assert rendered[0]["memFreeGb"] == 31.5 and rendered[0]["voice"] == {}
     assert slept.count(im.MEMORY_POLL_GAP_S) == 2
+
+
+def test_pipeline_rechecks_memory_after_the_idle_wait(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """The idle wait can be long; if memory ran low meanwhile the render must not start on the old
+    figure. Readings: fine, then low right after the idle wait, then fine again."""
+    im, c = mods["images"], mods["check"]
+    work = im.WorkDir(tmp_path / "work")
+    subjects = {"a": im.Subject("a", "A", "c", "w", "v tokA", "whole")}
+    readings = iter([31.0, 5.0, 33.0, 34.0])
+    slept: list[float] = []
+    asyncio.run(
+        im.run_pipeline(
+            ["a"],
+            subjects,
+            work,
+            FakeComfy({"a": 30}, {}),
+            lambda: {},
+            FakeJudge({"a": 30}, {"a": "A"}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            review_path=tmp_path / "r.json",
+            sleep=slept.append,
+            render_only=True,
+            free_gb=lambda: next(readings, 40.0),
+        )
+    )
+    entries = [json.loads(x) for x in work.journal.read_text("utf-8").splitlines()]
+    rendered = [e for e in entries if e["state"] == "rendered"]
+    assert len(rendered) == 1 and rendered[0]["memFreeGb"] >= 20
+    assert slept.count(im.GATE_POLL_GAP_S) == 4  # two idle waits of 3 polls (2 sleeps each)
 
 
 def test_voice_probes_parse_and_summarise(mods: dict[str, ModuleType]) -> None:

@@ -654,9 +654,11 @@ async def sample_latency(
     stop: asyncio.Event,
     *,
     probe: Callable[[str], float | None] = probe_ms,
-    gap_s: float = 5.0,
+    gap_s: float = 15.0,
 ) -> None:
-    """While one of our pictures renders, time each probe every `gap_s` seconds."""
+    """While one of our pictures renders, time each probe every `gap_s` seconds. Each probe is a
+    real one-token reply from the model that is loaded, so it adds a little load of its own (and
+    keeps that model resident); 15 s keeps that near 2% of the model's time."""
     while not stop.is_set():
         for name, url in probes.items():
             try:
@@ -1229,11 +1231,20 @@ async def run_pipeline(
                     saw[signature] = saw.get(signature, 0) + 1
                 return queue
 
-            proceed, mem_free = wait_for_memory(
-                free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
-            )
-            if not proceed or not wait_for_idle(watching_queue, pause_file=work.pause, sleep=sleep):
-                return totals  # PAUSE file: stop between pictures
+            while True:
+                proceed, mem_free = wait_for_memory(
+                    free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
+                )
+                if not proceed or not wait_for_idle(
+                    watching_queue, pause_file=work.pause, sleep=sleep
+                ):
+                    return totals  # PAUSE file: stop between pictures
+                # the idle wait can be long: look at memory again right before starting, so a
+                # render never begins on a figure that went stale while the queue was busy
+                after_idle = free_gb()
+                if after_idle is None or after_idle >= min_free_gb:
+                    mem_free = mem_free if after_idle is None else after_idle
+                    break
             gate_s = time.monotonic() - picture_started
             attempt = next_attempt(work, ident)
             visual = visual_for(subjects_by_id[ident], work.read_overrides())
