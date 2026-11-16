@@ -1304,6 +1304,44 @@ def test_check_only_checks_several_batches_at_once(
     assert all(e["state"] == "accepted" for e in im.journal_state(work.journal).values())
 
 
+def test_a_render_only_round_draws_just_the_listed_ids(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """`--only-ids`: a redraw round on one set of pictures must not draw (or touch) the others."""
+    im, c = mods["images"], mods["check"]
+    subjects, levels = _eight_subjects(im)
+    NL = chr(10)
+    listing = tmp_path / "ids.txt"
+    listing.write_text("# redraws" + NL + "itemb" + NL + NL + "  itemd  " + NL, encoding="utf-8")
+    only = im.read_only_ids(listing, subjects)
+    assert only == {"itemb", "itemd"}
+    listing.write_text("itemb" + NL + "itemzz" + NL, encoding="utf-8")
+    with pytest.raises(ValueError, match="itemzz"):
+        im.read_only_ids(listing, subjects)  # a typo must not become a silent no-op
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, {})
+    asyncio.run(
+        im.run_pipeline(
+            [i for i in sorted(subjects) if i in only],
+            subjects,
+            work,
+            comfy,
+            lambda: {},
+            FakeJudge(levels, {k: s.name for k, s in subjects.items()}),
+            c.HAIKU,
+            c.HAIKU,
+            c.SOL,
+            c.OPUS,
+            chunk_size=2,
+            review_path=tmp_path / "rev.json",
+            rng=random.Random(4),
+            sleep=lambda _s: None,
+            render_only=True,
+        )
+    )
+    assert comfy.renders == 2 and set(im.journal_state(work.journal)) == only
+
+
 def test_one_slow_batch_does_not_hold_the_other_lanes_idle(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
