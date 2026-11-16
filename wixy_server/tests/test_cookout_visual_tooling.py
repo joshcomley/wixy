@@ -1215,10 +1215,13 @@ def test_check_only_asks_for_the_attempt_three_rewrite_once(
 class _OverlapJudge:
     """Wraps FakeJudge: every model run takes a moment, and we count how many were in flight."""
 
-    def __init__(self, inner: Any, fail_first: int = 0) -> None:
+    def __init__(self, inner: Any, fail_first: int = 0, fail_tag: str | None = None) -> None:
         self.inner, self.in_flight, self.peak, self.fail_first = inner, 0, 0, fail_first
+        self.fail_tag = fail_tag  # every run whose batch folder name contains this fails
 
     async def run(self, **kw: Any) -> str:
+        if self.fail_tag is not None and self.fail_tag in str(kw.get("cwd")):
+            raise RuntimeError("run spawn-failed: POST failed and is not safe to repeat")
         if self.fail_first > 0:
             self.fail_first -= 1
             raise RuntimeError("run spawn-failed: POST failed and is not safe to repeat")
@@ -1320,6 +1323,61 @@ def test_a_batch_whose_run_fails_to_start_is_retried(
     run(render_only=True)
     totals = run(check_only=True, check_concurrency=2)  # two starts fail, then it goes on
     assert totals["accepted"] == 8
+
+
+def test_a_batch_that_fails_for_good_does_not_drop_the_others_results(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im, c = mods["images"], mods["check"]
+    subjects, levels = _eight_subjects(im)
+    work = im.WorkDir(tmp_path / "work")
+    comfy = FakeComfy(levels, {})
+    inner = FakeJudge(levels, {k: s.name for k, s in subjects.items()})
+    judge = _OverlapJudge(inner, fail_tag="b1-")  # the first batch can never be checked
+
+    def run(**mode: Any) -> dict[str, int]:
+        return asyncio.run(
+            im.run_pipeline(
+                sorted(subjects),
+                subjects,
+                work,
+                comfy,
+                lambda: {},
+                judge,
+                c.HAIKU,
+                c.HAIKU,
+                c.SOL,
+                c.OPUS,
+                chunk_size=2,
+                review_path=tmp_path / "rev.json",
+                rng=random.Random(4),
+                sleep=lambda _s: None,
+                retry_wait_s=0.0,
+                **mode,
+            )
+        )
+
+    run(render_only=True)
+    with pytest.raises(RuntimeError):
+        run(check_only=True, check_concurrency=3)
+    state = im.journal_state(work.journal)
+    done = [i for i, e in state.items() if e["state"] == "accepted"]
+    assert (
+        len(done) == 4
+    )  # batches 2 and 3 finished and were kept; batch 1 (2 ids) and 4 not reached
+    assert (work.images / "status.json").exists()  # settle() and the status write still ran
+    judge.fail_tag = None  # the cmd trouble is over: the next round finishes everything
+    run(check_only=True, check_concurrency=3)
+    assert all(e["state"] == "accepted" for e in im.journal_state(work.journal).values())
+
+
+def test_check_concurrency_below_one_is_refused(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    im = mods["images"]
+    with pytest.raises(SystemExit) as err:
+        im.main(["--work-dir", str(tmp_path), "run", "--check-only", "--check-concurrency", "0"])
+    assert err.value.code == 2
 
 
 def test_render_only_and_check_only_together_are_refused(

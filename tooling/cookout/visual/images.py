@@ -1209,7 +1209,12 @@ async def run_pipeline(
             except (_check.VerdictError, RuntimeError, OSError) as exc:
                 if attempt == 3:
                     raise
-                print(f"check batch {tag} failed ({exc}); try {attempt + 1} of 3", file=sys.stderr)
+                # a start reported "not safe to repeat" may have left a run behind: the tag names it
+                print(
+                    f"check batch {tag} failed ({exc}); try {attempt + 1} of 3 "
+                    "(an earlier run for this batch may exist)",
+                    file=sys.stderr,
+                )
                 await asyncio.sleep(retry_wait_s * attempt)
         raise AssertionError("unreachable")
 
@@ -1280,12 +1285,21 @@ async def run_pipeline(
             for _ in chunks:
                 batch_no += 1
                 tags.append(f"b{batch_no}")
-            outcomes = await asyncio.gather(
-                *(checked(c, t) for c, t in zip(chunks, tags, strict=True))
+            results = await asyncio.gather(
+                *(checked(c, t) for c, t in zip(chunks, tags, strict=True)),
+                return_exceptions=True,
             )
-            for outcome in outcomes:
-                await settle(outcome)
+            # a batch that failed for good must not throw away the batches that finished beside
+            # it: settle every success (requeue, Opus review, counts), then raise the first error
+            failure: BaseException | None = None
+            for result in results:
+                if isinstance(result, BaseException):
+                    failure = failure or result
+                    continue
+                await settle(result)
             write_status()
+            if failure is not None:
+                raise failure
         return totals
 
     while pending:
@@ -1471,6 +1485,8 @@ def _parser() -> Any:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    if args.cmd == "run" and args.check_concurrency < 1:
+        parser.error("--check-concurrency must be at least 1")
     if args.cmd == "run" and args.render_only and args.check_only:
         parser.error("--render-only and --check-only cannot be used together")
     work = WorkDir(Path(args.work_dir) if args.work_dir else default_work_dir())
