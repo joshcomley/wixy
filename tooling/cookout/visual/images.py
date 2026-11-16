@@ -1155,6 +1155,7 @@ async def run_pipeline(
     rng: random.Random | None = None,
     sleep: Callable[[float], None] = time.sleep,
     render_only: bool = False,
+    check_only: bool = False,
     free_gb: Callable[[], float | None] = hub_free_gb,
     min_free_gb: float = MIN_FREE_GB,
     voice_probes: Mapping[str, str] | None = None,
@@ -1162,12 +1163,25 @@ async def run_pipeline(
     """Render and check `ids` to completion: render a chunk (one picture at a time, only when
     ComfyUI is idle and the machine has `min_free_gb` of free memory), check it, regenerate
     failures along the attempt ladder, send persistent failures to Opus. Resumable from the
-    journal. Returns counts."""
+    journal. Returns counts.
+
+    `check_only` is the other half of `render_only`: it checks what is already drawn (and does the
+    work that needs cmd: the attempt-3 rewrite, the Opus review) but never renders. A picture that
+    needs another attempt is left in state `regenerate`; a `render_only` run (on the render
+    machine) draws it, and the next `check_only` round checks it. This keeps the hub free of
+    rendering while the checks, which need cmd, stay where cmd is."""
     rng = rng or random.Random()
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
     pick_decoy = pick_decoy_factory(subjects_by_id, lambda: rendered, rng)
     totals = {"accepted": 0, "pictureless": 0, "rendered": 0}
+    # accepted pictures are known-good decoys: a later round that has only a few pictures to check
+    # (a handful of redraws, maybe all one category) still has a pool of two categories to draw from
+    for ident, entry in journal_state(work.journal).items():
+        if ident in subjects_by_id and entry.get("state") == "accepted" and "attempt" in entry:
+            accepted_card = work.card(ident, int(entry["attempt"]))
+            if accepted_card.exists():
+                rendered[ident] = accepted_card
 
     def master_exists(ident: str) -> bool:
         return work.master(ident, max(1, next_attempt(work, ident) - 1)).exists()
@@ -1183,12 +1197,14 @@ async def run_pipeline(
         # attempt 3 starts from a Haiku rewrite of the description; a picture that is already
         # drawn and only waits for its check, and a render-only run (no checker), need none
         state = journal_state(work.journal)
+        overrides = work.read_overrides()
         rewrite = [
             i
             for i in chunk_ids
             if not render_only
             and next_attempt(work, i) == 3
             and unchecked_attempt(work, i, state.get(i)) is None
+            and not (check_only and i in overrides)  # asked once; the render round draws it
         ]
         if rewrite:
             await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
@@ -1200,6 +1216,8 @@ async def run_pipeline(
                 if not render_only:
                     chunk.append((ident, waiting))  # rendered before a restart: just check it
                 continue
+            if check_only:
+                continue  # needs a picture: left for the render machine
             picture_started = time.monotonic()
             gate_saw: dict[str, int] = {}
 
@@ -1355,6 +1373,11 @@ def _parser() -> Any:
         help="ComfyUI recipe in wyr_images.IMAGE_MODELS (default: the server's default)",
     )
     run.add_argument(
+        "--check-only",
+        action="store_true",
+        help="check what is drawn and never render (the hub); failures wait for a render round",
+    )
+    run.add_argument(
         "--render-only",
         action="store_true",
         help="render and journal only; check later (the pilot, before calibration picks a checker)",
@@ -1461,6 +1484,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _check.SOL,
             _check.OPUS,
             render_only=args.render_only,
+            check_only=args.check_only,
             voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
         )
     )
