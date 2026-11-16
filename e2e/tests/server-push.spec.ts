@@ -2,6 +2,22 @@ import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 
 const MULTI_TAP_INTERVAL_MS = 400;
+const SLOW_RUNNER_MS = 1500;
+const KEEP_AWAKE_EVERY_MS = 2500;
+
+/** R7's idle lock fires after 10 s with no activity and tears the chat (and the settings sheet) down
+ * after an 800 ms fade. This spec taps "Send me a test notification", which starts a 10 s countdown
+ * (TEST_SEND_DELAY_S) with nobody touching the page, so without this the lock begins exactly as the
+ * countdown ends and the test only passes if its next click lands inside the fade: it did on a quiet
+ * machine and missed on a loaded CI runner ("element was detached from the DOM", then a 10 s wait for
+ * a DELETE that never came). A key press counts as activity and cannot disturb a click. The other
+ * specs that watch a page for longer than 10 s do the same (server-adventure, server-calls). */
+function keepAwake(page: Page): () => void {
+  const timer = setInterval(() => {
+    void page.keyboard.press("Shift").catch(() => undefined); // the page may be closing
+  }, KEEP_AWAKE_EVERY_MS);
+  return () => clearInterval(timer);
+}
 const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/126.0.0.0 Mobile Safari/537.36";
 
 async function unlockServer(page: Page, name: string): Promise<void> {
@@ -36,6 +52,12 @@ test("desktop browser does not show the optional push control", async ({ page })
 
 test.describe("Android browser", () => {
   test.use({ userAgent: ANDROID_UA, viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  let stopAwake: (() => void) | undefined;
+  test.afterEach(() => {
+    stopAwake?.();
+    stopAwake = undefined;
+  });
 
   test("mounts push controls and enables/disables the subscription through the sheet", async ({ page }) => {
     const pushRequests: Array<{ method: string; url: string }> = [];
@@ -93,6 +115,7 @@ test.describe("Android browser", () => {
     });
 
     await unlockServer(page, "Android tester");
+    stopAwake = keepAwake(page);
     await page.locator(".wx-srv-settings-button").click();
     const toggle = page.locator(".wx-srv-push-toggle");
     await expect(toggle).toBeVisible();
@@ -135,7 +158,9 @@ test.describe("Android browser", () => {
     await expect(toggle.locator(".wx-srv-push-test-message")).toHaveText("Your phone received the test and showed it.");
     await expect(toggle.locator(".wx-srv-push-test-hint")).toContainText("Android Settings -> Apps -> Chrome -> Notifications is On");
 
-    await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+    // a slow runner: pause longer than the idle-lock fade (800 ms) so the test proves it never relies on
+    // landing inside it; also longer than the 400 ms multi-tap window the old fixed wait was there for
+    await page.waitForTimeout(SLOW_RUNNER_MS);
     const del = page.waitForResponse((response) =>
       response.url().includes("/api/admin/server/push/subscriptions/")
       && response.request().method() === "DELETE",
