@@ -18,7 +18,7 @@ from typing import Any, cast
 import pytest
 
 from wixy_server.livechat.cookout_catalogue import Catalogue, CatalogueEntry
-from wixy_server.livechat.cookout_pack import ImageRef, PackManifest, object_relpath
+from wixy_server.livechat.cookout_pack import ImageRef, PackManifest, load_manifest, object_relpath
 from wixy_server.livechat.cookout_visuals import (
     IngredientVisuals,
 )
@@ -203,6 +203,29 @@ class TestReloadCost:
             write_object(images, ref.thumb)
         visuals.reload()
         assert visuals.snap_extras("a")["image"] is not None
+
+
+class TestVisualsFromEnvironment:
+    """For a caller with no app (the image-boot proof's `python -c` inside the container)."""
+
+    def test_it_reads_the_baked_pictures_dir_from_the_environment(
+        self, images: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from wixy_server.livechat.cookout_visuals import visuals_from_environment
+
+        manifest = load_manifest()
+        sample = next(iter(manifest.items.values()), None)
+        if sample is not None:
+            write_object(images, sample.card)
+            write_object(images, sample.thumb)
+        monkeypatch.setenv("WIXY_COOKOUT_IMAGES_BAKED_DIR", str(images))
+        monkeypatch.delenv("WIXY_COOKOUT_IMAGES_DIR", raising=False)
+        monkeypatch.delenv("WIXY_STORAGE_ROOT", raising=False)
+        visuals = visuals_from_environment()
+        assert visuals.search == (images,)
+        if sample is not None:
+            ident = next(iter(manifest.items))
+            assert visuals.snap_extras(ident)["image"] is not None
 
 
 class TestSnapExtras:

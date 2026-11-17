@@ -9,7 +9,7 @@
 # to 127.0.0.1, since the network is none):
 #   1. a card sha and a thumb sha from <manifest.json> -> 200, image/webp, sha256(body) == the sha;
 #   2. an unknown sha -> 404;
-#   3. default_visuals().snap_extras(id)["image"] is non-null for every checked id;
+#   3. visuals_from_environment().snap_extras(id)["image"] is non-null for every checked id;
 #   4. the packaged catalogue loads with the same entry count as the committed one.
 # <manifest.json> is the manifest the image was BUILT from. When it has more than five items, ONE
 # id is checked, chosen by a seeded draw (COOKOUT_PROOF_SEED, default: the git sha or "0"), so a
@@ -86,9 +86,9 @@ want_catalogue="$(python -c 'from wixy_server.livechat.cookout_catalogue import 
 docker exec -e CHECK_IDS="$ids" -e WANT_CATALOGUE="$want_catalogue" "$name" python -c '
 import os
 from wixy_server.livechat.cookout_catalogue import load_cookout_catalogue
-from wixy_server.livechat.cookout_visuals import default_visuals
+from wixy_server.livechat.cookout_visuals import visuals_from_environment
 
-visuals = default_visuals()
+visuals = visuals_from_environment()
 for ingredient_id in os.environ["CHECK_IDS"].split():
     image = visuals.snap_extras(ingredient_id)["image"]
     assert image is not None, f"no baked picture for {ingredient_id}"
