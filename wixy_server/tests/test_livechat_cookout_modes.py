@@ -20,7 +20,6 @@ import pytest
 
 from wixy_server.livechat import store as store_module
 from wixy_server.livechat.cookout_bank import CookoutBank, load_cookout_bank_or_empty
-from wixy_server.livechat.cookout_catalogue import Catalogue
 from wixy_server.livechat.cookout_game import (
     CookoutSetup,
     EncoreSpec,
@@ -28,17 +27,13 @@ from wixy_server.livechat.cookout_game import (
     current_turn,
 )
 from wixy_server.livechat.cookout_modes import CookoutModes, default_modes
-from wixy_server.livechat.cookout_visuals import (
-    IngredientVisuals,
-    empty_manifest,
-    set_default_visuals,
-)
 from wixy_server.livechat.reactions import reactor_key
 from wixy_server.livechat.store import (
     CookoutBadStateError,
     CookoutInvalidError,
     LiveChatStore,
 )
+from wixy_server.tests.no_visuals import no_visuals
 from wixy_server.tests.test_livechat_view_once import (  # noqa: F401 - fixtures re-exported
     _dev_no_auth,
     fake_cmd_state,
@@ -172,6 +167,7 @@ def view_json(store: LiveChatStore, bank: Any, seq: int, viewer: str | None) -> 
             all_recipes=data.all_recipes,
             photo_attachments=data.photo_attachments,
             encore_title=data.encore_title,
+            visuals=no_visuals(),
         )
     )
 
@@ -209,14 +205,6 @@ def _strip_mode_fields(node: Any, *, top: bool = True) -> Any:
 
 
 class TestMigrationFromRealV21:
-    @pytest.fixture(autouse=True)
-    def _no_catalogue(self) -> Iterator[None]:
-        """The golden views predate the ingredient catalogue (`what`, `facts`, pictures), so they
-        are compared with no catalogue loaded, whatever the packaged one holds."""
-        set_default_visuals(IngredientVisuals(Catalogue(), empty_manifest(), []))
-        yield
-        set_default_visuals(None)
-
     def test_the_fixture_really_is_a_v21_database_with_every_round_state(self) -> None:
         conn = sqlite3.connect(FIXTURES / "livechat_v21.db")
         try:
@@ -1173,6 +1161,7 @@ class TestBankKindsAndSeedErrors:
                 turns=d.turns,
                 generation_row=d.generation_row,
                 bank=bank,
+                visuals=no_visuals(),
             )
             for d in data
             if d.round.anchor_message_seq == source
@@ -1232,7 +1221,13 @@ class TestBankKindsAndSeedErrors:
         )
         d = next(x for x in store.list_cookout_bank() if x.round.anchor_message_seq == seq)
         entry = bank_entry_json(
-            d.round, d.recipe, d.attachments, None, turns=d.turns, generation_row=d.generation_row
+            d.round,
+            d.recipe,
+            d.attachments,
+            None,
+            turns=d.turns,
+            generation_row=d.generation_row,
+            visuals=no_visuals(),
         )
         assert entry is not None
         snaps: Any = entry["ingredients"]

@@ -210,6 +210,7 @@ def golden(db: Path, out: Path) -> None:
     the migration test's golden. Run against the pre-modes tree (e.g. dc66d2ce), on a COPY of the
     database."""
     from wixy_server.livechat.cookout_game import cookout_view_json
+    from wixy_server.tests.no_visuals import no_visuals
 
     store = LiveChatStore(db)
     result: dict[str, object] = {}
@@ -230,6 +231,7 @@ def golden(db: Path, out: Path) -> None:
                 all_recipes=data.all_recipes,
                 photo_attachments=data.photo_attachments,
                 encore_title=data.encore_title,
+                visuals=no_visuals(),
             )
     out.write_text(json.dumps(result, indent=1, sort_keys=True), encoding="utf-8", newline=chr(10))
 

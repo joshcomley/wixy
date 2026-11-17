@@ -9,7 +9,6 @@ from __future__ import annotations
 import json
 import threading
 import time
-from collections.abc import Iterator
 from pathlib import Path
 
 import anyio
@@ -22,7 +21,6 @@ from wixy_server.livechat.cookout_visuals import (
     IngredientVisuals,
     load_visuals,
     search_path,
-    set_default_visuals,
 )
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.tests.test_cookout_visuals import (
@@ -43,12 +41,6 @@ from wixy_server.tests.test_livechat_view_once import (  # noqa: F401 - fixtures
 from wixy_server.tests.test_routes_livechat_cookout import BASE, cookout_client
 
 ROUTE = "/admin/cookout-img"
-
-
-@pytest.fixture(autouse=True)
-def _reset_default_visuals() -> Iterator[None]:
-    yield
-    set_default_visuals(None)
 
 
 @pytest.fixture
@@ -472,3 +464,29 @@ class TestBootNeverWaitsOnTheStore:
             cookout_visuals=make_visuals(images, ["a"]),
         ) as (client, _h, _):
             assert client.get("/healthz").status_code == 200
+
+
+class TestVisualsBelongToTheApp:
+    """The visuals an app serves and builds its views from are the app's own (`app.state`), not a
+    process-wide default another app could overwrite (the old default leaked the real manifest from
+    one test into the next)."""
+
+    def test_two_apps_keep_their_own_visuals(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier, images: Path
+    ) -> None:
+        first = make_visuals(images / "one", ["a"])
+        second = make_visuals(images / "two", ["b"])
+        with (
+            cookout_client(storage_root, wixy_repo_root, pin_verifier, cookout_visuals=first) as (
+                client_one,
+                _h1,
+                _r1,
+            ),
+            cookout_client(storage_root, wixy_repo_root, pin_verifier, cookout_visuals=second) as (
+                client_two,
+                _h2,
+                _r2,
+            ),
+        ):
+            assert client_one.app.state.livechat_cookout_visuals is first  # type: ignore[attr-defined]
+            assert client_two.app.state.livechat_cookout_visuals is second  # type: ignore[attr-defined]

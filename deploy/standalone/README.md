@@ -132,7 +132,7 @@ deterministically), with `COOKOUT_PACK_URL` pointing at a throwaway local HTTP s
 Dockerfile path runs. The script boots that image with `--network none`, an empty `/data` and no `WIXY_COOKOUT_IMAGES_DIR`
 (so the baked directory is the only possible source) and, from inside the container, asserts: a card and a thumb sha from the
 manifest give `200`, `Content-Type: image/webp` and a body whose sha256 equals the sha; an unknown sha gives `404`;
-`default_visuals().snap_extras(id)["image"]` is non-null; and the packaged catalogue has the same number of entries as the
+`visuals_from_environment().snap_extras(id)["image"]` is non-null; and the packaged catalogue has the same number of entries as the
 committed one. A second, real-pack run (the real image and manifest, one card and one thumb chosen by a seeded draw) happens
 in `ci.yml` only on PRs that change a manifest which names a pack (a path filter, so ordinary PRs do not download ~150 MB) and on every `main`
 build in `publish-image.yml` (both skip an empty `pack: null` manifest: nothing to prove).

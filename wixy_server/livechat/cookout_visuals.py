@@ -207,35 +207,21 @@ def load_visuals(
     return IngredientVisuals(catalogue, manifest, search)
 
 
-_default: IngredientVisuals | None = None
-_default_lock = threading.Lock()
-
-
-def default_visuals() -> IngredientVisuals:
-    """The process's visuals, built lazily once like `default_bank()`. The app replaces it with the
-    settings-aware one at start (`set_default_visuals`); before that, the search path comes from the
-    same environment variables the settings read (so a bare `python -c` in the container sees the
-    baked pictures too)."""
-    global _default
-    with _default_lock:
-        if _default is None:
-            root = os.environ.get("WIXY_STORAGE_ROOT")
-            images = os.environ.get("WIXY_COOKOUT_IMAGES_DIR")
-            baked = os.environ.get("WIXY_COOKOUT_IMAGES_BAKED_DIR")
-            _default = load_visuals(
-                search_path(
-                    Path(root) if root else None,
-                    Path(images) if images else None,
-                    Path(baked) if baked else None,
-                )
-            )
-        return _default
-
-
-def set_default_visuals(visuals: IngredientVisuals | None) -> None:
-    global _default
-    with _default_lock:
-        _default = visuals
+def visuals_from_environment() -> IngredientVisuals:
+    """Visuals built from the same environment variables the settings read, for a caller with no app
+    (a bare `python -c` inside the container, as the image-boot proof does: it sees the baked
+    pictures too). The app itself holds its own visuals in `app.state`; there is no process
+    default."""
+    root = os.environ.get("WIXY_STORAGE_ROOT")
+    images = os.environ.get("WIXY_COOKOUT_IMAGES_DIR")
+    baked = os.environ.get("WIXY_COOKOUT_IMAGES_BAKED_DIR")
+    return load_visuals(
+        search_path(
+            Path(root) if root else None,
+            Path(images) if images else None,
+            Path(baked) if baked else None,
+        )
+    )
 
 
 class CookoutVisualsService:

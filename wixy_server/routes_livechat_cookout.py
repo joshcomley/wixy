@@ -49,6 +49,7 @@ from wixy_server.livechat.cookout_game import (
     picture_json,
 )
 from wixy_server.livechat.cookout_modes import CookoutMode, default_modes
+from wixy_server.livechat.cookout_visuals import IngredientVisuals
 from wixy_server.livechat.models import CookoutRoundRow, MessageHook, MessageRow, message_json
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.reactions import reactor_key
@@ -307,6 +308,11 @@ def _bank(request: Request) -> BankLike | None:
     return bank
 
 
+def _visuals(request: Request) -> IngredientVisuals:
+    visuals: IngredientVisuals = request.app.state.livechat_cookout_visuals
+    return visuals
+
+
 def _runner(request: Request) -> CookoutRunner:
     runner: CookoutRunner = request.app.state.livechat_cookout_runner
     return runner
@@ -354,6 +360,7 @@ async def _view_response(
         all_recipes=data.all_recipes,
         photo_attachments=data.photo_attachments,
         encore_title=data.encore_title,
+        visuals=_visuals(request),
     )
     return JSONResponse(status_code=200, content=content, headers=_NO_STORE)
 
@@ -416,7 +423,7 @@ async def search_cookout_ingredients(request: Request) -> JSONResponse:
         found = await anyio.to_thread.run_sync(lambda: bank.search(query, limit=20))
     return JSONResponse(
         status_code=200,
-        content={"ingredients": [bank_ingredient_json(i) for i in found]},
+        content={"ingredients": [bank_ingredient_json(_visuals(request), i) for i in found]},
         headers=_NO_STORE,
     )
 
@@ -538,6 +545,7 @@ async def get_cookout_bank(request: Request) -> JSONResponse:
     rows = await anyio.to_thread.run_sync(store.list_cookout_bank)
     signer = MediaSigner.for_auth(secret, auth)
     bank = _bank(request)
+    visuals = _visuals(request)
     recipes = [
         entry
         for row in rows
@@ -551,6 +559,7 @@ async def get_cookout_bank(request: Request) -> JSONResponse:
                 generation_row=row.generation_row,
                 photo_attachments=row.photo_attachments,
                 bank=bank,
+                visuals=visuals,
             )
         )
         is not None
