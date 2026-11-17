@@ -229,6 +229,26 @@ def test_pool_paces_spawns_and_resumes_a_journalled_run(tmp_path: Path) -> None:
     assert len(client.spawned) == before
 
 
+def test_pool_replays_a_completed_run_unless_the_caller_rejected_its_answer(
+    tmp_path: Path,
+) -> None:
+    """A completed run is replayed after a crash; once the caller REFUSED its answer, the same
+    request must start a new run (`fresh=True`), not hand back the refused answer again."""
+    client = FakeClient(lambda kw: f"answer {len(client.spawned)}")
+    journal = cmdruns.Journal(tmp_path / "j.jsonl")
+    pool = cmdruns.RunPool(client=client, journal=journal, spawn_gap_s=0, poll_s=0, sleep=_no_sleep)
+    spec = cmdruns.RunSpec("c", "p", cmdruns.HAIKU, "medium", "D:/x", 900, tool_profile="judge")
+    first = run(pool.run("k", "rewrite", ["a"], spec))
+    again = run(pool.run("k", "rewrite", ["a"], spec))
+    assert again.run_id == first.run_id and again.resumed and len(client.spawned) == 1
+    fresh = run(pool.run("k", "rewrite", ["a"], spec, fresh=True))
+    assert fresh.run_id != first.run_id and not fresh.resumed and len(client.spawned) == 2
+    assert fresh.text != first.text
+    # the new run is now the journalled one: a crash-replay returns it, not the refused one
+    replay = run(pool.run("k", "rewrite", ["a"], spec))
+    assert replay.run_id == fresh.run_id and len(client.spawned) == 2
+
+
 def test_pool_caps_in_flight_runs_per_provider(tmp_path: Path) -> None:
     active = 0
     peak = 0

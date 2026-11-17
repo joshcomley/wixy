@@ -54,8 +54,12 @@ class Runner(Protocol):
         cwd: Path,
         tool_profile: str,
         timeout_secs: int,
+        fresh: bool = False,
     ) -> str:
-        """Run one chat-spawn run to completion and return its final assistant message."""
+        """Run one chat-spawn run to completion and return its final assistant message.
+
+        `fresh=True`: the caller refused the answer an earlier identical request got, so do not
+        replay it (a journalled completed run is otherwise resumed after a crash)."""
         ...
 
 

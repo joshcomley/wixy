@@ -1340,6 +1340,38 @@ def test_a_locked_batch_folder_does_not_end_the_round(
     assert b2.directory == free and not (free / "stale.webp").exists()
 
 
+def test_a_rewrite_the_model_dropped_is_asked_again_as_a_new_run(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """strozzapreti, 17 Nov 2026: the answer left one id out, and asking the same thing again just
+    replayed that answer. The missing id is asked on its own, with `fresh=True`."""
+    im = mods["images"]
+    subjects, _levels = _eight_subjects(im)
+    work = im.WorkDir(tmp_path / "work")
+    calls: list[dict[str, object]] = []
+    good = "one whole plain thing on a pale surface, soft even light, sharp focus"
+
+    class Runner:
+        async def run(self, **kw: object) -> str:
+            calls.append(kw)
+            ids = [i for i in ("itema", "itemb") if i in str(kw["prompt"]).lower()]
+            if not kw.get("fresh"):
+                ids = ids[:1]  # the first answer drops the second id
+            return json.dumps({"items": [{"id": i, "visual": good} for i in ids]})
+
+    asyncio.run(
+        im.rewrite_visuals(Runner(), mods["check"].HAIKU, ["itema", "itemb"], subjects, work)
+    )
+    assert set(work.read_overrides()) == {"itema", "itemb"}
+    assert len(calls) == 2 and not calls[0].get("fresh") and calls[1]["fresh"] is True
+    assert "itema" not in str(calls[1]["prompt"]).lower()  # only the missing id is re-asked
+    calls.clear()
+    asyncio.run(
+        im.rewrite_visuals(Runner(), mods["check"].HAIKU, ["itema"], subjects, work)
+    )  # nothing missing: one call, no retry
+    assert len(calls) == 1
+
+
 def test_a_render_only_round_draws_just_the_listed_ids(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
@@ -1693,10 +1725,14 @@ def test_pool_runner_retries_a_dead_run(
             self.outcomes = outcomes
             self.keys: list[str] = []
             self.passes: list[tuple[str, list[str]]] = []
+            self.fresh: list[bool] = []
 
-        async def run(self, key: str, pass_name: str, ids: list[str], spec: object) -> Outcome:
+        async def run(
+            self, key: str, pass_name: str, ids: list[str], spec: object, *, fresh: bool = False
+        ) -> Outcome:
             self.keys.append(key)
             self.passes.append((pass_name, ids))
+            self.fresh.append(fresh)
             return self.outcomes.pop(0)
 
     def make(outcomes: list[Outcome]) -> tuple[Any, Pool]:
@@ -1715,10 +1751,14 @@ def test_pool_runner_retries_a_dead_run(
     runner, pool = make([Outcome("error", None), Outcome("completed", "answer")])
     assert asyncio.run(runner.run(**kw)) == "answer"
     assert len(pool.keys) == 2 and pool.keys[0] == pool.keys[1]  # same key: journal-resumable
+    assert pool.fresh == [False, False]
     # the run journal names the batch folder, so a hung run can be tied to its pictures
     assert pool.passes[0] == (f"image-{tmp_path.name}", [tmp_path.name])
     # a check batch that cmd never starts must not hold a lane for 15 minutes
     assert mods["check"].BATCH_TIMEOUT_S <= 420
+    runner, pool = make([Outcome("error", None), Outcome("completed", "answer")])
+    assert asyncio.run(runner.run(**kw, fresh=True)) == "answer"
+    assert pool.fresh == [True, False]  # only the first try is a rejection of a replayed answer
     runner, pool = make([Outcome("error", None)] * 3)
     with pytest.raises(mods["check"].VerdictError, match="process exited"):
         asyncio.run(runner.run(**kw))

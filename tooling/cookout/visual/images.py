@@ -545,6 +545,7 @@ class PoolRunner:
         cwd: Path,
         tool_profile: str,
         timeout_secs: int,
+        fresh: bool = False,
     ) -> str:
         key = sha256_hex(f"{provider}|{model}|{cwd.name}|{prompt}".encode())[:24]
         spec = self._spec(
@@ -560,7 +561,9 @@ class PoolRunner:
         for attempt in range(1 + RUN_RETRIES):
             # the journal's pass is the run's batch folder (b46-recheck-1, b47-tie-<id>-1 ...), so a
             # hung run can be tied to its pictures; the tool profile alone said nothing
-            outcome = await self._pool.run(key, f"image-{cwd.name}", [cwd.name], spec)
+            outcome = await self._pool.run(
+                key, f"image-{cwd.name}", [cwd.name], spec, fresh=fresh and attempt == 0
+            )
             if outcome.ok and outcome.text is not None:
                 return str(outcome.text)
             # a run that died (`process exited before end_turn`, a timeout, a failed spawn) is
@@ -945,6 +948,18 @@ async def rewrite_visuals(
         entries.append((i, s.name, s.what, visual_for(s, overrides), reasons))
     cwd = work.root / "rewrite"
     cwd.mkdir(parents=True, exist_ok=True)
+
+    def apply(text: str) -> None:
+        data = _check.strip_json(text)
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            raise _check.VerdictError("rewrite answer is not {items: [...]}")
+        for item in data["items"]:
+            if not (isinstance(item, dict) and item.get("id") in ids):
+                continue
+            visual = item.get("visual")
+            if isinstance(visual, str) and not visual_problems(visual):
+                work.write_override(item["id"], visual)
+
     text = await runner.run(
         prompt=_prompts.visual_rewrite_prompt(entries),
         model=haiku.model,
@@ -954,15 +969,22 @@ async def rewrite_visuals(
         tool_profile="judge",
         timeout_secs=CHECK_TIMEOUT_S,
     )
-    data = _check.strip_json(text)
-    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
-        raise _check.VerdictError("rewrite answer is not {items: [...]}")
-    for item in data["items"]:
-        if not (isinstance(item, dict) and item.get("id") in ids):
-            continue
-        visual = item.get("visual")
-        if isinstance(visual, str) and not visual_problems(visual):
-            work.write_override(item["id"], visual)
+    apply(text)
+    # an id the answer dropped or got wrong (strozzapreti, 17 Nov 2026) is asked again on its own,
+    # as a NEW run: asking the same request again would replay the answer already refused
+    missing = [e for e in entries if e[0] not in work.read_overrides()]
+    if missing:
+        retry = await runner.run(
+            prompt=_prompts.visual_rewrite_prompt(missing),
+            model=haiku.model,
+            provider=haiku.provider,
+            effort="medium",
+            cwd=cwd,
+            tool_profile="judge",
+            timeout_secs=CHECK_TIMEOUT_S,
+            fresh=True,
+        )
+        apply(retry)
 
 
 async def review_failures(
@@ -993,7 +1015,22 @@ async def review_failures(
         tool_profile="replay_probe",
         timeout_secs=CHECK_TIMEOUT_S,
     )
-    decision = _review.parse_review(text, max(a["attempt"] for a in attempts))
+    newest = max(a["attempt"] for a in attempts)
+    try:
+        decision = _review.parse_review(text, newest)
+    except _check.VerdictError:
+        # refused: ask once more as a NEW run (the same request would replay this answer)
+        text = await runner.run(
+            prompt=_prompts.opus_review_prompt(ident, s.name, s.what, rows),
+            model=opus.model,
+            provider=opus.provider,
+            effort="high",
+            cwd=cwd,
+            tool_profile="replay_probe",
+            timeout_secs=CHECK_TIMEOUT_S,
+            fresh=True,
+        )
+        decision = _review.parse_review(text, newest)
     if decision.choose is not None:
         _review.record_decision(ident, "accepted", decision.choose, decision.reason, review_path)
         return f"accepted:{decision.choose}"
