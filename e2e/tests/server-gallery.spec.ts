@@ -5,6 +5,7 @@
 import { expect, test } from "../fixtures";
 import type { Download, Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { unlockServer, unlockAgain } from "./server-helpers";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
@@ -13,39 +14,6 @@ const VIDEO = fileURLToPath(new URL("../fixtures/livechat-video.mp4", import.met
 const FILENAME = /^wixy-\d{8}-\d{6}-[0-9a-f]{8}\.(jpg|png|mp4)$/;
 
 test.describe.configure({ timeout: 90_000 });
-
-async function openPinPad(page: Page): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-}
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await openPinPad(page);
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
-  await page.locator(".wx-srv-name-prompt-input").fill(name);
-  await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
-
-async function unlockAgain(page: Page): Promise<void> {
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await openPinPad(page);
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 /** Attach the files, wait for every upload to finish, send. */
 async function sendMedia(page: Page, files: string[]): Promise<void> {

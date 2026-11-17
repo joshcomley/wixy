@@ -4,23 +4,10 @@ import { test, expect } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 import { unlockTogether } from "./two-devices";
+import { unlockServer as unlock } from "./server-helpers";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 test.describe.configure({ timeout: 90_000 });
-
-async function unlock(page: Page, name: string): Promise<void> {
-  const { pin } = await (await page.request.post("/test/server/config")).json() as { pin: string };
-  await page.goto("/admin/server");
-  await page.locator(".wx-srv-decoy").click();
-  await page.waitForTimeout(450);
-  await page.locator(".wx-srv-affordance").click();
-  for (const digit of pin) await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
-  await page.locator(".wx-srv-name-prompt-input").fill(name);
-  await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-call")).toBeVisible();
-}
 
 interface Probe {
   streams: MediaStream[];

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
@@ -127,6 +128,86 @@ def snaps_in(view: dict[str, Any]) -> list[dict[str, Any]]:
 
     walk(view)
     return found
+
+
+class TestReloadCost:
+    """Every `create_app` builds the visuals, so a suite (and a cold server start) pays for
+    `reload()` once per app. With the real manifest (3,487 pictures) a per-picture file lookup
+    measured ~0.5 s per app on a loaded box, which put the whole pytest job past 40 minutes on
+    CI, and the live server pays it per reload. Each search folder is listed once; the manifest
+    lookups are dict hits and make no file-system call."""
+
+    def test_no_per_picture_file_lookup_runs_with_or_without_a_pack(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+
+        ids = [f"ing-{n}" for n in range(3487)]
+        manifest = manifest_for(ids)
+        present = tmp_path / "images"
+        for ref in list(manifest.items.values())[:50]:
+            write_object(present, ref.card)
+            write_object(present, ref.thumb)
+        catalogue = cast(Catalogue, FakeCatalogue({i: entry_for(i) for i in ids}))
+
+        lookups: list[str] = []
+        real_relpath = object_relpath
+        real_is_file = Path.is_file
+
+        def counting_relpath(sha: str) -> Any:
+            lookups.append(sha)
+            return real_relpath(sha)
+
+        def counting_is_file(self: Path, *args: Any, **kwargs: Any) -> bool:
+            lookups.append(str(self))
+            return real_is_file(self, *args, **kwargs)
+
+        monkeypatch.setattr("wixy_server.livechat.cookout_visuals.object_relpath", counting_relpath)
+        monkeypatch.setattr(Path, "is_file", counting_is_file)
+        started = time.perf_counter()
+        with_pack = IngredientVisuals(catalogue, manifest, [present, tmp_path / "no-objects"])
+        without = IngredientVisuals(
+            catalogue, manifest, [tmp_path / "a", tmp_path / "b" / "objects"]
+        )
+        elapsed = time.perf_counter() - started
+        assert lookups == []
+        assert elapsed < 3.0
+        assert with_pack.snap_extras("ing-0")["image"] is not None
+        assert with_pack.snap_extras("ing-100")["image"] is None
+        assert without.snap_extras("ing-0")["image"] is None
+
+    def test_the_earlier_search_folder_wins_for_the_same_picture(self, tmp_path: Path) -> None:
+        manifest = manifest_for(["a"])
+        first, second = tmp_path / "first", tmp_path / "second"
+        for folder in (first, second):
+            for ref in manifest.items.values():
+                write_object(folder, ref.card)
+                write_object(folder, ref.thumb)
+        visuals = IngredientVisuals(
+            cast(Catalogue, FakeCatalogue({"a": entry_for("a")})), manifest, [first, second]
+        )
+        assert visuals.resolve_object(manifest.items["a"].card) == first / object_relpath(
+            manifest.items["a"].card
+        )
+
+    def test_a_folder_named_like_an_object_is_not_a_picture(self, tmp_path: Path) -> None:
+        manifest = manifest_for(["a"])
+        ref = manifest.items["a"]
+        for sha in (ref.card, ref.thumb):
+            (tmp_path / "images" / object_relpath(sha)).mkdir(parents=True)
+        visuals = IngredientVisuals(
+            cast(Catalogue, FakeCatalogue({"a": entry_for("a")})), manifest, [tmp_path / "images"]
+        )
+        assert visuals.snap_extras("a")["image"] is None
+
+    def test_a_folder_that_appears_later_is_picked_up_by_reload(self, images: Path) -> None:
+        visuals = make_visuals(images, ["a"], with_files=False)
+        assert visuals.snap_extras("a")["image"] is None
+        manifest = manifest_for(["a"])
+        for ref in manifest.items.values():
+            write_object(images, ref.card)
+            write_object(images, ref.thumb)
+        visuals.reload()
+        assert visuals.snap_extras("a")["image"] is not None
 
 
 class TestSnapExtras:
