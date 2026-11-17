@@ -826,6 +826,7 @@ class FakeJudge:
     ) -> None:
         self.level_of, self.name_of = level_of, name_of
         self.opus_calls, self.rewrites = 0, 0
+        self.opus_unreadable = 0  # the next N Opus reviews answer in prose with no JSON at all
         # name -> how many times Sol still says "wrong" about a picture Haiku accepted
         self.sol_rejects = dict(sol_rejects or {})
         self.models_seen: list[str] = []
@@ -850,6 +851,9 @@ class FakeJudge:
             )
         if "failed an automatic check" in prompt:
             self.opus_calls += 1
+            if self.opus_unreadable > 0:
+                self.opus_unreadable -= 1
+                return "I looked at all four pictures but cannot decide."
             return json.dumps(
                 {
                     "choose": None,
@@ -882,6 +886,7 @@ def _pipeline(
     mods: dict[str, ModuleType],
     bad: dict[str, int],
     sol_rejects: dict[str, int] | None = None,
+    opus_unreadable: int = 0,
 ) -> tuple[Any, Any, Any, Any, dict[str, int]]:
     im, c = mods["images"], mods["check"]
     levels = {n.lower(): 30 * (i + 1) for i, n in enumerate(_NAMES)}
@@ -899,6 +904,7 @@ def _pipeline(
     work = im.WorkDir(tmp_path / "work")
     comfy = FakeComfy(levels, bad)
     judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()}, sol_rejects)
+    judge.opus_unreadable = opus_unreadable
     totals = asyncio.run(
         im.run_pipeline(
             sorted(subjects),
@@ -985,6 +991,25 @@ def test_pipeline_walks_the_ladder_to_opus_then_picture_less(
     assert decided["echo"]["decision"] == "pictureless"
     assert im.journal_state(work.journal)["echo"].get("pictureless") is True
     assert "echo" not in {p.ident for p in im.accepted_pictures(work)}
+
+
+def test_one_unreadable_review_waits_and_the_round_carries_on(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """17 Nov 2026: one picture's review could not be read and the whole check round died, as a
+    locked folder had at 20:04 UTC the day before. The picture now waits for the next round."""
+    im, work, comfy, judge, totals = _pipeline(tmp_path, mods, {"echo": 99}, opus_unreadable=2)
+    # the review and its fresh retry were both unreadable: echo waits, the other five are done
+    assert totals["accepted"] == 5 and totals["pictureless"] == 0 and totals["review_waiting"] == 1
+    assert judge.opus_calls == 2
+    entry = im.journal_state(work.journal)["echo"]
+    assert entry["state"] == "regenerate" and not entry.get("pictureless")
+    assert [a["attempt"] for a in work.read_attempts("echo")] == [1, 2, 3, 4]  # no attempt 5 yet
+    # the next round asks again before anything is drawn, and the ladder goes on
+    im2, work2, comfy2, judge2, totals2 = _pipeline(tmp_path, mods, {"echo": 99})
+    assert judge2.opus_calls >= 1 and totals2["review_waiting"] == 0
+    assert totals2["pictureless"] == 1
+    assert [a["attempt"] for a in work2.read_attempts("echo")] == [1, 2, 3, 4, 5, 6]
 
 
 def test_pipeline_pause_file_stops_between_pictures(
