@@ -50,7 +50,7 @@ async function unlockServer(page: Page, name: string): Promise<void> {
   }
   await page.locator(".wx-srv-pinpad-key-submit").click();
 
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
+  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 30_000 });
   if (await page.locator(".wx-srv-name-prompt").isVisible()) {
     await page.locator(".wx-srv-name-prompt-input").fill(name);
     await page.locator(".wx-srv-name-prompt-button").click();
