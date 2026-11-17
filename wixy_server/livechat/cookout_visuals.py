@@ -207,37 +207,6 @@ def load_visuals(
     return IngredientVisuals(catalogue, manifest, search)
 
 
-_default: IngredientVisuals | None = None
-_default_lock = threading.Lock()
-
-
-def default_visuals() -> IngredientVisuals:
-    """The process's visuals, built lazily once like `default_bank()`. The app replaces it with the
-    settings-aware one at start (`set_default_visuals`); before that, the search path comes from the
-    same environment variables the settings read (so a bare `python -c` in the container sees the
-    baked pictures too)."""
-    global _default
-    with _default_lock:
-        if _default is None:
-            root = os.environ.get("WIXY_STORAGE_ROOT")
-            images = os.environ.get("WIXY_COOKOUT_IMAGES_DIR")
-            baked = os.environ.get("WIXY_COOKOUT_IMAGES_BAKED_DIR")
-            _default = load_visuals(
-                search_path(
-                    Path(root) if root else None,
-                    Path(images) if images else None,
-                    Path(baked) if baked else None,
-                )
-            )
-        return _default
-
-
-def set_default_visuals(visuals: IngredientVisuals | None) -> None:
-    global _default
-    with _default_lock:
-        _default = visuals
-
-
 class CookoutVisualsService:
     """Slot pin, lease refresh, self-heal and GC for one server process (spec B.6)."""
 

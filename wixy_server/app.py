@@ -78,7 +78,6 @@ from wixy_server.livechat.cookout_visuals import (
     is_sha,
     load_visuals,
     search_path,
-    set_default_visuals,
 )
 from wixy_server.livechat.drawing_broker import DrawingBroker
 from wixy_server.livechat.drawings import MAX_LIVE_BATCHES_PER_SECOND
@@ -456,7 +455,7 @@ def create_app(
             )
         )
     )
-    set_default_visuals(resolved_cookout_visuals)
+    app_cookout_visuals = resolved_cookout_visuals
     cookout_visuals_service = CookoutVisualsService(
         resolved_cookout_visuals,
         lambda: PackStore(
@@ -708,6 +707,7 @@ def create_app(
     app.state.livechat_adventure_runner = livechat_adventure_runner
     app.state.livechat_adventure_live_limiter = livechat_adventure_live_limiter
     app.state.livechat_cookout_bank = resolved_cookout_bank
+    app.state.livechat_cookout_visuals = app_cookout_visuals
     app.state.livechat_cookout_runner = resolved_cookout_runner
 
     @app.exception_handler(FastAPIHTTPException)

@@ -29,6 +29,7 @@ from wixy_server.livechat.cookout_game import (
     cookout_view_json,
     current_turn,
 )
+from wixy_server.livechat.cookout_visuals import IngredientVisuals
 from wixy_server.livechat.models import AttachmentResult, CookoutRoundRow, message_json
 from wixy_server.livechat.store import (
     _LATEST_SCHEMA_VERSION,
@@ -43,6 +44,7 @@ from wixy_server.livechat.store import (
     WyrRoundNotFoundError,
 )
 from wixy_server.tests.adventure_testkit import run_concurrently
+from wixy_server.tests.no_visuals import no_visuals
 
 ROLES = ("base", "protein", "produce", "accent")
 V20_TABLES = ("messages", "wyr_rounds", "adv_rounds", "wyr_chat", "events")
@@ -447,6 +449,7 @@ def view_for(
     seq: int,
     viewer: str | None,
     email: str | None = None,
+    visuals: IngredientVisuals | None = None,
 ) -> dict[str, Any]:
     from wixy_server.livechat.reactions import reactor_key
 
@@ -461,6 +464,7 @@ def view_for(
             viewer_key=reactor_key(viewer) if viewer else None,
             viewer_email=email,
             signer=_Signer(),
+            visuals=visuals if visuals is not None else no_visuals(),
         )
     )
 
