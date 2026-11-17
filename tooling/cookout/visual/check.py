@@ -116,8 +116,13 @@ class Batch:
     decoy_number: str | None
 
 
+_FENCES = re.compile(r"```[a-zA-Z]*[ \t]*\n(.*?)```", re.DOTALL)
+
+
 def strip_json(text: str) -> object:
-    """The final message must be exactly one JSON object (a ```json fence is tolerated)."""
+    """The final message must carry exactly one JSON object: bare, in a ```json fence, or (a
+    model that explains itself first, as Opus does in a review) in the ONE fenced block that
+    follows some prose. Two or more fenced blocks are ambiguous and refused."""
     body = text.strip()
     fence = _FENCE.match(body)
     if fence:
@@ -125,6 +130,12 @@ def strip_json(text: str) -> object:
     try:
         return json.loads(body)
     except json.JSONDecodeError as exc:
+        blocks = _FENCES.findall(text)
+        if len(blocks) == 1:
+            try:
+                return json.loads(blocks[0].strip())
+            except json.JSONDecodeError as inner:
+                raise VerdictError(f"the fenced answer is not a JSON object: {inner}") from inner
         raise VerdictError(f"the answer is not a single JSON object: {exc}") from exc
 
 

@@ -1422,6 +1422,28 @@ def test_a_refused_rewrite_is_asked_again_with_the_reason(
     assert bad in str(calls[1]["prompt"])  # the refused text is shown back
 
 
+def test_strip_json_takes_the_one_fenced_block_after_some_prose(
+    mods: dict[str, ModuleType],
+) -> None:
+    """Opus explains itself and then fences the answer; that killed a check round (horse mushroom,
+    17 Nov 2026). One fenced block after prose is the answer; two blocks are ambiguous."""
+    c = mods["check"]
+    nl, fence = chr(10), chr(96) * 3
+    obj = '{"choose": null, "visual": "v", "reason": "r"}'
+    assert c.strip_json(obj) == {"choose": None, "visual": "v", "reason": "r"}
+    wrapped = fence + "json" + nl + obj + nl + fence
+    assert c.strip_json(wrapped) == c.strip_json(obj)
+    prose = "I looked at all four." + nl + nl + wrapped + nl
+    assert c.strip_json(prose) == c.strip_json(obj)
+    for bad in (
+        prose + nl + wrapped,
+        "no json at all",
+        "text " + fence + "json" + nl + "{nope" + nl + fence,
+    ):
+        with pytest.raises(c.VerdictError):
+            c.strip_json(bad)
+
+
 def test_a_render_only_round_draws_just_the_listed_ids(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
