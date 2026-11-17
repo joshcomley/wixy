@@ -1304,6 +1304,38 @@ def test_check_only_checks_several_batches_at_once(
     assert all(e["state"] == "accepted" for e in im.journal_state(work.journal).values())
 
 
+def test_a_locked_batch_folder_does_not_end_the_round(
+    mods: dict[str, ModuleType], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows cannot delete a folder some process still has open (a cancelled check run, an
+    indexer): the round died of exactly that. The batch takes a new folder name instead."""
+    import shutil
+
+    c = mods["check"]
+    monkeypatch.setattr(c.time, "sleep", lambda _s: None)
+    root = tmp_path / "k"
+    locked = root / "b9-1"
+    locked.mkdir(parents=True)
+    (locked / "old.webp").write_bytes(b"x")
+    real_rmtree = shutil.rmtree
+
+    def rmtree(path: Any, *a: Any, **kw: Any) -> None:
+        if Path(path) == locked:
+            raise PermissionError(32, "The process cannot access the file")
+        real_rmtree(path, *a, **kw)
+
+    monkeypatch.setattr(c.shutil, "rmtree", rmtree)
+    b = c.build_batch("b9-1", _images(c, tmp_path, 2), None, root, random.Random(0))
+    assert b.directory == root / "b9-1-r1" and (b.directory / "01.webp").exists()
+    assert (locked / "old.webp").exists()  # the stuck folder is left alone, not half-deleted
+    # an ordinary stale folder is still replaced in place
+    free = root / "b10-1"
+    free.mkdir()
+    (free / "stale.webp").write_bytes(b"y")
+    b2 = c.build_batch("b10-1", _images(c, tmp_path, 2), None, root, random.Random(0))
+    assert b2.directory == free and not (free / "stale.webp").exists()
+
+
 def test_a_render_only_round_draws_just_the_listed_ids(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
