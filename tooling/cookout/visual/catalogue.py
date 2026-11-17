@@ -938,6 +938,28 @@ class Builder:
 # ---------------------------------------------------------------- the public API for parcel 2
 
 
+def visual_check(catalogue_path: Path) -> Callable[[str, str], list[str]]:
+    """The exact check `set_visual` applies, as a callable `(ingredient id, new visual) -> problems`.
+
+    The rewrite step uses it so that a description the committed catalogue would refuse (it puts
+    another ingredient after 'with', for one) is caught when the model writes it, and the model is
+    told why, instead of being stored and refused at the end (eleven were, 17 Nov 2026). The bank and
+    the catalogue are read once."""
+    raw = json.loads(catalogue_path.read_text(encoding="utf-8"))
+    bank = vc.load_bank_items()
+    names = vc.ingredient_names(bank)
+
+    def check(ingredient_id: str, visual: str) -> list[str]:
+        entry = raw["items"].get(ingredient_id)
+        if entry is None or ingredient_id not in bank:
+            return [f"{ingredient_id}: not in the committed catalogue"]
+        return vc.item_problems(
+            ingredient_id, {**entry, "visual": visual}, bank[ingredient_id], names
+        )
+
+    return check
+
+
 def set_visual(
     catalogue_path: Path, ingredient_id: str, visual: str, by: str, *, now: int | None = None
 ) -> None:

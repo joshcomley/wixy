@@ -525,6 +525,25 @@ def test_set_visual_validates_and_records_who(tmp_path: Path) -> None:
         cat.set_visual(path, item_id, "a plain serving held in a hand on the plain background", "x")
 
 
+def test_visual_check_is_the_check_set_visual_applies(tmp_path: Path) -> None:
+    """The rewrite step asks `visual_check` before storing a text, so it must refuse exactly what
+    `set_visual` would (eleven rewrites were stored and then refused, 17 Nov 2026)."""
+    run(make_builder(tmp_path, FakeClient(good_handler)).build(limit=1))
+    path = tmp_path / "catalogue.json"
+    (item_id,) = json.loads(path.read_text(encoding="utf-8"))["items"]
+    check = cat.visual_check(path)
+    good = "one plain serving shown whole on its own on the plain background, true colour"
+    assert check(item_id, good) == []
+    other = next(n for n in vc.ingredient_names(BANK).values() if n != BANK[item_id].name)
+    with_other = f"one plain serving shown whole with {other.lower()} beside it, true colour"
+    problems = check(item_id, with_other)
+    assert any("after 'with'" in p for p in problems), problems
+    with pytest.raises(ValueError, match="after 'with'"):
+        cat.set_visual(path, item_id, with_other, "x")  # the same refusal, later and too late
+    assert check(item_id, "a plain serving held in a hand on the plain background") != []
+    assert check("no-such-ingredient", good) != []
+
+
 def test_report_opens_with_the_answer(tmp_path: Path) -> None:
     builder = make_builder(tmp_path, FakeClient(good_handler))
     run(builder.build(limit=5))

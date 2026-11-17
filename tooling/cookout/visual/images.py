@@ -946,10 +946,12 @@ async def rewrite_visuals(
     ids: Sequence[str],
     subjects_by_id: Mapping[str, Subject],
     work: WorkDir,
+    visual_check: Callable[[str, str], Sequence[str]] | None = None,
 ) -> None:
-    """Attempt 3: Haiku rewrites `visual` given the name, `what`, the old visual and every
-    checker reason so far. The new text goes to an overrides file; the committed catalogue is
-    updated once, at the end, through `catalogue.set_visual`."""
+    """Haiku rewrites `visual` given the name, `what`, the old visual and every checker reason so
+    far. The new text goes to an overrides file; the committed catalogue is updated at the end,
+    through `catalogue.set_visual`. `visual_check(id, text)` is the check `set_visual` will apply
+    (`catalogue.visual_check`): a text it refuses is not stored, the model is shown the reason."""
     from wixy_server.livechat.cookout_catalogue import visual_problems
 
     overrides = work.read_overrides()
@@ -973,7 +975,9 @@ async def rewrite_visuals(
             visual = item.get("visual")
             if not isinstance(visual, str):
                 continue
-            problems = visual_problems(visual)
+            problems = list(visual_problems(visual))
+            if visual_check is not None:
+                problems += [p for p in visual_check(item["id"], visual) if p not in problems]
             if problems:
                 refused[item["id"]] = (visual, problems)  # told to the model on the next ask
             else:
@@ -1253,6 +1257,7 @@ async def run_pipeline(
     free_gb: Callable[[], float | None] = hub_free_gb,
     min_free_gb: float = MIN_FREE_GB,
     voice_probes: Mapping[str, str] | None = None,
+    visual_check: Callable[[str, str], Sequence[str]] | None = None,
 ) -> dict[str, int]:
     """Render and check `ids` to completion: render a chunk (one picture at a time, only when
     ComfyUI is idle and the machine has `min_free_gb` of free memory), check it, regenerate
@@ -1388,7 +1393,9 @@ async def run_pipeline(
                         and unchecked_attempt(work, i, state.get(i)) is None
                     ]
                     if rewrite:
-                        await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
+                        await rewrite_visuals(
+                            runner, haiku, rewrite, subjects_by_id, work, visual_check
+                        )
                     chunk_k: list[tuple[str, int]] = []
                     for ident in ids_k:
                         waiting = unchecked_attempt(work, ident, state.get(ident))
@@ -1428,7 +1435,7 @@ async def run_pipeline(
             and unchecked_attempt(work, i, state.get(i)) is None
         ]
         if rewrite:
-            await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
+            await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work, visual_check)
         chunk: list[tuple[str, int]] = []
         for ident in chunk_ids:
             waiting = unchecked_attempt(work, ident, journal_state(work.journal).get(ident))
@@ -1648,6 +1655,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(json.dumps(manifest["pack"], indent=1))
         return 0
     # run
+    from tooling.cookout.visual import catalogue as cat_tool
     from tooling.cookout.visual import cmdruns
     from wixy_server.livechat.wyr_images import (
         DEFAULT_IMAGE_MODEL,
@@ -1703,6 +1711,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             check_only=args.check_only,
             check_concurrency=args.check_concurrency,
             voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
+            visual_check=cat_tool.visual_check(catalogue),
         )
     )
     print(json.dumps(totals))
