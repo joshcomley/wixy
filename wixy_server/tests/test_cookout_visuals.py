@@ -189,6 +189,16 @@ class TestReloadCost:
             manifest.items["a"].card
         )
 
+    def test_a_folder_named_like_an_object_is_not_a_picture(self, tmp_path: Path) -> None:
+        manifest = manifest_for(["a"])
+        ref = manifest.items["a"]
+        for sha in (ref.card, ref.thumb):
+            (tmp_path / "images" / object_relpath(sha)).mkdir(parents=True)
+        visuals = IngredientVisuals(
+            cast(Catalogue, FakeCatalogue({"a": entry_for("a")})), manifest, [tmp_path / "images"]
+        )
+        assert visuals.snap_extras("a")["image"] is None
+
     def test_a_folder_that_appears_later_is_picked_up_by_reload(self, images: Path) -> None:
         visuals = make_visuals(images, ["a"], with_files=False)
         assert visuals.snap_extras("a")["image"] is None

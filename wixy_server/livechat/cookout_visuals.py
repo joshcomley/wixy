@@ -120,7 +120,13 @@ class IngredientVisuals:
                     continue
                 for obj in objects:
                     stem, dot, suffix = obj.name.partition(".")
-                    if dot and suffix == "webp" and is_sha(stem) and stem[:2] == bucket.name:
+                    if (
+                        dot
+                        and suffix == "webp"
+                        and is_sha(stem)
+                        and stem[:2] == bucket.name
+                        and obj.is_file()
+                    ):
                         index.setdefault(stem, Path(obj.path))
         return index
 
