@@ -191,11 +191,24 @@ class RunPool:
         )
 
     async def run(
-        self, batch: str, pass_name: str, ids: Sequence[str], spec: RunSpec
+        self,
+        batch: str,
+        pass_name: str,
+        ids: Sequence[str],
+        spec: RunSpec,
+        *,
+        fresh: bool = False,
     ) -> RunOutcome:
-        """Run one batch to a terminal outcome, resuming a journalled in-flight run if any."""
+        """Run one batch to a terminal outcome, resuming a journalled in-flight run if any.
+
+        `fresh=True` is for a caller that REJECTED the answer of a completed run with this key: the
+        completed run is journalled as `rejected`, so this call starts a new run instead of
+        replaying the answer that was just refused (replaying is right after a crash only)."""
         async with self._semaphore(spec.model.provider):
             prior = self.journal.latest(batch, pass_name)
+            if fresh and prior is not None and prior.get("status") == "completed":
+                self._record(batch, pass_name, ids, prior.get("run_id"), "rejected")  # type: ignore[arg-type]
+                prior = None
             run_id: str | None = None
             started_at = self.now()
             resumed = False
