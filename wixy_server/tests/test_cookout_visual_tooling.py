@@ -1444,6 +1444,41 @@ def test_strip_json_takes_the_one_fenced_block_after_some_prose(
             c.strip_json(bad)
 
 
+def test_a_rewrite_the_catalogue_would_refuse_is_not_stored_and_is_asked_again(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """17 Nov 2026: eleven rewrites passed the quick check, were stored, and were refused by the
+    committed catalogue's own check at the end. The rewrite step now applies that check (passed as
+    `visual_check`), tells the model why, and stores only a text the catalogue will take."""
+    im = mods["images"]
+    subjects, _levels = _eight_subjects(im)
+    work = im.WorkDir(tmp_path / "work")
+    calls: list[str] = []
+    tainted = "a loose heap of dried pasta with flaked almonds beside it, pale golden-beige"
+    clean = "a loose heap of dried pasta, pale golden-beige, on a plain surface, true colour"
+
+    class Runner:
+        async def run(self, **kw: object) -> str:
+            calls.append(str(kw["prompt"]))
+            told = "after 'with'" in str(kw["prompt"])
+            return json.dumps({"items": [{"id": "itema", "visual": clean if told else tainted}]})
+
+    def catalogue_check(ident: str, visual: str) -> list[str]:
+        return (
+            [f"{ident}: visual puts another ingredient ('Flaked almonds') after 'with'"]
+            if "with flaked" in visual
+            else []
+        )
+
+    asyncio.run(
+        im.rewrite_visuals(
+            Runner(), mods["check"].HAIKU, ["itema"], subjects, work, catalogue_check
+        )
+    )
+    assert work.read_overrides() == {"itema": clean}
+    assert len(calls) == 2 and tainted in calls[1]  # the refused text is shown back with its reason
+
+
 def test_a_render_only_round_draws_just_the_listed_ids(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
