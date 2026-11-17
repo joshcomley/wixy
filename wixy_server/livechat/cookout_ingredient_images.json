@@ -3222,6 +3222,12 @@
    "card": "fa6a8e7af64ce176e592a22a14a8ce40ae8771b1fce1074590615bdf948dcd37",
    "thumb": "fc602786c7c221b738803c86f2a77ed0bec761767886f6fb60d685206cc362b4"
   },
+  "cheese-and-onion-crisps": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "9930aa0ed9c5ce500a8263cb98dfb7c43dbddace4ac8fe3304fe85bee094985b",
+   "thumb": "7d1a53571fc7f26fbce5b9d9f8c1e947c2634a2b094d1d421ab38817665ff793"
+  },
   "cheese-and-onion-filling": {
    "acceptedBy": "haiku+sol",
    "attempt": 1,
@@ -3947,6 +3953,12 @@
    "attempt": 3,
    "card": "8dc41ab91b8a71a62eb7b9d75acc3fa9fee86304c959941aea4e93f15bff6bbf",
    "thumb": "7968e515d6f922f1d229d036f8a8f3cd6d13c3943d8a77eaa5b9b7a56d6ca8f3"
+  },
+  "chocolate-rice-cakes": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "306260bf331f90356d47e06087adcb10bbb6509b6583f382cb13becc1189c76b",
+   "thumb": "ce362cb30efd908e976ff6453667a4287e8aad828929a8dd2a000c934d04fdad"
   },
   "chocolate-sauce": {
    "acceptedBy": "haiku+sol",
@@ -8964,6 +8976,12 @@
    "card": "a37e4590797a66b0bf01d41ddb722b8137285f9e9829426cc6a4c92a1a7a2e71",
    "thumb": "cfad923f8db478ff377cd06b08f026ae91794d4e365ef54398f539fdd98772ee"
   },
+  "hominy": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "6df2cf6d2632cb26b3949b7887274a1f467df7572fd7b5001efca93ed42545bb",
+   "thumb": "e24487c844aeb4d9b78c83e586f160813599dd107a9e9f435cfd4df7c24b377c"
+  },
   "honey": {
    "acceptedBy": "haiku+sol",
    "attempt": 1,
@@ -9444,6 +9462,12 @@
    "card": "9fc5a7dc374d0f949273d13316f26c7743e437cbfb81aae0f8cc2fda24f34ef2",
    "thumb": "a25f118579f284feb6a737015373c99dd4f682613d114f80205014d8ed9866e5"
   },
+  "jaffa-cakes": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "be1eabc7ac811aceffd48b8c98c0225d2044dc5e1cda706877eda86fb7120394",
+   "thumb": "a2f74de5d2a14aecf55b8c450c26302e687b42d014dc48833b89d416b002a991"
+  },
   "jaggery": {
    "acceptedBy": "haiku+sol",
    "attempt": 1,
@@ -9641,6 +9665,12 @@
    "attempt": 1,
    "card": "d460cb1e8cc97bfb256889100b2240418e62d292e1b81730fc76bdef50d31bec",
    "thumb": "6eca1b90e74340a3ee5e37a5b43e39d9c2cca1a6dc906e66dd753b635aaae892"
+  },
+  "jiu-soba": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 2,
+   "card": "001fa8dfaab6b547282c87f1c6d412e0cc561ec89f16de97fcd3e9a288162e71",
+   "thumb": "88f244754589fefd2cc72f6f800117ce188737e987dd3436024151eb83439d36"
   },
   "john-dory": {
    "acceptedBy": "haiku+sol",
@@ -16836,6 +16866,12 @@
    "card": "c2517025f6b0ff104052ca5c5fa062c3e44bc0f6bc188f01dab3664f910b4541",
    "thumb": "6f8a128a294cce4882d8b8442df6650607be39c250d7e88b37796c6b88a6870f"
   },
+  "sloe": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "f6d77599d1b1f30069bcc92fc20fd3d3b56cc6eae7126eb6351154fd8c5ad5ac",
+   "thumb": "075c3b7194c7cb63ba70720d3901c3017945569cb5c42a7b5cbe010425783972"
+  },
   "sloe-gin": {
    "acceptedBy": "haiku+sol",
    "attempt": 1,
@@ -17549,6 +17585,12 @@
    "attempt": 1,
    "card": "55e981e797c33ffcd81f313beabd8f3bcc4d52aa6e0d4eb7b73b970c4cbbd962",
    "thumb": "9d92fd27e5d575ac77d186ace01b855a50501c2ce886e3b8e3af87703b305967"
+  },
+  "steak-bake": {
+   "acceptedBy": "haiku+sol",
+   "attempt": 1,
+   "card": "bfe2e0e5563c852697656ea9b68a0accc6621ddd2b4f74a0e33c2b807d99a38d",
+   "thumb": "489ec872001f41184f0e1ddae2eeb74ff159d86171fc8a7d34df217157c81a46"
   },
   "steak-cut-chips": {
    "acceptedBy": "sol-tiebreak",
@@ -20882,13 +20924,13 @@
   }
  },
  "pack": {
-  "bytes": 44257280,
-  "installedBytes": 38881674,
-  "objects": 6960,
-  "sha256": "5b0431d50c9605fc10093aa2c65cc8c5f9880b490d7ecaf11d036d147f902395",
-  "url": "https://github.com/joshcomley/wixy/releases/download/cookout-images-v1/cookout-images-v1.tar"
+  "bytes": 44369920,
+  "installedBytes": 38991242,
+  "objects": 6974,
+  "sha256": "d4ffc9f6bf1ea521e562aa55ac5ec6ce8ca72dc3586e8dd0ad75b5e874f5f7de",
+  "url": "https://github.com/joshcomley/wixy/releases/download/cookout-images-v2/cookout-images-v2.tar"
  },
- "packVersion": 1,
+ "packVersion": 2,
  "renditions": {
   "card": 512,
   "thumb": 160

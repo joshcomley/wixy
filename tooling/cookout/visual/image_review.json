@@ -47,18 +47,6 @@
   "decision": "retry",
   "reason": "I opened all four pictures and none of them shows cavatelli. Picture 1 shows short ridged tubes with holes all the way through, much like ditalini. Picture 2 is elbow macaroni. Picture 3 shows round, coiled rings. Picture 4 shows small conchiglie shells. Cavatelli are elongated pieces with their edges curled in around a groove and no through-hole, so the new description spells out that shape, gives a size and rules out the shapes that were wrongly produced."
  },
- "cheese-and-onion-crisps": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794907341,
-   "attempt": 4,
-   "decision": "accepted",
-   "reason": "I looked at all four pictures. Attempts 1 and 2 really are wrong: they show shredded cabbage and diced potato in a bowl, not crisps. Attempts 3 and 4 both show real crisps: thin, round, golden potato crisps with savoury seasoning flecks, on a clean plain background. The only thing the check rejected them for was that the crisps sit in a pile instead of a bowl. That is about how they are served, not about whether the food is right. Attempt 4 is the sharpest and best lit, and its crisps are large and easy to recognise, so it is a faithful, clean picture of cheese and onion crisps."
-  },
-  "reason": "Opus chose attempt 4 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The crisps are consistent with cheese and onion flavour, but the requested bowl is missing."
- },
  "cheese-and-onion-loaf": {
   "at": 1794907830,
   "attempt": null,
@@ -76,18 +64,6 @@
   "attempt": null,
   "decision": "retry",
   "reason": "I looked at all four pictures. Attempts 1 and 2 show raw chicken breast with no breadcrumbs, so they are not schnitzel. Attempts 3 and 4 do show a good breaded, fried schnitzel, but it is whole, and the requested presentation is cut. The new description asks for cut strips that show the white chicken inside and the crumb crust around it."
- },
- "chocolate-rice-cakes": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794909550,
-   "attempt": 3,
-   "decision": "accepted",
-   "reason": "Attempt 3 shows exactly the right food: flat, round puffed-rice discs with the rice texture visible at the edges and a smooth chocolate coating on top, on a plain clean background. The only complaint was that they are arranged loose rather than in a bowl. That is a presentation detail, and flat rice cakes are naturally shown loose or stacked anyway. Attempts 1 and 2 show chocolate balls, not discs. Attempt 4 is right but less clear: the discs are only half-dipped and look like crispbread."
-  },
-  "reason": "Opus chose attempt 3 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The chocolate rice cakes look recognisable, but they are not presented in a bowl."
  },
  "choux-pastry": {
   "at": 1794909759,
@@ -189,7 +165,7 @@
   "at": 1794918783,
   "attempt": null,
   "decision": "retry",
-  "reason": "None of the four is clean gemelli. Attempts 1–3 show fusilli: corkscrews with flat blades or fins, and in attempt 1, curls that look hollow. Attempt 4 is closest because its pieces look a bit like rope, but they are long and blade-twisted like fusilli rather than short pieces made of two round strands. The new description drops words like 'spiral' and 'twisted', which pull the generator toward fusilli. It describes the two-strand rope look instead and rules out blades and tubes."
+  "reason": "None of the four is clean gemelli. Attempts 1\u20133 show fusilli: corkscrews with flat blades or fins, and in attempt 1, curls that look hollow. Attempt 4 is closest because its pieces look a bit like rope, but they are long and blade-twisted like fusilli rather than short pieces made of two round strands. The new description drops words like 'spiral' and 'twisted', which pull the generator toward fusilli. It describes the two-strand rope look instead and rules out blades and tubes."
  },
  "green-sichuan-peppercorns": {
   "at": 1794918534,
@@ -208,18 +184,6 @@
   "attempt": null,
   "decision": "retry",
   "reason": "I looked at all four images and none of them shows guanciale. Attempt 1 is a lean pink piece that looks like back bacon or ham. Attempts 2, 3 and 4 are neat rectangular slabs with even stripes of meat and fat, which is what pork belly or pancetta looks like. Real guanciale is a whole cheek with an irregular, roughly triangular shape. It is mostly white fat with only thin, uneven streaks of meat, and the outside is usually coated in black pepper. The new description asks for exactly those features."
- },
- "hominy": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794921029,
-   "attempt": 2,
-   "decision": "accepted",
-   "reason": "I looked at all four images. Attempt 2 shows real hominy: plump, puffed white maize kernels, many split open at the top, with the small tip where the kernel joined the cob. It is a clean, well-lit picture of the ingredient on a plain background. Its only fault is that the kernels sit in a loose heap instead of a bowl, and that is a staging detail, not a mistake about the ingredient. Attempt 3 is also accurate but less clearly detailed. Attempt 4 is softer and looks a little like popcorn. Attempt 1 really is wrong: its small, smooth, glossy beads look like pearl barley or tapioca, not hominy."
-  },
-  "reason": "Opus chose attempt 2 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The kernels are consistent with hominy, but the requested bowl is missing."
  },
  "horse-mackerel": {
   "at": 1794918566,
@@ -250,30 +214,6 @@
   "attempt": null,
   "decision": "retry",
   "reason": "I opened all four images. Attempts 1 and 2 show narrow-necked bottles of clear golden liquid with no herbs, garlic or seasoning, so they look like plain oil. Attempts 3 and 4 show the dressing well, with herb and garlic flecks and settled herbs, but in open wide-mouth jars instead of the required bottle. None meets both conditions, so the new description asks for the herb-filled dressing inside a bottle."
- },
- "jaffa-cakes": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794923649,
-   "attempt": 3,
-   "decision": "accepted",
-   "reason": "I opened all four images. Attempt 3 is a clean, accurate Jaffa cake: a thin golden sponge base, a thin orange jelly layer showing at the edge, and a smooth chocolate dome on top, on a plain light background. Its only failure was the missing plate, which is just staging and doesn't change what the cake looks like. The other three really are wrong. Attempt 1 is a tall layered cake with a small chocolate cap. Attempt 2 has the jelly sitting on top of the chocolate. Attempt 4 has no jelly layer at all."
-  },
-  "reason": "Opus chose attempt 3 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The cake is recognisable as a Jaffa cake, but the requested plate is missing."
- },
- "jiu-soba": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794920662,
-   "attempt": 4,
-   "decision": "accepted",
-   "reason": "Attempt 4 is a clean, accurate picture of dried soba: a neat bundle of long, thin, straight strands in the grey-brown colour of buckwheat, on a plain background. The check rejected it only because the noodles are bundled rather than heaped, and dried soba is normally sold and recognised in a bundle like this. Attempts 1 and 2 show short, broken, twig-like pieces that look like wood rather than noodles. Attempt 3 is also a bundle, but its strands are less even in colour and texture than Attempt 4's."
-  },
-  "reason": "Opus chose attempt 4 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The noodles are consistent with buckwheat soba, but form an aligned stack rather than the requested heap."
  },
  "keema-naan": {
   "at": 1794923681,
@@ -357,7 +297,7 @@
   "at": 1794936030,
   "attempt": null,
   "decision": "retry",
-  "reason": "I opened all four. Attempt 1 is a dark red, opaque liquid in a straight tumbler, so it looks like cordial, not wine. Attempts 2, 3 and 4 are pale salmon-pink wine in a stemmed glass, which is plainly rosé. None of them is a usable picture of Pinot Noir. The new description asks for a specific ruby-to-garnet red that light passes through, in a Burgundy glass, and rules out both mistakes (the pink rosé and the opaque juice)."
+  "reason": "I opened all four. Attempt 1 is a dark red, opaque liquid in a straight tumbler, so it looks like cordial, not wine. Attempts 2, 3 and 4 are pale salmon-pink wine in a stemmed glass, which is plainly ros\u00e9. None of them is a usable picture of Pinot Noir. The new description asks for a specific ruby-to-garnet red that light passes through, in a Burgundy glass, and rules out both mistakes (the pink ros\u00e9 and the opaque juice)."
  },
  "poached-egg": {
   "at": 1794935828,
@@ -381,7 +321,7 @@
   "at": 1794936036,
   "attempt": null,
   "decision": "retry",
-  "reason": "I opened all four images. Attempt 1 is a bowl of dry, loose red spice powder, so it is not a paste. Attempts 2-4 do show a moist red paste, but it is in a plain glass jar instead of a bowl. That paste is also smooth and bright like tomato purée or ketchup, not the darker, oily, flecked texture of rogan josh paste. The new description asks for a bowl, a moist and oily texture with visible spice flecks, and rules out both jars and powder."
+  "reason": "I opened all four images. Attempt 1 is a bowl of dry, loose red spice powder, so it is not a paste. Attempts 2-4 do show a moist red paste, but it is in a plain glass jar instead of a bowl. That paste is also smooth and bright like tomato pur\u00e9e or ketchup, not the darker, oily, flecked texture of rogan josh paste. The new description asks for a bowl, a moist and oily texture with visible spice flecks, and rules out both jars and powder."
  },
  "romano-pepper": {
   "at": 1794936106,
@@ -405,7 +345,7 @@
   "at": 1794935726,
   "attempt": null,
   "decision": "retry",
-  "reason": "None of the four pictures is a faithful scallop roe. Attempt 1 is in a bowl, but it shows round, grainy orange balls that look like melon or candied fruit. Attempts 2, 3 and 4 are each a single rough, mashed orange mound sitting on the surface with no bowl. They read as a paste or purée, not the smooth, curved sac of a scallop's roe. The new description asks for the real shape: a smooth, glossy crescent that tapers to a point, served in a bowl."
+  "reason": "None of the four pictures is a faithful scallop roe. Attempt 1 is in a bowl, but it shows round, grainy orange balls that look like melon or candied fruit. Attempts 2, 3 and 4 are each a single rough, mashed orange mound sitting on the surface with no bowl. They read as a paste or pur\u00e9e, not the smooth, curved sac of a scallop's roe. The new description asks for the real shape: a smooth, glossy crescent that tapers to a point, served in a bowl."
  },
  "scrag-end-of-lamb": {
   "at": 1794936169,
@@ -425,18 +365,6 @@
   "decision": "retry",
   "reason": "I opened all four pictures. Each one shows a pile of whole shrimp with curled bodies and tails, not the heads alone, so none of them fits. The new description says what a detached head looks like and rules out bodies and tails."
  },
- "sloe": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794935762,
-   "attempt": 2,
-   "decision": "accepted",
-   "reason": "I opened all four pictures. Attempt 1 really does look like blueberries in a bowl, so it is rejected. Attempts 2, 3 and 4 all show real sloes, and the check's only complaint about them was that the fruit sits on the surface instead of in a bowl. That is about layout, not about whether the fruit is right. Attempt 2 is the best match: small round blue-black fruits of slightly different sizes, short woody stalks, and the dusty pale-blue coating sloes have. It is a clean shot on a plain background with nothing else in it."
-  },
-  "reason": "Opus chose attempt 2 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The fruit is consistent with sloes, but the requested bowl is missing."
- },
  "soppressata": {
   "at": 1794935756,
   "attempt": null,
@@ -454,18 +382,6 @@
   "attempt": null,
   "decision": "retry",
   "reason": "I looked at all four images. Attempt 1 has the bowl, but the grains are small, rounded and broken, more like bulgur than whole spelt. Attempts 2, 3 and 4 show whole, elongated grains, but each is a loose pile on a bare surface with no bowl. Attempt 4's pointed, husk-like grains also look more like barley or oats. None meets both requirements, so the new description asks for whole spelt kernels inside a bowl."
- },
- "steak-bake": {
-  "at": 1794942593,
-  "attempt": null,
-  "decision": "pictureless",
-  "opusChose": {
-   "at": 1794938014,
-   "attempt": 3,
-   "decision": "accepted",
-   "reason": "I looked at all four images. Attempt 1 is a round plated pie, not a steak bake. Attempts 2, 3 and 4 all show the right food. Attempt 3 is the best: a whole rectangular slice of golden, layered flaky pastry, with chunks of steak in dark gravy showing at the cut end, on a clean plain backdrop. It is an accurate, clean picture of a steak bake. Its only fault is that it is not on a plate, which is a styling detail and does not make the food picture wrong."
-  },
-  "reason": "Opus chose attempt 3 but the operator's Haiku+Sol rule needs a Sol re-check and Sol said wrong: The pastry is recognisable as a steak bake, but the requested plate is missing."
  },
  "steak-cut-chips": {
   "at": 1794938044,

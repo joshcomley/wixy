@@ -124,7 +124,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942615,
+    "visualAt": 1794943797,
     "visualBy": "image-rewrite"
    },
    "visual": "An open ackee pod with three separate creamy yellow fleshy lobes, each holding a glossy black seed at its tip, the lobes spread apart and not fused together, on a plain background.",
@@ -345,7 +345,7 @@
     "at": 1793329073,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942615,
+    "visualAt": 1794943797,
     "visualBy": "image-rewrite"
    },
    "visual": "Small uncooked pale yellow pasta parcels, each sealed shut with a pinched closed edge forming a plump pocket like a small pillow, not a hollow ring, in a small heap on a plain background.",
@@ -517,7 +517,7 @@
     "at": 1793330862,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942616,
+    "visualAt": 1794943797,
     "visualBy": "image-rewrite"
    },
    "visual": "A bunch of wild Alexanders stems: glossy dark green leaves split into three broad, rounded, bluntly toothed leaflets, thick hollow stems with pinkish-purple bases and wide clasping sheaths, topped by domed clusters of tiny yellow-green flowers",
@@ -595,7 +595,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942616,
+    "visualAt": 1794943797,
     "visualBy": "image-rewrite"
    },
    "visual": "A small slender clear glass dropper bottle with a narrow neck and a plain black screw-on cap, filled with pale golden liquid, standing upright on a plain background.",
@@ -1133,7 +1133,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942616,
+    "visualAt": 1794943798,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw Anya potato, slender and slightly knobbly with a fingerling shape, thin pale yellow skin with small eyes, lying on its side on a plain background.",
@@ -1167,7 +1167,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942616,
+    "visualAt": 1794943798,
     "visualBy": "image-rewrite"
    },
    "visual": "A block of firm pale yellow cheese with small scattered holes, a thin brownish rind, and one wedge cut out of a corner to show the paste, on a plain background.",
@@ -1576,7 +1576,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942617,
+    "visualAt": 1794943798,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw arrowroot rhizome, long, slender and segmented like a flattened ginger root, with pale tan fibrous skin and a few short side branches, lying on a plain background.",
@@ -1843,7 +1843,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942617,
+    "visualAt": 1794943798,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of tiny, tender mushrooms with closed, rounded caps and short pale stems, each around the size of a fingertip, in an uneven heap on a plain background.",
@@ -1860,7 +1860,7 @@
     "at": 1793326814,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942617,
+    "visualAt": 1794943798,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of several whole baby carrots, short, slender and tapered, bright orange with smooth skin, tops trimmed off, each about finger length, on a plain background.",
@@ -2200,9 +2200,11 @@
    "source": {
     "at": 1793329084,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943799,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a golden slice of almond tart showing pale sponge on a pastry base, on a plain white plate",
+   "visual": "A whole round Bakewell tart with a golden pastry rim, a visible layer of red jam beneath a golden almond sponge topped by flaked almonds, on a plain background.",
    "what": "A jam and almond pastry tart from Derbyshire, England."
   },
   "baking-powder": {
@@ -2357,7 +2359,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942618,
+    "visualAt": 1794943799,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain unlabelled glass bowl of smooth, pale yellow custard with thin banana slices visible throughout, the surface glossy, on a plain background.",
@@ -2422,7 +2424,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942618,
+    "visualAt": 1794943799,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw banana pepper, long, thin and gently curved, tapering to a pointed tip, with smooth glossy pale yellow skin and a small green stem cap, lying on its side on a plain background.",
@@ -2714,7 +2716,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942618,
+    "visualAt": 1794943799,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain unlabelled glass bowl filled with thick, coarse, medium-brown mustard paste, with dark mustard seeds visibly scattered through it.",
@@ -2731,7 +2733,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942619,
+    "visualAt": 1794943799,
     "visualBy": "image-rewrite"
    },
    "visual": "One raw bavette steak, long, thin and flat, with a coarse, open, fibrous grain clearly visible across deep red meat, on a plain background.",
@@ -2994,7 +2996,7 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942619,
+    "visualAt": 1794943800,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw beef tenderloin lying lengthways: a long, round, lean deep-red muscle, thick and rounded at one end and tapering to a narrow pointed tail at the other, fully trimmed with no fat cap, on a plain white background.",
@@ -3335,7 +3337,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942619,
+    "visualAt": 1794943800,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw beef thick flank joint, a rounded rectangular block of deep red fine-grained meat with a thin layer of white fat along one edge, uncut, lying flat on a plain background.",
@@ -3383,7 +3385,7 @@
     "at": 1793331333,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942619,
+    "visualAt": 1794943800,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw cut piece of pale beef tripe, a flat rectangular slab with a dense honeycomb pattern of small pockets across its surface, lying flat on a plain background.",
@@ -3603,7 +3605,7 @@
     "at": 1793329068,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942620,
+    "visualAt": 1794943800,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole bergamot orange, round and slightly pear-shaped with a small nub at the stem end, smooth yellow-green skin with fine pores, not warty or elongated, on a plain background.",
@@ -3652,7 +3654,7 @@
     "at": 1793330873,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942620,
+    "visualAt": 1794943801,
     "visualBy": "image-rewrite"
    },
    "visual": "One single round fried bread puffed into a thin-walled, hollow dome, golden-brown with a blistered surface, lying directly on a plain background.",
@@ -4011,7 +4013,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942620,
+    "visualAt": 1794943801,
     "visualBy": "image-rewrite"
    },
    "visual": "A thick, rectangular fillet of black cod, its skin dark grey-black along one edge, the flesh creamy ivory-white, glossy and moist with thin pale fat lines, lying flat on a plain background.",
@@ -4663,7 +4665,7 @@
     "at": 1793329051,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942620,
+    "visualAt": 1794943801,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole lightly smoked herring with its head intact, pale golden-brown skin, and a slightly curved body, lying on its side on a plain background.",
@@ -4880,7 +4882,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942620,
+    "visualAt": 1794943801,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of whole peanut pods in their ridged, wrinkled shells, wet and darkened tan-brown from boiling. One pod is split open to show two soft peanuts with reddish skins inside. No loose shelled kernels.",
@@ -4928,7 +4930,7 @@
     "at": 1793327148,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942621,
+    "visualAt": 1794943802,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled ceramic bowl of thick, rich reddish-brown meat sauce with visible crumbles of minced beef and bits of tomato, glossy surface, on a plain background.",
@@ -4946,7 +4948,7 @@
     "at": 1793331457,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942621,
+    "visualAt": 1794943802,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white bowl filled with Bombay mix: thin crispy golden fried gram-flour noodle strands mixed with whole red-skinned peanuts, yellow split lentils and a few cornflakes, all seen clearly. No round boondi balls. Plain light background.",
@@ -4963,7 +4965,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942621,
+    "visualAt": 1794943802,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw beef marrow bone cut crosswise into a short cylinder, showing a thick bone ring around a wide hollow centre filled with soft, pale pink-white marrow, on a plain background.",
@@ -4980,7 +4982,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942621,
+    "visualAt": 1794943802,
     "visualBy": "image-rewrite"
    },
    "visual": "Two raw skin-on boneless chicken thigh pieces, deep pink dark meat with a plump, uneven shape and a slightly thicker middle, lying side by side on a plain background.",
@@ -4998,7 +5000,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942622,
+    "visualAt": 1794943802,
     "visualBy": "image-rewrite"
    },
    "visual": "One small raw boneless quail the size of a large egg cup, about 8 cm long: a plump, rounded, compact bird with smooth pale pink-cream skin, a tiny neck stub and two small legs tucked in, whole and not flattened, breast up on plain white",
@@ -5180,9 +5182,11 @@
    "source": {
     "at": 1793331457,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943803,
+    "visualBy": "image-rewrite"
    },
-   "visual": "two dark chocolate-brown biscuits stacked on a plain white plate, one turned to show the pale cream filling",
+   "visual": "Two rectangular dark chocolate biscuits stacked flat, a dark chocolate cream filling visible at the edges, one turned on its side to show the chocolate filling, on a plain background.",
    "what": "Chocolate biscuits sandwiched with sweet cream filling."
   },
   "boysenberry": {
@@ -5534,7 +5538,7 @@
     "at": 1793331202,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942622,
+    "visualAt": 1794943803,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw flatfish with a broad, flattened oval body, brown speckled upper side with both eyes on the top surface, and a pale underside, lying flat on a plain background.",
@@ -5660,7 +5664,7 @@
     "at": 1793331451,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942623,
+    "visualAt": 1794943803,
     "visualBy": "image-rewrite"
    },
    "visual": "Long slender brown rice grains with a smooth, tan, bran-covered surface and no husks, forming a small neat pile on a plain background.",
@@ -5878,7 +5882,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942623,
+    "visualAt": 1794943803,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw brown trout lying straight, olive-brown back, golden-brown flanks with black spots and red spots with pale halos, no pink band along the side, on a plain background.",
@@ -5895,7 +5899,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942623,
+    "visualAt": 1794943803,
     "visualBy": "image-rewrite"
    },
    "visual": "Several broad, leafy green Brussels sprout tops with ruffled, wide leaves on thick pale stalks, lying loose on a plain background.",
@@ -5943,7 +5947,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942623,
+    "visualAt": 1794943804,
     "visualBy": "image-rewrite"
    },
    "visual": "Thick, long, straight dried pasta strands, pale yellow and pencil-thick, with a visible hollow center at each end, loosely bundled on a plain background.",
@@ -6022,7 +6026,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942624,
+    "visualAt": 1794943804,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole yellow citron with many long finger-like segments fanning out from a central base, bumpy pale yellow rind, lying on a plain background.",
@@ -6270,7 +6274,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942624,
+    "visualAt": 1794943804,
     "visualBy": "image-rewrite"
    },
    "visual": "One raw boneless leg of lamb opened flat into an irregular, fairly thin sheet with several sections of deep red meat and a thin fat layer, on a plain background.",
@@ -6287,7 +6291,7 @@
     "at": 1793326753,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942624,
+    "visualAt": 1794943804,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole butterhead lettuce with a loose, open rosette of soft, wide, pale green leaves, cupped and layered loosely, with a small trimmed white base, on a plain background.",
@@ -6598,7 +6602,7 @@
     "at": 1793327577,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942624,
+    "visualAt": 1794943805,
     "visualBy": "image-rewrite"
    },
    "visual": "Thick, wide rings of dried pasta, large hollow circles with smooth pale yellow surfaces, forming a small loose pile on a plain background.",
@@ -6708,7 +6712,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942624,
+    "visualAt": 1794943805,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole round camembert cheese viewed from above, an intact flat disc with a soft white bloomy rind and no wedge cut out, lying on a plain background.",
@@ -6863,7 +6867,7 @@
     "at": 1793324298,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942625,
+    "visualAt": 1794943805,
     "visualBy": "image-rewrite"
    },
    "visual": "One thin, translucent orange slice with a glossy amber syrup coating and visible sugar crystals on the rind edge, glistening, lying flat on a plain background.",
@@ -6896,7 +6900,7 @@
     "at": 1793329068,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942625,
+    "visualAt": 1794943805,
     "visualBy": "image-rewrite"
    },
    "visual": "A pineapple ring coated in a thick, glossy golden sugar crust with visible sugar crystals and a chewy-looking candied surface, lying flat on a plain background.",
@@ -6992,7 +6996,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942625,
+    "visualAt": 1794943805,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of baked cannelloni piled on top of each other in a pile: about eight fat pasta tubes criss-crossed, golden with a smooth baked skin, white cheese filling showing at the cut ends, no sauce, on a plain white background",
@@ -7100,7 +7104,7 @@
     "at": 1793331389,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942626,
+    "visualAt": 1794943806,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of uncooked pale yellow pasta, each piece a sealed hat shape with a rounded crown, a pointed tip and a folded brim, plump with a soft orange filling, on a plain background.",
@@ -7117,7 +7121,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942626,
+    "visualAt": 1794943806,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of raw pale yellow stuffed pasta, each piece a closed, plump hat shape with a folded brim and a rounded crown, on a plain background.",
@@ -7194,7 +7198,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942627,
+    "visualAt": 1794943806,
     "visualBy": "image-rewrite"
    },
    "visual": "One round crisp spiced biscuit, golden-brown with a glossy caramelised top and slightly darker edges, lying directly on a plain background.",
@@ -7384,7 +7388,7 @@
     "at": 1793329076,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942627,
+    "visualAt": 1794943806,
     "visualBy": "image-rewrite"
    },
    "visual": "A single squat, deeply wrinkled red chilli pepper with a short pointed tail at one end, lying on a plain background.",
@@ -7495,7 +7499,7 @@
     "at": 1793330862,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942627,
+    "visualAt": 1794943807,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white bowl of dry casarecce: short 4 cm strips of pale pasta, each a wide flat strip with both long edges curled over in opposite directions into a squashed S, so no piece is a closed tube, with fine ridges",
@@ -7512,7 +7516,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942628,
+    "visualAt": 1794943807,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of about eight whole dried cascabel chillies, each a walnut-sized round pod with smooth, slightly wrinkled, glossy dark reddish-brown skin and a short thin stem; every pod intact and closed, no holes or cracks.",
@@ -7574,7 +7578,7 @@
     "at": 1793326162,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942628,
+    "visualAt": 1794943807,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of raw pale yellow pasta parcels, each a sealed, folded rectangle with crimped, twisted ends like a wrapped sweet, on a plain background.",
@@ -7624,7 +7628,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942628,
+    "visualAt": 1794943807,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bunch of fresh dark green cassava leaves, each leaf deeply divided into five to seven pointed, finger-like lobes radiating from one point, glossy, with long thin stems, on a plain background.",
@@ -7735,7 +7739,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942628,
+    "visualAt": 1794943807,
     "visualBy": "image-rewrite"
    },
    "visual": "A rounded clump of wild Sparassis mushroom: many thin, flat, wavy, ribbon-like lobes folded and curled together like a bath sponge or a tangle of lasagne noodles, pale cream with light tan edges, no florets or thick stem, on a plain white background",
@@ -7768,7 +7772,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942629,
+    "visualAt": 1794943808,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of dry cavatappi pasta on a plain white background: long hollow ridged yellow tubes, each twisted into a tight corkscrew helix with two full spiral turns, open round tube ends clearly visible.",
@@ -7786,7 +7790,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942629,
+    "visualAt": 1794943808,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of uncooked cavatelli on white: short, oblong pieces of pale pasta, each about 2 cm long and shaped like a tiny hot-dog bun, with both edges curled inward around a deep central groove. Matte and slightly rough. No tubes, holes or round shells.",
@@ -8071,7 +8075,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942629,
+    "visualAt": 1794943808,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bundle of thin, curved, pale greenish buckwheat noodle strands dotted with tiny dark green tea flecks, on a plain background.",
@@ -8120,7 +8124,7 @@
     "at": 1793329050,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942629,
+    "visualAt": 1794943808,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear glass mug filled with opaque, light tan milky tea, with a creamy beige colour from the added milk and a faint foam layer on top, set on a plain background.",
@@ -8232,7 +8236,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942630,
+    "visualAt": 1794943808,
     "visualBy": "image-rewrite"
    },
    "visual": "A bunch of five very short, fat, cone-shaped orange carrots, each only about twice as long as it is wide, wide at the top and tapering to a blunt round tip, deep orange, with short green stalks, on a plain white background",
@@ -8420,10 +8424,10 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942630,
+    "visualAt": 1794943809,
     "visualBy": "image-rewrite"
    },
-   "visual": "A small heap of thin, flat, golden-yellow potato crisps with light blistering and specks of pale orange-yellow seasoning, on a plain white background.",
+   "visual": "A small white bowl filled to the top with cheese and onion flavour potato crisps: thin, round, golden crisps piled high in the bowl, dusted with fine pale-yellow seasoning and tiny green and white flecks, on a plain white background",
    "what": "Savoury, sweetly oniony crisps with a cheesy flavour."
   },
   "cheese-and-onion-filling": {
@@ -8452,7 +8456,7 @@
     "at": 1793325132,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942630,
+    "visualAt": 1794943809,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole, uncut golden bread loaf seen from the side, its top crust covered in bubbling melted orange cheddar with caramelised onion pieces and small onion bits baked into the crust, on a plain white background.",
@@ -8486,7 +8490,7 @@
     "at": 1793331395,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942630,
+    "visualAt": 1794943809,
     "visualBy": "image-rewrite"
    },
    "visual": "A single triangular slice of cheese and onion pie resting directly on a plain off-white background, no plate or surface props. Golden shortcrust top and crimped edge; the cut face shows creamy melted cheese with soft translucent onion pieces.",
@@ -8688,7 +8692,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942631,
+    "visualAt": 1794943809,
     "visualBy": "image-rewrite"
    },
    "visual": "A single golden spiral bun with a shiny sticky glazed top, the swirl clearly showing dark dried currants and raisins rolled through the dough, on a plain background.",
@@ -9097,7 +9101,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942631,
+    "visualAt": 1794943810,
     "visualBy": "image-rewrite"
    },
    "visual": "The bony frame of a whole roasted chicken: pale bare ribcage, spine and wishbone with only a few small golden-brown skin scraps, lying on a plain background.",
@@ -9484,7 +9488,7 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942631,
+    "visualAt": 1794943810,
     "visualBy": "image-rewrite"
    },
    "visual": "A thin golden-brown breaded chicken schnitzel, fried crisp, sliced into three or four strips on a plain white background, with the cut edges showing white cooked chicken inside a crunchy breadcrumb crust.",
@@ -9654,7 +9658,7 @@
     "at": 1793327396,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942631,
+    "visualAt": 1794943810,
     "visualBy": "image-rewrite"
    },
    "visual": "Several uncooked chickpea pasta shapes, such as short spirals and twists, pale beige and smooth, scattered on a plain background, each piece a distinct pasta shape.",
@@ -10132,7 +10136,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942632,
+    "visualAt": 1794943810,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of several purple chive flower heads, round clusters of small star-shaped purple florets, each head on its own thin green stem, gathered loosely together on a plain background.",
@@ -10305,7 +10309,7 @@
     "at": 1793329073,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942632,
+    "visualAt": 1794943810,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole round ball of milk chocolate shaped like an orange, with curved segment ridges across its surface, a smooth golden-brown sphere on a plain background.",
@@ -10323,10 +10327,10 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942632,
+    "visualAt": 1794943811,
     "visualBy": "image-rewrite"
    },
-   "visual": "Several flat, round puffed rice cakes, thin light-brown discs with a porous, airy texture, each with one face coated in smooth dark chocolate, on a plain white background.",
+   "visual": "A small white bowl filled with chocolate rice cakes: flat round discs of puffed rice coated on top in smooth milk chocolate, stacked loosely in the bowl, the puffed-rice texture showing at the edges",
    "what": "Crisp puffed rice discs with a coating of chocolate."
   },
   "chocolate-sauce": {
@@ -10476,7 +10480,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942633,
+    "visualAt": 1794943811,
     "visualBy": "image-rewrite"
    },
    "visual": "Three baked golden-brown choux puffs on a plain white surface. Each is round, hollow and crisp, with a cracked, puffed top. One is broken open to show the empty, airy inside. No filling, no cream and no bowl.",
@@ -10740,7 +10744,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942633,
+    "visualAt": 1794943811,
     "visualBy": "image-rewrite"
    },
    "visual": "A single small, flat round onion, noticeably squashed in shape, with papery pale copper-brown skin, lying on its side on a plain background.",
@@ -11238,7 +11242,7 @@
     "at": 1793325222,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942633,
+    "visualAt": 1794943811,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw cod liver, a soft, plump, smooth pale cream-pink organ with a lobed shape and a glossy, dense look, lying on a plain background.",
@@ -11485,7 +11489,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942634,
+    "visualAt": 1794943812,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bunch of five or six fresh collard green leaves tied at the stems: very broad, flat, paddle-shaped, smooth blue-green leaves with pale whitish veins and thin stems, fanned out flat and overlapping. Not crinkled, not chard.",
@@ -11783,7 +11787,7 @@
     "at": 1793331333,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942634,
+    "visualAt": 1794943812,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled clear glass bottle of pale golden oil with a black trigger spray pump nozzle on top, standing upright on a plain background.",
@@ -11878,7 +11882,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942634,
+    "visualAt": 1794943812,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw chicken lying on a plain background, plump body with clearly separate legs and wings attached at visible joints, smooth unbroken golden-yellow skin.",
@@ -11943,7 +11947,7 @@
     "at": 1793330857,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942634,
+    "visualAt": 1794943812,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled white ceramic bowl of chunky salsa: bright yellow sweetcorn kernels mixed with finely chopped green fresh herbs, on a plain background.",
@@ -12099,7 +12103,7 @@
     "at": 1793326503,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942635,
+    "visualAt": 1794943813,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw corvina lying on its side, with a slender, elongated, shallow torpedo-shaped body and silvery grey skin, on a plain background.",
@@ -12410,7 +12414,7 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942635,
+    "visualAt": 1794943813,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole round sourdough boule, uncut, golden floured crust with a deep score; dark red dried cranberries and walnut pieces clearly poking out through the crust surface and along the opened score, plain white background",
@@ -12798,7 +12802,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942635,
+    "visualAt": 1794943813,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl filled with seaweed snack crisps: flat, bite-size rectangles cut from thin roasted nori sheets, dark green, slightly glossy with fine salt flecks, loosely stacked inside the bowl, plain light background.",
@@ -12892,7 +12896,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942635,
+    "visualAt": 1794943813,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole Crown Prince squash, flattened round shape with a lightly ribbed surface and dull blue-grey skin, lying on a plain background.",
@@ -12924,7 +12928,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942636,
+    "visualAt": 1794943813,
     "visualBy": "image-rewrite"
    },
    "visual": "Three thin round griddle cakes stacked, golden-brown on top with many small open holes across the surface, shown on a plain background.",
@@ -12987,7 +12991,7 @@
     "at": 1793326553,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942636,
+    "visualAt": 1794943814,
     "visualBy": "image-rewrite"
    },
    "visual": "A single pale yellow-green, elongated pepper about three times as long as it is wide, with a broad, slightly lobed shoulder tapering to a blunt point, on a plain background.",
@@ -13035,7 +13039,7 @@
     "at": 1793331393,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942636,
+    "visualAt": 1794943814,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of tiny oval green fruits, each about the size of a grape, with dark green skin and lighter stripes like a miniature watermelon, on a plain background.",
@@ -13083,7 +13087,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942637,
+    "visualAt": 1794943814,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of culantro with broad, rigid, deeply serrated dark green leaves on short stems, the sawtooth edges clearly visible, on a plain background.",
@@ -13101,7 +13105,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942637,
+    "visualAt": 1794943814,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole pear-shaped culatello ham, tied tightly with crisscrossing twine, its dry brown rind dusted with grey-white mould; one end cut to show deep ruby-red meat with thin white fat marbling. Single item on plain white background.",
@@ -13150,7 +13154,7 @@
     "at": 1793329086,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942637,
+    "visualAt": 1794943815,
     "visualBy": "image-rewrite"
    },
    "visual": "one tightly coiled raw Cumberland sausage, a dense spiral of pale pink pork with the rings wound closely against each other, lying on a plain background",
@@ -13368,7 +13372,7 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942637,
+    "visualAt": 1794943815,
     "visualBy": "image-rewrite"
    },
    "visual": "Finely shredded pale green cabbage slaw soaked in a light brine so the strands look glossy and limp, piled loosely in a plain unlabelled glass bowl.",
@@ -13416,7 +13420,7 @@
     "at": 1793331389,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942638,
+    "visualAt": 1794943815,
     "visualBy": "image-rewrite"
    },
    "visual": "A pair of round pale sandwich biscuits, with a soft pale cream filling visible at the edge, shown on a plain background.",
@@ -13448,7 +13452,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942638,
+    "visualAt": 1794943815,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw cuttlefish with a soft oval mantle, flat fins along its sides, eight short arms and two long tentacles all attached, pale mottled skin, lying flat on a plain background.",
@@ -13480,7 +13484,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942638,
+    "visualAt": 1794943815,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw dab, a small flat sea fish lying flat with an oval body, two eyes on the upper side, small fins around the edge, brownish mottled skin and a pale underside, on a plain background.",
@@ -13560,7 +13564,7 @@
     "at": 1793323683,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942639,
+    "visualAt": 1794943816,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear, unlabelled drinking glass filled with dark brown, slightly cloudy, fizzy soft drink, with small bubbles rising through it and a thin foam at the top, on a plain background.",
@@ -13870,7 +13874,7 @@
     "at": 1793331451,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942639,
+    "visualAt": 1794943816,
     "visualBy": "image-rewrite"
    },
    "visual": "A single thick, puffy round pizza with a deep, soft, golden bready crust rising high at the edge and a reddish tomato-topped surface, on a plain background.",
@@ -14085,7 +14089,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942639,
+    "visualAt": 1794943816,
     "visualBy": "image-rewrite"
    },
    "visual": "Three round, flat, golden-brown digestive biscuits with a lightly dotted, slightly rough wheaty surface, lying side by side on a plain background.",
@@ -14134,7 +14138,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942639,
+    "visualAt": 1794943816,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dill seeds, flattened oval and pale brown with lighter edges and fine ridges, lying directly on a plain background.",
@@ -14335,7 +14339,7 @@
     "at": 1793329004,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942640,
+    "visualAt": 1794943817,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw Dover sole seen from above on white: long narrow oval flatfish, brown skin, small rounded head with both eyes on one side, thin fin fringe along the full body edge, short rounded tail fin at the end",
@@ -14581,7 +14585,7 @@
     "at": 1793329066,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942640,
+    "visualAt": 1794943817,
     "visualBy": "image-rewrite"
    },
    "visual": "Small white bowl of freeze-dried chives: uniform vivid deep-green tube segments 3-5 mm long, cut straight across with visible hollow round ends, like tiny green straws. No needles, no long strands, no flakes, no pale or beige bits.",
@@ -15528,7 +15532,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942640,
+    "visualAt": 1794943817,
     "visualBy": "image-rewrite"
    },
    "visual": "A single raw duck leg lying flat on a plain background, thigh and drumstick joined, with thick yellowish fat over golden-yellow skin and dark reddish-purple meat showing at the cut edge.",
@@ -15560,7 +15564,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942641,
+    "visualAt": 1794943817,
     "visualBy": "image-rewrite"
    },
    "visual": "Two golden, crisp, cylindrical spring rolls, one cut in half crosswise to show a dense filling of dark brown shredded meat and glossy dark sauce, on a plain background.",
@@ -15932,7 +15936,7 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942641,
+    "visualAt": 1794943818,
     "visualBy": "image-rewrite"
    },
    "visual": "Three separate neat round nests of dried yellow egg pasta, each a tightly coiled circle of pale golden ribbons, lying apart on a plain background.",
@@ -16166,7 +16170,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942641,
+    "visualAt": 1794943818,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dried pale golden eliche: short, chunky, tightly wound helical spirals, each a thick corkscrew about two turns long, on a plain background.",
@@ -16199,7 +16203,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942641,
+    "visualAt": 1794943818,
     "visualBy": "image-rewrite"
    },
    "visual": "A pale yellow Swiss cheese block with rectangular shape, clean square corners, and one wedge cut away showing large round holes in the glossy cut face, on a plain background.",
@@ -16337,7 +16341,7 @@
     "at": 1793326624,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942642,
+    "visualAt": 1794943818,
     "visualBy": "image-rewrite"
    },
    "visual": "a whole head of escarole, broad, flat, spreading pale-green leaves with ruffled edges fanning outward from a pale base, lying on a plain background",
@@ -16416,7 +16420,7 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942642,
+    "visualAt": 1794943819,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of dried, short, plump oval pods with pronounced ridges, dark brown and wrinkled, in a plain unlabelled ceramic bowl.",
@@ -16449,7 +16453,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942642,
+    "visualAt": 1794943819,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole round golden-brown bagel with a central hole, its top and sides thickly coated with visible seeds, dried onion and garlic flakes, on a plain background.",
@@ -16731,7 +16735,7 @@
     "at": 1793331513,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942643,
+    "visualAt": 1794943819,
     "visualBy": "image-rewrite"
    },
    "visual": "A fanned, overlapping pile of thin round salami slices, deep red meat flecked with creamy white fat, on a plain background.",
@@ -16916,7 +16920,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942643,
+    "visualAt": 1794943819,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole undamaged rectangular block of white crumbly feta cheese with clean straight edges and no bites missing, lying on a plain background.",
@@ -16964,7 +16968,7 @@
     "at": 1793324718,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942643,
+    "visualAt": 1794943820,
     "visualBy": "image-rewrite"
    },
    "visual": "one long, thin, narrow French ficelle stick of bread, slender as a pencil in width, with a deeply crisp golden crust and several diagonal slashes, lying on a plain background",
@@ -17042,7 +17046,7 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942644,
+    "visualAt": 1794943820,
     "visualBy": "image-rewrite"
    },
    "visual": "A soft golden biscuit cut across its middle, showing a smooth dark fig paste rolled in a spiral through the pale biscuit dough, on a plain background.",
@@ -17202,7 +17206,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942644,
+    "visualAt": 1794943820,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole salami log, a thick cylinder with coarse chunky pinkish-red meat, white fat pieces and small dark fennel seeds scattered through it, on a plain background.",
@@ -17516,7 +17520,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942644,
+    "visualAt": 1794943820,
     "visualBy": "image-rewrite"
    },
    "visual": "Dried broad flat rice noodle ribbons, pale off-white and about one centimetre wide, straight and separate, arranged in a loose neat bundle lying flat on a plain background.",
@@ -17640,7 +17644,7 @@
     "at": 1793323592,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942644,
+    "visualAt": 1794943820,
     "visualBy": "image-rewrite"
    },
    "visual": "A bunch of five flower sprouts: each a small loose open head of frilly, ruffled, curly dark-green leaves with purple edges, looser and more open than a Brussels sprout, like a tiny open kale flower, on short pale stems",
@@ -17658,7 +17662,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942645,
+    "visualAt": 1794943821,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bunch of fluted pumpkin leaves: broad, glossy, dark green heart-shaped leaves, each with three to five shallow rounded lobes and slightly wavy toothed edges, wide leaf blades, not deeply cut, each on a long green stem",
@@ -17799,7 +17803,7 @@
     "at": 1793330873,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942645,
+    "visualAt": 1794943821,
     "visualBy": "image-rewrite"
    },
    "visual": "A large roasted forerib of beef on the bone: a browned, crusty rectangular joint with several curved rib bones visible along one side, lying on a plain background.",
@@ -17878,7 +17882,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942645,
+    "visualAt": 1794943821,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl filled with dry freekeh: plump, smooth, oval wheat kernels, each with a crease down one side. The grains are olive-green to toasted brown with a few charred dark flecks. Plain light background.",
@@ -17928,7 +17932,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942646,
+    "visualAt": 1794943821,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of irregular, golden-brown toasted pasta pearls, coarse and uneven in size and shape, lying on a plain white background.",
@@ -18036,7 +18040,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942646,
+    "visualAt": 1794943822,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of fresh chervil with delicate, lacy, deeply divided leaflets that are broader and flatter than dill, in bright green, on thin pale green stems, on a plain background.",
@@ -18206,7 +18210,7 @@
     "at": 1793329061,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942646,
+    "visualAt": 1794943822,
     "visualBy": "image-rewrite"
    },
    "visual": "A neat stack of wide, flat, rectangular sheets of pale yellow fresh egg pasta, smooth and unbroken, lying on a plain background.",
@@ -18223,7 +18227,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942646,
+    "visualAt": 1794943822,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of fresh lovage stems with broad, glossy, deeply lobed bright green leaves, each leaflet wedge-shaped with coarse toothed edges, on a plain white background.",
@@ -18472,7 +18476,7 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942647,
+    "visualAt": 1794943822,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of bright red chillies, each stubby and conical with a broad, blunt rounded tip and glossy skin, on a plain background.",
@@ -18594,7 +18598,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942647,
+    "visualAt": 1794943822,
     "visualBy": "image-rewrite"
    },
    "visual": "A single rectangular white fish fillet fully coated in a smooth, thick, pale golden batter with a bumpy, blistered surface and frosty ice crystals, lying on a plain background.",
@@ -18720,7 +18724,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942647,
+    "visualAt": 1794943823,
     "visualBy": "image-rewrite"
    },
    "visual": "A square portion of baked potato dauphinoise on a plain white plate: many thin, round potato slices stacked in clear visible layers, set in thick cream sauce, with a golden-brown top. Plain light background.",
@@ -18752,7 +18756,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942648,
+    "visualAt": 1794943823,
     "visualBy": "image-rewrite"
    },
    "visual": "Three round, pale, plump frozen dumplings with pleated, crimped edges and a slightly frosted surface, placed separately on a plain background.",
@@ -18954,7 +18958,7 @@
     "at": 1793331451,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942648,
+    "visualAt": 1794943823,
     "visualBy": "image-rewrite"
    },
    "visual": "a neat pile of frozen oven chips, long straight potato strips with pale golden-yellow edges and a light frost, lying on a plain background",
@@ -18987,7 +18991,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942648,
+    "visualAt": 1794943823,
     "visualBy": "image-rewrite"
    },
    "visual": "several very thin, flat, crepe-like pancakes, pale golden and slightly frosted, stacked neatly on a plain background",
@@ -19097,9 +19101,11 @@
    "source": {
     "at": 1793329078,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943824,
+    "visualBy": "image-rewrite"
    },
-   "visual": "three golden fried prawn toast triangles, served plainly on a plain white plate",
+   "visual": "Triangular slices of golden fried bread, each topped by a thick layer of pink-tinged minced prawn and toasted sesame seeds scattered over the top, lying flat on a plain background.",
    "what": "Fried bread topped with minced prawn and sesame seeds."
   },
   "frozen-puff-pastry-vol-au-vent-bites": {
@@ -19114,7 +19120,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942649,
+    "visualAt": 1794943824,
     "visualBy": "image-rewrite"
    },
    "visual": "Six small round baked vol-au-vent cases, golden puff pastry with clearly visible flaky stacked layers on the risen outer walls, a hollow centre and a small pastry lid beside each, on a plain white background",
@@ -19178,7 +19184,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942649,
+    "visualAt": 1794943824,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of breaded langoustine tail pieces on a plain background, each a curled, pale golden crumb-coated piece with a visible tail shape and segmented ridges.",
@@ -19212,7 +19218,7 @@
     "at": 1793331207,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942649,
+    "visualAt": 1794943824,
     "visualBy": "image-rewrite"
    },
    "visual": "Several uncooked spring rolls, cylindrical pale ivory pastry parcels with a matte, frosted surface dusted with tiny ice crystals and no browning, on a plain white background.",
@@ -19307,7 +19313,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942649,
+    "visualAt": 1794943824,
     "visualBy": "image-rewrite"
    },
    "visual": "Several thin, flat, round golden-brown Yorkshire pudding wraps, each about 20 cm across and paper-thin, lying flat on a plain background.",
@@ -19340,7 +19346,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942650,
+    "visualAt": 1794943825,
     "visualBy": "image-rewrite"
    },
    "visual": "A slice of dense dark fruit cake with a moist, close crumb packed with visible pieces of dried fruit, lying on a plain background.",
@@ -19387,7 +19393,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942650,
+    "visualAt": 1794943825,
     "visualBy": "image-rewrite"
    },
    "visual": "A single round golden scone with a cracked top, its pale crumb speckled throughout with dark dried fruit pieces, lying on a plain background.",
@@ -19482,7 +19488,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942650,
+    "visualAt": 1794943825,
     "visualBy": "image-rewrite"
    },
    "visual": "Slow-cooked fava beans in a plain unlabelled bowl: a thick brown stew with whole soft dark-brown beans visible throughout, a few beans intact on the surface.",
@@ -19530,7 +19536,7 @@
     "at": 1793325735,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942650,
+    "visualAt": 1794943825,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bundle of long, thin, straight dry pasta with tight, clearly visible spiral ridges running along each strand, pale golden in colour, lying on a plain background.",
@@ -19627,7 +19633,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942651,
+    "visualAt": 1794943825,
     "visualBy": "image-rewrite"
    },
    "visual": "Several thin-cut raw beef short ribs sliced across the bone, showing deep red meat with small pale bone sections, lying flat on a plain background.",
@@ -19692,7 +19698,7 @@
     "at": 1793331395,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942651,
+    "visualAt": 1794943826,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw cured gammon joint, a plump oblong leg of pink meat with a thick pale fat cap and rind along one side, uncut and intact, lying flat on a plain background.",
@@ -19771,7 +19777,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942652,
+    "visualAt": 1794943826,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white bowl of dry garganelli: thin egg-pasta tubes about 4 cm long, each covered in clear raised parallel ridges all round like corduroy, rolled from a flat square so a seam shows along the side, ends cut on a slant",
@@ -19789,7 +19795,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942652,
+    "visualAt": 1794943826,
     "visualBy": "image-rewrite"
    },
    "visual": "A single thin, flat, rectangular golden biscuit with a dark layer of squashed currants visible in its cut edge, lying on a plain background.",
@@ -19836,7 +19842,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942652,
+    "visualAt": 1794943826,
     "visualBy": "image-rewrite"
    },
    "visual": "A baguette split lengthwise and open, with a golden crisp crust and a soft pale crumb generously filled with glossy yellow garlic butter, lying on a plain background.",
@@ -20132,7 +20138,7 @@
     "at": 1793326884,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942653,
+    "visualAt": 1794943827,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dry gemelli pasta on a plain white background: short, chunky pieces about 4 cm long, each like a thick two-ply rope or a loose braid of two plump round strands wrapped around each other. No flat blades, fins or hollow tubes.",
@@ -20461,7 +20467,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942653,
+    "visualAt": 1794943827,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of round, hard, golden-brown ginger nut biscuits with a slightly cracked matte surface, loosely piled on a plain background.",
@@ -21168,7 +21174,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942653,
+    "visualAt": 1794943827,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw aubergine with a small green star-shaped cap on top, short oval shape, glossy purple-violet skin with white stripes running lengthwise, lying on its side on a plain background.",
@@ -21812,7 +21818,7 @@
     "at": 1793330873,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942654,
+    "visualAt": 1794943827,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl, seen from slightly above, filled with dried green Sichuan pepper husks: each one a tiny olive-green shell split open, hollow inside and textured, with no black seeds. Plain cream background, soft light.",
@@ -22324,7 +22330,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942654,
+    "visualAt": 1794943828,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole unplucked red grouse lying on its side, seen in profile: small plump body covered in dark chestnut-brown feathers finely barred with black, short hooked beak, red wattle above the eye, white feathered feet, plain white background.",
@@ -22373,7 +22379,7 @@
     "at": 1793326679,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942654,
+    "visualAt": 1794943828,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole dried guajillo chilli pod, wrinkled and leathery with a matte deep red-brown skin, long slender tapered shape and dried stem cap, lying on its side on a plain background.",
@@ -22391,7 +22397,7 @@
     "at": 1793331333,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942655,
+    "visualAt": 1794943828,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cured pork jowl: an irregular, roughly triangular slab that is mostly creamy white fat with thin, uneven streaks of deep pink meat, its outside rubbed with coarse black pepper and dried herbs, with a few thick slices cut from one end.",
@@ -22409,7 +22415,7 @@
     "at": 1793329054,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942655,
+    "visualAt": 1794943828,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of long, flat, ribbon-shaped bright green guar pods, broad and flat-sided rather than round, with slightly curved edges, on a plain background.",
@@ -22443,7 +22449,7 @@
     "at": 1793331457,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942655,
+    "visualAt": 1794943828,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw guinea fowl, small and lean with a slim body, pale plucked skin with small dark speckles, a modest breast smaller than a chicken's, on a plain background.",
@@ -22710,7 +22716,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942656,
+    "visualAt": 1794943829,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cooked bone-in ham, oval and plump, with a golden-brown glazed fat surface lightly scored in a diamond pattern, the exposed end of the shank bone visible, on a plain background.",
@@ -23221,7 +23227,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942656,
+    "visualAt": 1794943829,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose mound of tiny, separate, pale orange herring eggs, each grain small, round and distinct from its neighbours, on a plain background.",
@@ -23300,7 +23306,7 @@
     "at": 1793331333,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942657,
+    "visualAt": 1794943829,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole hispi cabbage, small and elongated with a pointed conical head, pale green outer leaves, and tightly packed, crinkled inner leaves, lying on its side on a plain background.",
@@ -23318,7 +23324,7 @@
     "at": 1793329073,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942657,
+    "visualAt": 1794943829,
     "visualBy": "image-rewrite"
    },
    "visual": "A small neat bundle of dry, pale cream Japanese wheat noodles, very thin, long and straight, with fine even strands lying loose on a plain background.",
@@ -23382,7 +23388,7 @@
     "at": 1793330862,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942657,
+    "visualAt": 1794943830,
     "visualBy": "image-rewrite"
    },
    "visual": "Loose roasted tea leaves and fine twiggy stems, dark brown with a warm tone, slightly curled, in a plain unlabelled white ceramic bowl.",
@@ -23477,10 +23483,10 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942658,
+    "visualAt": 1794943830,
     "visualBy": "image-rewrite"
    },
-   "visual": "A small heap of pale white hominy kernels, each puffed and irregular, larger than sweetcorn kernels, with an opaque, slightly wrinkled surface and split edges, lying loose on a plain background.",
+   "visual": "A small white bowl filled with cooked hominy: plump, puffed, creamy-white maize kernels, many split open at the tip, each with a small pale nub where it joined the cob, heaped in the bowl",
    "what": "Maize kernels soaked in lime until soft and chewy."
   },
   "honey": {
@@ -23647,7 +23653,7 @@
     "at": 1793331263,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942658,
+    "visualAt": 1794943830,
     "visualBy": "image-rewrite"
    },
    "visual": "One irregular golden-amber piece of crunchy honeycomb toffee, airy and sponge-like, with many small uneven bubble pockets, rough edges, and no regular cells, on a plain background.",
@@ -23758,7 +23764,7 @@
     "at": 1793330857,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942658,
+    "visualAt": 1794943830,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of tiny, slightly flattened oval seeds with matte, mottled grey-brown skins and smooth surfaces, lying on a plain background.",
@@ -23776,7 +23782,7 @@
     "at": 1793331389,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942659,
+    "visualAt": 1794943830,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw horse mackerel (scad) on a plain white background: plain silvery body with an unmarked grey-green back, no stripes or bars, large eye, small black spot on the gill cover, a bony ridged lateral line that dips steeply behind the head, forked tail.",
@@ -23794,7 +23800,7 @@
     "at": 1793323321,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942660,
+    "visualAt": 1794943831,
     "visualBy": "image-rewrite"
    },
    "visual": "One large, mature wild horse mushroom lying on its side, its broad flat cap creamy white with yellowish patches, underside showing dark chocolate-brown gills and a large drooping white ring like a skirt on a tall thick white stem",
@@ -23874,7 +23880,7 @@
     "at": 1793330990,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942660,
+    "visualAt": 1794943831,
     "visualBy": "image-rewrite"
    },
    "visual": "One soft, oblong hot dog bread roll with a lightly split top and a matte, golden-tan crust that is faintly floury and not glossy, lying on its side on a plain background.",
@@ -23970,7 +23976,7 @@
     "at": 1793329004,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942661,
+    "visualAt": 1794943831,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain unlabelled white ceramic bowl of huitlacoche: irregular, swollen, grey-black corn galls with bulbous lumps and wrinkled, blistered surfaces, soft, moist and dark.",
@@ -24081,7 +24087,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942661,
+    "visualAt": 1794943831,
     "visualBy": "image-rewrite"
    },
    "visual": "One raw pork pluma cut, a thin, flat, elongated piece of dark pink meat tapering at both ends, with a thick strip of creamy white fat along one edge, lying directly on a plain background.",
@@ -24114,7 +24120,7 @@
     "at": 1793330944,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942661,
+    "visualAt": 1794943832,
     "visualBy": "image-rewrite"
    },
    "visual": "One raw, thin, irregular piece of dark pink pork with heavy, fine white fat marbling throughout, lying flat and slightly curved on a plain background.",
@@ -24195,7 +24201,7 @@
     "at": 1793331262,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942662,
+    "visualAt": 1794943832,
     "visualBy": "image-rewrite"
    },
    "visual": "A few thin, crisp, pale-golden rectangular ice cream wafer sheets with a fine square grid pattern pressed into them, laid flat and slightly fanned on a plain round white plate, the whole plate visible, plain light background.",
@@ -24321,7 +24327,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942662,
+    "visualAt": 1794943832,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dried Indian bay leaves piled together: long, narrow, pointed olive-green to tan leaves, stiff and leathery, each with three clear pale veins running lengthwise from the base to the tip",
@@ -24414,7 +24420,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942662,
+    "visualAt": 1794943832,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain white bowl holding a dry mix of pale-brown miso granules and small, light-beige dried tofu cubes, unmixed and not dissolved, on a plain background.",
@@ -24446,7 +24452,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942662,
+    "visualAt": 1794943832,
     "visualBy": "image-rewrite"
    },
    "visual": "A single uncooked block of dried instant noodles, pale golden with tight crinkly wavy strands, resting dry inside a plain white ceramic bowl, no water or broth, the bowl fully visible, plain light background, soft even lighting",
@@ -24633,7 +24639,7 @@
     "at": 1793331202,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942663,
+    "visualAt": 1794943833,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear glass salad dressing bottle with a cork, filled with golden Italian dressing full of green herb flecks, red pepper bits and minced garlic, a layer of herbs settled at the bottom, on a plain white background",
@@ -24698,7 +24704,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942663,
+    "visualAt": 1794943833,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of plump oval ivy gourds, each smooth and glossy green with faint pale streaks, slightly tapered at both ends and about the size of a finger, lying loose on a plain background.",
@@ -24761,10 +24767,10 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942664,
+    "visualAt": 1794943833,
     "visualBy": "image-rewrite"
    },
-   "visual": "One Jaffa cake, a small round cake with a thin golden sponge base, a domed layer of bright orange jelly on top, and a smooth coating of dark chocolate, lying directly on a plain background.",
+   "visual": "Three jaffa cakes on a small round white plate: each a small round golden sponge with a thin orange jelly layer showing at the edge under a smooth dark chocolate top",
    "what": "Sponge cakes topped with orange jelly and chocolate."
   },
   "jaggery": {
@@ -24854,7 +24860,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942664,
+    "visualAt": 1794943833,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cylindrical jam roly-poly pudding with a pale, matte, dense suet pastry surface, one cut end showing a tight spiral of dark red jam, lying directly on a plain background.",
@@ -24871,7 +24877,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942664,
+    "visualAt": 1794943834,
     "visualBy": "image-rewrite"
    },
    "visual": "One round sandwich biscuit made of two pale golden shortbread biscuits, with a thick layer of glossy red jam showing at the edge, lying flat on a plain background.",
@@ -25011,7 +25017,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942665,
+    "visualAt": 1794943834,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw Japanese sweet potato, elongated and irregular with a knobbly, tapered shape and dark red-purple skin, lying directly on a plain background.",
@@ -25118,7 +25124,7 @@
     "at": 1793326023,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942665,
+    "visualAt": 1794943834,
     "visualBy": "image-rewrite"
    },
    "visual": "a small plain unlabelled bowl of fine, powdery granular jelly crystals, translucent and sugar-fine, loosely heaped",
@@ -25136,7 +25142,7 @@
     "at": 1793331323,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942665,
+    "visualAt": 1794943834,
     "visualBy": "image-rewrite"
    },
    "visual": "A small neat pile of concentrated jelly cubes, translucent amber and gelatinous with a glassy, see-through look, lying directly on a plain background.",
@@ -25215,7 +25221,7 @@
     "at": 1793331328,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942666,
+    "visualAt": 1794943834,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear drinking glass filled with rich, creamy golden-yellow milk, with a thick layer of pale yellow cream visibly floating on the top surface.",
@@ -25294,10 +25300,10 @@
     "at": 1793329051,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942666,
+    "visualAt": 1794943835,
     "visualBy": "image-rewrite"
    },
-   "visual": "A small neat bundle of thin, straight, dried brown buckwheat soba noodles, uniform in width and length with a matte grey-brown colour, on a plain background.",
+   "visual": "A loose heap of dried soba noodles: very long, thin, gently curved strands as thin as spaghetti, grey-brown buckwheat colour, looping and tangled together like a nest, soft-looking and flexible, not stiff sticks, on a plain white background",
    "what": "Thin Japanese noodles made mostly from buckwheat flour."
   },
   "john-dory": {
@@ -25312,7 +25318,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942666,
+    "visualAt": 1794943835,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw John Dory fish with a tall, deep, flattened oval body, a long spiny dorsal fin, golden-olive skin and one large dark round spot on its side, on a plain background.",
@@ -25485,7 +25491,7 @@
     "at": 1793331393,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942667,
+    "visualAt": 1794943835,
     "visualBy": "image-rewrite"
    },
    "visual": "Several separate round slices of white kamaboko fish cake, each showing a cut face with a pink spiral pattern, arranged on a plain background.",
@@ -25688,7 +25694,7 @@
     "at": 1793331328,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942667,
+    "visualAt": 1794943835,
     "visualBy": "image-rewrite"
    },
    "visual": "A flat round keema naan on a plain white plate, cut into wedges. The cut edges show a thin layer of brown spiced minced lamb sealed between two thin layers of golden, char-blistered naan. Plain light background.",
@@ -25750,7 +25756,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942667,
+    "visualAt": 1794943836,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of thick, irregular golden potato crisps with rough, uneven edges and blistered bubbles on the surface. They are sturdy and crunchy-looking, lying loosely on a plain background.",
@@ -26123,7 +26129,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942668,
+    "visualAt": 1794943836,
     "visualBy": "image-rewrite"
    },
    "visual": "Loose white rice grains, each coated in a fuzzy off-white mould, heaped in a small plain white ceramic bowl.",
@@ -26463,7 +26469,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942668,
+    "visualAt": 1794943836,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose, tangled heap of soft cooked laksa noodles: thick, round, opaque white rice noodles as thick as a pencil lead, glossy and gently curving, with round cut ends visible. Not thin, flat, dry or in a straight bundle.",
@@ -26495,7 +26501,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942668,
+    "visualAt": 1794943836,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw whole lamb breast, a rectangular slab of deep red meat topped by a thick layer of creamy white fat, with a few rib bones visible at one end, on a plain background.",
@@ -26592,7 +26598,7 @@
     "at": 1793331146,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942669,
+    "visualAt": 1794943836,
     "visualBy": "image-rewrite"
    },
    "visual": "Three raw lamb loin chops in a row, top-down: deep rosy-red meat, each with a small T-shaped bone dividing a round dark-red loin eye from a thin strip of tenderloin, a narrow rim of creamy-white fat, 3 cm thick",
@@ -26655,7 +26661,7 @@
     "at": 1793331451,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942669,
+    "visualAt": 1794943837,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw rack of lamb ribs: several thin rib bones, each with a strip of pink meat and a thick layer of white fat along one side, lying flat on a plain background.",
@@ -26874,7 +26880,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942669,
+    "visualAt": 1794943837,
     "visualBy": "image-rewrite"
    },
    "visual": "one whole raw lamprey, a long eel-like fish with a round, disc-shaped sucker mouth at the front and no jaws, olive-grey skin and a pale belly, lying on a plain background",
@@ -26999,7 +27005,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942670,
+    "visualAt": 1794943837,
     "visualBy": "image-rewrite"
    },
    "visual": "A single thin, translucent slice of white cured pork fat with a faint pink edge, lying flat on a plain background.",
@@ -27140,7 +27146,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942670,
+    "visualAt": 1794943837,
     "visualBy": "image-rewrite"
    },
    "visual": "Thin, flat, rectangular translucent gelatine sheets, pale amber and clear, lying flat and separate, each about twelve centimetres long, on a plain background.",
@@ -27389,7 +27395,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942670,
+    "visualAt": 1794943838,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear glass bottle of thick, opaque, creamy pale lemon-yellow cake icing glaze, clearly yellow-white and sugary, with a thick drizzle of the same yellow icing running down the outside of the neck; the bottle is plain and unlabelled",
@@ -27451,7 +27457,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942670,
+    "visualAt": 1794943838,
     "visualBy": "image-rewrite"
    },
    "visual": "A small sprig of broad, lance-shaped leaves, bright glossy green with pointed tips, two or three leaves on a short green stem, lying flat on a plain background.",
@@ -27740,7 +27746,7 @@
     "at": 1793327007,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942671,
+    "visualAt": 1794943838,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain clear glass bottle with no markings, filled with thin, translucent reddish-brown liquid that glows where light passes through it.",
@@ -27851,7 +27857,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942671,
+    "visualAt": 1794943838,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain glass jar filled with chopped pickled lime pieces in oil, each piece showing a curled green-yellow citrus rind edge and pale pulpy segments, on a plain background.",
@@ -27883,7 +27889,7 @@
     "at": 1793326502,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942671,
+    "visualAt": 1794943838,
     "visualBy": "image-rewrite"
    },
    "visual": "a small heap of raw limpets, low cone-shaped shells with a flattened conical profile and radiating ridged ribs, grey-brown, lying on a plain background",
@@ -27931,7 +27937,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942672,
+    "visualAt": 1794943839,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw lingcod fish lying flat, elongated body with a large wide head and wide mouth with prominent teeth, a long continuous dorsal fin along the back, mottled olive-grey and brown skin with dark blotches, on a plain background.",
@@ -27980,7 +27986,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942672,
+    "visualAt": 1794943839,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bundle of long, dried linguine, narrow flat pale pasta ribbons several inches long and straight, lying on a plain background.",
@@ -28094,7 +28100,7 @@
     "at": 1793330929,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942672,
+    "visualAt": 1794943839,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole little gem lettuce with an elongated, oblong head of upright, tightly packed, crisp pale green leaves with ribbed edges, lying on a plain background.",
@@ -28188,7 +28194,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942673,
+    "visualAt": 1794943839,
     "visualBy": "image-rewrite"
    },
    "visual": "A small cluster of dark red loganberries, elongated and bumpy with clustered drupelets like a raspberry, lying on a plain background.",
@@ -28329,7 +28335,7 @@
     "at": 1793329076,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942673,
+    "visualAt": 1794943840,
     "visualBy": "image-rewrite"
    },
    "visual": "A cut lotus root stem showing several round slices with multiple small holes arranged in a ring pattern, pale beige, lying flat on a plain background.",
@@ -28439,7 +28445,7 @@
     "at": 1793326981,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942673,
+    "visualAt": 1794943840,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of dried lumache pasta: short, curled snail-shaped tubes with deep ridges, golden-yellow, lying loose on a plain background.",
@@ -28580,7 +28586,7 @@
     "at": 1793329056,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942673,
+    "visualAt": 1794943840,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl holding whole dried mace blades: broad, flat, brittle orange-red lacy webs with net-like branching lobes, each piece a few centimetres across and irregular, not thin threads or shreds. Plain light background, soft daylight.",
@@ -28689,7 +28695,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942674,
+    "visualAt": 1794943840,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw mahi-mahi in side view: an extremely long, narrow, flat body about five times as long as it is deep, a high steep square forehead, one very long dorsal fin from above the eye to the tail, golden-yellow sides, blue spots",
@@ -28768,7 +28774,7 @@
     "at": 1793330862,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942674,
+    "visualAt": 1794943840,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of glossy dark-green makrut lime leaves, each a double-lobed figure-eight blade joined to a flat, winged leaf stalk, on a plain background.",
@@ -29111,7 +29117,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942674,
+    "visualAt": 1794943841,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of baked manicotti: five fat ridged pasta tubes piled in a pile, golden and lightly browned, white ricotta filling showing at the open ends, a little red tomato sauce on top, on a plain white background",
@@ -29358,7 +29364,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942675,
+    "visualAt": 1794943841,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dark purple-black, elongated blackberry-type fruits, each made of many knobby, segmented drupelets with a bumpy textured surface, lying on a plain background.",
@@ -29468,7 +29474,7 @@
     "at": 1793326243,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942675,
+    "visualAt": 1794943841,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of large dried whole peas, pale yellow-green and wrinkled, round and bumpy in texture, seen from above on a plain background.",
@@ -29609,7 +29615,7 @@
     "at": 1793329067,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942675,
+    "visualAt": 1794943841,
     "visualBy": "image-rewrite"
    },
    "visual": "A single elongated, tapered tuber with pale yellow waxy skin and several ring-like constrictions along its length, narrowing toward one end, lying on its side on a plain background.",
@@ -29783,7 +29789,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942675,
+    "visualAt": 1794943842,
     "visualBy": "image-rewrite"
    },
    "visual": "Coarse, moist, glossy Meaux mustard paste in a plain unlabelled white ceramic bowl, with visible whole pale brown mustard seeds throughout.",
@@ -29817,7 +29823,7 @@
     "at": 1793331263,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942676,
+    "visualAt": 1794943842,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose pile of dried medium egg noodles, pale yellow and wavy, each strand about the thickness of a pencil lead, lying on a plain background.",
@@ -30002,7 +30008,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942676,
+    "visualAt": 1794943842,
     "visualBy": "image-rewrite"
    },
    "visual": "One crisp, bowl-shaped white meringue shell with a rough, craggy, baked surface and an empty hollow center, standing upright on a plain background.",
@@ -30219,7 +30225,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942676,
+    "visualAt": 1794943843,
     "visualBy": "image-rewrite"
    },
    "visual": "A flat, sealed, pillow-shaped plain white microwave popcorn pouch lying beside a small white bowl of hard unpopped golden-yellow corn kernels, no popped corn, on a plain white background",
@@ -30267,7 +30273,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942676,
+    "visualAt": 1794943843,
     "visualBy": "image-rewrite"
    },
    "visual": "One long raw British middle bacon rasher on white, viewed from above: one end is a wide oval of solid pink lean back loin with a white fat rim, joined without a break to a long narrow streaky tail with clear alternating pink and white stripes.",
@@ -30284,7 +30290,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942677,
+    "visualAt": 1794943843,
     "visualBy": "image-rewrite"
    },
    "visual": "Three thick raw lamb neck chops, deep red marbled meat with creamy fat. Each shows one central vertebra cut through: a single small round bone with a thin Y-shaped bone spur and a tiny spinal hole. Plain white background, top-down.",
@@ -30380,7 +30386,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942677,
+    "visualAt": 1794943843,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl filled with flat, thin, round milk chocolate buttons: light-brown smooth coin-shaped discs about 2 cm across, several lying flat to show their round faces. Plain off-white background, soft even light.",
@@ -30583,7 +30589,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942677,
+    "visualAt": 1794943844,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of mini sweet peppers, each elongated and tapering to a pointed tip, about seven centimetres long, glossy red and yellow with small green stems.",
@@ -30988,7 +30994,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942677,
+    "visualAt": 1794943844,
     "visualBy": "image-rewrite"
    },
    "visual": "A compact, rectangular block of pale white cheese, firm and matte, with one clean rectangular wedge neatly cut away from one corner, lying flat on a plain background.",
@@ -31021,7 +31027,7 @@
     "at": 1793331065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942678,
+    "visualAt": 1794943844,
     "visualBy": "image-rewrite"
    },
    "visual": "A single round, soft white mochi rice cake with a slightly glossy, smooth surface, resting on a plain white plate on a plain background.",
@@ -31099,7 +31105,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942678,
+    "visualAt": 1794943844,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of irregular, tapered pieces of firm pale pink-white fish flesh, each cut into a rough oval or teardrop shape with uneven edges, lying on a plain background.",
@@ -31116,7 +31122,7 @@
     "at": 1793329068,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942678,
+    "visualAt": 1794943845,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw monkfish tail, long and tapering, thick at the front, with firm pinkish-white flesh and a thin grey membrane along its back, lying on its side on a plain background.",
@@ -31319,7 +31325,7 @@
     "at": 1793325805,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942678,
+    "visualAt": 1794943845,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dry, smooth, elongated oval beans with a slightly mottled tan-brown coat, lying loose on a plain background.",
@@ -31384,7 +31390,7 @@
     "at": 1793329086,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942679,
+    "visualAt": 1794943845,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose pile of muesli made of rolled oat flakes mixed with chopped dried fruit pieces and whole nuts, showing pale oats, dark raisins and golden nut pieces.",
@@ -31431,7 +31437,7 @@
     "at": 1793326110,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942679,
+    "visualAt": 1794943845,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dried mulato chillies: broad, flattened, wrinkled dark brown pods with wide shoulders tapering to a point, on a plain background.",
@@ -31636,7 +31642,7 @@
     "at": 1793331071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942679,
+    "visualAt": 1794943846,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw Muscovy duck lying breast side up on a plain background: a large, plump, full-breasted bird with pale pinkish skin, legs tucked neatly against the body and the head resting flat along one side.",
@@ -31762,7 +31768,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942679,
+    "visualAt": 1794943846,
     "visualBy": "image-rewrite"
    },
    "visual": "A pile of small blue-black mussel shells steamed open, showing the orange-cream flesh inside each shell, on a plain background.",
@@ -31871,7 +31877,7 @@
     "at": 1793331328,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942679,
+    "visualAt": 1794943846,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw mutton leg joint with deep red meat, a thin white fat cap, and the bone end visible, lying on a plain background.",
@@ -31935,7 +31941,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942680,
+    "visualAt": 1794943846,
     "visualBy": "image-rewrite"
    },
    "visual": "Thin, pale grey-brown buckwheat noodles coiled in a plain unlabelled bowl filled with clear, icy cold broth, the noodles visibly submerged in the liquid.",
@@ -32187,7 +32193,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942680,
+    "visualAt": 1794943847,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of cooked nettle tops, dark olive green, wilted and soft, with crumpled serrated leaves, lying flat on a plain background.",
@@ -32404,7 +32410,7 @@
     "at": 1793326369,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942680,
+    "visualAt": 1794943847,
     "visualBy": "image-rewrite"
    },
    "visual": "A rectangular cut bar of off-white chewy nougat with visible whole pale almonds and hazelnuts embedded throughout, slightly rough cut edges, on a plain background.",
@@ -32482,7 +32488,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942680,
+    "visualAt": 1794943847,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of golden-brown praline pieces, each shard showing visible whole and chopped nuts embedded in hardened caramelised sugar, on a plain background.",
@@ -32625,7 +32631,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942681,
+    "visualAt": 1794943847,
     "visualBy": "image-rewrite"
    },
    "visual": "A round ball of pale ivory Oaxaca cheese made of tightly wound, stringy white ribbons of cheese, slightly loose and fibrous on the surface, lying on a plain background.",
@@ -32673,7 +32679,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942681,
+    "visualAt": 1794943848,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw octopus with exactly eight arms of equal length, pinkish-grey skin, body and arms laid out loosely on a plain background.",
@@ -33229,7 +33235,7 @@
     "at": 1793330857,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942681,
+    "visualAt": 1794943848,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of dry orzo pasta lying directly on the surface: slim, elongated, rice-shaped pale-yellow pasta, each piece about 10 mm long and 3 mm wide, tapering to pointed ends, smooth and matte",
@@ -33246,7 +33252,7 @@
     "at": 1793326033,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942681,
+    "visualAt": 1794943848,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain glass bowl filled with intact, separate, rounded caviar pearls, golden-brown with a slight sheen, each egg distinct and not crushed.",
@@ -33372,7 +33378,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942682,
+    "visualAt": 1794943849,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw ox kidney, dark reddish-brown and bean-shaped, with a lobed, bumpy surface of distinct rounded lobes, lying on its side on a plain background.",
@@ -33575,9 +33581,11 @@
    "source": {
     "at": 1793329082,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943849,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a golden baked pain au chocolat with flaky layers and visible dark chocolate batons, on a plain white plate",
+   "visual": "A rectangular pain au chocolat on a white plate: a flat, boxy pastry with a deep golden, glossy, shiny top and flaky, visibly separate layers along its sides, and two dark chocolate batons poking out of each open end.",
    "what": "A flaky, buttery pastry rolled around dark chocolate."
   },
   "pain-aux-raisins": {
@@ -33654,7 +33662,7 @@
     "at": 1793324672,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942682,
+    "visualAt": 1794943849,
     "visualBy": "image-rewrite"
    },
    "visual": "Several pale cream cylindrical palm hearts cut into short rounds, each showing a solid, dense cross-section with a layered pale white interior, lying flat on a plain background.",
@@ -33812,7 +33820,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942682,
+    "visualAt": 1794943849,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of five distinct whole spice seeds: tiny round black nigella, angular dark-brown mustard seeds, elongated greenish-brown fennel, pale cumin, and yellow-brown fenugreek, on a plain background.",
@@ -34108,7 +34116,7 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942683,
+    "visualAt": 1794943849,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw small game bird, plucked, slender and compact with pale skin, a small reddish-brown breast facing up, and short slender legs tucked in, lying on a plain background.",
@@ -34280,7 +34288,7 @@
     "at": 1793331268,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942683,
+    "visualAt": 1794943850,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of many small empty golden baked pastry tartlet cases with fluted edges, piled together in a casual mound on a plain background.",
@@ -34312,7 +34320,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942683,
+    "visualAt": 1794943850,
     "visualBy": "image-rewrite"
    },
    "visual": "A thick slice of coarse-textured rustic pork pate, pale brown with visible flecks of green herbs and small chunks of meat, standing directly on a plain background with no plate.",
@@ -34515,7 +34523,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942683,
+    "visualAt": 1794943850,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dry pale cream barley grains, each elongated and oval with a visible central groove and a smooth polished surface, lying loose on a plain background.",
@@ -34533,7 +34541,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942684,
+    "visualAt": 1794943850,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of pale golden, uniform round pasta balls, each about the size of a peppercorn, smooth and slightly matte, lying loose on a plain background.",
@@ -34628,7 +34636,7 @@
     "at": 1793329004,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942684,
+    "visualAt": 1794943851,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of pecan halves, elongated golden-brown kernels with smooth, rounded outlines and fine lengthwise ridges, lighter at the tips, on a plain background.",
@@ -34645,7 +34653,7 @@
     "at": 1793329006,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942684,
+    "visualAt": 1794943851,
     "visualBy": "image-rewrite"
    },
    "visual": "One round, flat, creamy pale-tan patty of brown sugar praline, studded with whole and chopped pecan pieces visible on the top surface, with a slightly glossy caramel sheen, on a plain background.",
@@ -34678,7 +34686,7 @@
     "at": 1793331268,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942684,
+    "visualAt": 1794943851,
     "visualBy": "image-rewrite"
    },
    "visual": "A single triangular wedge of aged Pecorino Romano cheese on its side, with a hard, dry, crumbly, slightly flaky ivory-white interior and a thin, hard, smooth pale straw-coloured rind along the curved back edge. No whole wheel.",
@@ -34695,7 +34703,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942684,
+    "visualAt": 1794943851,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole, uncut firm pale yellow sheep's milk cheese wheel with a natural rind, lying on its side on a plain background.",
@@ -34808,7 +34816,7 @@
     "at": 1793329067,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942685,
+    "visualAt": 1794943852,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of dried tube pasta pieces, each with a smooth unridged outer surface and diagonally angled cut ends, pale cream colour, lying on a plain background.",
@@ -34962,7 +34970,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942685,
+    "visualAt": 1794943852,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of tiny whole dried pequin chillies, each about a centimetre long, round to oval, bright red with thin wrinkled skin and a small stem, lying loose on a plain background.",
@@ -35229,7 +35237,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942685,
+    "visualAt": 1794943852,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw pheasant lying on its side, with a very long, slender, tapering tail extending far past the small body, dark reddish-brown tail feathers, on a plain background.",
@@ -35247,7 +35255,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942685,
+    "visualAt": 1794943852,
     "visualBy": "image-rewrite"
    },
    "visual": "A single raw skinless pheasant breast fillet with deep dark red meat, lean and compact, lying flat on a plain background.",
@@ -35280,7 +35288,7 @@
     "at": 1793326098,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942686,
+    "visualAt": 1794943853,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of dried flat rice noodles, long thin straight strands that are smooth and ribbon-shaped, pale off-white and slightly translucent, lying on a plain background.",
@@ -35470,7 +35478,7 @@
     "at": 1793331065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942686,
+    "visualAt": 1794943853,
     "visualBy": "image-rewrite"
    },
    "visual": "A small round white ceramic bowl filled with pickled mustard greens: long, limp, olive-to-yellow-green shredded leaf and stem strips, glossy with brine, piled inside the bowl. Plain white background, soft light, three-quarter overhead view.",
@@ -35658,7 +35666,7 @@
     "at": 1793323334,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942686,
+    "visualAt": 1794943853,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole hedgehog mushroom tipped on its side to show the underside: a wavy, uneven, pale apricot-buff cap above a short off-centre white stem, with the cap's underside covered in tiny, short, crowded cream spines like little teeth, not gills.",
@@ -35675,7 +35683,7 @@
     "at": 1793324970,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942686,
+    "visualAt": 1794943853,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole elongated piel de sapo melon, oval and slightly tapered, with dark green skin heavily mottled by irregular black-green blotches over a paler yellow-green base, on a plain background.",
@@ -35723,7 +35731,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942687,
+    "visualAt": 1794943854,
     "visualBy": "image-rewrite"
    },
    "visual": "A single whole pig's ear, deep golden-brown and crisp, with blistered, puffed skin and curled edges, lying flat on a plain background.",
@@ -35802,7 +35810,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942687,
+    "visualAt": 1794943854,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw pig's trotter: a pale pink lower leg ending in a rounded, blunt cloven hoof split into two short, stubby toes, lying on its side on a plain background.",
@@ -35851,7 +35859,7 @@
     "at": 1793331263,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942687,
+    "visualAt": 1794943854,
     "visualBy": "image-rewrite"
    },
    "visual": "Six small cocktail sausages, each tightly wrapped in a strip of streaky bacon, roasted until the bacon is crisp, deep golden-brown and caramelised, piled on a white plate. Brown sausage ends show. No pastry, no raw pink bacon.",
@@ -36040,7 +36048,7 @@
     "at": 1793329066,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942687,
+    "visualAt": 1794943854,
     "visualBy": "image-rewrite"
    },
    "visual": "Several long, knobbly, finger-shaped potatoes with pale pink-tinged skin and uneven bumps and ridges, lying loosely together on a plain background.",
@@ -36165,7 +36173,7 @@
     "at": 1793325380,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942688,
+    "visualAt": 1794943854,
     "visualBy": "image-rewrite"
    },
    "visual": "A wide Burgundy balloon wine glass one-third full of clear ruby-red Pinot Noir: deep cherry-red in the centre, fading to a lighter garnet edge, with light shining through. Clearly red wine, not pink rosé, not opaque juice. Plain white background.",
@@ -36446,7 +36454,7 @@
     "at": 1793331395,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942688,
+    "visualAt": 1794943855,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of short, flat buckwheat pasta ribbons, about two centimetres wide and five centimetres long, dark brown with a matte surface and rough edges, on a plain background.",
@@ -36462,9 +36470,11 @@
    "source": {
     "at": 1793326364,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943855,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a single raw plaice fillet, skin-on, its brown upper skin marked by reddish spots, lying flat",
+   "visual": "A single raw plaice fillet, no head, tail or fins, thin and flat with a neatly trimmed oval outline, its brown-olive upper skin dotted by red-orange spots, lying flat on a plain background.",
    "what": "A mild, flat white fish, often fried in batter."
   },
   "plain-flour": {
@@ -36494,7 +36504,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942688,
+    "visualAt": 1794943855,
     "visualBy": "image-rewrite"
    },
    "visual": "A single large, thick, angular cooking plantain with ridged sides, blunt ends and firm green-yellow skin, lying on its side on a plain background.",
@@ -36591,7 +36601,7 @@
     "at": 1793329051,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942689,
+    "visualAt": 1794943855,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain white ceramic bowl holding several whole peeled plum tomatoes, oval and elongated with pointed ends, submerged in their own red juice, on a plain background.",
@@ -36639,7 +36649,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942689,
+    "visualAt": 1794943856,
     "visualBy": "image-rewrite"
    },
    "visual": "One poached egg in the centre of a plain white round plate: a puffy, rounded oval of white fully wrapping the yolk, a faint golden glow showing through the top, soft wispy edges, no yolk visible, no crisp or browned edges.",
@@ -36656,7 +36666,7 @@
     "at": 1793329073,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942689,
+    "visualAt": 1794943856,
     "visualBy": "image-rewrite"
    },
    "visual": "One large, broad dark green chilli pepper with broad shoulders tapering to a pointed tip, glossy wrinkled skin, lying on its side on a plain background.",
@@ -36703,7 +36713,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942689,
+    "visualAt": 1794943856,
     "visualBy": "image-rewrite"
    },
    "visual": "Several golden-yellow rectangular polenta slices, each with a crisp, deep golden-brown fried crust and a slightly bubbled surface, lying flat on a plain background.",
@@ -36828,7 +36838,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942690,
+    "visualAt": 1794943856,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole, uncut Pont-l'Évêque: a flat square cheese about 11 cm wide and only 3 cm tall, with slightly rounded corners and a soft golden-beige washed rind marked by faint crosshatch lines, viewed from above at an angle on a plain white background.",
@@ -37050,7 +37060,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942690,
+    "visualAt": 1794943857,
     "visualBy": "image-rewrite"
    },
    "visual": "A single whole raw pig's cheek, small and rounded, deep red muscle with a thin smooth band of white fat along one edge, lying alone on a plain background.",
@@ -37068,7 +37078,7 @@
     "at": 1793331202,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942690,
+    "visualAt": 1794943857,
     "visualBy": "image-rewrite"
    },
    "visual": "A single raw pork chump chop, a thick rounded cut of reddish-pink meat with a neat band of white fat along one side, lying flat on a plain background.",
@@ -37100,7 +37110,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942691,
+    "visualAt": 1794943857,
     "visualBy": "image-rewrite"
    },
    "visual": "A single piece of roasted pork skin, golden brown and evenly covered in large crisp blisters, with a bubbly, shattered-looking crunchy surface, lying on a plain background.",
@@ -37164,7 +37174,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942691,
+    "visualAt": 1794943857,
     "visualBy": "image-rewrite"
    },
    "visual": "A single cooked pork hock, the lower leg of a pig, with dark caramelised glossy brown skin and tender pale meat visible at the cut end, lying on a plain background.",
@@ -37182,7 +37192,7 @@
     "at": 1793331513,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942691,
+    "visualAt": 1794943858,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole roasted pork leg joint with golden-brown, bubbled, crisp crackling skin, scored in a diamond pattern, cooked pale meat showing at the cut edge, lying on a plain background.",
@@ -37291,7 +37301,7 @@
     "at": 1793331333,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942692,
+    "visualAt": 1794943858,
     "visualBy": "image-rewrite"
    },
    "visual": "One raw boneless pork neck fillet, an irregular elongated cut of pink meat with visible white streaks of fat marbling and thin seams of fat between muscle sections, lying on a plain background.",
@@ -37324,7 +37334,7 @@
     "at": 1793331263,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942692,
+    "visualAt": 1794943858,
     "visualBy": "image-rewrite"
    },
    "visual": "Several irregular pieces of crisp, golden, puffed pork rind, light and airy with a bubbled, blistered surface, lying on a plain background.",
@@ -37539,7 +37549,7 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942692,
+    "visualAt": 1794943858,
     "visualBy": "image-rewrite"
    },
    "visual": "A round potato farl cut into four wedge-shaped quarters and arranged together, golden-brown with griddle marks and crisp edges, lying flat on a plain background.",
@@ -37572,7 +37582,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942692,
+    "visualAt": 1794943859,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of pale golden potato pieces, each round with crimped edges, two small dark indentations for eyes, and a curved upturned mouth cut into the face, lying loose on a plain background.",
@@ -37651,7 +37661,7 @@
     "at": 1793329067,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942693,
+    "visualAt": 1794943859,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw pouting fish, stocky and cod-shaped with a deep body, large head, prominent upper jaw, a small chin barbel, and pale silvery skin with a faint greenish tint, lying on its side on a plain background.",
@@ -37804,7 +37814,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942693,
+    "visualAt": 1794943859,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain clear glass jar without any label, filled with whole yellow lemons with soft, wrinkled peel, packed between coarse white salt crystals.",
@@ -37929,7 +37939,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942693,
+    "visualAt": 1794943859,
     "visualBy": "image-rewrite"
    },
    "visual": "Paper-thin, translucent slices of Prosciutto di San Daniele draped in loose ruffled folds on a round white plate; deep rosy-red lean meat with a broad band of pure white fat along one edge, slightly glossy, plain light background.",
@@ -38040,7 +38050,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942693,
+    "visualAt": 1794943860,
     "visualBy": "image-rewrite"
    },
    "visual": "A single rectangular block of chilled pale cream puff pastry, its cut edge showing many thin, distinct horizontal layers of dough, lying flat on a plain background.",
@@ -38215,7 +38225,7 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942694,
+    "visualAt": 1794943860,
     "visualBy": "image-rewrite"
    },
    "visual": "One small, round, deep-fried Indian bread, golden brown and evenly puffed into a thick dome with a slightly blistered surface, lying alone on a plain background.",
@@ -38232,7 +38242,7 @@
     "at": 1793326242,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942694,
+    "visualAt": 1794943860,
     "visualBy": "image-rewrite"
    },
    "visual": "Several slender violet-purple asparagus spears with pointed, tightly closed tips made of overlapping scale-like bracts and neatly trimmed pale ends, lying flat on a plain background.",
@@ -38358,7 +38368,7 @@
     "at": 1793329061,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942694,
+    "visualAt": 1794943861,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain white ceramic bowl filled with thick, chunky deep red tomato sauce, with visible dark olives and small green capers scattered throughout.",
@@ -38468,7 +38478,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942694,
+    "visualAt": 1794943861,
     "visualBy": "image-rewrite"
    },
    "visual": "A round wheel of soft Portuguese sheep's cheese with a thin pale rind, one side cut open to reveal a creamy, pale yellow interior that looks soft and spreadable.",
@@ -38531,7 +38541,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942695,
+    "visualAt": 1794943861,
     "visualBy": "image-rewrite"
    },
    "visual": "One wedge-shaped slice of quiche Lorraine, cut face up, showing pale golden egg custard with pieces of bacon and a crisp pastry crust edge, on a plain background.",
@@ -38579,7 +38589,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942695,
+    "visualAt": 1794943861,
     "visualBy": "image-rewrite"
    },
    "visual": "A firm block of ruby-orange quince paste with a clean-cut, sliceable face, sitting in a small plain unmarked white ceramic bowl on a plain background.",
@@ -38659,7 +38669,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942695,
+    "visualAt": 1794943862,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw rack of lamb, a curved row of about eight rib bones with a thick, substantial loin of bright pink meat along the bones and a thin white fat cap on top, on a plain background.",
@@ -38768,7 +38778,7 @@
     "at": 1793323592,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942695,
+    "visualAt": 1794943862,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain unlabelled white ceramic bowl of cubed radish kimchi: pale white radish cubes coated in bright red chilli seasoning, moist and glossy.",
@@ -39157,7 +39167,7 @@
     "at": 1793327577,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942696,
+    "visualAt": 1794943862,
     "visualBy": "image-rewrite"
    },
    "visual": "Three or four small, knobbly, oval fingerling potatoes with pale golden-tan skin and a few shallow eyes, whole and plump, lying on a plain background.",
@@ -39300,7 +39310,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942696,
+    "visualAt": 1794943862,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled white bowl of creamy coleslaw, with thin visible shreds of white cabbage and bright orange carrot strands bound in pale dressing.",
@@ -39317,7 +39327,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942696,
+    "visualAt": 1794943863,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled white bowl holding cottage pie, its top a smooth golden-brown layer of mashed potato with a ridged texture, on a plain background.",
@@ -39349,7 +39359,7 @@
     "at": 1793329077,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942697,
+    "visualAt": 1794943863,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole rectangular fish pie with a golden-brown mashed potato top, a slice cut out to show flaky white fish chunks in creamy sauce, lying on a plain background.",
@@ -39688,7 +39698,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942697,
+    "visualAt": 1794943863,
     "visualBy": "image-rewrite"
    },
    "visual": "A large whole raw haunch of red deer venison, a thick, bulky, rounded back-leg joint of deep dark red meat with a thin creamy layer of fat along one edge, on a plain background.",
@@ -39767,7 +39777,7 @@
     "at": 1793331065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942697,
+    "visualAt": 1794943863,
     "visualBy": "image-rewrite"
    },
    "visual": "A rectangular block of cheese with a rich, bright orange interior throughout, a thin paler rind along the edges, and one clean triangular wedge cut away from the corner, on a plain background.",
@@ -39984,7 +39994,7 @@
     "at": 1793325619,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942698,
+    "visualAt": 1794943864,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of red Russian kale with flat, broad, deeply lobed blue-green leaves edged in purple, and pale purple-red stems, the leaves lying flat rather than curled, on a plain background.",
@@ -40279,7 +40289,7 @@
     "at": 1793331457,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942698,
+    "visualAt": 1794943864,
     "visualBy": "image-rewrite"
    },
    "visual": "A small stack of flat, round, pale golden puffed rice cakes, thin discs with a porous crisp surface and a regular circular shape, neatly overlapping on a plain background.",
@@ -40469,7 +40479,7 @@
     "at": 1793331513,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942698,
+    "visualAt": 1794943864,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled ceramic pot filled with shredded pork, pinkish-brown and fine-fibred, set compactly in creamy pale fat with a smooth, even surface, viewed from above on a plain background.",
@@ -40501,7 +40511,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942698,
+    "visualAt": 1794943864,
     "visualBy": "image-rewrite"
    },
    "visual": "A single portion of roast chicken meat, golden-brown crisp skin over pale, moist white meat, lying directly on a plain background with no plate or props.",
@@ -40628,7 +40638,7 @@
     "at": 1793329003,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942699,
+    "visualAt": 1794943865,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of toasted seeds with three distinct kinds visible: small golden-brown sunflower seeds, flat pale green oval pumpkin seeds, and tiny cream sesame seeds, mixed together, on a plain background.",
@@ -40706,7 +40716,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942699,
+    "visualAt": 1794943865,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of rock samphire with thick, fleshy, grey-green leaves divided into several lobes along slender stems, lying loosely on a plain background.",
@@ -40814,7 +40824,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942700,
+    "visualAt": 1794943865,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl filled with thick, moist, deep brick-red rogan josh curry paste, glossy with oil, with tiny flecks of ground chilli and spice visible, smoothed into a mound; plain white background, no jar, no powder.",
@@ -40877,7 +40887,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942700,
+    "visualAt": 1794943865,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole uncut round cheese wheel with a pale orange washed rind, seen from the side at a slight angle showing its flat top and curved sides, on a plain background.",
@@ -40909,7 +40919,7 @@
     "at": 1793329074,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942701,
+    "visualAt": 1794943866,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole bright red Romano pepper lying flat on a plain white background: long and slender, about four times longer than wide, slightly curved, glossy smooth skin, wide at the green stem end, gently tapering to a rounded blunt tip.",
@@ -41265,9 +41275,11 @@
    "source": {
     "at": 1793329078,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943866,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a small bunch of rue stems with blue-green, finely divided leaves, lying on a plain background",
+   "visual": "A small bunch of fresh rue sprigs on a plain white background: matte blue-grey-green leaves, each split into many small paddle-shaped leaflets with rounded tips, on pale stems. Not feathery like dill, not single round leaves.",
    "what": "A bitter, pungent herb with small blue-green leaves."
   },
   "rum-flavouring": {
@@ -41406,7 +41418,7 @@
     "at": 1793329060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942701,
+    "visualAt": 1794943866,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain white ceramic bowl filled with fine dark grey-brown flour, with a smooth, soft, powdery texture and no coarse flecks, on a plain background.",
@@ -41547,7 +41559,7 @@
     "at": 1793331202,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942702,
+    "visualAt": 1794943866,
     "visualBy": "image-rewrite"
    },
    "visual": "A single thick rectangular slab of fried saganaki cheese, about 2 cm thick, with a thin golden-brown crust on top and bottom and the creamy-white firm cheese showing at the cut sides, alone on a plain white background",
@@ -41644,7 +41656,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942702,
+    "visualAt": 1794943866,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cylindrical goat's cheese log with a smooth white rind, with a thin straw pushed through its centre along the length, lying on a plain background.",
@@ -41678,7 +41690,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942702,
+    "visualAt": 1794943867,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of fresh salad burnet with slender stems, each leaf made of many small, rounded, toothed leaflets arranged in neat opposite pairs along a central stalk, bright green.",
@@ -41758,7 +41770,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942703,
+    "visualAt": 1794943867,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole dry-cured sausage log, short and thick, with dark reddish-brown coarse meat, distinct white fat cubes and black peppercorns visible, on a plain background.",
@@ -41790,7 +41802,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942703,
+    "visualAt": 1794943867,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw salmon collar: an irregular, bony, wedge-shaped chunk of fatty orange salmon with the curved gill-bone arch and the pectoral fin attached and sticking out, rough torn edges where it was cut from the head, not a round steak",
@@ -41822,7 +41834,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942703,
+    "visualAt": 1794943867,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of crisp, golden-brown fried salmon skin, thin and crackly, curled into rolled and folded pieces with a glossy surface, on a plain background.",
@@ -41887,7 +41899,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942704,
+    "visualAt": 1794943868,
     "visualBy": "image-rewrite"
    },
    "visual": "Thin slices of pale white onion and thin lime slices in a plain clear glass bowl, suspended in a glossy, moist, lime-tinged liquid.",
@@ -42032,7 +42044,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942704,
+    "visualAt": 1794943868,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole dried salted white fish, stiff and flat, with a pale, slightly crystalline surface, lying on a plain background.",
@@ -42126,7 +42138,7 @@
     "at": 1793329054,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942705,
+    "visualAt": 1794943868,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole salted herring with its head and tail intact, lying flat on a plain background, silver-grey skin dusted with a fine pale salt crust and a slim elongated body.",
@@ -42144,7 +42156,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942705,
+    "visualAt": 1794943868,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of shelled roasted peanuts, elongated oval kernels with a central groove and pale golden-brown papery skins, fine salt crystals clinging to them, on a plain background.",
@@ -42193,7 +42205,7 @@
     "at": 1793331060,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942705,
+    "visualAt": 1794943869,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled glass bowl of raw relish with thin pale sliced shallot rings, long thin pale lemongrass strips, and small red chilli slices, loosely mixed together.",
@@ -42440,7 +42452,7 @@
     "at": 1793329003,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942706,
+    "visualAt": 1794943869,
     "visualBy": "image-rewrite"
    },
    "visual": "A single whole satsuma, a small, slightly flattened round citrus with loose, puffy, bright orange skin and no peel removed, lying on a plain white background.",
@@ -42595,7 +42607,7 @@
     "at": 1793326308,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942706,
+    "visualAt": 1794943869,
     "visualBy": "image-rewrite"
    },
    "visual": "Three raw scallop corals in a small white bowl: smooth, glossy, bright orange crescent-shaped lobes, each tapering to a curved point like a comma, soft and moist with a thin shiny skin. Plain white background, soft daylight.",
@@ -42627,7 +42639,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942706,
+    "visualAt": 1794943869,
     "visualBy": "image-rewrite"
    },
    "visual": "One round golden scone split into two halves, the pale crumbly cut faces showing, with a smear of red jam spread across one half, on a plain background.",
@@ -42660,7 +42672,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942706,
+    "visualAt": 1794943869,
     "visualBy": "image-rewrite"
    },
    "visual": "One small, squat, whole fresh Scotch bonnet chilli, wider than it is long, with a rounded lantern-like body, bumpy lobes at the base, glossy orange-yellow skin and a short green stalk, on a plain background.",
@@ -42738,7 +42750,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942707,
+    "visualAt": 1794943870,
     "visualBy": "image-rewrite"
    },
    "visual": "Three thick raw lamb neck slices (scrag end) lying flat, each a round cross-section with a knobbly white vertebra bone in the centre, ringed by dark red meat and creamy fat, on a plain white background",
@@ -42816,7 +42828,7 @@
     "at": 1793324788,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942707,
+    "visualAt": 1794943870,
     "visualBy": "image-rewrite"
    },
    "visual": "A small cluster of tiny bright orange oval berries on thin, thorny brown stems, glossy, lying on a plain background.",
@@ -42893,7 +42905,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942707,
+    "visualAt": 1794943870,
     "visualBy": "image-rewrite"
    },
    "visual": "Whole raw sea robin (gurnard) seen from above: slim tapering body, big bony box-shaped armored head with a steep snout, huge wing-like pectoral fins spread flat to the sides, three separate finger-like rays below them; red-orange skin, plain white background",
@@ -43035,7 +43047,7 @@
     "at": 1793327643,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942708,
+    "visualAt": 1794943870,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole unsliced rustic batch loaf with a golden-brown crust densely studded with visible pale sunflower seeds and darker flat green pumpkin seeds, on a plain background.",
@@ -43409,7 +43421,7 @@
     "at": 1793331207,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942708,
+    "visualAt": 1794943871,
     "visualBy": "image-rewrite"
    },
    "visual": "A pair of raw shad roe sacs, reddish-orange and grainy-looking with visible egg granules, lying side by side on a plain background.",
@@ -43472,7 +43484,7 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942708,
+    "visualAt": 1794943871,
     "visualBy": "image-rewrite"
    },
    "visual": "A single whole Sharon fruit, squat and slightly flattened, with glossy orange-red skin and a broad, flat, green leafy star-shaped cap spread across the top, on a plain background.",
@@ -43752,7 +43764,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942708,
+    "visualAt": 1794943871,
     "visualBy": "image-rewrite"
    },
    "visual": "Several straight-edged rectangular shortbread fingers, pale golden with a fine crumbly texture and a few small pricked holes on the surface, lying side by side on a plain background.",
@@ -43800,7 +43812,7 @@
     "at": 1793331146,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942709,
+    "visualAt": 1794943871,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of raw shrimp heads that have been pulled off the bodies: short cone-shaped grey-pink shells, each with black eyes, long feelers and small legs, with an open cut end. There are no bodies, tails or curled shrimp anywhere.",
@@ -43818,7 +43830,7 @@
     "at": 1793331328,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942709,
+    "visualAt": 1794943871,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled white ceramic bowl filled with a firm, dense block of dark pinkish-grey shrimp paste, flat-topped and compressed, with a slightly tacky surface.",
@@ -44174,10 +44186,10 @@
     "at": 1793329062,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942709,
+    "visualAt": 1794943872,
     "visualBy": "image-rewrite"
    },
-   "visual": "A small cluster of dark blue-black sloe berries, round and small with a dusty bloom, each with a short thin stalk, lying on a plain background.",
+   "visual": "A small white bowl of sloes: small round blue-black fruits of slightly different sizes with a dusty pale-blue bloom and short woody stalks, heaped in the bowl",
    "what": "A small, dark wild plum with a very sharp, sour taste."
   },
   "sloe-gin": {
@@ -44640,7 +44652,7 @@
     "at": 1793330990,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942709,
+    "visualAt": 1794943872,
     "visualBy": "image-rewrite"
    },
    "visual": "One very long, slender, nearly uniform-width snake gourd, many times longer than it is wide, with smooth unridged pale green skin and faint pale lengthwise stripes, lying straight on a plain background.",
@@ -44657,7 +44669,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942710,
+    "visualAt": 1794943872,
     "visualBy": "image-rewrite"
    },
    "visual": "one whole raw small wading bird lying on its side, with a very long straight slender bill, speckled brown and buff feathers, a short tail, and two thin legs folded beneath it, on a plain background",
@@ -44674,7 +44686,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942710,
+    "visualAt": 1794943872,
     "visualBy": "image-rewrite"
    },
    "visual": "Several long, slender cooked snow crab legs with a pale orange-red shell and a slim tapering shape, arranged side by side and lying flat on a plain background.",
@@ -44907,7 +44919,7 @@
     "at": 1793331268,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942710,
+    "visualAt": 1794943873,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole, intact soppressata sausage lying on its side, seen from the side: a long, slightly flattened log with a wrinkled red-brown casing dusted with white bloom, tied with butcher's twine at both ends. Only the outer casing shows, with both ends closed.",
@@ -45049,7 +45061,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942710,
+    "visualAt": 1794943873,
     "visualBy": "image-rewrite"
    },
    "visual": "One flat, round, golden-brown crumpet, a solid disc with no central hole, its top covered in many small open pores, on a plain background.",
@@ -45144,7 +45156,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942711,
+    "visualAt": 1794943873,
     "visualBy": "image-rewrite"
    },
    "visual": "Several rolled pale herring fillets, firm and translucent white with a soft sheen, lying directly on a plain background with no plate.",
@@ -45268,9 +45280,11 @@
    "source": {
     "at": 1793329072,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943873,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a small plain white ceramic bowl of small, soft, pale yellow egg dumplings, irregular and slightly golden at the edges",
+   "visual": "A small white ceramic bowl filled with fresh spaetzle: soft, pale-yellow egg noodle dumplings, short, thin and irregular, squiggly and uneven, tangled together, slightly glossy and buttered. Seen from a three-quarter angle on a plain light background.",
    "what": "Tiny, soft egg dumplings from southern German cooking."
   },
   "spaghetti": {
@@ -45285,7 +45299,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942711,
+    "visualAt": 1794943874,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of long, thin, unbroken, straight dry spaghetti strands, each as long as the others, pale golden yellow, on a plain background.",
@@ -45303,7 +45317,7 @@
     "at": 1793329067,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942711,
+    "visualAt": 1794943874,
     "visualBy": "image-rewrite"
    },
    "visual": "a loose bundle of long, straight, uncooked pale yellow pasta strands, each with a distinct square cross-section and a matte, dry surface, laid side by side on a plain background",
@@ -45400,7 +45414,7 @@
     "at": 1793331393,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942712,
+    "visualAt": 1794943874,
     "visualBy": "image-rewrite"
    },
    "visual": "one whole raw chicken flattened and opened out flat, backbone removed, legs and wings spread wide, pale skin, lying flat on a plain background",
@@ -45433,7 +45447,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942712,
+    "visualAt": 1794943874,
     "visualBy": "image-rewrite"
    },
    "visual": "a thin, neatly cut slice of dry-cured smoked ham with deep reddish-brown meat, a wide band of firm white fat along one edge, and a thin dark outer rind, lying on a plain background",
@@ -45481,7 +45495,7 @@
     "at": 1793329076,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942712,
+    "visualAt": 1794943874,
     "visualBy": "image-rewrite"
    },
    "visual": "A small round white ceramic bowl filled with whole, raw spelt kernels: plump, elongated oval grains, golden-tan, each intact with a faint crease down one side, none cracked or crushed. The bowl sits on a plain white background in soft light.",
@@ -45498,9 +45512,11 @@
    "source": {
     "at": 1793331389,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943875,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a whole flat round salami, dark red-brown casing, rustic and slightly uneven, lying flat",
+   "visual": "A whole spianata piccante salami pressed into a flat wide oval slab, like a thick flat cake about 20 cm across and 3 cm thick, not a round log, dark red casing dusted in chilli flakes, tied with twine, lying flat",
    "what": "A flat, spicy salami from Calabria in southern Italy."
   },
   "spiced-rum": {
@@ -45558,7 +45574,7 @@
     "at": 1793331121,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942713,
+    "visualAt": 1794943875,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cooked spider crab seen from above: a small round spiny orange body, exactly eight long thin jointed walking legs, four on each side, and two shorter claws at the front, all spread out on a plain white background",
@@ -45607,7 +45623,7 @@
     "at": 1793329070,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942713,
+    "visualAt": 1794943875,
     "visualBy": "image-rewrite"
    },
    "visual": "a small pile of fresh pale yellow tortellini, each a tightly closed, folded ring pinched shut at the seam with no filling showing, lying on a plain background",
@@ -45702,7 +45718,7 @@
     "at": 1793329006,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942713,
+    "visualAt": 1794943875,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of split mung beans, each a flat half-moon with smooth, bright yellow flesh and no dark skin or seam, on a plain white background.",
@@ -45720,7 +45736,7 @@
     "at": 1793327456,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942713,
+    "visualAt": 1794943876,
     "visualBy": "image-rewrite"
    },
    "visual": "one whole tall, rectangular golden-crusted loaf with straight vertical sides and a flat top, with a deep split running along the length of the top revealing pale crumb, lying on a plain background",
@@ -45782,7 +45798,7 @@
     "at": 1793329072,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942714,
+    "visualAt": 1794943876,
     "visualBy": "image-rewrite"
    },
    "visual": "a loose bunch of crinkled, frilly pale green cabbage leaves with thick pale central stalks, leaves open and not tightly packed, lying on a plain background",
@@ -45860,7 +45876,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942714,
+    "visualAt": 1794943876,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw squid lying flat on a plain background, with a smooth pale speckled tube-shaped body, triangular fins attached along its sides, and eight short arms plus two longer tentacles.",
@@ -45986,7 +46002,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942714,
+    "visualAt": 1794943876,
     "visualBy": "image-rewrite"
    },
    "visual": "A few separate pale cream mushrooms with broad, fleshy caps and short, thick, stout stems, not fused together, with a dry, fine-textured surface, on a plain background.",
@@ -46035,7 +46051,7 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942714,
+    "visualAt": 1794943876,
     "visualBy": "image-rewrite"
    },
    "visual": "A single wedge-shaped slice of golden baked pastry pie, cut open to show filling, with a few small fish heads with eyes poking up through the pastry on top, on a plain background.",
@@ -46068,10 +46084,10 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942715,
+    "visualAt": 1794943877,
     "visualBy": "image-rewrite"
    },
-   "visual": "A single rectangular flaky golden puff pastry slice, cut open at one end to show chunks of brown steak in thick dark gravy, on a plain background.",
+   "visual": "A steak bake on a round white plate: a whole rectangular golden flaky puff-pastry slice, cut open at one end to show chunks of beef in dark gravy",
    "what": "A flaky pastry slice filled with steak and gravy."
   },
   "steak-cut-chips": {
@@ -46086,7 +46102,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942715,
+    "visualAt": 1794943877,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose pile of long, thick frozen potato chips: each one a straight rectangular baton about 1.5 cm square and 8-10 cm long, pale golden, lightly frosted, lying side by side lengthwise, like extra-thick fries, on a plain white background",
@@ -46104,7 +46120,7 @@
     "at": 1793329052,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942715,
+    "visualAt": 1794943877,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of pale cream-coloured oat grains, each a short, chunky, irregular piece of chopped grain with rough edges, not flat or flaky, on a plain background.",
@@ -46259,7 +46275,7 @@
     "at": 1793329069,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942715,
+    "visualAt": 1794943877,
     "visualBy": "image-rewrite"
    },
    "visual": "A pair of separate cooked stone crab claws only, with no body or legs attached, each a thick bright orange-red shell with black-tipped pincers, lying on a plain background.",
@@ -46460,7 +46476,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942716,
+    "visualAt": 1794943878,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose handful of about 12 strozzapreti on a white background, close-up: each piece a short, chunky rolled pasta strip about 8 cm long and as thick as a finger, with a loose irregular spiral twist and a visible rolled seam, slightly uneven ends",
@@ -46478,7 +46494,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942716,
+    "visualAt": 1794943878,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole uncooked round frozen pizza, its thick rim visibly packed with pale yellow cheese filling, topped with red tomato sauce and cheese, lying flat on a plain background.",
@@ -46494,9 +46510,11 @@
    "source": {
     "at": 1793329061,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943878,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a small plain white ceramic bowl of whole green olives, each showing a small filling at one end",
+   "visual": "A small shallow white ceramic bowl brimming over, packed full of green olives, each olive turned so its open end faces the camera showing a bright red pimento stuffing; plain white background, soft even light, viewed from slightly above.",
    "what": "Green olives filled with a savoury stuffing, for snacking."
   },
   "stuffing-mix": {
@@ -46573,7 +46591,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942717,
+    "visualAt": 1794943878,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole roasted suckling pig, small and plump, golden-brown with crisp, bubbled crackling skin, legs tucked under the body, lying on its side on a plain background.",
@@ -47093,7 +47111,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942717,
+    "visualAt": 1794943879,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose bunch of three sweet cicely stems: soft light-green, fern-like fronds whose leaflets are neither thread-thin nor broad but flat, lance-shaped and toothed, about 2 cm long, in pairs along each frond, on hollow stems",
@@ -47234,7 +47252,7 @@
     "at": 1793327582,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942717,
+    "visualAt": 1794943879,
     "visualBy": "image-rewrite"
    },
    "visual": "A small bunch of fresh sweet potato leaves with broad heart-shaped, lightly lobed blades and pointed tips, glossy bright green, on slender green stems, lying flat on a plain background.",
@@ -47637,7 +47655,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942717,
+    "visualAt": 1794943879,
     "visualBy": "image-rewrite"
    },
    "visual": "A rolled Japanese omelette sliced into rounds, showing pale-gold layered egg with visible spiral layers, the slices arranged in a neat row on a plain background.",
@@ -47747,7 +47765,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942718,
+    "visualAt": 1794943879,
     "visualBy": "image-rewrite"
    },
    "visual": "Long, slightly curved brown tamarind pods, about fifteen centimetres each, with a thin brittle papery shell and visible constrictions between the seeds, lying loose on a plain background.",
@@ -47890,7 +47908,7 @@
     "at": 1793329068,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942718,
+    "visualAt": 1794943879,
     "visualBy": "image-rewrite"
    },
    "visual": "A loose heap of cooked taro leaves, dark green and soft, wilted and glossy with a silky, collapsed texture, the broad heart-shaped blades folded, on a plain background.",
@@ -47986,7 +48004,7 @@
     "at": 1793329065,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942718,
+    "visualAt": 1794943880,
     "visualBy": "image-rewrite"
    },
    "visual": "A clear drinking glass filled with translucent golden-amber tawny port wine, bright and see-through, filled to just below the rim.",
@@ -48003,7 +48021,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942718,
+    "visualAt": 1794943880,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of fresh tayberries: long, tapered cone-shaped berries about 4 cm long, made of plump glossy drupelets, bright deep red to wine-red like an oversized raspberry, not black, on a plain white background.",
@@ -48051,7 +48069,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942719,
+    "visualAt": 1794943880,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole small oven-ready wild teal duck, plucked, breast up, legs neatly tucked, wings folded; intact skin with a darker pinkish-red game tint, plump dark breast visible beneath; no cuts or exposed flesh; plain white background, soft light",
@@ -48207,7 +48225,7 @@
     "at": 1793329083,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942719,
+    "visualAt": 1794943880,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of delicate pale cream cheese shavings, each one curled and twisted into an open rose-shaped spiral, loosely arranged on a plain background.",
@@ -48224,7 +48242,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942719,
+    "visualAt": 1794943881,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole cheese shaped like a rounded cone with a small pointed nipple at the top, standing upright on its flat base, smooth pale yellow rind, shown on a plain background.",
@@ -48286,7 +48304,7 @@
     "at": 1793325354,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942719,
+    "visualAt": 1794943881,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of dried bird's eye chillies, each slim and about three centimetres long, tapering to a sharp point, with wrinkled dull red skin and short brown stems.",
@@ -48589,7 +48607,7 @@
     "at": 1793331192,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942720,
+    "visualAt": 1794943881,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of dried Timut pepper on plain white: tiny reddish-brown to dark brown husks split open into little cups, with rough, pitted skins, a few loose shiny black seeds and short twig stems mixed in. No green, no smooth round peppercorns.",
@@ -48636,7 +48654,7 @@
     "at": 1793329063,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942720,
+    "visualAt": 1794943881,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled white bowl of small whole baby squid, each with a rounded tube-shaped body and short curled tentacles, floating in dark oil.",
@@ -48853,9 +48871,11 @@
    "source": {
     "at": 1793325948,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943881,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a small plain white ceramic bowl of small pale bite-sized shellfish, lightly glossy",
+   "visual": "A small white bowl heaped with dozens of shelled cockles in a little brine: tiny plump curled morsels about 1 cm long, creamy beige and a pinkish hooked foot, glossy, wet and irregular in shape, no shells, plain light background.",
    "what": "Small, briny shellfish, sold ready to eat in a tin."
   },
   "tinned-coconut-milk": {
@@ -48964,7 +48984,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942720,
+    "visualAt": 1794943882,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain clear glass bowl of mixed diced fruit in pale syrup: bright red cherry halves, green grape halves, pale yellow pineapple cubes and orange papaya chunks, in a heap on a plain background.",
@@ -49166,7 +49186,7 @@
     "at": 1793329086,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942721,
+    "visualAt": 1794943882,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain white bowl of thick Italian minestrone soup with visible diced carrot, green beans, celery and zucchini and small ditalini pasta tubes in a tomato-coloured broth.",
@@ -49277,7 +49297,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942721,
+    "visualAt": 1794943882,
     "visualBy": "image-rewrite"
    },
    "visual": "Bite-sized pieces of cooked octopus, pale pink-white with visible round suckers and curled tentacle shapes, in a plain unlabelled clear glass bowl with a little liquid.",
@@ -49523,7 +49543,7 @@
     "at": 1793330990,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942721,
+    "visualAt": 1794943882,
     "visualBy": "image-rewrite"
    },
    "visual": "Small smoked oysters, dark brown-amber with a glossy, slightly wrinkled texture, packed in golden oil in a plain unlabelled clear glass bowl.",
@@ -49540,7 +49560,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942721,
+    "visualAt": 1794943883,
     "visualBy": "image-rewrite"
    },
    "visual": "A small plain unlabelled white bowl filled with soft pasta in smooth orange tomato sauce, the pasta forming many tiny hollow rings, each about a centimetre across, pale yellow and glossy.",
@@ -49724,7 +49744,7 @@
     "at": 1793329084,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942722,
+    "visualAt": 1794943883,
     "visualBy": "image-rewrite"
    },
    "visual": "A block of pale cream-coloured cheddar with one triangular wedge cut away, the cut face speckled with many small bright green chive flecks and tiny pale shallot pieces.",
@@ -49804,7 +49824,7 @@
     "at": 1793329071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942722,
+    "visualAt": 1794943883,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic dipping bowl filled with a dense mound of tobiko: thousands of tiny, pinhead-sized, glossy bright-orange flying fish eggs with a fine, sand-like texture. All roe stays inside the bowl. Plain cream background.",
@@ -50082,7 +50102,7 @@
     "at": 1793329064,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942722,
+    "visualAt": 1794943883,
     "visualBy": "image-rewrite"
    },
    "visual": "A small scattered handful of about a dozen tonka beans: almond-shaped black seeds, each the size of a large almond (3 cm long, 1 cm wide), tapered at both ends, with deep lengthwise wrinkles and a faint oily sheen, on a plain cream background.",
@@ -50147,7 +50167,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942722,
+    "visualAt": 1794943884,
     "visualBy": "image-rewrite"
    },
    "visual": "A small round sheep's cheese with its top cut away, showing soft, spoonable pale yellow creamy paste inside and a thin golden-brown rind around the edge, on a plain background.",
@@ -50382,7 +50402,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942723,
+    "visualAt": 1794943884,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole, uncut raw tri-tip beef roast, thick and triangular with three rounded corners, deep red meat with a thin fat cap along one edge, lying flat on a plain background.",
@@ -50445,7 +50465,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942723,
+    "visualAt": 1794943884,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled clear glass bottle filled with a transparent, colourless liquid, pale and water-clear, standing on a plain background.",
@@ -50462,7 +50482,7 @@
     "at": 1793329068,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942723,
+    "visualAt": 1794943884,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose heap of dry, uncooked trofie pasta: short, thin, tapered twists with a few tight, slender spirals that narrow to pointed ends, in pale cream colour, on a plain white background.",
@@ -50479,7 +50499,7 @@
     "at": 1793329075,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942724,
+    "visualAt": 1794943884,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole long, slender, curved squash with a thin curved neck and a bulbous end, pale green smooth skin with fine pale stripes, lying on its side on a plain background.",
@@ -50790,7 +50810,7 @@
     "at": 1793329081,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942724,
+    "visualAt": 1794943885,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of raw turkey giblets on a plain white background: a pale, smooth neck with a cut end, a dark red heart, and a pinkish-grey gizzard with a ridged, muscular surface.",
@@ -51164,7 +51184,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942724,
+    "visualAt": 1794943885,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole round soft cheese with a thin pale golden rind and a slightly sunken, creamy-looking top, lying on its side on a plain background.",
@@ -51182,7 +51202,7 @@
     "at": 1793329061,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942724,
+    "visualAt": 1794943885,
     "visualBy": "image-rewrite"
    },
    "visual": "a small plain bowl of peeled cooked chestnuts, irregular lobed rounded shapes with creased, wrinkled surfaces and pale golden-brown colour, not smooth",
@@ -51368,7 +51388,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942725,
+    "visualAt": 1794943885,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw veal breast, a thin, flat rectangular cut of pale pink meat with a thin, uneven layer of creamy white fat along one edge, lying flat on a plain white background.",
@@ -51386,7 +51406,7 @@
     "at": 1793331463,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942727,
+    "visualAt": 1794943886,
     "visualBy": "image-rewrite"
    },
    "visual": "A single raw veal loin chop lying flat on a plain white background: a thin oval slice of very pale pink, fine-grained meat with a small curved bone along one edge and a narrow rim of white fat.",
@@ -51450,7 +51470,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942728,
+    "visualAt": 1794943886,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw cross-cut veal shin on a plain white background: a thick round slice of pale pink leg meat with a central marrow bone surrounded by a ring of lean muscle.",
@@ -51698,7 +51718,7 @@
     "at": 1793324274,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942728,
+    "visualAt": 1794943886,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw velvet crab, small and flattened, with a smooth, velvety reddish-brown shell, bright red eyes and paddle-shaped swimming legs, lying on its back on a plain background.",
@@ -51793,7 +51813,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942728,
+    "visualAt": 1794943886,
     "visualBy": "image-rewrite"
    },
    "visual": "A small, round raw venison medallion, about 4 cm across and 2 cm thick, with a smooth deep-red surface and clean, straight sides, lying flat on a plain background.",
@@ -51826,7 +51846,7 @@
     "at": 1793329086,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942728,
+    "visualAt": 1794943886,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole roasted venison rack, browned on the outside with pink cooked meat at the cut face, and a row of curved rib bones extending from one end, lying on a plain background.",
@@ -51858,7 +51878,7 @@
     "at": 1793329085,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942728,
+    "visualAt": 1794943887,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw venison shank, elongated and tapered like a lower leg, dark red meat with one exposed pale bone at the thicker end, lying on its side on a plain background.",
@@ -51921,7 +51941,7 @@
     "at": 1793329004,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942729,
+    "visualAt": 1794943887,
     "visualBy": "image-rewrite"
    },
    "visual": "A small loose pile of very thin, fine, uniform pale pasta strands, each as slender as thread, straight and dry, lying on a plain background.",
@@ -51970,7 +51990,7 @@
     "at": 1793331513,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942729,
+    "visualAt": 1794943887,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole round two-layer sponge cake with a pale golden top, one wedge cut away to show two light sponge layers separated by a visible band of bright red raspberry jam, on a plain background.",
@@ -52033,7 +52053,7 @@
     "at": 1793331323,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942729,
+    "visualAt": 1794943887,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain unlabelled clear glass jar filled to the top with a smooth, thick, brick-red paste with a slight oily sheen and fine flecks of ground spice, with no chunks or fruit pieces visible.",
@@ -52170,7 +52190,7 @@
     "at": 1793329061,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942729,
+    "visualAt": 1794943888,
     "visualBy": "image-rewrite"
    },
    "visual": "A single empty golden puff pastry case standing upright on a plain background: a round, straight-sided cup with a hollow centre, its walls showing many thin, flaky layers.",
@@ -52218,7 +52238,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942730,
+    "visualAt": 1794943888,
     "visualBy": "image-rewrite"
    },
    "visual": "A rectangular stack of three thin, crisp, pale golden wafer sheets lying flat on a plain background, with smooth white cream spread between each layer and clean, flat edges.",
@@ -52311,7 +52331,7 @@
     "at": 1793331395,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942730,
+    "visualAt": 1794943888,
     "visualBy": "image-rewrite"
    },
    "visual": "A single whole, uncut round rustic loaf of walnut bread with a golden-brown crust and many large walnut halves and pieces pressed into the top and sides, clearly visible. Plain off-white background, soft light, no slices or cut face.",
@@ -52497,7 +52517,7 @@
     "at": 1793329059,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942730,
+    "visualAt": 1794943889,
     "visualBy": "image-rewrite"
    },
    "visual": "A few thin, flat, pale golden water biscuits on a plain background: square crackers with a crisp, slightly bubbled surface and a neat grid of small, evenly spaced pricked holes.",
@@ -52642,7 +52662,7 @@
     "at": 1793331071,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942730,
+    "visualAt": 1794943889,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white ceramic bowl filled with roasted black watermelon seeds: small, flat, teardrop-shaped seeds with a glossy dark shell and pale edges, all inside the bowl, none spilled, plain light background, soft daylight.",
@@ -52753,7 +52773,7 @@
     "at": 1793329073,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942731,
+    "visualAt": 1794943889,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of whole, unmilled wheat kernels: oval, slightly elongated, with a visible crease along one side, dull light-brown color and a matte finish, on a plain background.",
@@ -52817,7 +52837,7 @@
     "at": 1793329079,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942731,
+    "visualAt": 1794943889,
     "visualBy": "image-rewrite"
    },
    "visual": "A small white bowl filled with liquid whipping cream, pale ivory, smooth and glossy, with a gentle swirl in the middle; only the bowl and the cream, on a plain white background",
@@ -52881,7 +52901,7 @@
     "at": 1793329058,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942731,
+    "visualAt": 1794943890,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole white aubergine lying on its side on a plain background, with smooth creamy-white skin, a slightly rounded oval shape, a small green leafy calyx and a short stem at the top end.",
@@ -52976,7 +52996,7 @@
     "at": 1793329082,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942731,
+    "visualAt": 1794943890,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw white hen's egg lying on its side, clearly oval and about one and a half times as long as it is wide, with a smooth matte white shell, on a plain background.",
@@ -53197,7 +53217,7 @@
     "at": 1793329006,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942732,
+    "visualAt": 1794943890,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole white truffle, a small irregular nugget with smooth, firm pale beige-cream skin, faint folds and shallow grooves, on a plain background.",
@@ -53349,7 +53369,7 @@
     "at": 1793329078,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942732,
+    "visualAt": 1794943890,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw duck, plucked and clean, with smooth pale cream skin, legs and folded wings tucked neatly against the body, lying breast-side up on a plain background.",
@@ -53523,7 +53543,7 @@
     "at": 1793330862,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942732,
+    "visualAt": 1794943891,
     "visualBy": "image-rewrite"
    },
    "visual": "A plain ceramic bowl of moist, coarse wholegrain mustard, pale brown with whole and cracked mustard seeds visible throughout the thick paste.",
@@ -53742,7 +53762,7 @@
     "at": 1793331513,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942732,
+    "visualAt": 1794943891,
     "visualBy": "image-rewrite"
    },
    "visual": "A whole raw wild goose, plucked and clean, with pale greyish skin, legs folded naturally under the body and the neck resting straight along the body, lying breast-down on a plain background.",
@@ -53759,7 +53779,7 @@
     "at": 1793326910,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942732,
+    "visualAt": 1794943891,
     "visualBy": "image-rewrite"
    },
    "visual": "A small heap of long, slender, needle-shaped wild rice grains, about 1.5 cm long, smooth-surfaced and tapered at both ends, in a dark brown-black color with a matte finish, on a plain background.",
@@ -53885,7 +53905,7 @@
     "at": 1793329057,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942733,
+    "visualAt": 1794943891,
     "visualBy": "image-rewrite"
    },
    "visual": "A small pile of cooked winkles, tiny sea snails with conical spiral shells that taper to a point, glossy dark grey-black, on a plain background.",
@@ -54026,7 +54046,7 @@
     "at": 1793329080,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942733,
+    "visualAt": 1794943892,
     "visualBy": "image-rewrite"
    },
    "visual": "One whole raw woodcock lying on its side on a plain white background. Plump body with mottled brown, grey and buff feathers, a very long, straight, slender bill, and short legs tucked in.",
@@ -54427,7 +54447,7 @@
     "at": 1793331005,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942733,
+    "visualAt": 1794943892,
     "visualBy": "image-rewrite"
    },
    "visual": "A raw irregular fish cut from behind the head, with uneven bony edges, a curved shape, and a fin-shaped piece attached, pale pink flesh and silver skin, lying flat on a plain background.",
@@ -54476,7 +54496,7 @@
     "at": 1793329061,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942733,
+    "visualAt": 1794943892,
     "visualBy": "image-rewrite"
    },
    "visual": "A single risen Yorkshire pudding shaped like a cup, with a tall golden-brown crisp rim, a hollow centre and a puffed, slightly uneven top edge, on a plain background.",
@@ -54616,9 +54636,11 @@
    "source": {
     "at": 1793331207,
     "author": "claude-haiku-5-5",
-    "factCheck": "claude-sonnet-5-5"
+    "factCheck": "claude-sonnet-5-5",
+    "visualAt": 1794943892,
+    "visualBy": "image-rewrite"
    },
-   "visual": "a small plain white ceramic bowl of smooth bright green paste, speckled with small dark flecks",
+   "visual": "A small heaped mound of thick, coarse, grainy green yuzu kosho paste in a shallow white ceramic dish, visible flecks of yuzu peel and tiny chilli specks, holding its shape, no jar, plain light background",
    "what": "A fiery paste of yuzu citrus peel and chilli, from Japan."
   },
   "za-atar": {
@@ -54742,7 +54764,7 @@
     "at": 1793331262,
     "author": "claude-haiku-5-5",
     "factCheck": "claude-sonnet-5-5",
-    "visualAt": 1794942734,
+    "visualAt": 1794943893,
     "visualBy": "image-rewrite"
    },
    "visual": "A small neat heap of dry, pale yellow ziti pasta tubes, smooth-surfaced with no ridges, medium width, with straight-cut ends, on a plain background.",
