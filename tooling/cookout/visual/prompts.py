@@ -132,8 +132,8 @@ def visual_rewrite_prompt(
     rejected: Mapping[str, tuple[str, Sequence[str]]] | None = None,
 ) -> str:
     """Rewrite of a failed description. entries: (id, name, what, old visual, every checker reason
-    so far). `rejected` maps an id to (the description we refused, why): a repeat request says so, or
-    the model keeps echoing a checker's wording (a reason saying 'hand-twisted' got 'hand' back)."""
+    so far). `rejected` maps an id to (the description we refused, why): a repeat request says
+    so, or the model keeps echoing a checker's wording ('hand-twisted' got 'hand' back)."""
     body = "\n\n".join(
         f"id: {i}\nname: {name}\nwhat: {what}\nold description: {old}\nchecker reasons: "
         + ("; ".join(reasons) or "none")
