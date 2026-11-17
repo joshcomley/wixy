@@ -11,6 +11,7 @@ import json
 import random
 import re
 import shutil
+import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -180,6 +181,29 @@ def parse_verdicts(text: str, numbers: Sequence[str]) -> list[Verdict]:
     return [out[n] for n in numbers]
 
 
+def fresh_directory(root: Path, name: str, *, tries: int = 4, wait_s: float = 2.0) -> Path:
+    """An empty folder for one batch. On Windows a folder cannot be deleted while any process (a
+    check run that was cancelled but has not quite exited, an indexer) still has it open; that
+    killed a whole check round at 20:04 UTC on 16 Nov 2026. So a stuck old folder is retried
+    briefly and then simply left alone: the batch gets `<name>-r<k>` instead. The pictures in
+    the abandoned folder are copies, so nothing is lost."""
+    for k in range(tries + 1):
+        directory = root / (name if k == 0 else f"{name}-r{k}")
+        if directory.exists():
+            for attempt in range(tries):
+                try:
+                    shutil.rmtree(directory)
+                    break
+                except OSError:
+                    if attempt == tries - 1:
+                        break
+                    time.sleep(wait_s)
+        if not directory.exists():
+            directory.mkdir(parents=True)
+            return directory
+    raise OSError(f"no usable folder for batch {name} under {root}")
+
+
 def build_batch(
     batch_id: str,
     real: Sequence[CheckImage],
@@ -188,10 +212,7 @@ def build_batch(
     rng: random.Random,
 ) -> Batch:
     """Copy the cards into `<check_root>/<batch_id>/` as 01.webp… with a decoy at a random spot."""
-    directory = check_root / batch_id
-    if directory.exists():
-        shutil.rmtree(directory)
-    directory.mkdir(parents=True)
+    directory = fresh_directory(check_root, batch_id)
     slots: list[CheckImage | Decoy] = list(real)
     if decoy is not None:
         slots.insert(rng.randrange(len(slots) + 1), decoy)
@@ -291,10 +312,7 @@ async def vision_proof(
 ) -> None:
     """Refuse-never-degrade: 2 obviously right + 2 obvious decoys, all four must be answered
     correctly (`correct` for the right ones, anything but `correct` for the decoys)."""
-    directory = check_root / f"proof-{model.label}"
-    if directory.exists():
-        shutil.rmtree(directory)
-    directory.mkdir(parents=True)
+    directory = fresh_directory(check_root, f"proof-{model.label}")
     slots: list[CheckImage | Decoy] = [*right[:2], *decoys[:2]]
     rng.shuffle(slots)
     lines: list[CheckLine] = []
