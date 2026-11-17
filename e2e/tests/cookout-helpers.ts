@@ -6,39 +6,9 @@ import { expect } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { LOADED_WAIT_MS, MULTI_TAP_INTERVAL_MS, unlockServer } from "./server-helpers";
 
-/** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
-/** How long a wait on a server round trip may take on a loaded box (a dozen browsers on one machine). */
-export const LOADED_WAIT_MS = 30_000;
-
-export const MULTI_TAP_INTERVAL_MS = 400;
-
-export async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
+export { LOADED_WAIT_MS, MULTI_TAP_INTERVAL_MS, unlockServer };
 
 /** The product's own spacing rule: two taps less than MULTI_TAP_INTERVAL_MS (400 ms) apart lock the chat (R3), so a
  * scripted tap sequence waits that long (+100 ms) between taps, as a person would. It waits for the product's timer,

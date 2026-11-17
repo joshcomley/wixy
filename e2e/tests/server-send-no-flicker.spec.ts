@@ -12,6 +12,7 @@
 
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { unlockServer } from "./server-helpers";
 
 const VIEWPORTS = [
   { label: "desktop", width: 1280, height: 900, hasTouch: false },
@@ -36,35 +37,6 @@ interface Sample {
   readonly sendDisabled: boolean;
   /** Pixels of thread content below the visible area: 0 means pinned to the latest message. */
   readonly threadGap: number;
-}
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  // R2 v1.3's 400ms reveal-affordance debounce (server-chat.spec.ts, same wait).
-  await page.waitForTimeout(500);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
-    timeout: 5000,
-  });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
 
 /** Enough history that the thread genuinely scrolls, so "pinned to the latest" means something. */
