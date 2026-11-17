@@ -186,10 +186,10 @@
   "reason": "I looked at all four images and agree with the automatic check each time. Attempt 1 shows solid, pale piped blobs with no hollow inside. Attempts 2, 3 and 4 are hollow cups, but their walls are smooth, dense shortcrust with no flaky puff-pastry layers. None of them is a faithful vol-au-vent case. The new description names the visible stacked layers, the risen walls, the hollow centre and the classic lid, so the generator should stop making shortcrust cups."
  },
  "garganelli": {
-  "at": 1794918742,
+  "at": 1794923828,
   "attempt": null,
-  "decision": "retry",
-  "reason": "I looked at all four pictures and none of them is right. Attempt 1 has a bowl, but the pasta is straight-cut, rigatoni-like tubes with no pointed ends. Attempts 2, 3 and 4 are loose heaps with no bowl. Attempt 2 comes closest to garganelli's slanted ridges, while 3 and 4 show short rigatoni-style cut tubes. The new description asks for a bowl and spells out the look: rolled diagonally, pointed quill-like ends, ridges circling each tube and a visible seam."
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
  },
  "gemelli": {
   "at": 1794918783,
@@ -233,11 +233,23 @@
   "decision": "retry",
   "reason": "I looked at all four pictures and none of them is right. Attempts 1 and 2 show a small, closed, plain white button mushroom: no gills, no ring and much too small. Attempts 3 and 4 show a porcini-type mushroom with a brown cap, a sponge-like underside and no ring. A real horse mushroom is large, with a broad cream-to-yellowish cap, dark brown gills and a big hanging ring on a tall stem. The new description puts the mushroom on its side so the gills and ring can be seen, which is what tells it apart from both mistakes."
  },
+ "ice-cream-wafers": {
+  "at": 1794923861,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four pictures can be used. Attempt 1 has a plate, but it shows round, plain biscuits rather than patterned wafers. Attempts 2, 3 and 4 show the right food, flat rectangular wafers with a grid pattern. But all three sit as a block on a bare surface with no plate, and they look quite thick. The new description asks for thin wafer sheets with a grid pattern, spread out on a white plate that is fully in view."
+ },
  "indian-bay-leaf": {
   "at": 1794920718,
   "attempt": null,
   "decision": "retry",
   "reason": "I opened all four images. Attempts 1 and 2 are heaps of thin, needle-like leaves that look like dried grass or willow leaves, not bay leaves. Attempts 3 and 4 are clean, but they show ordinary bay leaves: one central vein with side veins branching off it like a feather. The real Indian bay leaf (Cinnamomum tamala) is broader and has three veins that start at the base and run side by side to the tip. None of the four gets this right. The new description asks for a few broad leaves laid flat with those three veins clearly visible."
+ },
+ "instant-noodles": {
+  "at": 1794923893,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images. Attempt 1 shows a white bowl, but the smooth, loose cooked strands look like spaghetti, not instant noodles. Attempts 2, 3 and 4 are clean, recognisable dried crinkly noodle blocks, but none has the bowl the brief asks for. I can't pick any of them without breaking the brief. The new description puts the dry, wavy block inside a fully visible white bowl and rules out water, so the strands can't turn into cooked spaghetti again."
  },
  "italian-dressing": {
   "at": 1794920750,
@@ -245,16 +257,76 @@
   "decision": "retry",
   "reason": "I opened all four images. Attempts 1 and 2 show narrow-necked bottles of clear golden liquid with no herbs, garlic or seasoning, so they look like plain oil. Attempts 3 and 4 show the dressing well, with herb and garlic flecks and settled herbs, but in open wide-mouth jars instead of the required bottle. None meets both conditions, so the new description asks for the herb-filled dressing inside a bottle."
  },
+ "jaffa-cakes": {
+  "at": 1794923649,
+  "attempt": 3,
+  "decision": "accepted",
+  "reason": "I opened all four images. Attempt 3 is a clean, accurate Jaffa cake: a thin golden sponge base, a thin orange jelly layer showing at the edge, and a smooth chocolate dome on top, on a plain light background. Its only failure was the missing plate, which is just staging and doesn't change what the cake looks like. The other three really are wrong. Attempt 1 is a tall layered cake with a small chocolate cap. Attempt 2 has the jelly sitting on top of the chocolate. Attempt 4 has no jelly layer at all."
+ },
  "jiu-soba": {
   "at": 1794920662,
   "attempt": 4,
   "decision": "accepted",
   "reason": "Attempt 4 is a clean, accurate picture of dried soba: a neat bundle of long, thin, straight strands in the grey-brown colour of buckwheat, on a plain background. The check rejected it only because the noodles are bundled rather than heaped, and dried soba is normally sold and recognised in a bundle like this. Attempts 1 and 2 show short, broken, twig-like pieces that look like wood rather than noodles. Attempt 3 is also a bundle, but its strands are less even in colour and texture than Attempt 4's."
  },
+ "keema-naan": {
+  "at": 1794923681,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and none is a faithful picture. Attempt 1 is plain naan on a plate with no mince showing. Attempt 2 is a bread bowl filled with mince, open on top. Attempt 3 has no plate and is a thick, puffy bun torn open, not a flat naan. Attempt 4 is also a thick stuffed bun with no plate. The new description asks for a plate, a flat shape and cut wedges. The cut edges show the thin layer of lamb sealed inside the bread, which is what makes it keema naan."
+ },
+ "laksa-noodles": {
+  "at": 1794923711,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four is right. Attempt 1 shows a nest of very thin, wispy vermicelli. Attempts 2, 3 and 4 all show dry, straight, flat sticks packed into a rigid bundle. None shows the soft, cooked, thick round strands of real laksa noodles. The new description asks for a loose heap of cooked strands, says how thick they should be, asks for round cut ends, and rules out the thin, flat, dry and bundled looks that failed before."
+ },
  "lamb-loin-chops": {
   "at": 1794920590,
   "attempt": null,
   "decision": "retry",
   "reason": "I looked at all four pictures and none of them is a lamb loin chop. Attempts 1 and 4 are large boneless red steaks that look like beef. Attempt 2 is a boneless round medallion. Attempt 3 has a curved rib bone, so it is a rib chop. None shows the small T-shaped bone that marks a loin chop. The new description asks for that bone, the two pieces of meat on either side of it, the fat rim, a small size, and several chops together so they read as lamb."
+ },
+ "lemon-glaze": {
+  "at": 1794923308,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and none of them shows lemon glaze. Attempt 1 is a clear, watery yellow liquid in a bottle, so it looks like a drink or a syrup rather than icing. Attempts 2, 3 and 4 are thick, matte yellow pastes in white bowls, which look like lemon curd or custard. Real lemon glaze is a glossy icing made from powdered sugar and lemon juice: almost white and runny enough to drizzle. The new description says it is opaque and white, shows it pouring off a spoon so you can see it drizzles, uses a clear bowl instead of a bottle, and adds a lemon so the flavour is obvious."
+ },
+ "mace-blades": {
+  "at": 1794923828,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four is usable. Attempt 1 has a bowl, but its contents are thin shredded threads that look like saffron or dried carrot, not mace's broad lacy blades. Attempts 2, 3 and 4 are loose heaps on a bare surface with no bowl. Attempt 4 looks most like mace, but it still breaks the brief. The new description asks for both the bowl and the flat, net-like blade shape, and rules out thin strands."
+ },
+ "mahi-mahi": {
+  "at": 1794923796,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and none shows a mahi-mahi. Each one is a silver-blue fish with a pointed head, a short raised dorsal fin and a slim tail stalk, which makes it look like a jack, yellowtail or small tuna. None has mahi-mahi's steep blunt forehead, its single dorsal fin running the full length of the back, or its gold and green colouring. The new description asks for exactly those features."
+ },
+ "manicotti": {
+  "at": 1794923602,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images. Attempt 1 shows a pile of short ridged rigatoni. Attempts 2, 3 and 4 show large, smooth tubes, but they are dry, empty, unbaked pasta with no filling and no sauce. None of them shows manicotti as the finished dish of stuffed tubes baked under sauce. The new description starts from the baked dish rather than the pasta shape. It asks for visible ricotta filling at the tube ends, tomato sauce and melted browned cheese, which should stop the image generator from drawing plain dry tubes again."
+ },
+ "microwave-popcorn-bag": {
+  "at": 1794923570,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and none shows the actual item. Attempt 1 is a bowl of popped popcorn. Attempts 2, 3 and 4 are loose heaps of raw corn kernels on a bare surface. No picture shows the sealed microwave pouch, which is the item itself. The bowl requests in the check results don't fit this item, because a microwave popcorn bag isn't served in a bowl. The new description asks for the closed, flat paper bag on its own, so the image generator can't fall back to drawing popcorn or kernels."
+ },
+ "middle-bacon": {
+  "at": 1794923849,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "Attempt 1 is streaky only: a long striped strip with no wide lean eye. Attempts 2 and 3 are lean back meat with a fat rim and no streaky part. Attempt 4 is the closest, but it is still a back rasher with only a faint fat seam and no clear striped tail. The new description names both halves and how they join, so the image has to show the two-part shape."
+ },
+ "middle-neck-of-lamb": {
+  "at": 1794923404,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and none is acceptable. Attempts 1 and 2 have one round marrow bone in the middle of the meat, which makes them look like leg steaks. Attempts 3 and 4 have a cluster of four to six round bones, which a lamb neck slice doesn't have, and all four show pale pink meat that looks like pork. A real middle neck slice has one vertebra, a round bone with a spur and a small spinal hole, in deep red lamb, so the new description asks for exactly that."
  }
 }
