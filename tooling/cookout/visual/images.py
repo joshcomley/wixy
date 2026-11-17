@@ -162,16 +162,24 @@ def wait_for_idle(
 @dataclass(frozen=True, slots=True)
 class AttemptPlan:
     attempt: int
-    rewrite_visual: bool  # attempt 3: Haiku rewrites `visual` first
+    rewrite_visual: bool  # attempt 2: Haiku rewrites `visual` first (a reseed alone passes ~33%)
     new_seed: bool  # attempt 1 draws a random seed too; 2 and 4 are explicit "new seed"
 
 
 def plan_attempt(attempt: int) -> AttemptPlan:
-    """1 catalogue visual; 2 same visual new seed; 3 rewritten visual; 4 rewritten, new seed.
-    5 and 6 (after an Opus review gives a new visual) are checked normally."""
+    """1 catalogue visual; 2 rewritten visual; 3 and 4 the rewritten visual with new seeds.
+    5 and 6 (after an Opus review gives a new visual) are checked normally. The rewrite moved from
+    attempt 3 to attempt 2 after measuring (17 Nov 2026): a plain reseed of a failed description
+    passed 33% (72/218), the Haiku rewrite passed 80% (32/40)."""
     if not 1 <= attempt <= MAX_REVIEW_ATTEMPTS:
         raise ValueError(f"attempt {attempt} is outside 1..{MAX_REVIEW_ATTEMPTS}")
-    return AttemptPlan(attempt, rewrite_visual=attempt == 3, new_seed=True)
+    return AttemptPlan(attempt, rewrite_visual=attempt == 2, new_seed=True)
+
+
+def needs_rewrite(attempt: int, overrides: Mapping[str, str], ident: str) -> bool:
+    """The next attempt (`attempt`) of `ident` starts from a Haiku rewrite: it is attempt 2 (or 3,
+    for an id a round already took past 2 under the old ladder) and none is stored yet."""
+    return attempt in (2, 3) and ident not in overrides
 
 
 def after_failure(attempt: int, *, reviewed: bool) -> str:
@@ -1187,7 +1195,7 @@ async def run_pipeline(
     journal. Returns counts.
 
     `check_only` is the other half of `render_only`: it checks what is already drawn (and does the
-    work that needs cmd: the attempt-3 rewrite, the Opus review) but never renders. A picture that
+    work that needs cmd: the attempt-2 rewrite, the Opus review) but never renders. A picture that
     needs another attempt is left in state `regenerate`; a `render_only` run (on the render
     machine) draws it, and the next `check_only` round checks it. This keeps the hub free of
     rendering while the checks, which need cmd, stay where cmd is. With `check_only`,
@@ -1296,9 +1304,8 @@ async def run_pipeline(
                     rewrite = [
                         i
                         for i in ids_k
-                        if next_attempt(work, i) == 3
+                        if needs_rewrite(next_attempt(work, i), overrides, i)
                         and unchecked_attempt(work, i, state.get(i)) is None
-                        and i not in overrides
                     ]
                     if rewrite:
                         await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)
@@ -1329,7 +1336,7 @@ async def run_pipeline(
 
     while pending:
         chunk_ids, pending = pending[:chunk_size], pending[chunk_size:]
-        # attempt 3 starts from a Haiku rewrite of the description; a picture that is already
+        # attempt 2 starts from a Haiku rewrite of the description; a picture that is already
         # drawn and only waits for its check, and a render-only run (no checker), need none
         state = journal_state(work.journal)
         overrides = work.read_overrides()
@@ -1337,9 +1344,8 @@ async def run_pipeline(
             i
             for i in chunk_ids
             if not render_only
-            and next_attempt(work, i) == 3
+            and needs_rewrite(next_attempt(work, i), overrides, i)
             and unchecked_attempt(work, i, state.get(i)) is None
-            and not (check_only and i in overrides)  # asked once; the render round draws it
         ]
         if rewrite:
             await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work)

@@ -513,7 +513,7 @@ def test_latency_sampler_records_each_probe_until_stopped(mods: dict[str, Module
 
 def test_attempt_ladder(mods: dict[str, ModuleType]) -> None:
     im = mods["images"]
-    assert [im.plan_attempt(n).rewrite_visual for n in range(1, 5)] == [False, False, True, False]
+    assert [im.plan_attempt(n).rewrite_visual for n in range(1, 5)] == [False, True, False, False]
     assert [im.after_failure(n, reviewed=False) for n in range(1, 5)] == [
         "retry",
         "retry",
@@ -1183,7 +1183,7 @@ def test_check_only_never_renders_and_rounds_with_render_only_converge(
     assert [a["attempt"] for a in work.read_attempts("bravo")] == [1, 2]
 
 
-def test_check_only_asks_for_the_attempt_three_rewrite_once(
+def test_a_failed_picture_is_rewritten_before_attempt_two_and_asked_once(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:
     im = mods["images"]
@@ -1198,15 +1198,19 @@ def test_check_only_asks_for_the_attempt_three_rewrite_once(
     work = im.WorkDir(tmp_path / "work")
     comfy = FakeComfy(levels, {"alpha": 2})  # attempts 1 and 2 of alpha show the wrong food
     judge = FakeJudge(levels, {k.lower(): s.name for k, s in subjects.items()})
-    for _ in range(2):
-        _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)
+    _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)
+    # alpha fails attempt 1; the same hub round asks for the rewrite once attempt 2 is next ...
+    _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
+    assert judge.rewrites == 1 and "alpha" in work.read_overrides()
+    for _ in range(3):  # ... and only once, however many hub rounds pass before the draw
         _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
-    assert judge.rewrites == 1  # asked as soon as attempt 3 was next
-    for _ in range(3):  # more hub rounds before the render machine gets to it: no more asks
-        _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
-    assert judge.rewrites == 1 and comfy.renders == 4  # 3 first draws + alpha's second
-    _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)  # draws attempt 3
-    assert comfy.renders == 5 and "alpha" in work.read_overrides()
+    assert judge.rewrites == 1 and comfy.renders == 3  # 3 first draws, nothing else yet
+    _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)  # draws attempt 2
+    attempt2 = work.read_attempts("alpha")[1]
+    assert attempt2["attempt"] == 2 and attempt2["visual"] == work.read_overrides()["alpha"]
+    _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)  # attempt 2 fails too
+    _round(tmp_path, mods, comfy, judge, subjects, work, render_only=True)  # attempt 3
+    assert comfy.renders == 5 and judge.rewrites == 1  # the stored rewrite is reused, not re-asked
     # the lone redraw is checked with decoys taken from the accepted pictures of other categories
     _round(tmp_path, mods, comfy, judge, subjects, work, check_only=True)
     assert im.journal_state(work.journal)["alpha"]["state"] == "accepted"
