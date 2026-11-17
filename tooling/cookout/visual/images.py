@@ -182,6 +182,18 @@ def needs_rewrite(attempt: int, overrides: Mapping[str, str], ident: str) -> boo
     return attempt in (2, 3) and ident not in overrides
 
 
+def review_due(
+    attempts_done: int, entry: Mapping[str, Any] | None, decisions: Mapping[str, Any], ident: str
+) -> bool:
+    """A picture that failed its fourth attempt and has no Opus decision yet is waiting for its
+    review (a review that could not be read is retried next round, never skipped: attempt 5 only
+    follows a review's new description)."""
+    if entry is None or entry.get("state") != "regenerate" or entry.get("pictureless"):
+        return False
+    done = decisions.get(ident, {}).get("decision")
+    return attempts_done == MAX_AUTO_ATTEMPTS and done not in ("retry", "accepted", "pictureless")
+
+
 def after_failure(attempt: int, *, reviewed: bool) -> str:
     """What follows a failed attempt: `retry` (next attempt), `review` (Opus), `pictureless`."""
     if reviewed:
@@ -1259,7 +1271,7 @@ async def run_pipeline(
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
     pick_decoy = pick_decoy_factory(subjects_by_id, lambda: rendered, rng)
-    totals = {"accepted": 0, "pictureless": 0, "rendered": 0}
+    totals = {"accepted": 0, "pictureless": 0, "rendered": 0, "review_waiting": 0}
     # accepted pictures are known-good decoys: a later round that has only a few pictures to check
     # (a handful of redraws, maybe all one category) still has a pool of two categories to draw from
     for ident, entry in journal_state(work.journal).items():
@@ -1271,10 +1283,14 @@ async def run_pipeline(
     def master_exists(ident: str) -> bool:
         return work.master(ident, max(1, next_attempt(work, ident) - 1)).exists()
 
+    state0 = journal_state(work.journal)
+    awaiting_review = [
+        i for i in ids if review_due(next_attempt(work, i) - 1, state0.get(i), decisions, i)
+    ]
     pending = [
         i
-        for i in pending_work(ids, journal_state(work.journal), master_exists)
-        if decisions.get(i, {}).get("decision") != "pictureless"
+        for i in pending_work(ids, state0, master_exists)
+        if decisions.get(i, {}).get("decision") != "pictureless" and i not in awaiting_review
     ]
     batch_no = 0
 
@@ -1308,9 +1324,16 @@ async def run_pipeline(
             if step == "retry":
                 pending.append(ident)
             elif step == "review":
-                verdict = await review_failures(
-                    runner, opus, ident, subjects_by_id, work, review_path
-                )
+                try:
+                    verdict = await review_failures(
+                        runner, opus, ident, subjects_by_id, work, review_path
+                    )
+                except _check.VerdictError as exc:
+                    # one unreadable review must not end the round for every other picture: it
+                    # stays waiting (nothing journalled) and the next round asks again
+                    totals["review_waiting"] += 1
+                    print(f"warning: review of {ident} unreadable, waits: {exc}", file=sys.stderr)
+                    continue
                 decisions = _review.load_decisions(review_path)
                 if verdict.startswith("accepted:"):
                     n = int(verdict.split(":")[1])
@@ -1330,6 +1353,10 @@ async def run_pipeline(
         (work.images / "status.json").write_text(
             json.dumps(build_status(work, len(ids)), indent=1) + "\n", encoding="utf-8"
         )
+
+    if not render_only:
+        for ident in awaiting_review:  # reviews an earlier round could not read: ask again
+            await settle({ident: "wrong"})
 
     if check_only and check_concurrency > 1:
         # A rolling pool: `check_concurrency` workers each take the next batch the moment their
