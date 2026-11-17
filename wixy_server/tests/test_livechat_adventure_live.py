@@ -193,6 +193,15 @@ class TestRateLimit:
             limiter = client.app.state.livechat_adventure_live_limiter  # type: ignore[attr-defined]
             assert isinstance(limiter, SlidingWindowRateLimiter)
             assert limiter is not client.app.state.livechat_drawing_live_limiter  # type: ignore[attr-defined]
+            # The budget is "30 in a window"; the clock is frozen so a slow box (32 requests taking
+            # over a second: CI did, and the window slid) cannot refill it mid-test.
+            frozen = SlidingWindowRateLimiter(
+                max_events=limiter._max_events,
+                window_s=limiter._window_s,
+                clock=lambda: 1000.0,
+            )
+            assert (frozen._max_events, frozen._window_s) == (30, 1.0)
+            client.app.state.livechat_adventure_live_limiter = frozen  # type: ignore[attr-defined]
             statuses = [
                 _live(client, h, _frame(clientId=f"trail-client-{n:04d}", frame=n)).status_code
                 for n in range(32)

@@ -12,17 +12,15 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
 from wixy_server.livechat.cookout_catalogue import Catalogue, CatalogueEntry
-from wixy_server.livechat.cookout_pack import ImageRef, PackManifest, object_relpath
+from wixy_server.livechat.cookout_pack import ImageRef, PackManifest, load_manifest, object_relpath
 from wixy_server.livechat.cookout_visuals import (
     IngredientVisuals,
-    set_default_visuals,
 )
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.tests.test_livechat_cookout import (
@@ -104,12 +102,9 @@ def images(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def visuals_for_bank(images: Path, bank: FakeBank) -> Iterator[IngredientVisuals]:  # noqa: F811
+def visuals_for_bank(images: Path, bank: FakeBank) -> IngredientVisuals:  # noqa: F811
     ids = [i.id for i in bank.items] + [s.id for s in bank.staples]
-    visuals = make_visuals(images, ids)
-    set_default_visuals(visuals)
-    yield visuals
-    set_default_visuals(None)
+    return make_visuals(images, ids)
 
 
 def snaps_in(view: dict[str, Any]) -> list[dict[str, Any]]:
@@ -210,6 +205,29 @@ class TestReloadCost:
         assert visuals.snap_extras("a")["image"] is not None
 
 
+class TestVisualsFromEnvironment:
+    """For a caller with no app (the image-boot proof's `python -c` inside the container)."""
+
+    def test_it_reads_the_baked_pictures_dir_from_the_environment(
+        self, images: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from wixy_server.livechat.cookout_visuals import visuals_from_environment
+
+        manifest = load_manifest()
+        sample = next(iter(manifest.items.values()), None)
+        if sample is not None:
+            write_object(images, sample.card)
+            write_object(images, sample.thumb)
+        monkeypatch.setenv("WIXY_COOKOUT_IMAGES_BAKED_DIR", str(images))
+        monkeypatch.delenv("WIXY_COOKOUT_IMAGES_DIR", raising=False)
+        monkeypatch.delenv("WIXY_STORAGE_ROOT", raising=False)
+        visuals = visuals_from_environment()
+        assert visuals.search == (images,)
+        if sample is not None:
+            ident = next(iter(manifest.items))
+            assert visuals.snap_extras(ident)["image"] is not None
+
+
 class TestSnapExtras:
     def test_known_ingredient_gets_what_and_both_picture_urls(self, images: Path) -> None:
         visuals = make_visuals(images, ["a"])
@@ -285,7 +303,7 @@ class TestViewEnrichment:
         seq = start(store, bank)
         join(store, bank, seq)
         pick(store, bank, seq, "Josh")
-        view = view_for(store, bank, seq, "Rose")
+        view = view_for(store, bank, seq, "Rose", visuals=visuals_for_bank)
         snaps = snaps_in(view)
         assert snaps
         for snap in snaps:
@@ -298,7 +316,6 @@ class TestViewEnrichment:
         store: LiveChatStore,  # noqa: F811
         bank: FakeBank,  # noqa: F811
     ) -> None:
-        set_default_visuals(None)
         seq = start(store, bank)
         view = view_for(store, bank, seq, "Josh")
         snaps = snaps_in(view)
@@ -312,10 +329,12 @@ class TestViewEnrichment:
         visuals_for_bank: IngredientVisuals,
     ) -> None:
         seq = start(store, bank)
-        offered = view_for(store, bank, seq, "Josh")["current"]["options"][0]["id"]
+        offered = view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)["current"][
+            "options"
+        ][0]["id"]
         (images / object_relpath(sha_of(f"card-{offered}"))).unlink()
         visuals_for_bank.reload()
-        options = view_for(store, bank, seq, "Josh")["current"]["options"]
+        options = view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)["current"]["options"]
         by_id = {o["id"]: o for o in options}
         assert by_id[offered]["image"] is None
         assert all(o["image"] is not None for i, o in by_id.items() if i != offered)
@@ -327,7 +346,7 @@ class TestViewEnrichment:
         visuals_for_bank: IngredientVisuals,
     ) -> None:
         seq = start(store, bank)
-        view_for(store, bank, seq, "Josh")
+        view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)
         stored = data_of(store, seq).turns[0].offers[-1][0]
         assert set(stored) == {"id", "name", "category", "emoji", "family", "blurb"}
 
@@ -340,13 +359,13 @@ class TestViewEnrichment:
         seq = start(store, bank)
         join(store, bank, seq)
         pick(store, bank, seq, "Josh")
-        picking = view_for(store, bank, seq, "Josh")
+        picking = view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)
         assert picking["state"] == "picking"
         assert '"facts"' not in all_text(picking)
         play_rest = [("Josh" if t % 2 == 1 else "Rose") for t in range(2, 11)]
         for who in play_rest:
             pick(store, bank, seq, who)
-        done = view_for(store, bank, seq, "Josh")
+        done = view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)
         assert done["state"] == "finished"
         picks = [p for player in done["players"] for p in player["picks"]]
         assert len(picks) == 10 and all(p["facts"] == ["Fact one.", "Fact two."] for p in picks)
@@ -363,7 +382,7 @@ class TestViewEnrichment:
         visuals_for_bank: IngredientVisuals,
     ) -> None:
         seq = start(store, bank)
-        staples = view_for(store, bank, seq, "Josh")["staples"]
+        staples = view_for(store, bank, seq, "Josh", visuals=visuals_for_bank)["staples"]
         assert len(staples) == 8
         assert all(s["image"]["card"].startswith("/admin/cookout-img/") for s in staples)
         assert set(staples[0]) == {"id", "name", "image"}
@@ -388,16 +407,17 @@ class TestBlindRegression:
         for turn in range(1, 10):
             who = "Josh" if turn % 2 == 1 else "Rose"
             pick(store, bank, seq, who)
-            self._assert_hidden(store, bank, seq, viewer="Josh", partner_slot=2)
-            self._assert_hidden(store, bank, seq, viewer="Rose", partner_slot=1)
-            self._assert_hidden(store, bank, seq, viewer=None, partner_slot=1)
-            self._assert_hidden(store, bank, seq, viewer=None, partner_slot=2)
+            self._assert_hidden(store, bank, seq, visuals_for_bank, viewer="Josh", partner_slot=2)
+            self._assert_hidden(store, bank, seq, visuals_for_bank, viewer="Rose", partner_slot=1)
+            self._assert_hidden(store, bank, seq, visuals_for_bank, viewer=None, partner_slot=1)
+            self._assert_hidden(store, bank, seq, visuals_for_bank, viewer=None, partner_slot=2)
 
     @staticmethod
     def _assert_hidden(
         store: LiveChatStore,  # noqa: F811
         bank: FakeBank,  # noqa: F811
         seq: int,
+        visuals: IngredientVisuals,
         *,
         viewer: str | None,
         partner_slot: int,
@@ -405,7 +425,7 @@ class TestBlindRegression:
         data = data_of(store, seq)
         if data.round.state != "picking":
             return
-        view = view_for(store, bank, seq, viewer)
+        view = view_for(store, bank, seq, viewer, visuals=visuals)
         text = json.dumps(view)
         viewer_slot = {"Josh": 1, "Rose": 2}.get(viewer or "")
         offered_to = {
@@ -435,6 +455,6 @@ class TestFinishedRoundEnrichment:
         seq = start(store, bank, blind=True)
         play_all(store, bank, seq)
         for viewer in ("Josh", "Rose", None):
-            view = view_for(store, bank, seq, viewer)
+            view = view_for(store, bank, seq, viewer, visuals=visuals_for_bank)
             assert view["revealed"] is True and len(view["basket"]) == 10
             assert all(b["image"] is not None and b["what"] is not None for b in view["basket"])
