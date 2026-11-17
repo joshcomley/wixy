@@ -634,8 +634,12 @@ test.describe("Cookout picture-first table: the fit matrix", () => {
 
 // -- The behaviours -------------------------------------------------------------------------------------------------
 
-/** Plays ten alternating picks (first card each time); returns the ids picked. */
-async function pickTen(pages: readonly [Page, Page]): Promise<string[]> {
+/** Plays ten alternating picks (first card each time); returns the ids picked. `afterPick(turn, id)` runs once
+ * that pick has landed, before the next one. */
+async function pickTen(
+  pages: readonly [Page, Page],
+  afterPick?: (turn: number, id: string) => Promise<void>,
+): Promise<string[]> {
   const ids: string[] = [];
   for (let turn = 1; turn <= 10; turn += 1) {
     const { page } = await whoseTurn(pages);
@@ -645,6 +649,7 @@ async function pickTen(pages: readonly [Page, Page]): Promise<string[]> {
     await card.click();
     ids.push(id);
     await eventually(pages, async () => (await pickable(pages[0]).count()) !== 2 || (await pickable(pages[1]).count()) !== 2 || turn === 10, `pick ${turn} lands`);
+    if (afterPick !== undefined) await afterPick(turn, id);
   }
   return ids;
 }
@@ -758,10 +763,15 @@ test.describe("Cookout picture-first table: behaviours", () => {
       await pageA.request.post("/test/cookout/chef-delay", { data: { seconds: 20 } });
       const seq = (await startCookout(pageA, false), (await pageA.locator(".wx-srv-bubble-ck").last().getAttribute("data-message-seq"))!);
       await joinCookout(pageB, seq);
-      const ids = await pickTen([pageA, pageB]);
-      // The pack loses one picked ingredient's files: its tile falls back to the emoji.
-      const lost = ids[0]!;
-      expect((await (await pageA.request.post("/test/cookout/drop-picture", { data: { id: lost } })).json()) as { dropped: boolean }).toEqual({ dropped: true });
+      // The pack loses one picked ingredient's files: its tile falls back to the emoji. The picture is looked up each
+      // time the server builds a view and the client redraws only when a new view arrives, so the loss has to come
+      // BEFORE the last pick, whose view the reveal is drawn from. Posted after the tenth pick it races the client's
+      // refresh: on a slow CI runner the refresh won, the tile kept its <img> and nothing redrew it
+      // (17 Nov 2026: Expected 9, Received 10; forced locally with a 3 s wait, 2 of 2 failed).
+      await pickTen([pageA, pageB], async (turn, id) => {
+        if (turn !== 1) return;
+        expect((await (await pageA.request.post("/test/cookout/drop-picture", { data: { id } })).json()) as { dropped: boolean }).toEqual({ dropped: true });
+      });
       const reveal = game(pageA).locator(".wx-srv-ck-reveal");
       await expect(reveal).toBeVisible({ timeout: 30_000 });
       const tiles = reveal.locator(".wx-srv-ck-reveal-grid .wx-srv-ck-rtile");
