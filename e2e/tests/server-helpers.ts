@@ -51,3 +51,22 @@ export async function unlockServer(page: Page, name: string): Promise<void> {
   // let that window elapse and the tests keep a human tap cadence.
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
+
+/** Unlocks again on a device that already has a name (a re-unlock after a lock or a reload): no name prompt is
+ * expected, only the thread. `reload: false` stays on the page the lock left (the decoy is already showing). */
+export async function unlockAgain(page: Page, options: { reload?: boolean } = {}): Promise<void> {
+  const { pin } = (await (await page.request.post("/test/server/config")).json()) as { pin: string };
+  if (options.reload ?? true) await page.goto("/admin/server");
+  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
+  await page.locator(".wx-srv-panel").click();
+  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
+  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+  await page.locator(".wx-srv-affordance").click();
+  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
+  for (const digit of pin) {
+    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
+  }
+  await page.locator(".wx-srv-pinpad-key-submit").click();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible({ timeout: LOADED_WAIT_MS });
+  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
+}

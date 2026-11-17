@@ -1,5 +1,6 @@
 import { expect, test } from "../fixtures";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
+import { unlockServer as unlock } from "./server-helpers";
 
 // spec/server-chat/05-voice-transcription.md: opt-in voice-note transcription, against the
 // fixture's fake cmd (which implements cmd's private mode + capability probe). Every gesture
@@ -44,31 +45,7 @@ async function seedVoice(page: Page, sender: string, seconds = 12): Promise<numb
   return seq;
 }
 
-async function openPinPad(page: Page): Promise<void> {
-  const { pin } = (await (await page.request.post("/test/server/config")).json()) as { pin: string };
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(TAP_GAP_MS);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-}
-
 /** Unlock the chat and set the display name (first unlock on this browser context). */
-async function unlock(page: Page, name: string): Promise<void> {
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await openPinPad(page);
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
-  await page.locator(".wx-srv-name-prompt-input").fill(name);
-  await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(TAP_GAP_MS);
-}
-
 /** Any pointer activity restarts the 10-second idle lock; a device that is only being watched
  * would otherwise lock while the other one works. */
 async function keepAwake(page: Page): Promise<void> {

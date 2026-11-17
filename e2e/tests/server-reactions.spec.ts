@@ -9,6 +9,7 @@ import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 import { unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.use({
   launchOptions: {
@@ -23,36 +24,6 @@ const MULTI_TAP_INTERVAL_MS = 400;
 const THUMBS_UP = "\u{1F44D}";
 const HEART = "❤️";
 const PRAY = "\u{1F64F}";
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
-    timeout: 5000,
-  });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass, so the tests
-  // exercise a human cadence rather than the panic gesture.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function seed(page: Page, opts: { label: string; sender: string; count?: number }): Promise<void> {
   await page.request.post("/test/server/seed-messages", {

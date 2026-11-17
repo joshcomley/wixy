@@ -6,6 +6,7 @@
 
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
+import { unlockServer } from "./server-helpers";
 
 test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -39,38 +40,6 @@ async function stableBox(page: Page, locator: ReturnType<Page["locator"]>): Prom
     await page.waitForTimeout(100);
   }
   throw new Error("stableBox: locator never resolved to a laid-out element");
-}
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  // R2 v1.3's 400ms reveal-affordance debounce (server-chat.spec.ts, same wait).
-  await page.waitForTimeout(500);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
-    timeout: 5000,
-  });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // R3: two taps inside the chat view less than MULTI_TAP_INTERVAL_MS apart lock the panel
-  // instantly (server-chat.spec.ts's own unlockServer carries the identical wait, same reason:
-  // automation taps land far closer together than any person's).
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
 }
 
 /** Dispatches one synthetic touch-type pointer sequence directly on `el`, moving well past
