@@ -1,1 +1,260 @@
-{}
+{
+ "alexanders": {
+  "at": 1794901310,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and none of them is Alexanders. Attempts 1 and 2 have plain, untoothed leaves on pale stalks, so they look like pak choi or choy sum. Attempts 3 and 4 have the deeply cut, frilly leaves of ordinary celery. The new description asks for the features that set Alexanders apart: glossy leaves in groups of three broad leaflets with rounded teeth, purple-tinged bases where the leaf stalk wraps around the stem, and yellow-green clusters of tiny flowers."
+ },
+ "beef-fillet": {
+  "at": 1794901335,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures and none of them is a faithful beef fillet. Attempts 1 and 2 are flat, wide steaks with a rim of fat, which looks like sirloin or rump. Attempt 4 is a flat, wedge-shaped slab with a fat layer along the top. Attempt 3 is the closest, because it is a round log, but it is the same thickness from end to end and has a strip of fat along the top, so it reads as rolled striploin rather than the lean, tapered fillet. The new description asks for a whole, round fillet with a thick end and a thin tail and no fat cap, and it avoids the word 'steak'."
+ },
+ "boiled-peanuts": {
+  "at": 1794901343,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and each one shows a pile of shelled, skinless, pale peanut kernels with no shells anywhere. Boiled peanuts are defined by being cooked in their shells, so none of the attempts is faithful. The new description asks for intact, wet-looking shell pods and one cracked pod to show the soft nuts, and it explicitly rules out loose kernels."
+ },
+ "bombay-mix": {
+  "at": 1794901304,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "Attempts 1 and 2 are in a bowl but contain only small round fried gram-flour balls (boondi), with no noodles, peanuts or lentils, so they are not Bombay mix. Attempts 3 and 4 do show a real Bombay mix, with fried noodle strands, peanuts and lentils, but it is piled loosely on a flat surface instead of in the bowl the presentation requires. None of the four passes. The new description asks for the right ingredients from 3 and 4 inside the bowl from 1 and 2, and rules out boondi by name."
+ },
+ "boneless-quail": {
+  "at": 1794909640,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "cannelloni": {
+  "at": 1794911851,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "casarecce": {
+  "at": 1794911657,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "cascabel-chilli": {
+  "at": 1794907663,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures and none is usable. Attempts 1 and 2 show a pile of dozens of tiny, rough, berry-sized pieces that look like dried berries rather than chilli pods. Attempts 3 and 4 each show a single pod with a large hole torn in its side, not a heap of whole chillies. The new description asks for a few large, round, whole pods with stems and no damage, to push the image away from both problems."
+ },
+ "cauliflower-fungus": {
+  "at": 1794907526,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and each one shows a cauliflower floret. They all have a thick white central stalk that splits into branches, topped with grainy curds. None of them shows the thin, flat, wavy folds of the cauliflower fungus. The new description describes how the fungus actually looks and leaves out the word 'cauliflower', so the image generator isn't steered back towards the vegetable."
+ },
+ "cavatappi": {
+  "at": 1794907370,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and none of them shows cavatappi. Attempt 1 has short, squat curls. Attempt 2 has ridged hollow tubes, but most only bend about half a turn, so they look like elbows or snail-shell pasta instead of a stretched-out corkscrew. Attempts 3 and 4 are twisted solid pieces like gemelli or fusilli, with no hollow tube. The new description asks for long hollow ridged tubes with two full spiral turns and visible open ends."
+ },
+ "cavatelli": {
+  "at": 1794907798,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four pictures and none of them shows cavatelli. Picture 1 shows short ridged tubes with holes all the way through, much like ditalini. Picture 2 is elbow macaroni. Picture 3 shows round, coiled rings. Picture 4 shows small conchiglie shells. Cavatelli are elongated pieces with their edges curled in around a groove and no through-hole, so the new description spells out that shape, gives a size and rules out the shapes that were wrongly produced."
+ },
+ "chantenay-carrot": {
+  "at": 1794911881,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "cheese-and-onion-crisps": {
+  "at": 1794907341,
+  "attempt": 4,
+  "decision": "accepted",
+  "reason": "I looked at all four pictures. Attempts 1 and 2 really are wrong: they show shredded cabbage and diced potato in a bowl, not crisps. Attempts 3 and 4 both show real crisps: thin, round, golden potato crisps with savoury seasoning flecks, on a clean plain background. The only thing the check rejected them for was that the crisps sit in a pile instead of a bowl. That is about how they are served, not about whether the food is right. Attempt 4 is the sharpest and best lit, and its crisps are large and easy to recognise, so it is a faithful, clean picture of cheese and onion crisps."
+ },
+ "cheese-and-onion-loaf": {
+  "at": 1794907830,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four pictures works. Attempts 1 and 2 are plain white loaves with no cheese or onion, and both have a cut end showing. Attempts 3 and 4 do show cheese and onion, but only inside a cut loaf or a single slice, not a whole loaf. The new description asks for a whole, uncut loaf and puts the melted cheese and onion on the outside crust, so they can be seen without cutting it open."
+ },
+ "cheese-and-onion-pie": {
+  "at": 1794909640,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and the check was right each time. Attempts 1 and 2 are good single slices, but each sits on a white plate, which counts as a banned prop. Attempts 3 and 4 show a whole pie with one wedge cut out instead of a single portion. The new description asks for one slice with nothing under it, and the visible filling makes it clear the pie is cheese and onion."
+ },
+ "chicken-schnitzel": {
+  "at": 1794909739,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures. Attempts 1 and 2 show raw chicken breast with no breadcrumbs, so they are not schnitzel. Attempts 3 and 4 do show a good breaded, fried schnitzel, but it is whole, and the requested presentation is cut. The new description asks for cut strips that show the white chicken inside and the crumb crust around it."
+ },
+ "chocolate-rice-cakes": {
+  "at": 1794909550,
+  "attempt": 3,
+  "decision": "accepted",
+  "reason": "Attempt 3 shows exactly the right food: flat, round puffed-rice discs with the rice texture visible at the edges and a smooth chocolate coating on top, on a plain clean background. The only complaint was that they are arranged loose rather than in a bowl. That is a presentation detail, and flat rice cakes are naturally shown loose or stacked anyway. Attempts 1 and 2 show chocolate balls, not discs. Attempt 4 is right but less clear: the discs are only half-dipped and look like crispbread."
+ },
+ "choux-pastry": {
+  "at": 1794909759,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four pictures shows choux pastry clearly. Attempts 1 and 2 show a pale, lumpy ball of dough in a bowl that looks like mashed potato. Attempts 3 and 4 show a smooth yellow paste in a bowl that looks like custard. Unbaked dough in a bowl can't be told apart from those foods, so the new description asks for baked, hollow, golden puffs, with one broken open to show the empty inside. It also rules out bowls and fillings."
+ },
+ "collard-greens": {
+  "at": 1794911908,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and none can be used. Attempts 1 and 2 are bunches, but their crinkled, glossy, spinach-like leaves on thick fleshy stalks look like Swiss chard, not collards. Attempt 4 is a good, clean collard leaf (broad, flat, blue-green, with pale veins), but it is only one leaf when a bunch is needed. Attempt 3 is also one leaf, and its tip is misshapen. The new description asks for several of attempt 4's broad, flat leaves fanned out in a bunch, with thin stems so they don't look like chard."
+ },
+ "cranberry-and-walnut-sourdough": {
+  "at": 1794911877,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four attempts works. Attempts 1 and 2 are clean whole loaves, but their crust is closed and has no visible cranberries or walnuts, so you can't tell what kind of bread it is. Attempts 3 and 4 do show the fruit and nuts, but each is a cut slice, not the whole loaf that was asked for. The new description keeps the loaf whole and puts the cranberries and walnuts on the crust and inside the opened score, where they can be seen."
+ },
+ "crispy-seaweed-crisps": {
+  "at": 1794911734,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four pictures meets the spec. Attempts 1 and 2 use a bowl, but the seaweed in them is fine shredded strips, not crisps cut from sheets. Attempts 3 and 4 show the right flat sheet crisps, but they lie in a heap on the surface with no bowl, and attempt 3 looks like raw sheets. The new description combines the right parts of each: whole flat rectangles cut from thin sheets, placed inside a bowl. It also asks for a light glossy, salted look so the pieces read as crisps and not raw sheets."
+ },
+ "culatello": {
+  "at": 1794911960,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four pictures and none of them works. Attempt 1 is a flat pale-pink disc. Attempts 2 and 4 are smooth pink lumps with no clear shape. Attempt 3 has a rough pear outline, but it looks like pale cooked ham. None shows the whole tied, pear-shaped culatello with a mouldy rind and deep red marbled meat. The new description asks for each of these features by name, so the picture reads as cured culatello rather than plain ham."
+ },
+ "dill-seeds": {
+  "at": 1794913912,
+  "attempt": 3,
+  "decision": "accepted",
+  "reason": "I looked at all four images. Attempt 3 shows the seeds most like real dill: flat, oval, brownish seeds with paler ribbed edges, on a clean plain background. Its only failure was showing a loose heap instead of a bowl. That is a styling difference, so the ingredient is still shown faithfully. Attempts 1 and 2 show plump, rounded, pale seeds that look like coriander or hemp, not dill. Attempt 4 has longer, narrower seeds that look more like cumin or fennel, and it also has no bowl."
+ },
+ "dover-sole": {
+  "at": 1794913777,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four pictures and none of them can be used. Attempts 1 and 2 show broad, diamond-shaped flatfish with pointed heads, which look like flounder or turbot rather than the long oval of a Dover sole. Attempts 3 and 4 have the right long shape, but the body runs to a point with no tail fin, and the fin fringe is missing or barely there, so the fish looks like a smooth slab. Attempt 3 also has a white belly showing from the top. The new description asks for the long oval shape, the fin fringe along the whole edge and a clear tail fin, and keeps the view to the brown upper side."
+ },
+ "dried-chives": {
+  "at": 1794913957,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four. Attempts 1 and 2 show long, pale, needle-like strands that look like dried rosemary or straw, not short chive pieces. Attempts 3 and 4 are fine, speckled, pale-and-dark granules that look like oregano or hemp seed, with no visible tube segments. None shows the short, bright green, hollow pieces that make dried chives recognisable."
+ },
+ "flower-sprouts": {
+  "at": 1794920631,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "fluted-pumpkin-leaves": {
+  "at": 1794920748,
+  "attempt": null,
+  "decision": "pictureless",
+  "reason": "failed all six attempts"
+ },
+ "freekeh": {
+  "at": 1794916362,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four is a faithful picture. Attempt 1 has the bowl, but its contents look like crumbly green pellets, not wheat grains. Attempts 2, 3 and 4 put the grains in a loose pile with no bowl. Their grains are also thin and ridged with pointed ends, so they look more like fennel or cumin seeds than wheat. The new description asks for the bowl and spells out what wheat grains look like: smooth, plump and creased. It also asks for the toasted, charred colour that shows the wheat was roasted."
+ },
+ "frozen-dauphinoise": {
+  "at": 1794916270,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four is usable. Attempts 1 and 2 are sponge cakes on plates. Attempt 3 is closest, but it's an unplated block with a frosty white top, and its inside looks shredded rather than made of clear potato slices. Attempt 4 is an unplated block with blurry streaks and no clear potato slices. The new description asks for clearly visible stacked potato slices, a browned baked top that won't be mistaken for icing sugar, and a plate."
+ },
+ "frozen-prawn-toast": {
+  "at": 1794916301,
+  "attempt": 4,
+  "decision": "accepted",
+  "reason": "I looked at all four pictures. Attempt 4 clearly shows prawn toast: a triangle of golden fried bread with an even layer of minced pink prawn and a scattering of sesame seeds, on a plain, clean background. Its only failure was that it isn't on a plate. That was a detail of the picture description; the food itself is shown correctly. Attempt 1 shows plain breaded triangles with no prawn or sesame. Attempt 2 has very few sesame seeds. Attempt 3 has whole prawn pieces rather than a minced layer."
+ },
+ "frozen-puff-pastry-vol-au-vent-bites": {
+  "at": 1794916331,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and agree with the automatic check each time. Attempt 1 shows solid, pale piped blobs with no hollow inside. Attempts 2, 3 and 4 are hollow cups, but their walls are smooth, dense shortcrust with no flaky puff-pastry layers. None of them is a faithful vol-au-vent case. The new description names the visible stacked layers, the risen walls, the hollow centre and the classic lid, so the generator should stop making shortcrust cups."
+ },
+ "garganelli": {
+  "at": 1794918742,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures and none of them is right. Attempt 1 has a bowl, but the pasta is straight-cut, rigatoni-like tubes with no pointed ends. Attempts 2, 3 and 4 are loose heaps with no bowl. Attempt 2 comes closest to garganelli's slanted ridges, while 3 and 4 show short rigatoni-style cut tubes. The new description asks for a bowl and spells out the look: rolled diagonally, pointed quill-like ends, ridges circling each tube and a visible seam."
+ },
+ "gemelli": {
+  "at": 1794918783,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four is clean gemelli. Attempts 1–3 show fusilli: corkscrews with flat blades or fins, and in attempt 1, curls that look hollow. Attempt 4 is closest because its pieces look a bit like rope, but they are long and blade-twisted like fusilli rather than short pieces made of two round strands. The new description drops words like 'spiral' and 'twisted', which pull the generator toward fusilli. It describes the two-strand rope look instead and rules out blades and tubes."
+ },
+ "green-sichuan-peppercorns": {
+  "at": 1794918534,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "None of the four pictures fully works. Attempts 1 and 2 are in a bowl, but they show smooth, whole round green peppercorns, not the split, hollow husks of green Sichuan pepper. Attempts 3 and 4 show the right ingredient, split-open green husks, but as a loose heap on the surface instead of in the required bowl. The new description puts the correct split husks inside a bowl."
+ },
+ "grouse": {
+  "at": 1794918494,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four pictures and none of them works. Attempt 1 is a bird with a warped body and a speckled, toad-like skin. Attempt 2 is a bright red, distorted bird with its wings spread out. Attempts 3 and 4 are both pale plucked birds that look like raw chicken. The new description asks for a whole bird with its feathers on, shown from the side, and names the features that mark it as a grouse. It does not ask for a plucked bird, because both plucked attempts came out looking like chicken."
+ },
+ "guanciale": {
+  "at": 1794920866,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four images and none of them shows guanciale. Attempt 1 is a lean pink piece that looks like back bacon or ham. Attempts 2, 3 and 4 are neat rectangular slabs with even stripes of meat and fat, which is what pork belly or pancetta looks like. Real guanciale is a whole cheek with an irregular, roughly triangular shape. It is mostly white fat with only thin, uneven streaks of meat, and the outside is usually coated in black pepper. The new description asks for exactly those features."
+ },
+ "hominy": {
+  "at": 1794921029,
+  "attempt": 2,
+  "decision": "accepted",
+  "reason": "I looked at all four images. Attempt 2 shows real hominy: plump, puffed white maize kernels, many split open at the top, with the small tip where the kernel joined the cob. It is a clean, well-lit picture of the ingredient on a plain background. Its only fault is that the kernels sit in a loose heap instead of a bowl, and that is a staging detail, not a mistake about the ingredient. Attempt 3 is also accurate but less clearly detailed. Attempt 4 is softer and looks a little like popcorn. Attempt 1 really is wrong: its small, smooth, glossy beads look like pearl barley or tapioca, not hominy."
+ },
+ "horse-mackerel": {
+  "at": 1794918566,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images and each one shows an ordinary mackerel. Every fish has dark wavy or barred stripes along the back, and attempts 3 and 4 also have rows of small spiky finlets near the tail. A horse mackerel has none of these. Its back is plain silvery grey-green and its eye is large. It has a dark spot on the gill cover and a line of bony ridged scales along its side that bends sharply downward behind the head. The new description names these features and rules out stripes so the generator stops producing ordinary mackerel."
+ },
+ "horse-mushroom": {
+  "at": 1794920487,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures and none of them is right. Attempts 1 and 2 show a small, closed, plain white button mushroom: no gills, no ring and much too small. Attempts 3 and 4 show a porcini-type mushroom with a brown cap, a sponge-like underside and no ring. A real horse mushroom is large, with a broad cream-to-yellowish cap, dark brown gills and a big hanging ring on a tall stem. The new description puts the mushroom on its side so the gills and ring can be seen, which is what tells it apart from both mistakes."
+ },
+ "indian-bay-leaf": {
+  "at": 1794920718,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images. Attempts 1 and 2 are heaps of thin, needle-like leaves that look like dried grass or willow leaves, not bay leaves. Attempts 3 and 4 are clean, but they show ordinary bay leaves: one central vein with side veins branching off it like a feather. The real Indian bay leaf (Cinnamomum tamala) is broader and has three veins that start at the base and run side by side to the tip. None of the four gets this right. The new description asks for a few broad leaves laid flat with those three veins clearly visible."
+ },
+ "italian-dressing": {
+  "at": 1794920750,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I opened all four images. Attempts 1 and 2 show narrow-necked bottles of clear golden liquid with no herbs, garlic or seasoning, so they look like plain oil. Attempts 3 and 4 show the dressing well, with herb and garlic flecks and settled herbs, but in open wide-mouth jars instead of the required bottle. None meets both conditions, so the new description asks for the herb-filled dressing inside a bottle."
+ },
+ "jiu-soba": {
+  "at": 1794920662,
+  "attempt": 4,
+  "decision": "accepted",
+  "reason": "Attempt 4 is a clean, accurate picture of dried soba: a neat bundle of long, thin, straight strands in the grey-brown colour of buckwheat, on a plain background. The check rejected it only because the noodles are bundled rather than heaped, and dried soba is normally sold and recognised in a bundle like this. Attempts 1 and 2 show short, broken, twig-like pieces that look like wood rather than noodles. Attempt 3 is also a bundle, but its strands are less even in colour and texture than Attempt 4's."
+ },
+ "lamb-loin-chops": {
+  "at": 1794920590,
+  "attempt": null,
+  "decision": "retry",
+  "reason": "I looked at all four pictures and none of them is a lamb loin chop. Attempts 1 and 4 are large boneless red steaks that look like beef. Attempt 2 is a boneless round medallion. Attempt 3 has a curved rib bone, so it is a rib chop. None shows the small T-shaped bone that marks a loin chop. The new description asks for that bone, the two pieces of meat on either side of it, the fat rim, a small size, and several chops together so they read as lamb."
+ }
+}
