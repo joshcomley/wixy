@@ -103,13 +103,45 @@ class IngredientVisuals:
                 return candidate
         return None
 
+    def _index_search(self) -> dict[str, Path]:
+        """sha -> file for every well-formed object in the search folders, earliest folder first."""
+        index: dict[str, Path] = {}
+        for directory in self._search:
+            try:
+                buckets = [entry for entry in os.scandir(directory) if entry.is_dir()]
+            except OSError:
+                continue
+            for bucket in buckets:
+                if len(bucket.name) != 2:
+                    continue
+                try:
+                    objects = list(os.scandir(bucket.path))
+                except OSError:
+                    continue
+                for obj in objects:
+                    stem, dot, suffix = obj.name.partition(".")
+                    if (
+                        dot
+                        and suffix == "webp"
+                        and is_sha(stem)
+                        and stem[:2] == bucket.name
+                        and obj.is_file()
+                    ):
+                        index.setdefault(stem, Path(obj.path))
+        return index
+
     def reload(self) -> None:
         """Re-check which manifest pictures exist here (at load and after a self-heal)."""
         images: dict[str, dict[str, str]] = {}
         served: dict[str, Path] = {}
+        # Every `create_app` reloads and the real manifest has thousands of pictures, so each
+        # search folder is listed ONCE (its two-character bucket folders) and the manifest
+        # lookups are dict hits, not a file-system call each. A folder that is not there is
+        # simply empty; the first folder wins.
+        index = self._index_search()
         for ingredient_id, ref in self._manifest.items.items():
-            card = self._find(ref.card)
-            thumb = self._find(ref.thumb)
+            card = index.get(ref.card)
+            thumb = index.get(ref.thumb)
             if card is None or thumb is None:
                 continue
             images[ingredient_id] = {
