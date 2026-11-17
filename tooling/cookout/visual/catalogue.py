@@ -38,6 +38,7 @@ from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[2]
@@ -938,42 +939,45 @@ class Builder:
 # ---------------------------------------------------------------- the public API for parcel 2
 
 
-def visual_check(catalogue_path: Path) -> Callable[[str, str], list[str]]:
-    """The exact check `set_visual` applies, as a callable `(ingredient id, new visual) -> problems`.
+def _visual_problems(
+    raw: Mapping[str, Any],
+    bank: Mapping[str, Any],
+    names: Mapping[str, str],
+    ingredient_id: str,
+    visual: str,
+) -> list[str]:
+    """THE check on a new `visual`, in one place: the whole entry, with the new text in it, goes
+    through `validate_catalogue.item_problems`. `set_visual` and `visual_check` both call this, so
+    what the rewrite step accepts and what the catalogue takes cannot drift apart (they did, 17 Nov
+    2026: eleven rewrites were stored and later refused)."""
+    entry = raw["items"].get(ingredient_id)
+    if entry is None or ingredient_id not in bank:
+        return [f"{ingredient_id}: not in the committed catalogue"]
+    return vc.item_problems(ingredient_id, {**entry, "visual": visual}, bank[ingredient_id], names)
 
-    The rewrite step uses it so that a description the committed catalogue would refuse (it puts
-    another ingredient after 'with', for one) is caught when the model writes it, and the model is
-    told why, instead of being stored and refused at the end (eleven were, 17 Nov 2026). The bank and
-    the catalogue are read once."""
+
+def visual_check(catalogue_path: Path) -> Callable[[str, str], list[str]]:
+    """`_visual_problems` as a callable `(ingredient id, new visual) -> problems`, with the bank and
+    the committed catalogue read once. The rewrite step asks it before it stores a description, so
+    a text the catalogue would refuse is caught when the model writes it and the model is told why."""
     raw = json.loads(catalogue_path.read_text(encoding="utf-8"))
     bank = vc.load_bank_items()
     names = vc.ingredient_names(bank)
-
-    def check(ingredient_id: str, visual: str) -> list[str]:
-        entry = raw["items"].get(ingredient_id)
-        if entry is None or ingredient_id not in bank:
-            return [f"{ingredient_id}: not in the committed catalogue"]
-        return vc.item_problems(
-            ingredient_id, {**entry, "visual": visual}, bank[ingredient_id], names
-        )
-
-    return check
+    return lambda ingredient_id, visual: _visual_problems(raw, bank, names, ingredient_id, visual)
 
 
 def set_visual(
     catalogue_path: Path, ingredient_id: str, visual: str, by: str, *, now: int | None = None
 ) -> None:
     """Replace one entry's `visual` (the attempt-3 rewrite, spec §B.5), recording who and when.
-    Validated before it is written; the rest of the entry is untouched."""
+    Validated before it is written (by `_visual_problems`); the rest of the entry is untouched."""
     raw = json.loads(catalogue_path.read_text(encoding="utf-8"))
-    entry = raw["items"][ingredient_id]
     bank = vc.load_bank_items()
-    updated = {**entry, "visual": visual}
-    problems = vc.item_problems(
-        ingredient_id, updated, bank[ingredient_id], vc.ingredient_names(bank)
-    )
+    problems = _visual_problems(raw, bank, vc.ingredient_names(bank), ingredient_id, visual)
     if problems:
         raise ValueError("; ".join(problems))
+    entry = raw["items"][ingredient_id]
+    updated = {**entry, "visual": visual}
     stamp = int(time.time()) if now is None else now
     source = dict(entry["source"])
     source["visualBy"], source["visualAt"] = by, stamp

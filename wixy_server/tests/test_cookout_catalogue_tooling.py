@@ -542,6 +542,9 @@ def test_visual_check_is_the_check_set_visual_applies(tmp_path: Path) -> None:
         cat.set_visual(path, item_id, with_other, "x")  # the same refusal, later and too late
     assert check(item_id, "a plain serving held in a hand on the plain background") != []
     assert check("no-such-ingredient", good) != []
+    # one shared function: an unknown id is refused the same way by both
+    with pytest.raises(ValueError, match="not in the committed catalogue"):
+        cat.set_visual(path, "no-such-ingredient", good, "x")
 
 
 def test_report_opens_with_the_answer(tmp_path: Path) -> None:
