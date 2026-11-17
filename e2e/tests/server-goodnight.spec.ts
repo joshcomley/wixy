@@ -7,36 +7,10 @@ import { expect, test } from "../fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 import { unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(500);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  const namePrompt = page.locator(".wx-srv-name-prompt");
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
-    timeout: 5000,
-  });
-  if (await namePrompt.isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function send(page: Page, text: string): Promise<void> {
   await page.locator(".wx-srv-thread-view textarea").fill(text);

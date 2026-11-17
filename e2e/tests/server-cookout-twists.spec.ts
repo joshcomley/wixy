@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { trackConsoleErrors } from "./helpers";
 import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.describe.configure({ timeout: 360_000 });
 
@@ -34,32 +35,6 @@ const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import
 /** The cupboard staples are listed in every view (the finished reveal), so they are never "withheld". */
 const STAPLE_IDS = new Set(["water", "salt", "black-pepper", "butter", "plain-flour", "cooking-oil", "granulated-sugar", "milk"]);
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 30_000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function humanPause(page: Page): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);

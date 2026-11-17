@@ -12,38 +12,13 @@ import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
 import { unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.describe.configure({ timeout: 120_000 });
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function humanPause(page: Page): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
