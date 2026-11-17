@@ -7,7 +7,7 @@ here ever contains chat content: the tooling is offline and reads only the bank 
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 IMAGE_PROMPT_TEMPLATE = (
@@ -129,13 +129,22 @@ def reconcile_prompt(rows: Sequence[tuple[str, str, str, str, str, str]]) -> str
 
 def visual_rewrite_prompt(
     entries: Sequence[tuple[str, str, str, str, Sequence[str]]],
+    rejected: Mapping[str, tuple[str, Sequence[str]]] | None = None,
 ) -> str:
-    """Attempt-3 rewrite. entries: (id, name, what, old visual, every checker reason so far)."""
+    """Rewrite of a failed description. entries: (id, name, what, old visual, every checker reason
+    so far). `rejected` maps an id to (the description we refused, why): a repeat request says so, or
+    the model keeps echoing a checker's wording (a reason saying 'hand-twisted' got 'hand' back)."""
     body = "\n\n".join(
         f"id: {i}\nname: {name}\nwhat: {what}\nold description: {old}\nchecker reasons: "
         + ("; ".join(reasons) or "none")
         for i, name, what, old, reasons in entries
     )
+    refused = "".join(
+        f"\nYour earlier description for {i} was refused ({'; '.join(why)}): {text}"
+        for i, (text, why) in (rejected or {}).items()
+    )
+    if refused:
+        body += "\n" + refused + "\nWrite a new one that avoids exactly those problems."
     return (
         "A text-to-image model keeps failing to draw these ingredients correctly. For each, write "
         "a clearer, more concrete picture description (30-260 characters): one ingredient, as a "
