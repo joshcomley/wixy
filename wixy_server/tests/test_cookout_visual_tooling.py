@@ -1372,6 +1372,31 @@ def test_a_rewrite_the_model_dropped_is_asked_again_as_a_new_run(
     assert len(calls) == 1
 
 
+def test_a_refused_rewrite_is_asked_again_with_the_reason(
+    mods: dict[str, ModuleType], tmp_path: Path
+) -> None:
+    """strozzapreti, 17 Nov 2026: a checker reason said 'hand-twisted', the model echoed it, the
+    validator refused 'hand', and every later ask got the same answer. Now the refusal and its
+    reason go back to the model, which can fix exactly that."""
+    im = mods["images"]
+    subjects, _levels = _eight_subjects(im)
+    work = im.WorkDir(tmp_path / "work")
+    calls: list[dict[str, object]] = []
+    bad = "a loose heap of hand-twisted dried pasta, pale golden-beige, on a plain surface"
+    good = "a loose heap of twisted dried pasta, pale golden-beige, on a plain surface"
+
+    class Runner:
+        async def run(self, **kw: object) -> str:
+            calls.append(kw)
+            told = "forbidden word 'hand'" in str(kw["prompt"])
+            return json.dumps({"items": [{"id": "itema", "visual": good if told else bad}]})
+
+    asyncio.run(im.rewrite_visuals(Runner(), mods["check"].HAIKU, ["itema"], subjects, work))
+    assert work.read_overrides() == {"itema": good}
+    assert len(calls) == 2 and calls[1]["fresh"] is True
+    assert bad in str(calls[1]["prompt"])  # the refused text is shown back
+
+
 def test_a_render_only_round_draws_just_the_listed_ids(
     mods: dict[str, ModuleType], tmp_path: Path
 ) -> None:

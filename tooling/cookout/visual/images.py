@@ -949,6 +949,8 @@ async def rewrite_visuals(
     cwd = work.root / "rewrite"
     cwd.mkdir(parents=True, exist_ok=True)
 
+    refused: dict[str, tuple[str, list[str]]] = {}
+
     def apply(text: str) -> None:
         data = _check.strip_json(text)
         if not isinstance(data, dict) or not isinstance(data.get("items"), list):
@@ -957,7 +959,12 @@ async def rewrite_visuals(
             if not (isinstance(item, dict) and item.get("id") in ids):
                 continue
             visual = item.get("visual")
-            if isinstance(visual, str) and not visual_problems(visual):
+            if not isinstance(visual, str):
+                continue
+            problems = visual_problems(visual)
+            if problems:
+                refused[item["id"]] = (visual, problems)  # told to the model on the next ask
+            else:
                 work.write_override(item["id"], visual)
 
     text = await runner.run(
@@ -972,10 +979,16 @@ async def rewrite_visuals(
     apply(text)
     # an id the answer dropped or got wrong (strozzapreti, 17 Nov 2026) is asked again on its own,
     # as a NEW run: asking the same request again would replay the answer already refused
-    missing = [e for e in entries if e[0] not in work.read_overrides()]
-    if missing:
+    # and one that WAS answered but refused by the validator is told why (strozzapreti: the model
+    # echoed a checker's 'hand-twisted' and 'hand' is a forbidden word), up to two more asks
+    for _ in range(2):
+        missing = [e for e in entries if e[0] not in work.read_overrides()]
+        if not missing:
+            break
         retry = await runner.run(
-            prompt=_prompts.visual_rewrite_prompt(missing),
+            prompt=_prompts.visual_rewrite_prompt(
+                missing, {i: refused[i] for i, *_rest in missing if i in refused}
+            ),
             model=haiku.model,
             provider=haiku.provider,
             effort="medium",
@@ -985,6 +998,9 @@ async def rewrite_visuals(
             fresh=True,
         )
         apply(retry)
+    for e in entries:
+        if e[0] not in work.read_overrides():
+            print(f"warning: no usable rewrite for {e[0]}: {refused.get(e[0])}", file=sys.stderr)
 
 
 async def review_failures(
