@@ -14,13 +14,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
+import anyio
 import pytest
 from fastapi.testclient import TestClient
 
 from wixy_server.app import create_app
 from wixy_server.background import ContainedTaskGroup
+from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat.cookout_game import NullCookoutRunner
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
@@ -92,6 +94,15 @@ def cookout_client(
     """An app with the small fake bank and a recording runner (or none, as the standalone edition
     has) and an unlocked token, closed on exit."""
     resolved = None if no_runner else (runner if runner is not None else FakeRunner())
+
+    # The real server-chat media worker would claim any `processing` photo a test creates and fail
+    # it (`original_missing`) - racing the tests that mark their photos `ready` by hand (a CI run
+    # saw the worker's failure land after the test's UPDATE). No test here needs it running.
+    async def _idle_media_worker(**_: Any) -> None:
+        await anyio.sleep_forever()
+
+    media_worker_patch = patch.object(livechat_media_queue, "run_forever", _idle_media_worker)
+    media_worker_patch.start()
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
@@ -125,6 +136,7 @@ def cookout_client(
         )
     finally:
         client.__exit__(None, None, None)
+        media_worker_patch.stop()
 
 
 _MOVE = iter(range(1, 10**6))
@@ -1123,6 +1135,30 @@ def table(client: TestClient, h: dict[str, str], seq: int, who: str) -> dict[str
         "offer": cur["offerIndex"],
         "optionIds": [o["id"] for o in cur["options"]],
     }
+
+
+class TestNoMediaWorker:
+    def test_the_app_here_runs_no_media_worker(
+        self, storage_root: Path, wixy_repo_root: Path, pin_verifier: CmdPinVerifier
+    ) -> None:
+        """A `processing` photo with no original is failed by a running worker within about a
+        second (its idle poll is 1 s); here it must still be `processing` after 2.5 s."""
+        with cx(storage_root, wixy_repo_root, pin_verifier) as (client, _h, _):
+            store = store_of(client)
+            store.create_attachment(att_id="att-idle-worker", kind="photo", now=5.0)
+            # Sent in a message, so no orphan sweep takes it: only a media worker could touch it.
+            store.create_message(
+                client_id="idle-worker-msg-01",
+                sender="Rose",
+                device_id="device-1234",
+                by_email=None,
+                text=None,
+                attachment_ids=["att-idle-worker"],
+                now=6.0,
+            )
+            time.sleep(2.5)
+            row = store.get_attachment("att-idle-worker")
+            assert row is not None and row.status == "processing"
 
 
 class TestTwistCatalogueRoutes:
