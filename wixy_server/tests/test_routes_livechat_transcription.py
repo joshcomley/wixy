@@ -240,7 +240,11 @@ def _finished(env: Env, att_id: str) -> Callable[[], bool]:
 def _raw_db(store: LiveChatStore) -> bytes:
     db = store._db_path
     wal = Path(f"{db}-wal")
-    return db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
+    # WAL first, then the database file: a checkpoint between the two reads moves frames out of
+    # the WAL into the database, so this order never misses bytes that exist (the reverse order
+    # read the old database, then the emptied WAL, and lost them).
+    wal_bytes = wal.read_bytes() if wal.exists() else b""
+    return wal_bytes + db.read_bytes()
 
 
 def _message_attachment(client: TestClient, headers: dict[str, str], att_id: str) -> Any:
@@ -1114,3 +1118,36 @@ class TestLongNotes:
         assert env.state.transcribe_retained == []
         tmp_root = env.paths.server_dir / livechat_transcription.TRANSCRIBE_TMP_DIRNAME
         assert not tmp_root.exists() or not list(tmp_root.iterdir())
+
+
+def test_raw_db_does_not_lose_bytes_to_a_checkpoint_between_its_two_reads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression (CI, `test_wiping_the_chat_erases_the_transcript_bytes`): the sentinel sat in the
+    WAL; a checkpoint ran between reading the database file and reading the WAL, moving it across,
+    so neither read held it. Simulated by checkpointing right after the FIRST read."""
+    import sqlite3
+
+    store = LiveChatStore(tmp_path / "server" / "server.db")
+    store.pending_upload_bytes()
+    conn = sqlite3.connect(str(store._db_path))
+    conn.execute("PRAGMA wal_autocheckpoint = 0")
+    conn.execute("CREATE TABLE IF NOT EXISTS marker(v TEXT)")
+    conn.execute("INSERT INTO marker VALUES ('raw-db-marker-5f2a91c7')")
+    conn.commit()
+    real_read = Path.read_bytes
+    reads: list[str] = []
+
+    def read_then_checkpoint(self: Path) -> bytes:
+        data = real_read(self)
+        if not reads:  # between the first and second read
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        reads.append(self.name)
+        return data
+
+    monkeypatch.setattr(Path, "read_bytes", read_then_checkpoint)
+    try:
+        assert b"raw-db-marker-5f2a91c7" in _raw_db(store)
+    finally:
+        monkeypatch.undo()
+        conn.close()
