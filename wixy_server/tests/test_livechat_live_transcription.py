@@ -72,7 +72,10 @@ def put_all(env: LiveEnv, upload_id: str, slices: list[bytes], *, upto: int | No
 def raw_db(env: LiveEnv) -> bytes:
     db = env.store._db_path
     wal = Path(f"{db}-wal")
-    return db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
+    # WAL first, then the database file (a checkpoint between the reads moves frames from the
+    # WAL into the database; the reverse order read the old database then the emptied WAL).
+    wal_bytes = wal.read_bytes() if wal.exists() else b""
+    return wal_bytes + db.read_bytes()
 
 
 # ---------------------------------------------------------------------------
