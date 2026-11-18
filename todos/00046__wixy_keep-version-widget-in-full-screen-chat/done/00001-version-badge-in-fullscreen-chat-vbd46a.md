@@ -1,0 +1,1 @@
+Version badge in full-screen Server chat. Merged PR 320 (status-bar strip), PR 321 (badge moved into the chat header, replacing "Server"). Follow-up in PR 322: header buttons right-aligned, class renamed `wx-shell-srv-version-in-header`.

@@ -51,9 +51,9 @@ produce, produce, cheese, cheese, main, main, finish`, a turn-3 pick handled by 
 items where the plan says `cheese` - a successful, wrong write the new process then serves. A finished round exposes other v21
 write paths (a rescue swap of the bread draws by its bank role `base`, outside the bread list). Hence a barrier, not a tolerated
 overlap: release with `WIXY_COOKOUT_MODES` absent, drain every process from the previous slot, then run `activate_modes.py
---enable toastie`, which checks and prints Devfleet, the active slot's schema (>= 22), the live database's `user_version` (>= 22),
+--enable toastie`, which checks and prints Devfleet, the active slot's schema (>= 24), the live database's `user_version` (>= 24),
 no process under the other slot and `/options`. `test_cookout_modes_overlap.py` keeps the canary (v21's `_cx_commit_pick` from a
-pinned git commit really mis-draws), so the barrier cannot be removed unnoticed. Rollback targets must be v22-or-later
+pinned git commit really mis-draws), so the barrier cannot be removed unnoticed. Rollback targets must be v24-or-later
 (`--check-rollback <commit>`); every later release refuses unknown modes the same way, which is how Pizza will ship.
 
 **Why dish words and bread names are not fatal checks.** The first draft rejected an answer for open-sandwich words and for a

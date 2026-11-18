@@ -1,5 +1,8 @@
 // Self-hosted AudioWorklet. Fixed capture pool and playout ring also bound MessagePort
 // traffic when the browser main thread stalls. No samples leave this live graph to storage.
+// The live-voice playout processor (spec/server-chat/07 §2) lives in the same module: this import
+// registers it FIRST, so the call's processor stays the last one registered.
+import "../liveVoice/worklet";
 export {};
 declare const sampleRate: number;
 declare const currentTime: number;

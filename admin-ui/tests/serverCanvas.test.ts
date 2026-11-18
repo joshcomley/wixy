@@ -46,11 +46,11 @@ function win(): Window {
   } as unknown as Window;
 }
 
-function canvasMessage(seq: number): Message {
+function canvasMessage(seq: number, sender = "Josh"): Message {
   return {
     seq,
     clientId: `c${seq}`,
-    sender: "Josh",
+    sender,
     text: null,
     attachments: [],
     reactions: [],
@@ -64,8 +64,8 @@ async function flush(): Promise<void> {
   for (let i = 0; i < 5; i += 1) await Promise.resolve();
 }
 
-async function mount() {
-  getHistory.mockResolvedValue({ messages: [], hasMore: false, cursor: 0 });
+async function mount(history: Message[] = []) {
+  getHistory.mockResolvedValue({ messages: history, hasMore: false, cursor: 0 });
   const h = hooks();
   const view = mountServerThread({ identity: identity(), hooks: h, win: win(), onSettings: vi.fn() });
   document.body.appendChild(view.element);
@@ -128,6 +128,123 @@ describe("header ... menu and canvas", () => {
     await flush();
     expect(view.element.textContent).toContain("Couldn’t add a canvas".replace("’", "'"));
     expect(view.element.querySelector(".wx-srv-canvas-surface")).toBeNull();
+    view.teardown();
+  });
+});
+
+/** The visible tab labels, in order. */
+function tabs(element: HTMLElement): string[] {
+  return Array.from(element.querySelectorAll<HTMLButtonElement>(".wx-srv-tab:not([hidden])")).map(
+    (tab) => tab.getAttribute("aria-label") ?? "",
+  );
+}
+
+function canvasTabShowing(element: HTMLElement): boolean {
+  const pane = element.querySelector<HTMLElement>(".wx-srv-canvas-pane");
+  return (
+    element.querySelector(".wx-srv-tab-canvas")?.getAttribute("aria-selected") === "true" &&
+    pane !== null &&
+    pane.isConnected &&
+    !pane.hidden &&
+    element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!.hidden === true
+  );
+}
+
+describe("the Canvas tab (decisions/00206)", () => {
+  it("a new canvas opens in the Canvas tab, full screen, with the pen on; the chat keeps it with an Open button", async () => {
+    sendCanvasMessage.mockResolvedValue({ ok: true, message: canvasMessage(5) });
+    const { view } = await mount();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-more-button")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-more-canvas")!.click();
+    await flush();
+
+    expect(canvasTabShowing(view.element)).toBe(true);
+    expect(tabs(view.element)).toEqual(["Chat", "Canvas"]);
+    const pane = view.element.querySelector<HTMLElement>(".wx-srv-canvas-pane")!;
+    expect(pane.querySelector(".wx-srv-canvas-title")!.textContent).toBe("Your canvas");
+    expect(pane.querySelector<HTMLElement>(".wx-srv-pen-toolbar")!.hidden).toBe(false);
+    expect(pane.querySelector(".wx-srv-canvas-frame .wx-srv-draw-surface")).not.toBeNull();
+    // The thread's own pen is not on.
+    expect(view.element.querySelector(".wx-srv-thread-wrap > .wx-srv-draw-surface")).toBeNull();
+    const open = view.element.querySelector<HTMLButtonElement>('[data-message-seq="5"] .wx-srv-canvas-open')!;
+    expect(open.textContent).toBe("Open");
+    expect(open.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    view.teardown();
+  });
+
+  it("the FAB goes back to the chat (the pen session ends); Open brings the canvas back", async () => {
+    sendCanvasMessage.mockResolvedValue({ ok: true, message: canvasMessage(5) });
+    const { view } = await mount();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-more-button")!.click();
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-more-canvas")!.click();
+    await flush();
+    const pane = view.element.querySelector<HTMLElement>(".wx-srv-canvas-pane")!;
+    pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
+    expect(canvasTabShowing(view.element)).toBe(false);
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!.hidden).toBe(false);
+    expect(pane.querySelector<HTMLElement>(".wx-srv-pen-toolbar")!.hidden).toBe(true);
+    // The tab stays (it is still open), Chat is the one showing.
+    expect(tabs(view.element)).toEqual(["Chat", "Canvas"]);
+
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="5"] .wx-srv-canvas-open')!.click();
+    expect(canvasTabShowing(view.element)).toBe(true);
+    expect(pane.querySelector<HTMLElement>(".wx-srv-pen-toolbar")!.hidden).toBe(false);
+    view.teardown();
+  });
+
+  it("Open on an older canvas shows that one instead; the other person's canvas is named for them", async () => {
+    const { view } = await mount([canvasMessage(3, "Purdy"), canvasMessage(4)]);
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="4"] .wx-srv-canvas-open')!.click();
+    const pane = view.element.querySelector<HTMLElement>(".wx-srv-canvas-pane")!;
+    expect(pane.querySelector(".wx-srv-canvas-title")!.textContent).toBe("Your canvas");
+    pane.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="3"] .wx-srv-canvas-open')!.click();
+    expect(canvasTabShowing(view.element)).toBe(true);
+    expect(pane.querySelector(".wx-srv-canvas-title")!.textContent).toBe("Purdy's canvas");
+    expect(tabs(view.element)).toEqual(["Chat", "Canvas"]);
+    view.teardown();
+  });
+
+  it("canvases already in the chat at unlock are not offered; one started elsewhere later is offered with a dot", async () => {
+    const { view } = await mount([canvasMessage(3, "Purdy")]);
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-tabs")!.hidden).toBe(true);
+
+    view.handleStreamEvent({ type: "message", message: canvasMessage(8, "Purdy") });
+    await flush();
+    expect(tabs(view.element)).toEqual(["Chat", "Canvas"]);
+    expect(view.element.querySelector(".wx-srv-tab-canvas .wx-srv-tab-dot:not([hidden])")).not.toBeNull();
+    // Offered, not forced: the chat is still what shows.
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!.hidden).toBe(false);
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-tab-canvas")!.click();
+    expect(canvasTabShowing(view.element)).toBe(true);
+    expect(view.element.querySelector(".wx-srv-canvas-title")!.textContent).toBe("Purdy's canvas");
+    view.teardown();
+  });
+
+  it("✕ closes the tab (the pen session ends, the pane leaves the chat); the canvas stays, and Open brings it back", async () => {
+    const { view } = await mount([canvasMessage(4)]);
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="4"] .wx-srv-canvas-open')!.click();
+    const close = view.element.querySelector<HTMLButtonElement>(".wx-srv-canvas-close")!;
+    expect(close.getAttribute("aria-label")).toBe("Close the canvas");
+    expect(close.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    close.click();
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-tabs")!.hidden).toBe(true);
+    expect(view.element.querySelector(".wx-srv-canvas-pane")).toBeNull();
+    expect(view.element.querySelector('[data-message-seq="4"] .wx-srv-canvas-surface')).not.toBeNull();
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="4"] .wx-srv-canvas-open')!.click();
+    expect(canvasTabShowing(view.element)).toBe(true);
+    view.teardown();
+  });
+
+  it("a deleted canvas closes its tab", async () => {
+    const { view } = await mount([canvasMessage(4)]);
+    view.element.querySelector<HTMLButtonElement>('[data-message-seq="4"] .wx-srv-canvas-open')!.click();
+    expect(canvasTabShowing(view.element)).toBe(true);
+    view.handleStreamEvent({ type: "message_deleted", seq: 4 });
+    await flush();
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-tabs")!.hidden).toBe(true);
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-thread-wrap")!.hidden).toBe(false);
+    expect(view.element.querySelector(".wx-srv-canvas-pane")).toBeNull();
     view.teardown();
   });
 });

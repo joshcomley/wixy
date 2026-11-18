@@ -1,6 +1,6 @@
 # Invariants
 
-### Inv 58 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
+### Inv 60 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
 
 The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to
 any conversation (livechat.md §24.3, workspace 00058 round 2, decisions/00202). Four rules:
@@ -36,6 +36,32 @@ gives `304`, malformed names, an unlisted sha even with a file present, and a li
 `test_cookout_visual_tooling.py` (the offline tooling: prompts, decoys, neutral check file names, the gate, the ladder, pack building),
 `admin-ui/tests/cookout/apiVisual.test.ts` (URL shape vetted client-side) and `pickTable.test.ts` (Blind partner turn: no
 ingredient text or image URL in the DOM). Decision: [00201](../../decisions/00202-cookout-ingredient-pictures/decision.md).
+
+### Inv 59 — Live voice audio goes only to the chat's authenticated participants, lives only in memory, and ends with its note
+A voice note recorded live (spec/server-chat/07, decisions/00211/00212) is relayed over `/api/admin/server/live-voice/ws`
+only after BOTH gates the call socket needs (Inv 55): the Cloudflare Access assertion verified before the socket is
+accepted, and an unlock token (re-checked against its device grant every two seconds) in the first frame; 4401 on a
+refused, expired or revoked credential. A note not yet sent in a message is `forbidden` to every listener. Decoded
+audio exists only in a bounded ring and in short-lived bounded buffers; peaks, state and the provisional transcript
+tail are memory only; nothing is written to the database or the event stream except the persistent `liveState`,
+status and finalised-transcript changes (Inv 50's row). Resources are bounded: 2 live notes per chat, 4 audio streams
+per note, 8 sockets, credit-limited frames, a bounded control queue, 60 s without a slice / 30 min paused auto-ends the
+note. Delete-for-everyone, wipe, auto-end and a server restart each end the decoder and tell the listeners; a
+note left `live` by a dead server is processed from its stored slices at startup. Live transcription is Inv 50's
+private mode only (a temporary private file, cmd asked afresh before every window).
+*Enforced by:* `test_livechat_live_voice_auth.py`, `test_livechat_live_voice.py`,
+`test_livechat_live_transcription.py`.
+
+### Inv 58 — Chat search keeps no copy of anything, never sees view-once, and its words are never in a URL
+`LiveChatStore.search_messages` reads the live `messages` and `attachment_transcripts` rows on every search. There is no
+index or other table of chat text, so Inv 46's delete and wipe need to know nothing about search. A view-once message is
+never found (Inv 52), and neither is an unfinished transcript. What was searched for travels in the body of
+`POST /messages/search`, whose answer is `no-store`; it is never logged, and the client holds it only in memory until a
+close, lock or wipe, which also empty the results. A deleted message leaves open results when its event arrives, and a page
+read before the delete cannot bring it back. Why not an index, with measurements: decisions/00208.
+*Enforced by:* `wixy_server/tests/test_livechat_search.py` (`test_search_adds_no_table_holding_a_copy_of_the_chat`,
+view-once, delete and wipe, `no-store`, no log line carrying the words), `admin-ui/tests/serverSearch.test.ts` (lock, wipe,
+delete, a stale page), `e2e/tests/server-search.spec.ts` (the words never appear in any request URL).
 
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 
@@ -1007,7 +1033,9 @@ removed by rebuilding the image from those normalized pixels. Animated GIFs are 
 documented exception: they keep their original bytes as `full.gif`. The output format follows
 transparency, not the source format (table in [livechat.md](livechat.md) §8). Voice/video are
 normalized into private renditions and successful raw uploads are removed. Failed originals are
-diagnostic-only and expire after seven days. Enforce quota and the free-space floor at upload
+kept seven days after their latest failure, for diagnosis and for "Try again", which re-runs
+processing from them in place (decisions/00209); then they expire. A transcode is bounded by
+ffmpeg's progress, never by a fixed wall clock. Enforce quota and the free-space floor at upload
 initialization; a declared `sizeBytes` below 1 is rejected. Missing ffmpeg, ffprobe or
 `pillow-heif` makes media uploads, the media queue and the `mediaProcessing` status
 unavailable without disabling text chat. View-once attachments are delivered once through
@@ -1204,7 +1232,13 @@ Inv 46's delete and wipe (with `secure_delete` and the WAL scrub) erase it with 
 that arrives after the message was deleted updates no row and is discarded. The text is never logged,
 never in a push payload and never in an error message. The job runs on the contained group (Inv 47),
 one at a time, single-flight per note, at most 6 new jobs a minute per identity; a `pending` row found
-at startup becomes `failed`.
+at startup becomes `failed`. A note longer than 15 minutes is transcribed in consecutive 15-minute
+stretches cut into temporary files inside the server's private storage (spec/server-chat/06 §2.4):
+each stretch is a separate request with its own fresh private-mode check immediately before it is
+sent, the files are deleted when read and again when the job ends however it ends, and nothing else
+leaves the server. A voice note still being recorded may be transcribed live (spec/server-chat/07 §3, Inv 59)
+through the same private mode: windows of at most 90 s as temporary private WAV files, cmd asked afresh before
+each, only the finalised text stored and the provisional tail kept in memory.
 *Enforced by:* `wixy_server/tests/test_livechat_transcribe.py` (probe strictness and 60 s cache; the
 exact request fields; response mapping; no text in any log line),
 `test_routes_livechat_transcription.py` (nothing sent to a cmd that is not private, on every
@@ -1277,8 +1311,8 @@ booleans rejected, and never a 500 even at SQLite's own integer ceiling), `test_
 shared fixture `spec/server-chat/fixtures/reply-to-cases.json` so the server's `reply_to_json` and
 the client's `replyToFromMessage` can never silently drift apart — and
 `admin-ui/tests/serverThread.test.ts`'s "reply to a message" suite (the composer bar, draft
-carry-through on a failed send, the sent bubble's quote button and its scroll-to-original paging
-including that a paging error never removes a quote genuine exhaustion would, and the in-place
+carry-through on a failed send, the sent bubble's quote button and its scroll to the original
+including that a failed load never removes a quote a real "gone" would, and the in-place
 quote removal on `message_deleted`, including that a playing `<audio>` element in the reply keeps
 its identity and `currentTime`), plus its "reattach after a lock" and "in-flight data can never
 resurrect a deleted target's words" suites (mechanisms 2 and 3 above, and the three narrower races

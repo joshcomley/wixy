@@ -105,7 +105,7 @@ export interface SceneDeps {
   vibrate(ms: number): void;
   /** The server's clock, epoch seconds. */
   serverNowS(): number;
-  /** [0, 1): the idle globe's starting angle. */
+  /** [0, 1): the idle globe's starting angle, and where each spin comes to rest (`restingAngle`). */
   random(): number;
   /** This person's display name. */
   viewer(): string | null;
@@ -471,7 +471,7 @@ export class AdventureScene {
     else this.idlePhi = drag.angle;
     this.lastShown[drag.axis] = drag.angle;
     if (cancelled) return { kind: "none" };
-    const plan = planSpin(drag.angle, drag.tracker.release(tMs));
+    const plan = planSpin(drag.angle, drag.tracker.release(tMs), drag.axis, this.deps.random());
     if (plan === null) {
       this.notify("Flick it harder!", tMs);
       return { kind: "weak" };

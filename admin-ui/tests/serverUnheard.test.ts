@@ -230,3 +230,136 @@ describe("unheard voice notes", () => {
     view.teardown();
   });
 });
+
+describe("unheard voice notes: going to each one in the chat", () => {
+  /** jsdom has no scrolling: record which bubble each jump scrolled to. */
+  function trackScrolls(): string[] {
+    const scrolled: string[] = [];
+    Element.prototype.scrollIntoView = vi.fn(function (this: Element) {
+      scrolled.push((this as HTMLElement).dataset["messageSeq"] ?? "?");
+    });
+    return scrolled;
+  }
+
+  function nav(view: { element: HTMLElement }) {
+    const bar = view.element.querySelector<HTMLElement>(".wx-srv-unheard-nav")!;
+    return {
+      bar,
+      prev: bar.querySelector<HTMLButtonElement>(".wx-srv-unheard-prev")!,
+      next: bar.querySelector<HTMLButtonElement>(".wx-srv-unheard-next")!,
+      pos: bar.querySelector<HTMLElement>(".wx-srv-unheard-pos")!,
+      close: bar.querySelector<HTMLButtonElement>(".wx-srv-unheard-nav-close")!,
+    };
+  }
+
+  function bubble(view: { element: HTMLElement }, seq: number): HTMLElement {
+    return view.element.querySelector<HTMLElement>(`.wx-srv-message-list [data-message-seq="${seq}"]`)!;
+  }
+
+  /** Plays it past 90% (a paused note dragged to the end does not count as listened). */
+  function listen(audio: HTMLAudioElement): void {
+    Object.defineProperty(audio, "duration", { value: 100, configurable: true });
+    Object.defineProperty(audio, "paused", { value: false, configurable: true });
+    audio.currentTime = 95;
+    audio.dispatchEvent(new Event("timeupdate"));
+  }
+
+  async function openListAndGoTo(view: { element: HTMLElement }, seq: number): Promise<void> {
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-unheard-tab")!.click();
+    const item = view.element.querySelector<HTMLElement>(`.wx-srv-unheard-item[data-message-seq="${seq}"]`)!;
+    item.querySelector<HTMLButtonElement>(".wx-srv-unheard-goto")!.click();
+    await flush();
+  }
+
+  it("Go to message closes the list, scrolls the chat to that note and highlights it; a bar shows where it is", async () => {
+    stubLayout(new Set(["1", "2", "3"]));
+    const scrolled = trackScrolls();
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2"), voiceMessage(3, "Cupcake", "a3")]);
+    expect(nav(view).bar.hidden).toBe(true);
+    view.element.querySelector<HTMLButtonElement>(".wx-srv-unheard-tab")!.click();
+    const goto = view.element.querySelector<HTMLButtonElement>('.wx-srv-unheard-item[data-message-seq="2"] .wx-srv-unheard-goto')!;
+    expect(goto.textContent).toBe("Go to message");
+    // It closes a view and moves the chat under the finger: a gesture boundary, like Back to chat.
+    expect(goto.hasAttribute("data-srv-gesture-boundary")).toBe(true);
+    goto.click();
+    await flush();
+
+    expect(view.element.querySelector<HTMLElement>(".wx-srv-unheard-view")!.hidden).toBe(true);
+    expect(scrolled).toEqual(["2"]);
+    expect(bubble(view, 2).classList.contains("wx-srv-bubble-highlighted")).toBe(true);
+    const n = nav(view);
+    expect(n.bar.hidden).toBe(false);
+    expect(n.pos.textContent).toBe("2 of 3 unread voice notes");
+    expect(n.prev.hidden).toBe(false);
+    expect(n.next.hidden).toBe(false);
+    // The count tab makes way for the bar.
+    expect(view.element.querySelector<HTMLButtonElement>(".wx-srv-unheard-tab")!.hidden).toBe(true);
+    view.teardown();
+  });
+
+  it("Previous and Next walk the unheard notes oldest to newest; at either end that button goes", async () => {
+    stubLayout(new Set(["1", "2", "3"]));
+    const scrolled = trackScrolls();
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2"), voiceMessage(3, "Cupcake", "a3")]);
+    await openListAndGoTo(view, 2);
+    const n = nav(view);
+    n.next.click();
+    expect(scrolled.at(-1)).toBe("3");
+    expect(n.pos.textContent).toBe("3 of 3 unread voice notes");
+    expect(n.next.hidden).toBe(true);
+    expect(n.prev.hidden).toBe(false);
+    n.prev.click();
+    n.prev.click();
+    expect(scrolled).toEqual(["2", "3", "2", "1"]);
+    expect(n.pos.textContent).toBe("1 of 3 unread voice notes");
+    expect(n.prev.hidden).toBe(true);
+    expect(bubble(view, 1).classList.contains("wx-srv-bubble-highlighted")).toBe(true);
+    view.teardown();
+  });
+
+  it("listening to the note keeps the bar for the rest; it goes once none are left; ✕ closes it", async () => {
+    stubLayout(new Set(["1", "2"]));
+    trackScrolls();
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2")]);
+    await openListAndGoTo(view, 1);
+    const n = nav(view);
+    listen(bubble(view, 1).querySelector<HTMLAudioElement>("audio")!);
+    expect(n.bar.hidden).toBe(false);
+    expect(n.pos.textContent).toBe("1 more unread voice note");
+    expect(n.prev.hidden).toBe(true);
+    n.next.click();
+    expect(n.pos.textContent).toBe("1 of 1 unread voice note");
+    listen(bubble(view, 2).querySelector<HTMLAudioElement>("audio")!);
+    expect(n.bar.hidden).toBe(true);
+    view.teardown();
+
+    document.body.replaceChildren();
+    const again = await mount([voiceMessage(1, "Cupcake", "b1"), voiceMessage(2, "Cupcake", "b2")]);
+    await openListAndGoTo(again.view, 2);
+    const m = nav(again.view);
+    // Never just "Close": that is the panic ✕ (which locks) to a screen reader and to the tests.
+    expect(m.close.getAttribute("aria-label")).toBe("Close the voice notes bar");
+    m.close.click();
+    expect(m.bar.hidden).toBe(true);
+    again.view.teardown();
+  });
+
+  it("the bar's buttons never count toward the double-tap lock (Next is tapped quickly on purpose)", async () => {
+    stubLayout(new Set(["1", "2"]));
+    trackScrolls();
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2")]);
+    await openListAndGoTo(view, 1);
+    expect(nav(view).bar.hasAttribute("data-srv-gesture-exempt")).toBe(true);
+    view.teardown();
+  });
+
+  it("a lock closes the bar", async () => {
+    stubLayout(new Set(["1", "2"]));
+    trackScrolls();
+    const { view } = await mount([voiceMessage(1, "Cupcake", "a1"), voiceMessage(2, "Cupcake", "a2")]);
+    await openListAndGoTo(view, 1);
+    view.detach();
+    expect(nav(view).bar.hidden).toBe(true);
+    view.teardown();
+  });
+});

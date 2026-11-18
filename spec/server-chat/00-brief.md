@@ -870,7 +870,10 @@ Then:
 Subprocesses:
 - Windows: `creationflags = BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW`. POSIX: a `nice -n 10`
   prefix.
-- Hard timeouts: 30 min for video, 5 min for others. Kill on timeout.
+- Hard timeouts: 30 min for video, 5 min for others. Kill on timeout. **Superseded for
+  transcodes by decisions/00209** (reality: a 5-minute wall clock killed a healthy 15-minute
+  voice note on a host at 100% CPU): a transcode is killed when ffmpeg stops making progress
+  for 120 s or passes a 1 h (voice) / 3 h (video) ceiling; ffprobe and the poster keep 5 min.
 - Outputs are written to temp names, then renamed atomically.
 
 **Photo** (Pillow, with pillow-heif registered):

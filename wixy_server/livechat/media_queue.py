@@ -19,6 +19,7 @@ limiter never goes lease-stale and gets double-claimed by another worker.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import shutil
@@ -141,22 +142,40 @@ def _do_work(
     permissions) still surfaces — every subsequent attachment fails the same
     way and gets logged, rather than one item silently blocking the whole
     queue."""
-    src = paths.server_upload_dir(att.id) / "assembled"
+    staged = paths.server_upload_dir(att.id) / "assembled"
+    # decisions/00209: a retried attachment has no staged upload any more — its original
+    # lives in the failed archive, and is processed from there IN PLACE (never moved back
+    # under `uploads/`, whose id is already tombstoned for cleanup).
+    archived = None if staged.exists() else failed_original_path(paths, att.id)
+    src = archived if archived is not None else staged
     output_dir = paths.server_attachment_media_dir(att.id)
     failure_reason: str | None
-    try:
-        result = processing.process(
-            att.kind, src, output_dir=output_dir, ffmpeg=config.ffmpeg, ffprobe=config.ffprobe
-        )
-    except processing.MediaProcessingError as exc:
-        failure_reason = exc.reason
-    except Exception:
-        logger.exception("server-chat media queue: unexpected error processing %s", att.id)
-        failure_reason = "internal_error"
+    started = time.monotonic()
+    if archived is None and not staged.exists():
+        failure_reason, detail = "original_missing", "no staged or archived original"
     else:
-        failure_reason = None
+        try:
+            result = processing.process(
+                att.kind, src, output_dir=output_dir, ffmpeg=config.ffmpeg, ffprobe=config.ffprobe
+            )
+        except processing.MediaProcessingError as exc:
+            failure_reason, detail = exc.reason, exc.detail
+        except Exception:
+            logger.exception("server-chat media queue: unexpected error processing %s", att.id)
+            failure_reason, detail = "internal_error", ""
+        else:
+            failure_reason = None
 
     if failure_reason is not None:
+        # Ids, kind, reason and ffmpeg's own diagnostic only — never message content.
+        logger.warning(
+            "server-chat media queue: %s %s failed after %.0fs: %s %s",
+            att.kind,
+            att.id,
+            time.monotonic() - started,
+            failure_reason,
+            detail[:300],
+        )
         failed_result = AttachmentResult(
             status="failed",
             mime=None,
@@ -169,15 +188,38 @@ def _do_work(
             failure=failure_reason,
         )
         store.finish_attachment(att_id=att.id, owner=owner, result=failed_result, now=time.time())
-        _archive_failed_original(store=store, paths=paths, att_id=att.id, src=src)
+        if archived is None:
+            _archive_failed_original(store=store, paths=paths, att_id=att.id, src=src)
+        else:
+            # Already archived: a failed retry restarts the archive's retention clock, so
+            # every failure leaves the full window for another try.
+            with contextlib.suppress(OSError):
+                os.utime(archived.parent)
     else:
         store.finish_attachment(
             att_id=att.id, owner=owner, result=_attachment_result_for(result), now=time.time()
         )
         store.delete_upload(att.id)
         _cleanup_deleted_storage(store=store, paths=paths, items={("upload", att.id)})
+        if archived is not None:
+            # The retry succeeded, so the archived original has no further use. A removal
+            # Windows refuses now is retried by the janitor's retention sweep.
+            shutil.rmtree(archived.parent, ignore_errors=True)
 
     return store.get_attachment(att.id) is not None
+
+
+def failed_original_path(paths: ProjectPaths, att_id: str) -> Path | None:
+    """The archived original of a failed attachment (`failed/<id>/original.<ext>`), or
+    `None` once the janitor's retention has removed it (decisions/00209)."""
+    try:
+        entries = sorted(paths.server_failed_dir(att_id).iterdir())
+    except OSError:
+        return None
+    for entry in entries:
+        if entry.name.startswith("original.") and entry.is_file():
+            return entry
+    return None
 
 
 def _cleanup_archive_if_attachment_deleted(

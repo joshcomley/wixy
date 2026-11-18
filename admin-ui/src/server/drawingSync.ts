@@ -92,6 +92,8 @@ export interface DrawingSync {
   /** Stop storing and fetching anything for `drawing` (its message went away). */
   forgetDrawing(key: string): void;
   forgetAnchor(seq: number): void;
+  /** Whether strokes on this message's drawings are still waiting to be stored. */
+  anchorHasPending(seq: number): boolean;
   /** Lock: clear every timer and send nothing new until `resume`. In-flight answers still apply. */
   pause(): void;
   resume(): void;
@@ -519,6 +521,12 @@ export function createDrawingSync(deps: DrawingSyncDeps): DrawingSync {
     deleteDrawing,
     forgetDrawing(key: string): void {
       dropQueue(key);
+    },
+    anchorHasPending(seq: number): boolean {
+      for (const key of queues.keys()) {
+        if (model.get(key)?.anchorSeq === seq) return true;
+      }
+      return false;
     },
     forgetAnchor(seq: number): void {
       const state = fetches.get(seq);

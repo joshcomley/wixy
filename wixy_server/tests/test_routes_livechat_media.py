@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
+import anyio
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -23,7 +24,9 @@ from wixy_server.livechat import uploads as uploads_module
 from wixy_server.livechat.pinclient import CmdPinVerifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.livechat.tokens import UNLOCK_GUARD_HEADER, UNLOCK_GUARD_VALUE, sign_media_url
+from wixy_server.storage import ProjectPaths
 from wixy_server.tests.fake_cmd import FakeCmdState, create_fake_cmd_app
+from wixy_server.tests.test_livechat_media_retry import _seed_sent_photo, _wait_for_status
 
 TEST_APP_KEY = "wixy-livechat"
 TEST_PIN = "482913"
@@ -787,3 +790,102 @@ class TestMediaRoute:
             assert response.status_code == 404
         finally:
             client.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------
+# The route, end to end through the app's own live media queue.
+# ---------------------------------------------------------------------------
+
+
+def _wait_for_archive(paths: ProjectPaths, att_id: str) -> None:
+    """The queue marks the row `failed` first and archives the original right after."""
+    archived = paths.server_failed_dir(att_id) / "original.jpg"
+    deadline = time.monotonic() + 20
+    while not archived.is_file() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert archived.is_file()
+
+
+def test_retry_route_brings_a_failed_photo_back(
+    storage_root: Path,
+    wixy_repo_root: Path,
+    pin_verifier: CmdPinVerifier,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_process = processing_module.process
+
+    def _starved(*_args: object, **_kwargs: object) -> processing_module.ProcessResult:
+        raise processing_module.MediaProcessingError("timeout", "ffmpeg exceeded 300s")
+
+    monkeypatch.setattr(processing_module, "process", _starved)
+    client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+    try:
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        att_id, _seq = _seed_sent_photo(store, paths, now=time.time())
+        anyio.run(_wait_for_status, store, att_id, "failed")
+        _wait_for_archive(paths, att_id)
+
+        messages = client.get("/api/admin/server/messages", headers=headers)
+        assert messages.status_code == 200
+        wire = [
+            a for m in messages.json()["messages"] for a in m["attachments"] if a["id"] == att_id
+        ]
+        assert [(a["status"], a["retryable"]) for a in wire] == [("failed", True)]
+
+        monkeypatch.setattr(processing_module, "process", real_process)
+        response = client.post(f"/api/admin/server/attachments/{att_id}/retry", headers=headers)
+        assert response.status_code == 202
+        assert response.json()["attachment"]["status"] == "processing"
+        assert response.json()["attachment"]["retryable"] is False
+
+        anyio.run(_wait_for_status, store, att_id, "ready")
+        # The archive is removed only AFTER the row is ready (never lose the original
+        # before the renditions are recorded), so wait for that second step too.
+        deadline = time.monotonic() + 20
+        while paths.server_failed_dir(att_id).exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert not paths.server_failed_dir(att_id).exists()
+
+        again = client.post(f"/api/admin/server/attachments/{att_id}/retry", headers=headers)
+        assert again.status_code == 409
+        assert again.json() == {"error": "not_failed"}
+    finally:
+        client.__exit__(None, None, None)
+
+
+def test_retry_route_reports_a_gone_original_and_unknown_ids(
+    storage_root: Path,
+    wixy_repo_root: Path,
+    pin_verifier: CmdPinVerifier,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def _starved(*_args: object, **_kwargs: object) -> processing_module.ProcessResult:
+        raise processing_module.MediaProcessingError("timeout", "ffmpeg exceeded 300s")
+
+    monkeypatch.setattr(processing_module, "process", _starved)
+    client, headers = _unlocked_client(storage_root, wixy_repo_root, pin_verifier)
+    try:
+        app = cast(FastAPI, client.app)
+        store: LiveChatStore = app.state.livechat_store
+        paths: ProjectPaths = app.state.paths
+        att_id, _seq = _seed_sent_photo(store, paths, now=time.time())
+        anyio.run(_wait_for_status, store, att_id, "failed")
+        _wait_for_archive(paths, att_id)
+        (paths.server_failed_dir(att_id) / "original.jpg").unlink()
+
+        gone = client.post(f"/api/admin/server/attachments/{att_id}/retry", headers=headers)
+        assert gone.status_code == 410
+        assert gone.json() == {"error": "original_gone"}
+        row = store.get_attachment(att_id)
+        assert row is not None and row.status == "failed"  # untouched
+
+        unknown = client.post(f"/api/admin/server/attachments/{'0' * 32}/retry", headers=headers)
+        assert unknown.status_code == 404
+        bad = client.post("/api/admin/server/attachments/not-an-id/retry", headers=headers)
+        assert bad.status_code == 404
+        unauthed = client.post(f"/api/admin/server/attachments/{att_id}/retry")
+        assert unauthed.status_code in (401, 403)
+    finally:
+        client.__exit__(None, None, None)

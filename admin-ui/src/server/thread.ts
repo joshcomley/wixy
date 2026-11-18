@@ -9,6 +9,7 @@
 import type { ChatComposer, ComposerDraft } from "../chatComposer";
 import { mountChatComposer } from "../chatComposer";
 import { mountChatThreadScroll, type ChatThreadScroll } from "../chatThreadScroll";
+import { senderHue } from "./senderHue";
 import { mountLightbox, type Lightbox } from "../lightbox";
 import {
   ServerErasureOutcomeUnknownError,
@@ -28,6 +29,7 @@ import {
   type SendCanvasResult,
   type SendViewOnceResult,
   setReaction,
+  retryAttachment,
   transcribeAttachment,
   wipeChat,
   type Message,
@@ -37,13 +39,28 @@ import {
 import { mountTeasePreview, type TeasePreviewHandle } from "./teasePreview";
 import { createGoodnightController, type GoodnightController } from "./goodnight";
 import { mountViewOnceViewer, type ViewOnceViewerHandle } from "./viewOnceViewer";
-import { uploadServerAttachment } from "./api/uploads";
+import {
+  completeUnsentUpload,
+  createServerLiveUploader,
+  discardUpload,
+  listUnsentUploads,
+  uploadServerAttachment,
+  type UnsentUpload,
+} from "./api/uploads";
+import type { LiveVoiceUploader } from "./liveUpload";
+import { differOnlyInLiveOrTranscript, patchLiveVoiceBlocks } from "./liveVoice/bubble";
+import { createLiveVoiceHub, type LiveVoiceHub } from "./liveVoice/hub";
+import { createVoiceModeMenu, type VoiceMode, type VoiceModeMenu } from "./liveVoice/modeMenu";
+import { createUnsentVoiceCards } from "./unsentVoice";
+import { formatVoiceTime } from "./voiceTime";
 import { mountDrawingLayer, type DrawingLayer } from "./drawingLayer";
 import { answerWyr, createWyrRound, getWyrRound, revealWyr, voteWyr } from "./api/wyr";
 import { createWyrCards, type WyrCards } from "./wyrCard";
 import { createWyrControls, type WyrControls } from "./wyrControls";
 import { createGallery, type GalleryView } from "./gallery";
 import { createLinksView, type LinksView } from "./linksView";
+import { applySearchMarks, clearSearchMarks } from "./searchMarks";
+import { createSearchView, type RevealOutcome, type SearchView } from "./searchView";
 import { createDownloadMarkStore } from "./galleryMark";
 import { createGameTabs, type GameKey, type GameTabs } from "./gameTabs";
 import { createGameFloat, type GameFloat } from "./gameFloat";
@@ -101,6 +118,7 @@ import {
 } from "./cookout/api";
 import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
+import { createCanvasPane, type CanvasPane } from "./canvasPane";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
 import { CookoutStartError, createCookoutStartSheet, type CookoutStartSheet, type StartChoices, type StartPreset } from "./cookout/startSheet";
@@ -109,13 +127,13 @@ import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
 import { createHeardStore } from "./heardStore";
 import { FRY_GIF_URL, GifFetchError, fetchGifFile, findGifLinks, removeGifLinks } from "./gifLink";
-import { disposeAttachmentMedia, renderAttachments } from "./mediaRender";
+import { disposeAttachmentMedia, renderAttachments, type RetryResult } from "./mediaRender";
 import { reactionLabel, reactionOrder } from "./reactions";
-import { createVoiceRecorder, type VoiceRecorder } from "./recorder";
+import { createVoiceRecorder, LIVE_SLICE_MS, VOICE_SLICE_MS, type VoiceRecorder } from "./recorder";
 import { renderReplyQuoteContent, replyToFromMessage } from "./replyTo";
 import type { ServerStreamEvent } from "./stream";
 import {
-  differOnlyInTranscripts,
+  isTranscribableVoice,
   patchTranscriptBlocks,
   refreshTranscriptBlocks,
   type TranscriptionContext,
@@ -134,11 +152,21 @@ const REACTION_ERROR_MS = 5_000;
 /** Backoff for reconciling an unconfirmed wipe against history: 1 s, 2 s, 4 s … capped. */
 const WIPE_RECONCILE_BASE_DELAY_MS = 1_000;
 const WIPE_RECONCILE_MAX_DELAY_MS = 15_000;
-/** Round 2 ruling item 10 §(4): paging backwards to find a quote's original
- * message uses its own, larger page size than ordinary history scrolling. */
+/** Paging back to a message a game opens (`ensureMessageLoaded`) uses a larger page than ordinary
+ * history scrolling. A quote's original is fetched by its neighbourhood instead (`showMessage`). */
 const SCROLL_TO_ORIGINAL_PAGE_SIZE = 100;
+/** Going to a search result not on screen: this many messages, half either side of it. */
+const JUMP_PAGE_SIZE = 50;
 /** §(4): "highlights it for about 1.5 s." */
 const SCROLL_TO_ORIGINAL_HIGHLIGHT_MS = 1_500;
+/** Longest a jump to a message (a quote's original, an unheard note) holds the thread still while
+ * it scrolls, if the browser never says the scroll ended (`scrollend` is missing, or nothing moved). */
+const REVEAL_HOLD_MAX_MS = 1_200;
+const REVEAL_SMOOTH_MAX_SCREENS = 3;
+/** The height from the thread's top that the date strip takes (`.wx-srv-day-strip`'s `top` and
+ * its pill, in chat.css). Fixed: it must not differ between the strip showing and not, or a
+ * separator passing under it would flip the answer on alternate scroll events. */
+const DAY_STRIP_BAND_PX = 36;
 /** Audit F2: when a sibling load owns the single history-load slot, retry
  * after a real macrotask, not just `await Promise.resolve()` — a microtask-only
  * yield never lets the in-flight fetch (a network macrotask) get a turn to
@@ -160,6 +188,8 @@ export interface ServerThreadDeps {
   fileViewOnceSettings?: WeakMap<File, ViewOnceDraftSettings>;
   /** Fetches GIFs (keyboard GIF links and the bundled Fry GIF). Defaults to `win.fetch`. */
   fetch?: typeof fetch;
+  /** The page's live-voice listener hub (spec/server-chat/07). Defaults to the real one; tests inject a fake. */
+  liveVoiceHub?: LiveVoiceHub;
 }
 
 export interface ServerThreadView {
@@ -253,6 +283,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const documentRef = deps.document ?? document;
   const fetchImpl: typeof fetch = deps.fetch ?? ((input, init) => win.fetch(input, init));
   const now = (): number => Date.now();
+  // One listener socket per page for every live voice note on screen (spec/server-chat/07 §6.2).
+  const liveVoiceHub: LiveVoiceHub = deps.liveVoiceHub ?? createLiveVoiceHub({
+    win,
+    getLabel: () => identity.getName() ?? "Device",
+    lockNow: () => hooks.lockNow("unauthorized"),
+  });
 
   const element = documentRef.createElement("div");
   element.className = "wx-srv-thread-view";
@@ -301,6 +337,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   moreMenu.className = "wx-srv-more-menu";
   moreMenu.setAttribute("role", "menu");
   moreMenu.hidden = true;
+  const searchItem = documentRef.createElement("button");
+  searchItem.type = "button";
+  searchItem.className = "wx-srv-more-item wx-srv-more-search";
+  searchItem.setAttribute("role", "menuitem");
+  searchItem.setAttribute("data-srv-gesture-boundary", "");
+  const searchItemTitle = documentRef.createElement("span");
+  searchItemTitle.className = "wx-srv-more-item-title";
+  searchItemTitle.textContent = "Search";
+  const searchItemHint = documentRef.createElement("span");
+  searchItemHint.className = "wx-srv-more-item-hint";
+  searchItemHint.textContent = "Find a message and go to it";
+  searchItem.append(searchItemTitle, searchItemHint);
   const galleryItem = documentRef.createElement("button");
   galleryItem.type = "button";
   galleryItem.className = "wx-srv-more-item wx-srv-more-gallery";
@@ -314,6 +362,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   galleryItemHint.textContent = "Every photo and video, with downloads";
   galleryItem.append(galleryItemTitle, galleryItemHint);
   moreMenu.appendChild(galleryItem);
+  moreMenu.appendChild(searchItem);
   const linksItem = documentRef.createElement("button");
   linksItem.type = "button";
   linksItem.className = "wx-srv-more-item wx-srv-more-links";
@@ -450,6 +499,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     documentRef.addEventListener("pointerdown", onPointerOutsideMore, true);
   }
   moreButton.addEventListener("click", () => (moreMenu.hidden ? openMoreMenu() : closeMoreMenu()));
+  searchItem.addEventListener("click", () => {
+    closeMoreMenu();
+    search.open(header.offsetHeight);
+  });
   galleryItem.addEventListener("click", () => {
     closeMoreMenu();
     gallery.open(header.offsetHeight);
@@ -527,13 +580,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   const threadContent = documentRef.createElement("div");
   threadContent.className = "wx-srv-thread-content";
   threadContent.appendChild(messageList);
-  thread.append(sentinel, historyErrorRow, threadContent);
+  // Only in a detached view (`revealSearchResult`): reaching it loads the next newer page.
+  const newerSentinel = documentRef.createElement("div");
+  newerSentinel.className = "wx-srv-thread-sentinel wx-srv-thread-sentinel-newer";
+  newerSentinel.hidden = true;
+  thread.append(sentinel, historyErrorRow, threadContent, newerSentinel);
   const jumpPill = documentRef.createElement("button");
   jumpPill.type = "button";
   jumpPill.className = "wx-srv-jump-pill";
   jumpPill.textContent = "↓ New messages";
   jumpPill.hidden = true;
-  threadWrap.append(thread, jumpPill);
+  // The date strip: which day you are looking at, kept at the top of the chat once you have
+  // scrolled back before today (`syncDayStrip`). The day separators themselves scroll away.
+  const dayStrip = documentRef.createElement("div");
+  dayStrip.className = "wx-srv-day-strip";
+  dayStrip.hidden = true;
+  const dayStripLabel = documentRef.createElement("span");
+  dayStrip.appendChild(dayStripLabel);
+  threadWrap.append(thread, jumpPill, dayStrip);
   element.appendChild(threadWrap);
 
   // The good-night scene: a live arrival from the other person saying good night (decided in
@@ -561,6 +625,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     column: messageList,
     anchors: () => drawingAnchors(),
     anchorElement: (seq) => drawingAnchorElement(seq),
+    canvasSurface: (seq) => drawingAnchorElement(seq)?.querySelector<HTMLElement>(".wx-srv-canvas-surface") ?? null,
     holdScroll: () => threadScroll.hold(),
     adoptScrollPosition: () => threadScroll.adoptPosition(),
     onRemoteContent: () => threadScroll.afterContentChange(false),
@@ -597,6 +662,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   // (the pop-up item chat re-parents it). Earlier code only calls into the tabs after that.
   let gameTabs: GameTabs;
   let gameFloat: GameFloat;
+  /** The Canvas tab (decisions/00206): a canvas is drawn on there, full screen, with its own pen. */
+  let canvasPane: CanvasPane;
   let gameMounted = false;
   /** The chat a message sent right now belongs to: the quick reply's while it is open, else the frame's
    * (the open game's item, the pop-up's item, or null for the main chat). */
@@ -671,7 +738,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let pendingVoiceNote:
     | {
         readonly file: File;
-        readonly clientId: string;
+        /** Replaced only when a live note's upload could not be finished and the whole recording
+         * goes out as a new message. */
+        clientId: string;
         attachmentId: string | null;
         readonly replyTo: PendingReplyTarget | null;
         /** The game chat this note was recorded for (a round's anchor seq), fixed when recording
@@ -679,9 +748,42 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
          * can never move it to the other chat. The ONE exception: if that round has been deleted
          * (the server answers 404) the recording is kept and goes to the main chat instead. */
         wyrSeq: number | null;
+        /** The live upload this recording was streamed to while it was made, until it either
+         * completed (then `attachmentId` is set) or failed for good and was deleted. */
+        live: LiveVoiceUploader | null;
+        /** A live voice note (spec/server-chat/07) whose message went out when recording began:
+         * `finish()` then only completes the upload, and nothing is posted again. */
+        liveMessage: Message | null;
       }
     | null = null;
   let voiceSendBusy = false;
+  /** The live upload of the recording in progress (spec/server-chat/06 §2.3). */
+  let liveUploader: LiveVoiceUploader | null = null;
+
+  // -- Live voice notes: the sender (spec/server-chat/07 §1, §6.1) ----------------------------
+  /** What the next recording is: a voice note, or a live voice note others hear as it is made.
+   * Chosen by long-pressing the mic and kept in memory only, for the life of the page (never in
+   * browser storage, per the round-2 ruling). */
+  let voiceMode: VoiceMode = "voice";
+  /** The recording in progress is a live one. */
+  let recordingLive = false;
+  let recordingMimeType = "audio/webm";
+  /** One live voice note being recorded: its message, sent the moment the server opened it. */
+  interface LiveSend {
+    readonly clientId: string;
+    /** The reply target and game chat, fixed when recording began (the message goes out then). */
+    readonly replyTo: PendingReplyTarget | null;
+    wyrSeq: number | null;
+    /** The message, once it has been sent. */
+    message: Message | null;
+    /** The person threw the note away (or it was too short): a message still in flight is deleted. */
+    cancelled: boolean;
+    /** Slices kept only until the init is answered, so a refused live note (409 `too_many_live`)
+     * can carry on as a normal recording without losing them. `null` once not needed. */
+    slices: Array<{ readonly blob: Blob; readonly index: number; readonly elapsedMs: number }> | null;
+  }
+  let liveSend: LiveSend | null = null;
+  const LIVE_MESSAGE_RETRY_MS = [1_000, 2_000, 4_000] as const;
 
   const MIC_LINE_ICON =
     '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
@@ -743,6 +845,53 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   voiceFailureRow.className = "wx-srv-voice-failure-row";
   voiceFailureRow.hidden = true;
   voiceFailureRow.append(retryVoiceButton, discardVoiceButton);
+
+  // A live note may already have been heard, so its Cancel becomes "Delete for everyone", behind
+  // a confirm (spec/server-chat/07 §1). The recording carries on while the question is open.
+  const TRASH_LINE_ICON =
+    '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+  const liveDeleteConfirm = documentRef.createElement("div");
+  liveDeleteConfirm.className = "wx-srv-live-delete-confirm";
+  liveDeleteConfirm.hidden = true;
+  liveDeleteConfirm.setAttribute("role", "alertdialog");
+  liveDeleteConfirm.setAttribute("aria-label", "Delete live voice note for everyone");
+  liveDeleteConfirm.setAttribute("data-srv-gesture-boundary", "");
+  const liveDeleteQuestion = documentRef.createElement("p");
+  liveDeleteQuestion.className = "wx-srv-live-delete-question";
+  liveDeleteQuestion.textContent = "Delete this live voice note for everyone? They may already have heard part of it.";
+  const liveDeleteYes = documentRef.createElement("button");
+  liveDeleteYes.type = "button";
+  liveDeleteYes.className = "wx-srv-live-delete-yes";
+  liveDeleteYes.textContent = "Delete for everyone";
+  const liveDeleteNo = documentRef.createElement("button");
+  liveDeleteNo.type = "button";
+  liveDeleteNo.className = "wx-srv-live-delete-no";
+  liveDeleteNo.textContent = "Keep recording";
+  const liveDeleteButtons = documentRef.createElement("div");
+  liveDeleteButtons.className = "wx-srv-live-delete-buttons";
+  liveDeleteButtons.append(liveDeleteYes, liveDeleteNo);
+  liveDeleteConfirm.append(liveDeleteQuestion, liveDeleteButtons);
+  // A short neutral line about what happened to a live note (refused, or cut short and re-sent).
+  const liveNotice = documentRef.createElement("p");
+  liveNotice.className = "wx-srv-live-notice";
+  liveNotice.hidden = true;
+  liveNotice.setAttribute("role", "status");
+  function showLiveNotice(text: string | null): void {
+    liveNotice.textContent = text ?? "";
+    liveNotice.hidden = text === null;
+  }
+  // Long-press the mic to choose Voice note or Live voice note (spec/server-chat/07 §1).
+  const modeMenu: VoiceModeMenu = createVoiceModeMenu({
+    document: documentRef,
+    win,
+    button: recordButton,
+    getMode: () => voiceMode,
+    setMode: (mode) => {
+      voiceMode = mode;
+      updateRecorderUi();
+    },
+    isBusy: () => callBusy || voiceSendBusy || pendingVoiceNote !== null || (voiceRecorder?.state ?? "idle") !== "idle",
+  });
 
   // Operator report (round 2): the original entry point was a ~20px "①" badge in the corner of
   // a 56px thumbnail chip, and its picker was appended INSIDE that chip — a box with
@@ -1029,10 +1178,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     openViewOncePicker();
   });
 
-  function formatRecordingTime(milliseconds: number): string {
-    const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
-    return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-  }
+  // m:ss, and h:mm:ss from one hour up: a note can now run for four hours.
+  const formatRecordingTime = formatVoiceTime;
 
   function updateRecorderUi(elapsedMs = voiceRecorder?.elapsedMs ?? 0): void {
     const state = voiceRecorder?.state ?? "idle";
@@ -1042,6 +1189,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     cancelRecordingButton.hidden = !recordingRowActive;
     cancelRecordingButton.disabled = voiceSendBusy;
     pauseRecordingButton.disabled = voiceSendBusy;
+    // A live note that listeners may already be hearing cannot just be cancelled (spec 07 §1).
+    const deleteForEveryoneOffered = recordingLive && liveSend?.message != null && isRecordingOrPaused;
+    cancelRecordingButton.innerHTML = deleteForEveryoneOffered ? TRASH_LINE_ICON : CANCEL_LINE_ICON;
+    cancelRecordingButton.title = deleteForEveryoneOffered ? "Delete for everyone" : "Cancel recording";
+    cancelRecordingButton.setAttribute("aria-label", deleteForEveryoneOffered ? "Delete for everyone" : "Cancel recording");
+    cancelRecordingButton.classList.toggle("wx-srv-record-cancel--delete", deleteForEveryoneOffered);
+    if (!isRecordingOrPaused) liveDeleteConfirm.hidden = true;
+    const liveRow = recordingLive && isRecordingOrPaused;
     recordButton.disabled = callBusy || voiceSendBusy || pendingVoiceNote !== null
       || state === "starting" || state === "stopping";
 
@@ -1060,23 +1215,46 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     composer?.element?.classList.toggle("wx-srv-recording-row", recordingRowActive);
     // Blue indicates the button's stop-and-send action in these two states.
     recordButton.classList.toggle("wx-srv-record-button--send", isRecordingOrPaused);
+    // In live mode the idle mic carries a red LIVE dot and a red tint (spec 07 §1).
+    const liveIdle = voiceMode === "live" && !active && !voiceSendBusy;
+    recordButton.classList.toggle("wx-srv-record-button--live", liveIdle);
+    inputRow?.classList.toggle("wx-srv-recording-live", liveRow);
+    function setRecordingStatus(text: string, live = false): void {
+      recordingStatus.classList.toggle("wx-srv-record-status--live", live);
+      if (!live) {
+        recordingStatus.textContent = text;
+        return;
+      }
+      const dot = documentRef.createElement("span");
+      dot.className = "wx-srv-live-dot";
+      dot.setAttribute("aria-hidden", "true");
+      const label = documentRef.createElement("span");
+      label.textContent = text;
+      recordingStatus.replaceChildren(dot, label);
+    }
 
     if (state === "recording") {
       recordButton.innerHTML = SEND_LINE_ICON;
-      recordButton.title = "Stop and send recording";
-      recordButton.setAttribute("aria-label", "Stop and send recording");
+      recordButton.title = recordingLive ? "Stop live voice note" : "Stop and send recording";
+      recordButton.setAttribute("aria-label", recordingLive ? "Stop live voice note" : "Stop and send recording");
       recordingStatus.hidden = false;
-      recordingStatus.textContent = `Recording ${formatRecordingTime(elapsedMs)}`;
+      setRecordingStatus(
+        recordingLive ? `LIVE · ${formatRecordingTime(elapsedMs)}` : `Recording ${formatRecordingTime(elapsedMs)}`,
+        recordingLive,
+      );
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
       pauseRecordingButton.innerHTML = PAUSE_LINE_ICON;
       pauseRecordingButton.title = "Pause recording";
       pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else if (state === "paused") {
       recordButton.innerHTML = SEND_LINE_ICON;
-      recordButton.title = "Stop and send recording";
-      recordButton.setAttribute("aria-label", "Stop and send recording");
+      recordButton.title = recordingLive ? "Stop live voice note" : "Stop and send recording";
+      recordButton.setAttribute("aria-label", recordingLive ? "Stop live voice note" : "Stop and send recording");
       recordingStatus.hidden = false;
-      recordingStatus.textContent = `Paused ${formatRecordingTime(elapsedMs)}`;
+      setRecordingStatus(
+        recordingLive ? `LIVE · Paused ${formatRecordingTime(elapsedMs)}` : `Paused ${formatRecordingTime(elapsedMs)}`,
+        recordingLive,
+      );
       pauseRecordingButton.hidden = !(voiceRecorder?.supportsPause ?? true);
       pauseRecordingButton.innerHTML = RESUME_LINE_ICON;
       pauseRecordingButton.title = "Resume recording";
@@ -1108,8 +1286,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       pauseRecordingButton.setAttribute("aria-label", "Pause recording");
     } else {
       recordButton.innerHTML = MIC_LINE_ICON;
-      recordButton.title = "Record a voice note";
-      recordButton.setAttribute("aria-label", "Record a voice note");
+      const idleLabel = voiceMode === "live" ? "Record a live voice note" : "Record a voice note";
+      recordButton.title = `${idleLabel} (press and hold to change)`;
+      recordButton.setAttribute("aria-label", idleLabel);
+      recordButton.setAttribute(
+        "aria-description",
+        "Press and hold, or press the up or down arrow key, to choose a voice note or a live voice note.",
+      );
       recordingStatus.hidden = true;
       recordingStatus.removeAttribute("aria-label");
       recordingStatus.textContent = "";
@@ -1117,12 +1300,152 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
 
+  function waitMs(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+      win.setTimeout(resolve, milliseconds);
+    });
+  }
+
+  /** A live voice note was refused (409 `too_many_live`): carry on as an ordinary recording,
+   * with the slices so far handed to an ordinary live upload so nothing is lost. */
+  function continueAsNormalRecording(send: LiveSend): void {
+    const slices = send.slices ?? [];
+    send.slices = null;
+    liveSend = null;
+    recordingLive = false;
+    if (send.replyTo !== null) setPendingReply(send.replyTo);
+    showLiveNotice("Two live voice notes are already going in this chat, so this one is a normal voice note.");
+    const normal = createServerLiveUploader(() => currentSession, {
+      mimeType: recordingMimeType,
+      deviceId: identity.getDeviceId(),
+      onLocked: () => hooks.lockNow("unauthorized"),
+    });
+    for (const slice of slices) normal.push(slice.blob, slice.index, slice.elapsedMs);
+    liveUploader = normal;
+    updateRecorderUi();
+  }
+
+  /** Send the live note's message at once, with the attachment the server created (spec 07 §6.1).
+   * A message that cannot be sent is not lost: the stop path sends it (same `clientId`). */
+  async function postLiveMessage(send: LiveSend, attachmentId: string): Promise<void> {
+    for (let attempt = 0; ; attempt += 1) {
+      const session = currentSession;
+      if (session === null) return;
+      let result: Awaited<ReturnType<typeof sendMessage>>;
+      try {
+        result = await sendMessage(session, {
+          clientId: send.clientId,
+          sender: identity.getName() ?? "",
+          deviceId: identity.getDeviceId(),
+          text: null,
+          attachmentIds: [attachmentId],
+          ...(send.replyTo !== null ? { replyToSeq: send.replyTo.seq } : {}),
+          ...(send.wyrSeq !== null ? { wyrSeq: send.wyrSeq } : {}),
+        });
+      } catch (error) {
+        if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+        return;
+      }
+      if (result.ok) {
+        if (send.cancelled) {
+          // The person threw the note away while this was in flight: nobody should keep it.
+          void deleteForEveryone(result.message);
+          return;
+        }
+        send.message = result.message;
+        addConfirmed(result.message);
+        renderThreadList();
+        gameFloat.noteSent(result.message.wyrRef ?? null);
+        updateRecorderUi();
+        return;
+      }
+      if (result.kind === "rejected" && result.status === 404 && send.wyrSeq !== null) {
+        // The game round it was recorded for is gone: the main chat instead.
+        send.wyrSeq = null;
+        continue;
+      }
+      if (result.kind !== "unavailable" || attempt >= LIVE_MESSAGE_RETRY_MS.length) return;
+      await waitMs(LIVE_MESSAGE_RETRY_MS[attempt] ?? 4_000);
+      if (send.cancelled) return;
+    }
+  }
+
+  /** Recording began in live mode: the server has been asked to open a listened-to upload; once
+   * it has, the message goes out immediately so the others see (and can listen to) it. */
+  function beginLiveSend(uploader: LiveVoiceUploader): void {
+    const send: LiveSend = {
+      clientId: cryptoRandomId(win),
+      replyTo: pendingReply,
+      wyrSeq: chatTargetNow(),
+      message: null,
+      cancelled: false,
+      slices: [],
+    };
+    setPendingReply(null);
+    liveSend = send;
+    void (async () => {
+      const result = await uploader.opened();
+      if (liveSend !== send || liveUploader !== uploader) return;
+      if (result.kind === "too_many_live") {
+        continueAsNormalRecording(send);
+        return;
+      }
+      send.slices = null;
+      if (result.kind !== "opened" || result.attachment === null) {
+        // No live note could be opened: this becomes an ordinary voice note when recording stops
+        // (the kept recording is uploaded whole).
+        liveSend = null;
+        recordingLive = false;
+        if (send.replyTo !== null) setPendingReply(send.replyTo);
+        updateRecorderUi();
+        return;
+      }
+      await postLiveMessage(send, result.attachment.id);
+    })();
+  }
+
   function createRecorder(): VoiceRecorder {
     return createVoiceRecorder({
       hooks,
+      sliceMs: () => (voiceMode === "live" ? LIVE_SLICE_MS : VOICE_SLICE_MS),
+      flushOnPause: () => recordingLive,
       onTimer: (elapsedMs) => updateRecorderUi(elapsedMs),
+      onStart: ({ mimeType }) => {
+        // The recording is uploaded while it is made. A server that refuses a live upload just
+        // means this note goes the ordinary way at stop (the kept recording is uploaded whole).
+        void liveUploader?.cancel();
+        liveSend = null;
+        showLiveNotice(null);
+        recordingLive = voiceMode === "live";
+        recordingMimeType = mimeType.split(";")[0] || "audio/webm";
+        liveUploader = createServerLiveUploader(() => currentSession, {
+          mimeType: recordingMimeType,
+          deviceId: identity.getDeviceId(),
+          ...(recordingLive ? { listen: true } : {}),
+          onLocked: () => hooks.lockNow("unauthorized"),
+        });
+        if (recordingLive) beginLiveSend(liveUploader);
+        updateRecorderUi();
+      },
+      onSlice: (blob, index, elapsedMs) => {
+        liveSend?.slices?.push({ blob, index, elapsedMs });
+        liveUploader?.push(blob, index, elapsedMs);
+      },
       onStop: (recording) => {
+        const live = liveUploader;
+        liveUploader = null;
+        const send = liveSend;
+        liveSend = null;
+        recordingLive = false;
         if (recording.durationMs < MIN_VOICE_DURATION_MS) {
+          if (send !== null) send.cancelled = true;
+          if (send?.message != null) {
+            // Nobody can have heard a second of it, but it is in the chat: take it out.
+            live?.abandon();
+            void deleteForEveryone(send.message);
+          } else {
+            void live?.cancel();
+          }
           composer.setError("Too short. Record for at least one second.");
           updateRecorderUi();
           return;
@@ -1136,20 +1459,42 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const file = new File([recording.blob], `voice-note.${extension}`, { type: mimeType });
         voiceDurations.set(file, recording.durationMs / 1000);
         // §(4): "A voice note captures the reply target at the moment
-        // recording stops: the note becomes a reply and the bar clears."
-        const capturedReplyTo = pendingReply;
-        setPendingReply(null);
+        // recording stops: the note becomes a reply and the bar clears." A live note's message
+        // went out when recording began, so it keeps the target it captured then.
+        const capturedReplyTo = send !== null ? send.replyTo : pendingReply;
+        if (send === null) setPendingReply(null);
         pendingVoiceNote = {
           file,
-          clientId: cryptoRandomId(win),
+          // The live message's own clientId, so a retry can never post a second message for it.
+          clientId: send?.clientId ?? cryptoRandomId(win),
           attachmentId: null,
           replyTo: capturedReplyTo,
-          wyrSeq: chatTargetNow(),
+          wyrSeq: send !== null ? send.wyrSeq : chatTargetNow(),
+          live,
+          liveMessage: send?.message ?? null,
         };
         void sendVoiceNote();
         updateRecorderUi();
       },
-      onCancel: () => updateRecorderUi(),
+      onCancel: () => {
+        // The person threw the recording away: so does the server (best effort). A lock is not
+        // this — `detach` has already abandoned the live upload, to be offered back as unsent.
+        const live = liveUploader;
+        liveUploader = null;
+        const send = liveSend;
+        liveSend = null;
+        recordingLive = false;
+        if (send !== null) send.cancelled = true;
+        if (send?.message != null) {
+          // A live note that went out is deleted for everyone: the normal message delete ends the
+          // server's decoder, closes the listeners and removes the upload (spec 07 §6.1).
+          live?.abandon();
+          void deleteForEveryone(send.message);
+        } else {
+          void live?.cancel();
+        }
+        updateRecorderUi();
+      },
       onError: () => {
         composer.setError("Microphone access failed. Check the browser permission and try again.");
         updateRecorderUi();
@@ -1163,6 +1508,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   recordButton.addEventListener("click", () => {
+    // The press that opened the mode menu must not also start a recording.
+    if (modeMenu.consumeClickSuppression()) return;
+    if (modeMenu.isOpen()) {
+      modeMenu.close();
+      return;
+    }
     if (callBusy) return;
     if (currentSession === null) return;
     const recorder = activeRecorder();
@@ -1180,15 +1531,33 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const recorder = activeRecorder();
     if (recorder.state === "recording") {
       recorder.pause();
+      // Listeners are told (the bubble says "Paused") and the server stops its silence clock.
+      if (recordingLive) liveUploader?.setLiveState("paused");
       updateRecorderUi();
     } else if (recorder.state === "paused") {
+      if (recordingLive) liveUploader?.setLiveState("recording");
       recorder.resume();
       updateRecorderUi();
     }
   });
   cancelRecordingButton.addEventListener("click", () => {
+    if (recordingLive && liveSend?.message != null) {
+      // Others may already have heard part of it: ask before deleting it for everyone.
+      liveDeleteConfirm.hidden = false;
+      liveDeleteYes.focus();
+      return;
+    }
     voiceRecorder?.cancel();
     updateRecorderUi();
+  });
+  liveDeleteYes.addEventListener("click", () => {
+    liveDeleteConfirm.hidden = true;
+    voiceRecorder?.cancel();
+    updateRecorderUi();
+  });
+  liveDeleteNo.addEventListener("click", () => {
+    liveDeleteConfirm.hidden = true;
+    cancelRecordingButton.focus();
   });
 
   composer = mountChatComposer({
@@ -1196,7 +1565,6 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     placeholder: "Message…",
     submitLabel: "Send",
     win,
-    accept: "image/*,video/*",
     acceptFile: (file) => file.type.startsWith("image/") || file.type.startsWith("video/"),
     onFilePickerOpen: () => hooks.suspend("filePicker"),
     onChipsRendered: (stagedFiles) => recomputeViewOnceTarget(stagedFiles),
@@ -1283,6 +1651,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     attachButton.setAttribute("aria-label", "Attach a photo or video");
   }
   composer.element.appendChild(voiceFailureRow);
+  composer.element.appendChild(liveDeleteConfirm);
+  composer.element.appendChild(liveNotice);
 
   // -- Reply bar (round 2 ruling item 10 §(4)) ------------------------------
   // Above the input row. Hidden by default (mount/hide, not append/remove —
@@ -1304,7 +1674,105 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   replyBarCancel.addEventListener("click", () => setPendingReply(null));
   replyBar.append(replyBarLabel, replyBarQuote, replyBarCancel);
 
+  // -- Unsent voice notes (spec/server-chat/06 §2.3) ---------------------------------------
+  // A recording uploaded live but never sent (a crash, a killed tab, a lock) is offered back to
+  // this device as a card next to the composer: Send or Discard, never sent on its own.
+  /** What a card has already done, so a Send that failed AFTER completing the upload retries
+   * from the message, never completing twice (the upload is gone once it has completed). */
+  const unsentProgress = new Map<string, { attachmentId: string; clientId: string }>();
+  const unsentCards = createUnsentVoiceCards({
+    document: documentRef,
+    send: (entry) => sendUnsentVoiceNote(entry),
+    discard: (entry) => discardUnsentVoiceNote(entry),
+  });
+
+  async function sendUnsentVoiceNote(entry: UnsentUpload): Promise<void> {
+    const session = currentSession;
+    if (session === null) throw new Error("Unlock the chat to send this voice note.");
+    let progress = unsentProgress.get(entry.uploadId);
+    try {
+      if (progress === undefined) {
+        const attachment = await completeUnsentUpload(session, entry.uploadId);
+        progress = { attachmentId: attachment.id, clientId: cryptoRandomId(win) };
+        unsentProgress.set(entry.uploadId, progress);
+      }
+      const known = progress;
+      const sendSession = currentSession;
+      if (sendSession === null) throw new Error("Unlock the chat to send this voice note.");
+      const post = (wyrSeq: number | null): ReturnType<typeof sendMessage> =>
+        sendMessage(sendSession, {
+          clientId: known.clientId,
+          sender: identity.getName() ?? "",
+          deviceId: identity.getDeviceId(),
+          text: null,
+          attachmentIds: [known.attachmentId],
+          ...(wyrSeq !== null ? { wyrSeq } : {}),
+        });
+      const target = chatTargetNow();
+      let result = await post(target);
+      if (!result.ok && result.kind === "rejected" && result.status === 404 && target !== null) {
+        // The game round it would have gone to is gone: send it to the main chat instead.
+        result = await post(null);
+      }
+      if (!result.ok) {
+        throw new Error(result.kind === "invalid" || result.kind === "rejected"
+          ? "The server couldn't accept this voice note. You can discard it."
+          : "Couldn't send. Try again.");
+      }
+      unsentProgress.delete(entry.uploadId);
+      addConfirmed(result.message);
+      renderThreadList();
+      gameFloat.noteSent(result.message.wyrRef ?? null);
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+        throw new Error("The chat locked. Unlock it and try again.");
+      }
+      if (error instanceof UploadError) {
+        throw new Error(error.status === 404 || error.status === 409
+          ? "This voice note is no longer on the server. You can discard it."
+          : "Couldn't send. Try again.");
+      }
+      throw error instanceof Error && error.message !== "" ? error : new Error("Couldn't send. Try again.");
+    }
+  }
+
+  async function discardUnsentVoiceNote(entry: UnsentUpload): Promise<void> {
+    const session = currentSession;
+    if (session === null) throw new Error("Unlock the chat to discard this voice note.");
+    try {
+      await discardUpload(session, entry.uploadId);
+      unsentProgress.delete(entry.uploadId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) {
+        hooks.lockNow("unauthorized");
+        throw new Error("The chat locked. Unlock it and try again.");
+      }
+      throw new Error("Couldn't discard. Try again.");
+    }
+  }
+
+  /** Ask the server which voice notes of this device were never sent and show a card for each.
+   * An older server (404) or any failure shows nothing: this is a convenience, never a blocker. */
+  async function refreshUnsentVoiceNotes(session: ServerSession): Promise<void> {
+    try {
+      const entries = await listUnsentUploads(session, identity.getDeviceId());
+      if (currentSession !== session) return;
+      // This device's own recording in progress (paused longer than the server's quiet window)
+      // or a note still being sent is not "unsent".
+      const mine = new Set<string>();
+      const recordingId = liveUploader?.uploadId;
+      if (recordingId) mine.add(recordingId);
+      const pendingId = pendingVoiceNote?.live?.uploadId;
+      if (pendingId) mine.add(pendingId);
+      unsentCards.setEntries(entries.filter((entry) => !mine.has(entry.uploadId)));
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+    }
+  }
+
   element.appendChild(replyBar);
+  element.appendChild(unsentCards.element);
   element.appendChild(composer.element);
 
   // -- The game frame: tabs + per-item chat, and the would-you-rather pane (workspace 00045) ----
@@ -1331,10 +1799,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (open && cookoutGame.pane.parentElement === null) game.pane.after(cookoutGame.pane);
     else if (!open && cookoutGame.pane.parentElement !== null) cookoutGame.pane.remove();
   }
+  /** The Canvas pane follows the same rule: in the chat only while a canvas is open in its tab. */
+  function syncCanvasPane(): void {
+    const open = gameTabs.seqOf("canvas") !== null;
+    if (open && canvasPane.pane.parentElement === null) game.pane.after(canvasPane.pane);
+    else if (!open && canvasPane.pane.parentElement !== null) canvasPane.pane.remove();
+  }
   function applyGameLayout(): void {
     if (gameMounted) {
       syncAdventurePane();
       syncCookoutPane();
+      syncCanvasPane();
     }
     recomputeViewOnceTarget(composer.stagedAttachments().map((a) => a.file));
     const inGame = gameTabs.activeTab() !== "chat";
@@ -1389,6 +1864,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     isRecording: () => voiceRecorder !== null && voiceRecorder.state !== "idle",
     tabBar: gameTabs.tabBar,
     host: element,
+  });
+  canvasPane = createCanvasPane({
+    document: documentRef,
+    win,
+    hooks,
+    identity,
+    tabs: gameTabs,
+    float: gameFloat,
+    canvasMessage: (seq) => {
+      const message = confirmedBySeq.get(seq);
+      return message !== undefined && message.canvas === true ? message : undefined;
+    },
   });
   const game: WyrGame = createWyrGame({
     document: documentRef,
@@ -1568,6 +2055,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     seenAnchor.wyr = 0;
     seenAnchor.adventure = 0;
     seenAnchor.cookout = 0;
+    seenAnchor.canvas = 0;
+    canvasBaseline = false;
   }
 
   /** The other person's display name, as the latest message from anyone else shows it (the two
@@ -1577,7 +2066,10 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   /** The newest game anchor of each game this tab has already considered offering: a game tab is
    * offered once per NEW round, never again for one already seen — with one game at a time, an
    * older unfinished round of one game must not keep pushing out the other game's tab. */
-  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0, cookout: 0 };
+  const seenAnchor: Record<GameKey, number> = { wyr: 0, adventure: 0, cookout: 0, canvas: 0 };
+  /** False until the first message batch after an unlock has been seen: the canvases already in the
+   * chat then are history, not new, and none of them is offered as a tab (decisions/00206). */
+  let canvasBaseline = false;
 
   /** The game chat a message sent now belongs to — `{}` for the main chat. */
   function wyrSendFields(): { wyrSeq?: number } {
@@ -1590,6 +2082,14 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   let historyLoaded = false;
   let historyLoading = false;
   let hasMoreHistory = false;
+  /** Set while the chat shows a stretch of old history gone to from Search, cut off from the newest
+   * messages by a gap neither side has loaded. Messages at or below `high` are on screen; those from
+   * `mainFloor` up (the newest messages, still arriving) are held but not shown. Everything else
+   * in the thread already copes with only part of the history being loaded. */
+  let detachedView: { high: number; readonly mainFloor: number } | null = null;
+  /** Bumped by each search jump and by whatever cancels one: only the newest may change the chat. */
+  let revealToken = 0;
+  let jumpPillDetached = false;
   const confirmedBySeq = new Map<number, Message>();
   const deletedSeqs = new Set<number>();
   const confirmedClientIds = new Set<string>();
@@ -1656,6 +2156,37 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   unheardTab.hidden = true;
   threadWrap.appendChild(unheardTab);
 
+  // Going to each unheard note IN the chat (its context: what "thank you" was thanking): "Go to
+  // message" in the list closes it and scrolls there, and this bar, floating at the bottom of the
+  // thread just above the composer, steps to the previous / next unheard note in place. Its buttons
+  // are tapped in quick succession on purpose, so they never count toward the double-tap lock (R3);
+  // Escape and the ✕ panic button still lock at once.
+  const unheardNav = documentRef.createElement("div");
+  unheardNav.className = "wx-srv-unheard-nav";
+  unheardNav.hidden = true;
+  unheardNav.setAttribute("role", "toolbar");
+  unheardNav.setAttribute("aria-label", "Unread voice notes");
+  unheardNav.setAttribute("data-srv-gesture-exempt", "");
+  function unheardNavButton(className: string, text: string, label: string): HTMLButtonElement {
+    const button = documentRef.createElement("button");
+    button.type = "button";
+    button.className = className;
+    button.textContent = text;
+    button.setAttribute("aria-label", label);
+    return button;
+  }
+  const unheardPrev = unheardNavButton("wx-srv-unheard-prev", "\u2039 Previous", "Previous unread voice note");
+  const unheardPos = documentRef.createElement("span");
+  unheardPos.className = "wx-srv-unheard-pos";
+  unheardPos.setAttribute("aria-live", "polite");
+  const unheardNext = unheardNavButton("wx-srv-unheard-next", "Next \u203a", "Next unread voice note");
+  // Never just "Close": to a screen reader that is the panic \u2715, which locks the chat.
+  const unheardNavClose = unheardNavButton("wx-srv-unheard-nav-close", "\u2715", "Close the voice notes bar");
+  unheardNav.append(unheardPrev, unheardPos, unheardNext, unheardNavClose);
+  threadWrap.appendChild(unheardNav);
+  /** The unheard note the bar is at (it may have been listened to since), or null: no bar. */
+  let unheardNavSeq: number | null = null;
+
   const unheardView = documentRef.createElement("div");
   unheardView.className = "wx-srv-unheard-view";
   unheardView.hidden = true;
@@ -1702,6 +2233,28 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     disposeMedia: (root) => disposeAttachmentMedia(root),
   });
   element.appendChild(links.element);
+
+  // Search (decisions/00208): find a message, then see it where it sits in the chat. Same lock
+  // behaviour as the Links view, and the bar shares the unread voice notes bar's place.
+  const search: SearchView = createSearchView({
+    document: documentRef,
+    win,
+    hooks,
+    getSession: () => currentSession,
+    senderLabel: (sender) => (identity.isMine(sender) ? "You" : sender),
+    reveal: revealSearchResult,
+    clearReveal: () => {
+      revealToken += 1;
+      clearSearchMarks(win);
+    },
+    onNavChange: () => {
+      if (search.navActive()) closeUnheardNav();
+      syncBottomBarRoom();
+      updateUnheard();
+    },
+  });
+  element.appendChild(search.element);
+  threadWrap.appendChild(search.nav);
 
   // The Holiday bank (workspace 00056): every banked Adventure Time trip, a tap opens it in the game.
   const holidayBank: HolidayBank = createHolidayBank({
@@ -1767,7 +2320,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       removeUnheardItem(message.seq);
       updateUnheard();
     });
-    item.append(bubble, dismiss);
+    const goto = documentRef.createElement("button");
+    goto.type = "button";
+    goto.className = "wx-srv-unheard-goto";
+    goto.textContent = "Go to message";
+    goto.title = "Close this list and show this voice note in the chat";
+    // It closes this view and moves the chat under the finger.
+    goto.setAttribute("data-srv-gesture-boundary", "");
+    goto.addEventListener("click", () => goToUnheard(message.seq));
+    const actions = documentRef.createElement("div");
+    actions.className = "wx-srv-unheard-actions";
+    actions.append(goto, dismiss);
+    item.append(bubble, actions);
     return item;
   }
 
@@ -1804,8 +2368,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           }
         }
       } else if (current !== item.message) {
-        if (differOnlyInTranscripts(item.message, current)) {
+        if (differOnlyInLiveOrTranscript(item.message, current)) {
           patchTranscriptBlocks(item.element, current.attachments);
+          patchLiveVoiceBlocks(item.element, current.attachments);
           item.message = current;
         } else {
           const replacement = buildUnheardItem(current);
@@ -1824,11 +2389,75 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const element = renderedMessages.get(message.seq)?.element;
       return element !== undefined && element.getBoundingClientRect().bottom < topY;
     });
-    unheardTab.hidden = unheardOpen || !scrolledOff;
+    unheardTab.hidden = unheardOpen || unheardNavSeq !== null || search.navActive() || !scrolledOff;
     if (!unheardTab.hidden) {
       unheardTab.textContent = `${unheard.length} unread voice note${unheard.length === 1 ? "" : "s"}`;
     }
     syncUnheardView(unheard);
+    syncUnheardNav(unheard);
+  }
+
+  /** The unheard notes before and after `seq`, oldest first (`seq` itself may be heard by now). */
+  function unheardNeighbours(unheard: readonly Message[], seq: number): { prev: number | null; next: number | null } {
+    let prev: number | null = null;
+    let next: number | null = null;
+    for (const message of unheard) {
+      if (message.seq < seq) prev = message.seq;
+      else if (message.seq > seq && next === null) next = message.seq;
+    }
+    return { prev, next };
+  }
+
+  /** Redraws the bar: where it is among the unheard notes, and Previous / Next only where there is
+   * one to go to. It goes once nothing is left unheard. */
+  function syncUnheardNav(unheard: readonly Message[]): void {
+    if (unheardNavSeq !== null && unheard.length === 0) unheardNavSeq = null;
+    const at = unheardNavSeq;
+    syncBottomBarRoom();
+    if (at === null) {
+      unheardNav.hidden = true;
+      return;
+    }
+    const { prev, next } = unheardNeighbours(unheard, at);
+    const index = unheard.findIndex((message) => message.seq === at);
+    const plural = unheard.length === 1 ? "" : "s";
+    unheardPos.textContent =
+      index >= 0 ? `${index + 1} of ${unheard.length} unread voice note${plural}` : `${unheard.length} more unread voice note${plural}`;
+    unheardPrev.hidden = prev === null;
+    unheardNext.hidden = next === null;
+    unheardNav.hidden = false;
+  }
+
+  /** A bar floating over the bottom of the thread makes room for itself, so the newest message can
+   * still be read, and moves the jump pill above it. */
+  function syncBottomBarRoom(): void {
+    threadWrap.classList.toggle("wx-srv-thread-wrap-bottom-bar", search.navActive() || unheardNavSeq !== null);
+  }
+
+  /** Shows the unheard note `seq` in the chat, in context: scrolled to and highlighted. */
+  function goToUnheard(seq: number): void {
+    search.reset();
+    closeUnheardView();
+    unheardNavSeq = seq;
+    syncBottomBarRoom();
+    if (!renderedMessages.has(seq) && detachedView !== null) {
+      leaveDetachedView();
+      renderThreadList(false);
+    }
+    const rendered = renderedMessages.get(seq);
+    if (rendered !== undefined) revealMessage(rendered.element);
+    updateUnheard();
+  }
+
+  function stepUnheard(direction: "prev" | "next"): void {
+    if (unheardNavSeq === null) return;
+    const target = unheardNeighbours(unheardMessages(), unheardNavSeq)[direction];
+    if (target !== null) goToUnheard(target);
+  }
+
+  function closeUnheardNav(): void {
+    unheardNavSeq = null;
+    unheardNav.hidden = true;
   }
 
   function openUnheardView(): void {
@@ -1853,7 +2482,19 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
 
   unheardTab.addEventListener("click", openUnheardView);
   unheardClose.addEventListener("click", closeUnheardView);
+  unheardPrev.addEventListener("click", () => stepUnheard("prev"));
+  unheardNext.addEventListener("click", () => stepUnheard("next"));
+  unheardNavClose.addEventListener("click", () => {
+    closeUnheardNav();
+    updateUnheard();
+  });
   thread.addEventListener("scroll", updateUnheard, { passive: true });
+  thread.addEventListener("scroll", syncDayStrip, { passive: true });
+  thread.addEventListener("scroll", syncDetachedChrome, { passive: true });
+  // After the shared scroller's own handler has scrolled to the end of what is on screen.
+  jumpPill.addEventListener("click", () => {
+    if (detachedView !== null) goToLatest();
+  });
 
   // -- Opt-in voice-note transcription (spec/server-chat/05-voice-transcription.md) ------
   // `transcriptionAvailable` mirrors `GET /usage`'s flag (cmd's private mode is live); the
@@ -1943,6 +2584,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
   }
   const daySeparators = new Map<number, HTMLElement>();
+  /** The days in the thread, oldest first: the order of their separators on screen. */
+  let daysInOrder: number[] = [];
   const renderedEchoes = new Map<string, { readonly echo: PendingEcho; readonly element: HTMLElement }>();
   let emptyState: HTMLElement | null = null;
   let pendingEchoes: PendingEcho[] = [];
@@ -2023,6 +2666,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * the cancel route takes the upload id. */
   function discardPendingVoiceNote(message: string | null): void {
     const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
+    // A live upload still on the server (the send never got as far as completing it) goes too.
+    void pendingVoiceNote?.live?.cancel();
     pendingVoiceNote = null;
     setVoiceRetryOffered(false);
     composer.setError(message);
@@ -2036,12 +2681,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (pending === null || session === null || voiceSendBusy) return;
     voiceSendBusy = true;
+    if (detachedView !== null) goToLatest();
     const focusWasInRow = voiceFailureRow.contains(documentRef.activeElement);
     retryVoiceButton.disabled = true;
     setVoiceRetryOffered(false);
     composer.setError(null);
     updateRecorderUi();
     try {
+      if (pending.attachmentId === null && pending.live !== null) {
+        // Throws ServerLockedError if the session died: the note stays pending and the next
+        // unlock calls this again, carrying on where the live upload stopped.
+        const listened = pending.live.listening === true;
+        const completed = await pending.live.finish();
+        pending.live = null;
+        if (completed !== null) {
+          pending.attachmentId = completed.id;
+          if (pending.liveMessage !== null) {
+            // A live note: its message went out when recording began and now holds the finished
+            // attachment (the server follows with message_updated). Nothing more to send.
+            if (pendingVoiceNote === pending) pendingVoiceNote = null;
+            return;
+          }
+        } else if (listened) {
+          // The live upload could not be finished (the connection was lost for good, or the
+          // server had already ended the note): what listeners heard stays, and the whole kept
+          // recording is sent once more as a NEW voice note, so no audio is lost. (A new
+          // clientId: the live message must not be mistaken for this one.)
+          pending.clientId = cryptoRandomId(win);
+          if (pending.liveMessage !== null) {
+            showLiveNotice("The live voice note was cut short, so the whole recording was sent again as a new voice note.");
+            pending.liveMessage = null;
+          }
+        }
+        // Otherwise the live upload failed for good and is already deleted: upload the kept recording.
+      }
       if (pending.attachmentId === null) {
         const durationS = voiceDurations.get(pending.file);
         const attachment = await uploadServerAttachment(
@@ -2133,6 +2806,17 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     messageActionControllers.delete(seq);
   }
 
+  async function retryFailedAttachment(attachmentId: string): Promise<RetryResult> {
+    const session = currentSession;
+    if (session === null) return { kind: "failed" };
+    try {
+      return await retryAttachment(session, attachmentId);
+    } catch (error) {
+      if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
+      return { kind: "failed" };
+    }
+  }
+
   function renderAttachmentsFor(message: Message, timeElement?: HTMLElement): HTMLElement | null {
     if (message.attachments.length === 0) return null;
     return renderAttachments(message.attachments, {
@@ -2140,6 +2824,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       openLightbox: (src, alt) => lightbox.open(src, alt),
       transcription,
       onVoiceListened: (attachmentId) => markHeard(attachmentId),
+      retryAttachment: retryFailedAttachment,
+      liveVoice: liveVoiceHub,
+      ownMessage: identity.isMine(message.sender),
       document: documentRef,
       win,
     }, timeElement);
@@ -2331,7 +3018,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   }
 
   /** §(4): a `<button>` whose accessible name reads like "Show the original
-   * message from <name>"; tapping it scrolls to the original (paging
+   * message from <name>"; tapping it scrolls to the original (fetching
    * backwards to find it if needed). It carries `data-srv-gesture-boundary`
    * — its tap makes a different control (the original) appear under the
    * finger, so a double-tap on a quote never locks either. */
@@ -2351,8 +3038,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return button;
   }
 
-  /** Adds a canvas message: a big blank surface in the thread, with space of its own so the pen
-   * has somewhere to draw that is not on top of anyone's words. */
+  /** Adds a canvas message and opens it in the Canvas tab, where it is drawn on full screen; the
+   * thread keeps it as the record of when it was started (decisions/00206). */
   async function addCanvas(): Promise<void> {
     const session = currentSession;
     if (session === null) return;
@@ -2379,7 +3066,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     addConfirmed(result.message);
     renderThreadList();
-    threadScroll.scrollToBottom();
+    goToLatest();
+    // It is drawn on in its own tab (decisions/00206); the chat keeps it as the record.
+    gameTabs.open("canvas", result.message.seq);
   }
 
   /** Starts a would-you-rather round: the server picks the question and paints the two
@@ -2410,7 +3099,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     addConfirmed(result.message);
     renderThreadList();
-    threadScroll.scrollToBottom();
+    goToLatest();
     // The game opens in its own tab (and pops the next round's card into the main chat).
     gameTabs.open("wyr", result.message.seq);
   }
@@ -2446,7 +3135,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     addConfirmed(result.message);
     renderThreadList();
-    threadScroll.scrollToBottom();
+    goToLatest();
     gameTabs.open("adventure", result.message.seq);
   }
 
@@ -2513,7 +3202,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     addConfirmed(result.message);
     renderThreadList();
-    threadScroll.scrollToBottom();
+    goToLatest();
     gameTabs.open("cookout", result.message.seq);
   }
 
@@ -2555,11 +3244,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   /** Pages older history in until the message `seq` is loaded (a banked trip may be months back),
    * so its card, its chat and its round are all there when its tab opens. */
   async function ensureMessageLoaded(seq: number): Promise<boolean> {
+    // Paging older from a detached view can't reach a message in the gap above it.
+    if (!confirmedBySeq.has(seq) && detachedView !== null) {
+      leaveDetachedView();
+      renderThreadList(false);
+    }
     const generation = contentGeneration;
     while (!confirmedBySeq.has(seq)) {
       if (currentSession === null || generation !== contentGeneration || !hasMoreHistory) return false;
       const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
-      if (generation !== contentGeneration || currentSession === null) return false;
+      if (generation !== contentGeneration || currentSession === null || detachedView !== null) return false;
       if (result === "loaded") continue;
       if (result === "blocked") {
         await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
@@ -2627,6 +3321,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       const current = gameTabs.seqOf("cookout");
       if (newestCookout.seq !== current && (active || (current !== null && newestCookout.seq > current))) {
         offers.push({ key: "cookout", seq: newestCookout.seq });
+      }
+    }
+    // A canvas started on another screen (the other person's, or this person's other device) is
+    // offered as the Canvas tab (decisions/00206). The canvases already in the chat when it loads
+    // are history and are never offered, and a canvas never pushes out a game that is on screen right
+    // now: it waits in the chat, where its Open button opens it.
+    let newestCanvas = 0;
+    for (const m of messages) if (m.canvas === true && m.seq > newestCanvas) newestCanvas = m.seq;
+    if (!canvasBaseline) {
+      if (historyLoaded) {
+        seenAnchor.canvas = Math.max(seenAnchor.canvas, newestCanvas);
+        canvasBaseline = true;
+      }
+    } else if (newestCanvas > seenAnchor.canvas) {
+      seenAnchor.canvas = newestCanvas;
+      const showing = gameTabs.activeTab();
+      if (newestCanvas !== gameTabs.seqOf("canvas") && (showing === "chat" || showing === "canvas")) {
+        offers.push({ key: "canvas", seq: newestCanvas });
       }
     }
     const newest = offers.reduce<(typeof offers)[number] | undefined>((a, b) => (a === undefined || b.seq > a.seq ? b : a), undefined);
@@ -2697,6 +3409,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       sender.className = "wx-srv-bubble-sender";
       sender.textContent = message.sender;
       bubble.appendChild(sender);
+      // A muted per-name hue (chat.css) so several other members read apart.
+      bubble.style.setProperty("--wx-sender-hue", String(senderHue(message.sender)));
+      bubble.classList.add("wx-srv-bubble-hued");
     }
     if (typeof message.wyrRef === "number") {
       // Sent in a game item's chat (a would-you-rather round, ...): a small tag names the game and
@@ -2727,11 +3442,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       bubble.appendChild(cookoutCards.create(message));
     } else if (message.canvas === true) {
       bubble.classList.add("wx-srv-bubble-canvas");
+      // The chat keeps the canvas as the record of when it was started, drawing and all; it is drawn
+      // on in the Canvas tab, which Open brings up (decisions/00206). The drawing is placed by the
+      // surface, so this row above it never moves it.
+      const head = documentRef.createElement("div");
+      head.className = "wx-srv-canvas-bubble-head";
+      const open = documentRef.createElement("button");
+      open.type = "button";
+      open.className = "wx-srv-canvas-open";
+      open.textContent = "Open";
+      open.setAttribute("aria-label", "Open this canvas");
+      open.setAttribute("data-srv-gesture-boundary", "");
+      const seq = message.seq;
+      open.addEventListener("click", () => gameTabs.open("canvas", seq));
+      head.appendChild(open);
       const surface = documentRef.createElement("div");
       surface.className = "wx-srv-canvas-surface";
       surface.setAttribute("role", "img");
-      surface.setAttribute("aria-label", "Blank canvas to draw on");
-      bubble.appendChild(surface);
+      surface.setAttribute("aria-label", "Canvas");
+      bubble.append(head, surface);
     } else if (message.viewOnce) {
       const isVideo = message.attachments[0]?.kind === "video";
       const kindLabel = isVideo ? "video" : "photo";
@@ -2809,7 +3538,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         bubble.appendChild(textEl);
       }
 
-      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => a.kind === "voice" && a.status === "ready");
+      hasTranscribableVoice = transcription !== undefined && message.attachments.some((a) => isTranscribableVoice(a));
       const attachmentsEl = renderAttachmentsFor(message, hasTranscribableVoice ? time : undefined);
       if (attachmentsEl !== null) bubble.appendChild(attachmentsEl);
     }
@@ -2867,11 +3596,46 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return bubble;
   }
 
+  /** Shows the day at the top of the chat in the strip, unless that is today, or that day's own
+   * separator is right there saying the same thing. The separators are in day order, so the one in
+   * charge is found by bisecting rather than by measuring every day in a long chat. */
+  function syncDayStrip(): void {
+    const top = thread.getBoundingClientRect().top;
+    const stripBottom = top + DAY_STRIP_BAND_PX;
+    let low = 0;
+    let high = daysInOrder.length - 1;
+    let current: number | null = null;
+    while (low <= high) {
+      const middle = (low + high) >> 1;
+      const day = daysInOrder[middle];
+      const separator = day === undefined ? undefined : daySeparators.get(day);
+      if (day === undefined || separator === undefined) break;
+      if (separator.getBoundingClientRect().top <= stripBottom) {
+        current = day;
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    const label = current === null ? "Today" : formatDaySeparator(current / 1000, new Date());
+    const ownSeparator = current === null ? undefined : daySeparators.get(current);
+    const separatorShowing = ownSeparator !== undefined && ownSeparator.getBoundingClientRect().bottom > top;
+    if (label === "Today" || separatorShowing) {
+      dayStrip.hidden = true;
+      return;
+    }
+    dayStripLabel.textContent = label;
+    dayStrip.hidden = false;
+  }
+
   function renderThreadList(revealPillIfNotStuck = false): void {
     const nowMs = now();
     pendingEchoes = pendingEchoes.filter((e) => nowMs - e.sentAt < ECHO_EXPIRY_MS);
-    const messages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
-    const visibleEchoes = pendingEchoes.filter((echo) => !confirmedClientIds.has(echo.clientId));
+    const allMessages = Array.from(confirmedBySeq.values()).sort((a, b) => a.seq - b.seq);
+    const view = detachedView;
+    const messages = view === null ? allMessages : allMessages.filter((message) => message.seq <= view.high);
+    const visibleEchoes =
+      view === null ? pendingEchoes.filter((echo) => !confirmedClientIds.has(echo.clientId)) : [];
     const desiredNodes: HTMLElement[] = [];
     const activeDays = new Set<number>();
     const nowDate = new Date();
@@ -2896,11 +3660,13 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       if (
         rendered !== undefined &&
         rendered.message !== message &&
-        differOnlyInTranscripts(rendered.message, message)
+        differOnlyInLiveOrTranscript(rendered.message, message)
       ) {
-        // Only a transcript changed: patch its block in place. Rebuilding the bubble would
-        // dispose the `<audio>` and cut off a voice note that is playing right now.
+        // Only a transcript (or a live note's status / pause state) changed: patch it in place.
+        // Rebuilding the bubble would dispose the `<audio>` and cut off a voice note that is
+        // playing right now, or the live stream someone is listening to.
         patchTranscriptBlocks(rendered.element, message.attachments);
+        patchLiveVoiceBlocks(rendered.element, message.attachments);
         rendered = { message, element: rendered.element };
         renderedMessages.set(message.seq, rendered);
       }
@@ -2932,6 +3698,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       desiredNodes.push(rendered.element);
     }
 
+    daysInOrder = Array.from(activeDays);
     const visibleSeqs = new Set(messages.map((message) => message.seq));
     for (const [seq, rendered] of renderedMessages) {
       if (!visibleSeqs.has(seq)) {
@@ -2996,16 +3763,25 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     // Drawings follow their anchors (positions re-read from the new layout before the scroll
     // decision below, which must see a drawing that extends past the last bubble), fetch
     // what a message's `drawings` summary says is new, and drop those of vanished messages.
-    drawingLayer.syncMessages(messages);
-    wyrModel.observe(messages);
-    adventureModel.observe(messages);
-    cookoutModel.observe(messages);
+    // Every held message: being off screen for now is not being deleted, which is what a missing
+    // anchor means to the drawing layer, and it would throw away strokes still being sent.
+    drawingLayer.syncMessages(allMessages);
+    canvasPane.sync();
+    wyrModel.observe(allMessages);
+    adventureModel.observe(allMessages);
+    cookoutModel.observe(allMessages);
     askCookoutModes(messages);
-    syncGames(messages);
+    // The old stretch is history, never a new game to offer. Paging older could already bring one
+    // in, but a single tap on a search result shouldn't retire the game on screen.
+    syncGames(view === null ? allMessages : allMessages.filter((message) => message.seq > view.high));
     landLostCookout();
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
+    // The end of a detached view is not the end of the chat: nothing may pull the reader along it.
+    if (view !== null) threadScroll.unstick();
     threadScroll.afterContentChange(revealPillIfNotStuck);
+    syncDetachedChrome();
     updateUnheard();
+    syncDayStrip();
   }
 
   async function deleteForEveryone(message: Message): Promise<void> {
@@ -3017,9 +3793,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     inFlightDeletes.add(message.seq);
     confirmedBySeq.delete(message.seq);
     links.messageDeleted(message.seq);
+    search.messageDeleted(message.seq);
     // spec 07 §6: its drawings go with it at once, in place (a failed delete restores the
     // message, and its summary brings them back).
     drawingLayer.messageDeleted(message.seq);
+    canvasPane.messageDeleted(message.seq);
     const bubble = messageList.querySelector<HTMLElement>(
       `[data-message-seq="${message.seq}"]`,
     );
@@ -3046,7 +3824,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         const fadeTimer = deleteFadeTimers.get(message.seq);
         if (fadeTimer !== undefined) win.clearTimeout(fadeTimer);
         deleteFadeTimers.delete(message.seq);
-        addConfirmed(message);
+        if (belongsInHeldRange(message.seq)) addConfirmed(message);
+        search.messageChanged(message);
         renderThreadList(false);
         const restored = messageList.querySelector<HTMLElement>(
           `[data-message-seq="${message.seq}"]`,
@@ -3075,6 +3854,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     }
     // spec 07 §5/§6: a wipe ends any drawing session and takes every drawing with it.
     drawingLayer.wiped();
+    canvasPane.wiped();
     wyrModel.reset();
     adventureModel.reset();
     cookoutModel.reset();
@@ -3097,7 +3877,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     reactionErrorTimers.clear();
     reactionErrors.clear();
     confirmedBySeq.clear();
+    detachedView = null;
     links.close();
+    search.reset();
     wyrTopics.close();
     deletedSeqs.clear();
     confirmedClientIds.clear();
@@ -3275,13 +4057,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     return oldest;
   }
 
-  /** `"blocked"` — a DIFFERENT load (ordinary scroll paging, or a sibling
-   * `scrollToOriginal` run) is already in flight — is distinct from
-   * `"exhausted"` (`hasMoreHistory` is false) precisely so a caller racing
-   * another load (§(4): "another tap") can retell them apart: worth
-   * retrying vs. genuinely nothing more to page. `limit` defaults to the
-   * ordinary scroll-driven page size; `scrollToOriginal` passes its own
-   * larger one. */
+  /** `"blocked"` — a DIFFERENT load (ordinary scroll paging, or a sibling `ensureMessageLoaded`
+   * run) is already in flight — is distinct from `"exhausted"` (`hasMoreHistory` is false) so a
+   * caller racing another load can tell them apart: worth retrying vs. genuinely nothing more to
+   * page. `limit` defaults to the ordinary scroll-driven page size; `ensureMessageLoaded` passes
+   * its own larger one. */
   async function loadOlderPage(
     limit: number = HISTORY_PAGE_SIZE,
   ): Promise<"loaded" | "blocked" | "exhausted" | "error"> {
@@ -3289,14 +4069,16 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     if (historyLoading) return "blocked";
     if (!hasMoreHistory) return "exhausted";
     const requestGeneration = contentGeneration;
+    const requestView = detachedView;
     const session = currentSession;
     const before = oldestLoadedSeq();
-    if (before === null) return "exhausted";
     historyLoading = true;
     try {
-      const page = await getHistory(session, { before, limit });
-      if (requestGeneration !== contentGeneration) return "error";
-      const wasStuck = threadScroll.stuck;
+      // Nothing held but more to come: the newest messages were left out of a view and gone since.
+      const page = await getHistory(session, before === null ? { limit } : { before, limit });
+      // A page for a view since left would land beside the newest messages, hiding the gap for good.
+      if (requestGeneration !== contentGeneration || detachedView !== requestView) return "error";
+      const wasStuck = threadScroll.stuck && detachedView === null;
       const prevScrollHeight = thread.scrollHeight;
       const prevScrollTop = thread.scrollTop;
       for (const message of page.messages) addConfirmed(message);
@@ -3324,6 +4106,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
    * Never re-renders a whole bubble — the same voice/video cut-off trap as
    * reactions. */
   function removeQuotesTargeting(seq: number): void {
+    // The held copies as well as the bubbles: a detached view tears bubbles down and rebuilds them
+    // from these, which must not bring the deleted words back.
+    for (const [heldSeq, held] of confirmedBySeq) {
+      if (held.replyTo?.seq === seq) confirmedBySeq.set(heldSeq, { ...held, replyTo: null });
+    }
     for (const rendered of renderedMessages.values()) {
       if (rendered.message.replyTo?.seq === seq) {
         rendered.element.querySelector(".wx-srv-quote")?.remove();
@@ -3334,66 +4121,214 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         rendered.element.querySelector(".wx-srv-quote")?.remove();
       }
     }
+    pendingEchoes = pendingEchoes.map((echo) => {
+      if (echo.replyTo?.seq !== seq) return echo;
+      const cleared = { ...echo, replyTo: null };
+      const shown = renderedEchoes.get(echo.clientId);
+      if (shown !== undefined) renderedEchoes.set(echo.clientId, { echo: cleared, element: shown.element });
+      return cleared;
+    });
     if (pendingReply?.seq === seq) setPendingReply(null);
   }
 
-  /** §(4): tapping a quote scrolls to the original, paging backwards (the
-   * quote shows busy meanwhile) if it isn't loaded yet. Not found after
-   * paging exhausts → the target was deleted meanwhile; remove the quote.
-   * Aborts on a lock, a wipe, or another tap — all three bump
+  /** §(4), decisions/00208: tapping a quote scrolls to the original, shown in its own neighbourhood
+   * if it isn't on screen (the quote shows busy meanwhile). The server saying it is gone means it was
+   * deleted meanwhile: remove the quote. Aborts on a lock, a wipe, or another tap — all three bump
    * `scrollToOriginalGeneration`. */
   async function scrollToOriginal(seq: number, button: HTMLButtonElement): Promise<void> {
     scrollToOriginalGeneration += 1;
     const generation = scrollToOriginalGeneration;
+    const wasOnScreen = renderedMessages.has(seq);
     button.classList.add("wx-srv-quote-busy");
     button.setAttribute("aria-busy", "true");
     try {
-      // Audit F6: only "exhausted" (paging genuinely ran out of history) means
-      // the target was deleted — a network/auth "error" must leave the quote
-      // alone, since `loadOlderPage` swallows every exception and the original
-      // may well still exist.
-      let genuinelyNotFound = false;
-      while (!renderedMessages.has(seq)) {
-        if (!hasMoreHistory) {
-          genuinelyNotFound = true;
-          break;
-        }
-        const result = await loadOlderPage(SCROLL_TO_ORIGINAL_PAGE_SIZE);
+      // Any original not on screen is shown in its own neighbourhood, one request however old it is
+      // (decisions/00208). Only the server saying it is gone removes the quote; a network or auth
+      // failure leaves it alone, since the original may well still exist (audit F6).
+      // A quote tapped in a game's pop-up: go to the original visibly, not behind the game.
+      if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
+      if (!renderedMessages.has(seq)) {
+        revealToken += 1;
+        const outcome = await showMessage(seq, () => generation === scrollToOriginalGeneration);
         if (generation !== scrollToOriginalGeneration) return;
-        if (result === "loaded") continue;
-        if (result === "blocked") {
-          // A sibling load (ordinary scroll paging, or another
-          // scrollToOriginal run) owns the single history-load slot right
-          // now — yield to a REAL macrotask and retry rather than treating
-          // this as exhausted (audit F2: a microtask-only yield never lets
-          // the sibling's in-flight fetch actually resolve).
-          await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
-          continue;
-        }
-        if (result === "exhausted") genuinelyNotFound = true;
-        break; // "exhausted" -> genuinely not found; "error" -> give up silently.
+        if (outcome === "gone") removeQuotesTargeting(seq);
+        if (outcome !== "shown") return;
       }
-      if (generation !== scrollToOriginalGeneration) return;
       const rendered = renderedMessages.get(seq);
-      if (rendered === undefined) {
-        if (genuinelyNotFound) removeQuotesTargeting(seq);
-        return;
-      }
-      const targetElement = rendered.element;
-      const prefersReducedMotion =
-        win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false;
-      targetElement.scrollIntoView({
-        behavior: prefersReducedMotion ? "auto" : "smooth",
-        block: "center",
-      });
-      targetElement.classList.add("wx-srv-bubble-highlighted");
-      win.setTimeout(() => {
-        targetElement.classList.remove("wx-srv-bubble-highlighted");
-      }, SCROLL_TO_ORIGINAL_HIGHLIGHT_MS);
+      if (rendered !== undefined) revealMessage(rendered.element, !wasOnScreen);
     } finally {
       button.classList.remove("wx-srv-quote-busy");
       button.removeAttribute("aria-busy");
     }
+  }
+
+  /** Leaves the stretch of old history on screen (`detachedView`), forgetting it: the loaded
+   * messages are contiguous again, with older ones still to page in. The caller renders. */
+  function leaveDetachedView(): void {
+    if (detachedView === null) return;
+    const { mainFloor } = detachedView;
+    for (const seq of Array.from(confirmedBySeq.keys())) {
+      if (seq < mainFloor) confirmedBySeq.delete(seq);
+    }
+    detachedView = null;
+    hasMoreHistory = true;
+    contentRevision += 1;
+  }
+
+  /** Whether a message not held could be taken in without leaving a hole in what is held. */
+  function belongsInHeldRange(seq: number): boolean {
+    const oldest = oldestLoadedSeq();
+    if (oldest === null) return true;
+    if (seq < oldest) return false;
+    return detachedView === null || seq <= detachedView.high || seq >= detachedView.mainFloor;
+  }
+
+  /** The newest messages, from wherever the reader is. From a game's tab the thread isn't showing,
+   * and a game opened from the old stretch needs that stretch: the view is left from the chat. */
+  function goToLatest(): void {
+    if (detachedView !== null) {
+      if (gameTabs.activeTab() !== "chat") return;
+      revealToken += 1;
+      scrollToOriginalGeneration += 1;
+      leaveDetachedView();
+      renderThreadList(false);
+      // Everything newer has been deleted since: the page that fills the chat again.
+      if (confirmedBySeq.size === 0) void loadOlderPage();
+    }
+    threadScroll.scrollToBottom();
+  }
+
+  /** The pill and the lower sentinel follow the view: a detached view always offers the way back. */
+  function syncDetachedChrome(): void {
+    const detached = detachedView !== null;
+    newerSentinel.hidden = !detached;
+    if (detached) {
+      jumpPill.textContent = "\u2193 Latest messages";
+      jumpPill.hidden = false;
+    } else if (jumpPillDetached) {
+      jumpPill.textContent = "\u2193 New messages";
+      jumpPill.hidden = true;
+    }
+    jumpPillDetached = detached;
+  }
+
+  /** Scrolled to the end of a detached view: the next newer page. Meeting the newest messages
+   * joins the two, and the chat is simply the chat again. */
+  async function loadNewerPage(): Promise<void> {
+    const view = detachedView;
+    const session = currentSession;
+    if (view === null || session === null || historyLoading) return;
+    const requestGeneration = contentGeneration;
+    historyLoading = true;
+    try {
+      const page = await getHistory(session, { after: view.high, limit: HISTORY_PAGE_SIZE });
+      if (requestGeneration !== contentGeneration || detachedView !== view) return;
+      for (const message of page.messages) addConfirmed(message);
+      const newest = page.messages[page.messages.length - 1]?.seq ?? view.high;
+      if (page.hasNewer !== true || newest >= view.mainFloor) detachedView = null;
+      else view.high = newest;
+      // The reader is at the end of what was on screen, so reads as stuck to the bottom. Joining
+      // must not carry them to the very end, past everything just loaded.
+      threadScroll.unstick();
+      renderThreadList(false);
+    } catch {
+      // Best-effort, like paging older: the sentinel fires again on the next scroll to the end.
+    } finally {
+      historyLoading = false;
+    }
+  }
+
+  /** Makes sure `seq` is on screen. One not on screen is shown in its own neighbourhood, one request
+   * however old it is, rather than building every message between here and there: at this chat's
+   * size that was over 565,000 page elements and took 5 seconds on a fast desktop, far longer on a
+   * phone (decisions/00208). `stillWanted` going false stops it changing anything. */
+  async function showMessage(seq: number, stillWanted: () => boolean): Promise<RevealOutcome> {
+    const generation = contentGeneration;
+    const wanted = (): boolean => stillWanted() && generation === contentGeneration && currentSession !== null;
+    if (renderedMessages.has(seq)) return "shown";
+    if (confirmedBySeq.has(seq)) {
+      leaveDetachedView();
+      renderThreadList(false);
+      return renderedMessages.has(seq) ? "shown" : "gone";
+    }
+    if (deletedSeqs.has(seq)) return "gone";
+    while (historyLoading) {
+      await new Promise<void>((resolve) => win.setTimeout(resolve, SCROLL_TO_ORIGINAL_RETRY_MS));
+      if (!wanted()) return "cancelled";
+    }
+    const session = currentSession;
+    if (session === null) return "cancelled";
+    historyLoading = true;
+    try {
+      const page = await getHistory(session, { around: seq, limit: JUMP_PAGE_SIZE });
+      if (!wanted()) return "cancelled";
+      // Deleted while the request was out: before anything changes, or the page would land beside
+      // the newest messages and hide the gap.
+      if (deletedSeqs.has(seq) || !page.messages.some((message) => message.seq === seq)) return "gone";
+      const mainFloor = detachedView?.mainFloor ?? oldestLoadedSeq() ?? Number.POSITIVE_INFINITY;
+      leaveDetachedView();
+      for (const message of page.messages) addConfirmed(message);
+      const newest = page.messages[page.messages.length - 1]?.seq ?? seq;
+      detachedView = page.hasNewer === true && newest < mainFloor ? { high: newest, mainFloor } : null;
+      hasMoreHistory = page.hasMore;
+      renderThreadList(false);
+    } catch {
+      return wanted() ? "failed" : "cancelled";
+    } finally {
+      historyLoading = false;
+    }
+    return renderedMessages.has(seq) ? "shown" : "gone";
+  }
+
+  /** Goes to a search result. The newest request wins; anything that closes the search, leaves the
+   * view or locks the chat cancels it. */
+  async function revealSearchResult(seq: number, matched: readonly string[]): Promise<RevealOutcome> {
+    scrollToOriginalGeneration += 1;
+    revealToken += 1;
+    const token = revealToken;
+    // During a live call the menu is reachable from a game's tab, where the thread isn't showing.
+    if (gameTabs.activeTab() !== "chat") gameTabs.showTab("chat");
+    const wasOnScreen = renderedMessages.has(seq);
+    const outcome = await showMessage(seq, () => token === revealToken);
+    if (outcome !== "shown") return outcome;
+    const rendered = renderedMessages.get(seq);
+    if (rendered === undefined) return "gone";
+    revealMessage(rendered.element, !wasOnScreen);
+    applySearchMarks(win, rendered.element, matched);
+    return "shown";
+  }
+
+  /** Scrolls a bubble to the middle of the thread and highlights it for a moment (§(4)): a quote's
+   * original, an unheard voice note gone to from its list, or a search result. A long way off it
+   * goes straight there: a smooth scroll past months of chat is only slow, and janky. */
+  function revealMessage(targetElement: HTMLElement, instant = false): void {
+    const threadBox = thread.getBoundingClientRect();
+    const farAway =
+      Math.abs(targetElement.getBoundingClientRect().top - threadBox.top) > REVEAL_SMOOTH_MAX_SCREENS * threadBox.height;
+    const prefersReducedMotion =
+      instant || farAway || (win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ?? false);
+    // Hold the thread while the jump scrolls: until it ends, the thread still reads as stuck to the
+    // bottom, and a message arriving meanwhile snapped it straight back there, undoing the jump
+    // (measured: 3 of 10 runs of the unheard-notes e2e). The scroll's own events then leave it
+    // un-stuck where it landed.
+    const release = threadScroll.hold();
+    let timer: number | null = null;
+    const done = (): void => {
+      thread.removeEventListener("scrollend", done);
+      if (timer !== null) win.clearTimeout(timer);
+      timer = null;
+      release();
+    };
+    thread.addEventListener("scrollend", done);
+    timer = win.setTimeout(done, REVEAL_HOLD_MAX_MS);
+    targetElement.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "center",
+    });
+    targetElement.classList.add("wx-srv-bubble-highlighted");
+    win.setTimeout(() => {
+      targetElement.classList.remove("wx-srv-bubble-highlighted");
+    }, SCROLL_TO_ORIGINAL_HIGHLIGHT_MS);
   }
 
   function ensureObserver(): void {
@@ -3404,12 +4339,15 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     observer = new Ctor(
       (entries) => {
         for (const entry of entries) {
-          if (entry.isIntersecting) void loadOlderPage();
+          if (!entry.isIntersecting) continue;
+          if (entry.target === newerSentinel) void loadNewerPage();
+          else void loadOlderPage();
         }
       },
       { root: thread },
     );
     observer.observe(sentinel);
+    observer.observe(newerSentinel);
   }
 
   // -- Send / echo reconciliation ---------------------------------------------
@@ -3453,6 +4391,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     voIndex: number,
     requestGeneration: number,
   ): void {
+    if (detachedView !== null) goToLatest();
     const text = draft.base.text;
     const voStaged = draft.base.staged[voIndex]!;
     const voSettings = fileViewOnceSettings.get(voStaged.file)!;
@@ -3496,7 +4435,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         };
         pendingEchoes.push(echo);
         contentRevision += 1;
-        threadScroll.scrollToBottom();
+        goToLatest();
         renderThreadList();
 
         try {
@@ -3684,7 +4623,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     };
     pendingEchoes.push(echo);
     contentRevision += 1;
-    threadScroll.scrollToBottom();
+    goToLatest();
     renderThreadList();
 
     sendMessage(session, {
@@ -3745,12 +4684,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     stopTranscriptionProbe(false);
     const availabilityOwner = transcriptionOwner;
     currentSession = session;
+    // The live-voice socket follows the session: opened for the live notes on screen, and
+    // reconnected (resuming any stream) on a renewed token.
+    liveVoiceHub.attach(session);
+    // Everything held is refreshed below, back to the oldest: never across a gap. A renewed token
+    // arrives here without a lock, so this can't be left to `detach`.
+    revealToken += 1;
+    const leftDetachedView = detachedView !== null;
+    if (leftDetachedView) {
+      scrollToOriginalGeneration += 1;
+      leaveDetachedView();
+    }
     // Capability recovery belongs to the attachment, independently of history or wipe.
     void refreshTranscriptionAvailability(session, availabilityOwner);
     // A renewed token: an open gallery swaps in freshly signed media URLs, no visible change.
     gallery.refreshSession();
     // Strokes a lock left waiting to be stored resume with this unlock's token.
     drawingLayer.attach(session);
+    canvasPane.attach(session);
     if (voiceRecorder === null) voiceRecorder = createRecorder();
     const requestGeneration = contentGeneration;
     const oldestSeqAtAttach = historyLoaded ? oldestLoadedSeq() : null;
@@ -3812,11 +4763,26 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           setPendingReply(null);
         }
       }
+      // Replying to a message in a detached view, which has since been left: its target is no longer
+      // held, so the refresh above can't say whether it survived. Ask.
+      if (
+        pendingReply !== null &&
+        !retainedSeqsAtAttach.has(pendingReply.seq) &&
+        !refreshedMessages.has(pendingReply.seq)
+      ) {
+        const target = pendingReply.seq;
+        const page = await getHistory(session, { around: target, limit: 1 });
+        if (requestGeneration !== contentGeneration) return null;
+        if (!page.messages.some((message) => message.seq === target)) setPendingReply(null);
+      }
       for (const message of refreshedMessages.values()) addConfirmed(message);
       historyLoaded = true;
       renderThreadList();
+      // Not wherever the old stretch's scroll position happens to fall among the newest messages.
+      if (leftDetachedView) threadScroll.scrollToBottom();
       ensureObserver();
       if (pendingVoiceNote !== null) void sendVoiceNote();
+      void refreshUnsentVoiceNotes(session);
       return cursor;
     } catch (error) {
       if (requestGeneration !== contentGeneration) return null;
@@ -3840,20 +4806,33 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     setCallLive(live: boolean): void { element.classList.toggle("wx-srv-call-live", live); },
     attach,
     detach(): void {
+      revealToken += 1;
       element.classList.remove("wx-srv-call-live");
       stopTranscriptionProbe();
       // First, while this unlock's token is still in hand: the pen turns off, a stroke in
       // progress is withdrawn with a live cancel, and the surface, live previews and every
       // drawing timer go (spec 07 §5).
       drawingLayer.detach();
+      canvasPane.detach();
+      // The next unlock refreshes everything held, back to the oldest: never across the gap. After
+      // the drawing layers stand down, so a stroke in progress is withdrawn properly, and before
+      // the games forget everything below, because this render would otherwise fill them again.
+      if (detachedView !== null) {
+        scrollToOriginalGeneration += 1;
+        leaveDetachedView();
+        renderThreadList(false);
+        threadScroll.scrollToBottom();
+      }
       wyrModel.reset();
       adventureModel.reset();
       cookoutModel.reset();
       resetGames();
       closeUnheardView();
+      closeUnheardNav();
       closeMoreMenu();
       gallery.close();
       links.close();
+      search.reset();
       holidayBank.close();
       recipeBook.close();
       cookoutStart.close();
@@ -3868,10 +4847,24 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // "A lock keeps it in memory exactly like the draft text").
       scrollToOriginalGeneration += 1;
       for (const controller of messageActionControllers.values()) controller.close();
+      // A lock ends the recording and the token that could delete it: leave what was uploaded on
+      // the server, to be offered back as an unsent voice note after the next unlock.
+      liveUploader?.abandon();
+      liveUploader = null;
+      // A lock does not take back what listeners already heard: the live note stays in the chat
+      // and the server ends it by itself after 60 s without audio, keeping what arrived.
+      liveSend = null;
+      recordingLive = false;
       voiceRecorder?.detach();
       voiceRecorder = null;
+      unsentCards.clear();
+      modeMenu.close();
+      liveDeleteConfirm.hidden = true;
       updateRecorderUi();
       disposeAttachmentMedia(messageList);
+      // A lock closes the live-voice socket and stops any live audio (bubbles still on screen
+      // stay registered and come back on the next unlock).
+      liveVoiceHub.detach();
       lightbox.teardown();
       goodnight.stop();
       if (activeViewOnceViewer !== null) {
@@ -3892,8 +4885,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           // An update to a message already on screen (a transcript, media finishing) is not an
           // arrival, so it never raises the "New messages" pill.
           const isArrival = !confirmedBySeq.has(event.message.seq);
+          // Older than anything held, or in a detached view's gap: taken in, it would make later
+          // paging skip everything between. Its page brings it, as it is by then.
+          if (isArrival && !belongsInHeldRange(event.message.seq)) {
+            links.messageChanged(event.message);
+            search.messageChanged(event.message);
+            holidayBank.messageChanged(event.message);
+            recipeBook.messageChanged(event.message);
+            return;
+          }
           addConfirmed(event.message);
           links.messageChanged(event.message);
+          search.messageChanged(event.message);
           holidayBank.messageChanged(event.message);
           recipeBook.messageChanged(event.message);
           renderThreadList(
@@ -3921,10 +4924,12 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
           contentRevision += 1;
           confirmedBySeq.delete(event.seq);
           links.messageDeleted(event.seq);
+          search.messageDeleted(event.seq);
           holidayBank.messageDeleted(event.seq);
           recipeBook.messageDeleted(event.seq);
           // spec 07 §6: the cascade took its drawings; remove them in place, no tombstone.
           drawingLayer.messageDeleted(event.seq);
+          canvasPane.messageDeleted(event.seq);
           // §(2)'s client mechanism: this seq's quote vanishes everywhere it
           // was shown, patched in place — the server does NOT fan out a
           // message_updated for replies on delete.
@@ -3945,6 +4950,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         case "drawing_live":
           // spec 07 §4: another screen's stroke while it is being drawn — lossy, never stored.
           drawingLayer.handleLive(event.frame);
+          canvasPane.handleLive(event.frame);
           return;
         case "adventure_live":
           // spec 08 §3.5: the other person's swipe while they spin the globe — lossy, never stored.
@@ -3962,6 +4968,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     teardown(): void {
       stopTranscriptionProbe();
       drawingLayer.teardown();
+      canvasPane.teardown();
       wyrModel.reset();
       adventureModel.reset();
       cookoutModel.reset();
@@ -3976,12 +4983,20 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       reactionErrorTimers.clear();
       reactionErrors.clear();
       pendingReactions.clear();
+      liveUploader?.abandon();
+      liveUploader = null;
+      liveSend = null;
+      recordingLive = false;
+      pendingVoiceNote?.live?.abandon();
       voiceRecorder?.detach();
       voiceRecorder = null;
+      unsentCards.clear();
       closeUnheardView();
+      closeUnheardNav();
       closeMoreMenu();
       gallery.close();
       links.close();
+      search.reset();
       holidayBank.close();
       recipeBook.close();
       cookoutStart.close();
@@ -3990,6 +5005,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       cookoutModesAsked = false;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
+      liveVoiceHub.dispose();
+      modeMenu.dispose();
       observer?.disconnect();
       lightbox.teardown();
       goodnight.stop();

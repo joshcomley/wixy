@@ -23,7 +23,8 @@
 
 import type { ItemChat } from "./itemChat";
 
-export type GameKey = "wyr" | "adventure" | "cookout";
+/** A game, or a canvas (decisions/00206): anything that takes the one second tab. */
+export type GameKey = "wyr" | "adventure" | "cookout" | "canvas";
 export type GameTab = "chat" | GameKey;
 
 export interface GameRegistration {
@@ -32,6 +33,9 @@ export interface GameRegistration {
   readonly tabLabel: string;
   /** The tab's accessible name ("Would you rather game"). */
   readonly tabAriaLabel: string;
+  /** False for an item with no chat of its own (a canvas): while its tab shows, a message sent
+   * goes to the main chat. Default true. */
+  readonly itemChat?: boolean;
   /** The game's pane; the frame shows it only while this game's tab is the active one. The
    * caller puts it in the thread view (it takes the thread's place). */
   readonly pane: HTMLElement;
@@ -319,7 +323,7 @@ export function createGameTabs(deps: GameTabsDeps): GameTabs {
     seqOf: (key) => entries.get(key)?.seq ?? null,
     chatTarget() {
       const current = activeEntry();
-      if (current !== undefined && current.seq !== null) return current.seq;
+      if (current !== undefined && current.seq !== null) return current.game.itemChat === false ? null : current.seq;
       return itemChat.isPopupOpen() ? itemChat.popupSeq() : null;
     },
     noteChatActivity() {

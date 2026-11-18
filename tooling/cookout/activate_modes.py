@@ -16,8 +16,8 @@ worktree, NEVER with a Wixy slot's venv (it has no `psutil`, so check (d) can ne
 and its result:
 
   (a) Devfleet shows Wixy running;
-  (b) the active slot (`active.txt`) holds a `store.py` with `_LATEST_SCHEMA_VERSION >= 22`;
-  (c) every live database has `PRAGMA user_version >= 22`;
+  (b) the active slot (`active.txt`) holds a `store.py` with `_LATEST_SCHEMA_VERSION >= 24`;
+  (c) every live database has `PRAGMA user_version >= 24`;
   (d) no running process has a command line or working directory under the OTHER slot;
   (e) `GET /cookout/options` on the live server answers.
 
@@ -25,7 +25,7 @@ It then writes `WIXY_COOKOUT_MODES=<ids>` into `Storage\\.env` (every other line
 byte; UTF-8, LF), bounces Wixy in place through Devfleet (`POST /restart/Wixy`; no older code
 starts) and verifies that the options now list the mode. `--disable` removes the id the same way
 (no slot checks are needed to switch off). `--check-rollback <commit>` says whether rolling Wixy
-back to that commit is safe: its `store.py` is >= v22, or no non-Classic round exists.
+back to that commit is safe: its `store.py` is >= v24, or no non-Classic round exists.
 
 The decision logic is pure (`evaluate_enable`) and every side effect sits behind `Probe`, so the
 refusals are tested without a machine (`test_cookout_modes_overlap.py`).
@@ -56,7 +56,7 @@ PSUTIL_HELP = (
     "has psutil) from the canonical clone or a worktree, not with a Wixy slot's venv"
 )
 SETTING = "WIXY_COOKOUT_MODES"
-REQUIRED_SCHEMA = 22
+REQUIRED_SCHEMA = 24
 DEVFLEET_URL = "http://127.0.0.1:9999"
 WIXY_URL = "http://127.0.0.1:9380"
 _VERSION_RE = re.compile(r"^_LATEST_SCHEMA_VERSION\s*=\s*(\d+)\s*$", re.MULTILINE)
@@ -151,7 +151,7 @@ def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
     schema = facts.slot_schema.get(active) if active else None
     checks.append(
         Check(
-            "(b) the active slot is at schema 22 or later",
+            "(b) the active slot is at schema 24 or later",
             schema is not None and schema >= REQUIRED_SCHEMA,
             f"active slot {active!r}: store.py schema {schema}",
         )
@@ -159,7 +159,7 @@ def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
     below = [v for v in facts.db_versions if v < REQUIRED_SCHEMA]
     checks.append(
         Check(
-            "(c) the live database is at schema 22 or later",
+            "(c) the live database is at schema 24 or later",
             bool(facts.db_versions) and not below,
             f"user_version(s) {list(facts.db_versions)}"
             if facts.db_versions

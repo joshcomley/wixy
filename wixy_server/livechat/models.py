@@ -6,6 +6,7 @@ stale row across an `anyio.to_thread.run_sync` boundary and mutate it in place.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -13,7 +14,12 @@ from typing import Any, Literal, Protocol
 from builder.jsontypes import JsonObject, JsonValue
 
 AttachmentKind = Literal["photo", "video", "voice"]
-AttachmentStatus = Literal["processing", "ready", "failed"]
+AttachmentStatus = Literal["live", "processing", "ready", "failed"]
+"""`live` is spec/server-chat/07's voice note still being recorded and heard as it is made. The
+database column stays `processing` for it (its `CHECK` cannot be widened in place; the separate
+`live_state` column marks it), so every `status IN ('processing','ready')` rule keeps accepting a
+live note, while `claim_processing` skips it until the live phase ends."""
+LiveState = Literal["recording", "paused"]
 TranscriptStatus = Literal["pending", "done", "failed"]
 EventType = Literal["message", "message_updated", "message_deleted", "wiped"]
 """§17.2 amendment A1: `message_deleted`/`wiped` are P8's future events (delete a
@@ -126,6 +132,9 @@ class AttachmentRow:
     updated_at: float
     transcript: TranscriptRow | None = None
     view_once_renditions: tuple[str, ...] | None = None
+    live_state: LiveState | None = None
+    """Set only while the note is being recorded (`status == "live"`): the sender is `recording` or
+    `paused` (spec/server-chat/07 §6.1)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -576,6 +585,14 @@ class UploadRow:
     filename: str | None
     by_email: str | None
     created_at: float
+    live: bool = False
+    """A voice recording still being uploaded slice by slice (spec/server-chat/06 §2.1):
+    `size_bytes` is then the running total of the slices stored so far, not a declared size."""
+    device_id: str | None = None
+    last_chunk_at: float | None = None
+    duration_ms: int | None = None
+    """The client's own elapsed-recording figure at its latest slice; only the "unsent voice
+    note" list reads it."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -635,6 +652,44 @@ def transcript_json(row: TranscriptRow | None) -> JsonObject | None:
     return data
 
 
+_LIVE_TAILS: dict[str, str] = {}
+"""spec/server-chat/07 §3: the provisional, still-being-rewritten tail of a live voice note's
+transcript. Process memory only, never stored (the finalised text alone goes in the transcript
+row), keyed by attachment id; the live-voice hub writes it and clears it when the live phase ends.
+A plain dict: every access is one atomic operation."""
+
+
+def set_live_tail(att_id: str, tail: str) -> None:
+    if tail:
+        _LIVE_TAILS[att_id] = tail
+    else:
+        _LIVE_TAILS.pop(att_id, None)
+
+
+def clear_live_tail(att_id: str) -> None:
+    _LIVE_TAILS.pop(att_id, None)
+
+
+def live_tail(att_id: str) -> str:
+    return _LIVE_TAILS.get(att_id, "")
+
+
+FAILED_ORIGINAL_RETENTION_S = 7 * 24 * 60 * 60.0
+"""§4: a failed attachment's original is archived under `failed/<id>/` this long after its
+(latest) failure, then the janitor removes it. While it is kept, the attachment can be tried
+again (decisions/00209)."""
+
+
+def attachment_retryable(row: AttachmentRow, *, now: float) -> bool:
+    """Whether "Try again" is offered: a failed attachment of a sent message whose archived
+    original is still inside its retention window (the route re-checks the file itself)."""
+    return (
+        row.status == "failed"
+        and row.message_seq is not None
+        and now - row.updated_at < FAILED_ORIGINAL_RETENTION_S
+    )
+
+
 def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     """§5.9's `Attachment` wire shape. `urls` carries only READY renditions — a
     processing/failed attachment has nothing safe to link to yet (Inv 41: a token in
@@ -648,7 +703,16 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
     # GIF into PNG), so this marks a photo whose `full` rendition moves — the bubble shows
     # `full` instead of the still `thumb` (decisions/00180).
     animated = row.status == "ready" and row.mime == "image/gif" and "full" in row.renditions
-    return {
+    transcript = transcript_json(row.transcript)
+    if row.status == "live" and row.transcript is not None and row.transcript.status == "pending":
+        # §6.3: a transcript still being made WHILE the note is recorded: the finalised text
+        # (stored) and the provisional tail (memory only).
+        transcript = {
+            "status": "live",
+            "text": row.transcript.text or "",
+            "tail": live_tail(row.id),
+        }
+    data: JsonObject = {
         "id": row.id,
         "kind": row.kind,
         "status": row.status,
@@ -658,8 +722,12 @@ def attachment_json(row: AttachmentRow, signer: MediaUrlSigner) -> JsonObject:
         "peaks": list(row.peaks) if row.peaks is not None else None,
         "urls": urls,
         "animated": animated,
-        "transcript": transcript_json(row.transcript),
+        "retryable": attachment_retryable(row, now=time.time()),
+        "transcript": transcript,
     }
+    if row.status == "live" and row.live_state is not None:
+        data["liveState"] = row.live_state
+    return data
 
 
 _REPLY_QUOTE_TEXT_MAX_CODEPOINTS = 300
@@ -788,6 +856,18 @@ def message_json(row: MessageRow, signer: MediaUrlSigner) -> JsonObject:
             else None
         ),
     }
+
+
+@dataclass(frozen=True, slots=True)
+class SearchHit:
+    """A message the Search screen found, and the text it was found in: its own words, or one of
+    its voice notes' transcripts."""
+
+    seq: int
+    sender: str
+    created_at: float
+    source: Literal["text", "transcript"]
+    text: str
 
 
 def drawing_stroke_json(row: DrawingStrokeRow) -> JsonObject:

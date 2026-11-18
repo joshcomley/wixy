@@ -117,12 +117,14 @@ from wixy_server.livechat.models import (
     MessageRow,
     PushSubscriptionRow,
     ReactionSummary,
+    SearchHit,
     TranscriptRow,
     UploadRow,
     WyrRoundRow,
     WyrSummary,
 )
 from wixy_server.livechat.reactions import reaction_order, reactor_key
+from wixy_server.livechat.search import fold, matches_all
 
 _SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS messages(
@@ -435,6 +437,28 @@ _ADVENTURE_PICTURE_COLUMNS = {
     "images_started_at": "ALTER TABLE adv_rounds ADD COLUMN images_started_at REAL",
     "images_tries": "ALTER TABLE adv_rounds ADD COLUMN images_tries INTEGER NOT NULL DEFAULT 0",
 }
+# Live voice uploads (spec/server-chat/06-long-voice-notes.md §2.2, decisions/00210): a recording is
+# uploaded slice by slice while it is made. `live` marks such a row (every existing row migrates as
+# 0, an ordinary upload), `device_id` is the device that is recording, `last_chunk_at` the arrival
+# of its latest slice (the janitor's stale clock and the "unsent" idle test) and `duration_ms` the
+# client's own elapsed-recording figure at that slice.
+_UPLOAD_LIVE_COLUMNS = {
+    "live": "ALTER TABLE uploads ADD COLUMN live INTEGER NOT NULL DEFAULT 0",
+    "device_id": "ALTER TABLE uploads ADD COLUMN device_id TEXT",
+    "last_chunk_at": "ALTER TABLE uploads ADD COLUMN last_chunk_at REAL",
+    "duration_ms": "ALTER TABLE uploads ADD COLUMN duration_ms INTEGER",
+}
+# Schema v23 (spec/server-chat/07-live-voice-notes.md): `attachments.live_state` marks a voice note
+# that is still being recorded and heard live (`recording` | `paused`; NULL for every ordinary
+# attachment). The row's `status` stays `processing` meanwhile — its `CHECK` cannot be widened in
+# place, and an older blue/green-overlap process must neither misread it nor claim it — and
+# `_row_to_attachment` presents it as `live`.
+_ATTACHMENT_LIVE_COLUMNS = {
+    "live_state": (
+        "ALTER TABLE attachments ADD COLUMN live_state TEXT "
+        "CHECK(live_state IS NULL OR live_state IN ('recording','paused'))"
+    ),
+}
 # Cookout (workspace 00058, spec/server-chat/09-cookout.md §4.1): the two-player cooking game.
 # `cookout_rounds` follows `wyr_rounds`/`adv_rounds` (Inv 54/56): keyed by its anchor message,
 # `ON DELETE CASCADE` so even an older blue/green-overlap process that has never heard of the
@@ -444,10 +468,11 @@ _ADVENTURE_PICTURE_COLUMNS = {
 # chat content (Inv 57). The twist addendum (spec 09a §2) is folded into this same, still undeployed
 # definition: `cookout_recipes` is keyed by generation from the start, `cookout_generations` holds
 # the dish sets a rescue swap superseded, and the twist columns ride on the round and turn rows.
-_SCHEMA_V22_COOKOUT_MODE = (
+_SCHEMA_V24_COOKOUT_MODE = (
     "ALTER TABLE cookout_rounds ADD COLUMN mode TEXT NOT NULL DEFAULT 'classic'"
 )
-"""Schema v22 (spec 09c §5.1): the round's game mode. No CHECK, like `style`/`challenge`: the
+"""Schema v24 (spec 09c §5.1 called it v22; live voice took v22/v23 on main first): the round's
+game mode. No CHECK, like `style`/`challenge`: the
 catalogue grows without a table rebuild; the unknown-mode guards decide what a process does with a
 mode it does not know."""
 
@@ -554,7 +579,7 @@ Moved = tuple[CookoutRoundRow, bool]
 MAX_PICTURE_TRIES = 3
 """How many times a round's picture hunt may begin (the first, then re-claims after a hunt died)
 before the wait is ended as `failed`."""
-_LATEST_SCHEMA_VERSION = 22
+_LATEST_SCHEMA_VERSION = 24
 WYR_REVEAL_WINDOW_S = 30.0
 ADVENTURE_ROULETTE_SETTLE_S = 5.0
 """Spec §3.4: the country roulette starts this long after the second spin stops (glide + zoom)."""
@@ -600,6 +625,15 @@ class UnusableAttachmentError(LiveChatStoreError):
             "(unknown, already attached to a message, or failed processing)"
         )
         self.attachment_id = attachment_id
+
+
+class TooManyLiveError(LiveChatStoreError):
+    """The chat already has its limit of live voice notes being recorded (spec/server-chat/07 §2);
+    `routes_livechat_media.py` answers 409 `too_many_live`."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(f"{limit} live voice notes are already being recorded")
+        self.limit = limit
 
 
 class MessageNotFoundError(LiveChatStoreError):
@@ -785,10 +819,12 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
     peaks_raw = row["peaks"]
     vo_raw = row["view_once_renditions"]
     view_once_renditions = tuple(json.loads(vo_raw)) if vo_raw is not None else None
+    live_state = row["live_state"]
     return AttachmentRow(
         id=row["id"],
         kind=row["kind"],
-        status=row["status"],
+        # A live voice note is `processing` in the column and `live` everywhere else.
+        status="live" if live_state is not None else row["status"],
         message_seq=row["message_seq"],
         ordinal=row["ordinal"],
         mime=row["mime"],
@@ -805,6 +841,7 @@ def _row_to_attachment(row: sqlite3.Row) -> AttachmentRow:
         updated_at=row["updated_at"],
         transcript=_row_to_transcript(row),
         view_once_renditions=view_once_renditions,
+        live_state=live_state,
     )
 
 
@@ -856,6 +893,10 @@ def _row_to_upload(row: sqlite3.Row) -> UploadRow:
         filename=row["filename"],
         by_email=row["by_email"],
         created_at=row["created_at"],
+        live=bool(row["live"]),
+        device_id=row["device_id"],
+        last_chunk_at=row["last_chunk_at"],
+        duration_ms=row["duration_ms"],
     )
 
 
@@ -1690,16 +1731,52 @@ class LiveChatStore:
                         conn.execute(statement)
                 conn.execute("PRAGMA user_version = 21")
                 current = 21
+
             if current < 22:
-                # Guarded by the real column list, not only `user_version`, so a retried
-                # migration that already added the column skips the ALTER (spec 09c §5.1).
+                existing_upload_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info(uploads)")
+                }
+                # A hand-built partial database without the table has nothing to alter.
+                if existing_upload_cols:
+                    for column, statement in _UPLOAD_LIVE_COLUMNS.items():
+                        if column not in existing_upload_cols:
+                            conn.execute(statement)
+                conn.execute("PRAGMA user_version = 22")
+                current = 22
+
+            if current < 23:
+                existing_att_cols = {
+                    row[1] for row in conn.execute("PRAGMA table_info(attachments)")
+                }
+                if existing_att_cols:
+                    for column, statement in _ATTACHMENT_LIVE_COLUMNS.items():
+                        if column not in existing_att_cols:
+                            conn.execute(statement)
+                conn.execute("PRAGMA user_version = 23")
+                current = 23
+
+            if current < 24:
+                # Cookout's `mode` column first shipped as v22 on the Cookout branch, before
+                # live voice took v22/v23. A database that branch stamped 22 skipped the
+                # live-voice steps, so settle those columns here too. Every step is guarded by
+                # the real column list, so a retry or an already-complete database is a no-op
+                # (spec 09c §5.1).
+                for table, live_columns in (
+                    ("uploads", _UPLOAD_LIVE_COLUMNS),
+                    ("attachments", _ATTACHMENT_LIVE_COLUMNS),
+                ):
+                    have = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    if have:
+                        for column, statement in live_columns.items():
+                            if column not in have:
+                                conn.execute(statement)
                 round_columns = {
                     row[1] for row in conn.execute("PRAGMA table_info(cookout_rounds)")
                 }
                 if "mode" not in round_columns:
-                    conn.execute(_SCHEMA_V22_COOKOUT_MODE)
-                conn.execute("PRAGMA user_version = 22")
-                current = 22
+                    conn.execute(_SCHEMA_V24_COOKOUT_MODE)
+                conn.execute("PRAGMA user_version = 24")
+                current = 24
             conn.execute("COMMIT")
         except BaseException:
             conn.execute("ROLLBACK")
@@ -2189,6 +2266,115 @@ class LiveChatStore:
             cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
             cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
             return messages, has_more, cursor
+
+    def _page_flags(self, conn: sqlite3.Connection, rows: list[sqlite3.Row]) -> tuple[bool, bool]:
+        """Whether anything exists older than, and newer than, an ascending page of rows."""
+        if not rows:
+            return False, False
+        older = conn.execute(
+            "SELECT 1 FROM messages WHERE seq < ? LIMIT 1", (rows[0]["seq"],)
+        ).fetchone()
+        newer = conn.execute(
+            "SELECT 1 FROM messages WHERE seq > ? LIMIT 1", (rows[-1]["seq"],)
+        ).fetchone()
+        return older is not None, newer is not None
+
+    def list_messages_around(
+        self, *, seq: int, limit: int
+    ) -> tuple[list[MessageRow], bool, bool, int]:
+        """The neighbourhood of a message, for going straight to it from Search: up to `limit`
+        rows, half either side, ascending. If `seq` is gone it simply isn't among them. Returns
+        `(messages, has_older, has_newer, cursor)`."""
+        with self._read_txn() as conn:
+            older = conn.execute(
+                "SELECT * FROM messages WHERE seq < ? ORDER BY seq DESC LIMIT ?",
+                (seq, limit // 2),
+            ).fetchall()
+            newer = conn.execute(
+                "SELECT * FROM messages WHERE seq >= ? ORDER BY seq LIMIT ?",
+                (seq, limit - limit // 2),
+            ).fetchall()
+            rows = [*reversed(older), *newer]
+            has_older, has_newer = self._page_flags(conn, rows)
+            cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
+            cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
+            return _hydrate_messages(conn, rows), has_older, has_newer, cursor
+
+    def list_messages_after(
+        self, *, after: int, limit: int
+    ) -> tuple[list[MessageRow], bool, bool, int]:
+        """The next `limit` messages newer than `after`, ascending: scrolling down from a stretch
+        of old history. Returns `(messages, has_older, has_newer, cursor)`."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM messages WHERE seq > ? ORDER BY seq LIMIT ?", (after, limit)
+            ).fetchall()
+            has_older, has_newer = self._page_flags(conn, rows)
+            cursor_row = conn.execute("SELECT MAX(event_seq) AS m FROM events").fetchone()
+            cursor = cursor_row["m"] if cursor_row["m"] is not None else 0
+            return _hydrate_messages(conn, rows), has_older, has_newer, cursor
+
+    def search_messages(
+        self,
+        *,
+        words: tuple[str, ...],
+        before: int | None,
+        only: int | None,
+        limit: int,
+    ) -> tuple[list[SearchHit], bool, int]:
+        """The Search screen's page: messages whose text, or a voice note's finished transcript,
+        contains every word, newest first. Returns `(hits, has_more, total)`, `total` counting
+        every match in the chat whichever page was asked for.
+
+        This reads the live rows and keeps no copy of anything, so a delete or a wipe needs to
+        know nothing about search (decisions/00208). View-once messages are never searched: the
+        whole point of one is that it is seen once, and on its own terms (Inv 52).
+
+        `only` asks about a single message that just arrived or changed: it is the only row a hit
+        can be returned for, while `total` still counts the whole chat."""
+        if not words:
+            return [], False, 0
+        with self._read_txn() as conn:
+            found: dict[int, SearchHit] = {}
+            for row in conn.execute(
+                "SELECT seq, sender, created_at, text FROM messages "
+                "WHERE view_once_s IS NULL AND text IS NOT NULL AND text <> ''"
+            ):
+                if matches_all(fold(row["text"]), words):
+                    found[row["seq"]] = SearchHit(
+                        seq=row["seq"],
+                        sender=row["sender"],
+                        created_at=row["created_at"],
+                        source="text",
+                        text=row["text"],
+                    )
+            # A message found by its own words is shown by them, not by its voice note's.
+            for row in conn.execute(
+                "SELECT m.seq, m.sender, m.created_at, t.text "
+                "FROM attachment_transcripts AS t "
+                "JOIN attachments AS a ON a.id = t.attachment_id "
+                "JOIN messages AS m ON m.seq = a.message_seq "
+                "WHERE t.status = 'done' AND t.text IS NOT NULL AND m.view_once_s IS NULL "
+                "ORDER BY a.ordinal"
+            ):
+                if row["seq"] not in found and matches_all(fold(row["text"]), words):
+                    found[row["seq"]] = SearchHit(
+                        seq=row["seq"],
+                        sender=row["sender"],
+                        created_at=row["created_at"],
+                        source="transcript",
+                        text=row["text"],
+                    )
+        total = len(found)
+        if only is not None:
+            hit = found.get(only)
+            return ([hit] if hit is not None else []), False, total
+        newest_first = sorted(
+            (hit for hit in found.values() if before is None or hit.seq < before),
+            key=lambda hit: hit.seq,
+            reverse=True,
+        )
+        return newest_first[:limit], len(newest_first) > limit, total
 
     def index_pending_links(self) -> int:
         """Settle `has_link` for messages inserted without it (a process older than schema 18
@@ -6277,7 +6463,7 @@ class LiveChatStore:
     def claim_processing(self, *, owner: str, now: float, lease_s: float) -> AttachmentRow | None:
         with self._write_txn() as conn:
             row = conn.execute(
-                "SELECT id FROM attachments WHERE status = 'processing' "
+                "SELECT id FROM attachments WHERE status = 'processing' AND live_state IS NULL "
                 "AND (lease_owner IS NULL OR lease_expires_at < ?) "
                 "ORDER BY created_at ASC LIMIT 1",
                 (now,),
@@ -6339,38 +6525,205 @@ class LiveChatStore:
             )
             message_seq = row["message_seq"]
             if message_seq is not None:
-                # A holiday-pack picture becoming ready changes the Adventure Time round's view
-                # (its pictures list only READY attachments), so the round's `rev` — the signal the
-                # client re-fetches on — moves too. A no-op for every other message.
-                conn.execute(
-                    "UPDATE adv_rounds SET rev = rev + 1, updated_at = ? "
-                    "WHERE anchor_message_seq = ?",
-                    (now, message_seq),
-                )
-                # Likewise a Cookout dish picture: the round's `rev` moves when one is ready.
-                conn.execute(
-                    "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? "
-                    "WHERE anchor_message_seq = ?",
-                    (now, message_seq),
-                )
-                conn.execute(
-                    "INSERT INTO events (type, message_seq, created_at) "
-                    "VALUES ('message_updated', ?, ?)",
-                    (message_seq, now),
-                )
-                # §(3): a quote's media summary is derived from the target's
-                # LIVE attachment state, so a reply's rendered quote must
-                # refresh too once processing finishes (e.g. it gains a
-                # thumbnail). `idx_messages_reply_to` serves this lookup.
-                reply_rows = conn.execute(
-                    "SELECT seq FROM messages WHERE reply_to_seq = ?", (message_seq,)
-                ).fetchall()
-                for reply_row in reply_rows:
-                    conn.execute(
-                        "INSERT INTO events (type, message_seq, created_at) "
-                        "VALUES ('message_updated', ?, ?)",
-                        (reply_row["seq"], now),
-                    )
+                self._emit_attachment_changed(conn, int(message_seq), now)
+
+    def requeue_failed_attachment(self, att_id: str, *, now: float) -> AttachmentRow | None:
+        """decisions/00209: put a FAILED attachment of a sent message back in the processing
+        queue, so the media queue re-runs it from its archived original. Returns the row (now
+        `processing`), or `None` when it is gone, not failed, or belongs to no message."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT message_seq FROM attachments WHERE id = ? AND status = 'failed' "
+                "AND message_seq IS NOT NULL",
+                (att_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "UPDATE attachments SET status = 'processing', failure = NULL, "
+                "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
+                (now, att_id),
+            )
+            self._emit_attachment_changed(conn, int(row["message_seq"]), now)
+            return _load_attachment(conn, att_id)
+
+    # -- live voice notes (spec/server-chat/07-live-voice-notes.md) ------------------
+
+    def create_live_upload(self, row: UploadRow, *, now: float, max_live: int) -> AttachmentRow:
+        """`POST /uploads` with `listen`: the live upload AND its attachment row (id == upload id,
+        presented as status `live`), in one transaction. Raises `TooManyLiveError` when the chat
+        already has `max_live` notes being recorded."""
+        with self._write_txn() as conn:
+            if self._is_deleted_storage(conn, kind="upload", storage_id=row.id):
+                raise LiveChatStoreError("upload id has already been deleted")
+            live_count = conn.execute(
+                "SELECT COUNT(*) AS n FROM attachments WHERE live_state IS NOT NULL"
+            ).fetchone()["n"]
+            if live_count >= max_live:
+                raise TooManyLiveError(max_live)
+            conn.execute(
+                "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at, "
+                "live, device_id, last_chunk_at, duration_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, NULL, NULL)",
+                (
+                    row.id,
+                    row.kind,
+                    row.mime,
+                    row.size_bytes,
+                    row.filename,
+                    row.by_email,
+                    row.created_at,
+                    row.device_id,
+                ),
+            )
+            conn.execute(
+                "INSERT INTO attachments "
+                "(id, kind, status, live_state, duration_s, peaks, renditions, bytes_on_disk, "
+                "created_at, updated_at) "
+                "VALUES (?, ?, 'processing', 'recording', 0.0, '[]', '[]', 0, ?, ?)",
+                (row.id, row.kind, now, now),
+            )
+            return _load_attachment(conn, row.id)
+
+    def live_attachment_ids(self) -> list[str]:
+        """Every attachment still being recorded, oldest first."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT id FROM attachments WHERE live_state IS NOT NULL ORDER BY created_at, id"
+            ).fetchall()
+            return [str(row["id"]) for row in rows]
+
+    def set_live_state(
+        self, att_id: str, state: Literal["recording", "paused"], *, now: float
+    ) -> Literal["changed", "same", "gone", "not_live"]:
+        """The sender paused or resumed. `changed` appends the usual `message_updated` (§6.1: a
+        `liveState` change is one of the only persistent events); a repeat is `same` and writes
+        nothing; `gone` is no such attachment, `not_live` one whose live phase has ended."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT live_state, message_seq FROM attachments WHERE id = ?", (att_id,)
+            ).fetchone()
+            if row is None:
+                return "gone"
+            if row["live_state"] is None:
+                return "not_live"
+            if row["live_state"] == state:
+                return "same"
+            conn.execute(
+                "UPDATE attachments SET live_state = ?, updated_at = ? WHERE id = ?",
+                (state, now, att_id),
+            )
+            if row["message_seq"] is not None:
+                self._emit_attachment_changed(conn, int(row["message_seq"]), now)
+            return "changed"
+
+    def end_live(
+        self, att_id: str, *, now: float, lease_owner: str | None = None, lease_s: float = 0.0
+    ) -> AttachmentRow | None:
+        """The live phase is over: `live` becomes `processing` and the normal pipeline takes
+        over. `lease_owner`/`lease_s` hold the queue off while the live decoder drains the last
+        slices from the assembled file (the owner releases it with `release_lease`; a crash lets it
+        lapse). `None` when the note is gone or was not live."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT message_seq FROM attachments WHERE id = ? AND live_state IS NOT NULL",
+                (att_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            conn.execute(
+                "UPDATE attachments SET live_state = NULL, lease_owner = ?, lease_expires_at = ?, "
+                "updated_at = ? WHERE id = ?",
+                (
+                    lease_owner,
+                    now + lease_s if lease_owner is not None else None,
+                    now,
+                    att_id,
+                ),
+            )
+            if row["message_seq"] is not None:
+                self._emit_attachment_changed(conn, int(row["message_seq"]), now)
+            return _load_attachment(conn, att_id)
+
+    def release_lease(self, att_id: str, *, owner: str) -> bool:
+        """Give back a lease taken by `end_live` (so the media queue may claim the note)."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE attachments SET lease_owner = NULL, lease_expires_at = NULL "
+                "WHERE id = ? AND lease_owner = ?",
+                (att_id, owner),
+            )
+            return cursor.rowcount > 0
+
+    def fail_live_attachment(self, att_id: str, *, failure: str, now: float) -> bool:
+        """A live note that ended with nothing to process (no slice ever arrived): `failed`, its
+        empty upload row removed (there is no original worth keeping)."""
+        with self._write_txn() as conn:
+            row = conn.execute(
+                "SELECT message_seq FROM attachments WHERE id = ? AND live_state IS NOT NULL",
+                (att_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            conn.execute(
+                "UPDATE attachments SET status = 'failed', live_state = NULL, failure = ?, "
+                "lease_owner = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?",
+                (failure, now, att_id),
+            )
+            self._queue_deleted_storage(conn, kind="upload", ids=[att_id], now=now)
+            conn.execute("DELETE FROM uploads WHERE id = ?", (att_id,))
+            if row["message_seq"] is not None:
+                self._emit_attachment_changed(conn, int(row["message_seq"]), now)
+            return True
+
+    def record_live_transcript(self, att_id: str, *, text: str, now: float) -> bool:
+        """One live transcription pass changed what the people see: store the finalised text (the
+        provisional tail is memory only) and append the `message_updated`. `False` when the row is
+        gone or no longer `pending` (the note was deleted, or the transcript failed)."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE attachment_transcripts SET text = ?, updated_at = ? "
+                "WHERE attachment_id = ? AND status = 'pending'",
+                (text, now, att_id),
+            )
+            if cursor.rowcount != 1:
+                return False
+            self._append_message_updated(conn, att_id, now)
+            return True
+
+    @staticmethod
+    def _emit_attachment_changed(conn: sqlite3.Connection, message_seq: int, now: float) -> None:
+        """An attachment's state moved (processed, failed, or put back in the queue), so its
+        message — and every reply quoting it — re-renders."""
+        # A holiday-pack picture becoming ready changes the Adventure Time round's view
+        # (its pictures list only READY attachments), so the round's `rev` — the signal the
+        # client re-fetches on — moves too. A no-op for every other message.
+        conn.execute(
+            "UPDATE adv_rounds SET rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+            (now, message_seq),
+        )
+        # Likewise a Cookout dish picture: the round's `rev` moves when one is ready.
+        conn.execute(
+            "UPDATE cookout_rounds SET rev = rev + 1, updated_at = ? WHERE anchor_message_seq = ?",
+            (now, message_seq),
+        )
+        conn.execute(
+            "INSERT INTO events (type, message_seq, created_at) VALUES ('message_updated', ?, ?)",
+            (message_seq, now),
+        )
+        # §(3): a quote's media summary is derived from the target's
+        # LIVE attachment state, so a reply's rendered quote must
+        # refresh too once processing finishes (e.g. it gains a
+        # thumbnail). `idx_messages_reply_to` serves this lookup.
+        reply_rows = conn.execute(
+            "SELECT seq FROM messages WHERE reply_to_seq = ?", (message_seq,)
+        ).fetchall()
+        for reply_row in reply_rows:
+            conn.execute(
+                "INSERT INTO events (type, message_seq, created_at) "
+                "VALUES ('message_updated', ?, ?)",
+                (reply_row["seq"], now),
+            )
 
     def get_attachment(self, att_id: str) -> AttachmentRow | None:
         with self._read_txn() as conn:
@@ -6447,7 +6800,8 @@ class LiveChatStore:
     def orphan_attachment_ids(self, *, older_than: float) -> list[str]:
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT id FROM attachments WHERE message_seq IS NULL AND created_at < ?",
+                "SELECT id FROM attachments WHERE message_seq IS NULL AND created_at < ? "
+                "AND live_state IS NULL",
                 (older_than,),
             ).fetchall()
             return [row["id"] for row in rows]
@@ -6510,12 +6864,14 @@ class LiveChatStore:
         """
         with self._write_txn() as conn:
             attachment = conn.execute(
-                "SELECT kind, status, message_seq FROM attachments WHERE id = ?", (att_id,)
+                "SELECT kind, status, message_seq, live_state FROM attachments WHERE id = ?",
+                (att_id,),
             ).fetchone()
             if (
                 attachment is None
                 or attachment["kind"] != "voice"
-                or attachment["status"] != "ready"
+                # A note still being recorded can be transcribed live (spec 07 §3).
+                or (attachment["status"] != "ready" and attachment["live_state"] is None)
                 or attachment["message_seq"] is None
             ):
                 return TranscriptBegin("gone")
@@ -6612,8 +6968,9 @@ class LiveChatStore:
             if self._is_deleted_storage(conn, kind="upload", storage_id=row.id):
                 raise LiveChatStoreError("upload id has already been deleted")
             conn.execute(
-                "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO uploads (id, kind, mime, size_bytes, filename, by_email, created_at, "
+                "live, device_id, last_chunk_at, duration_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     row.id,
                     row.kind,
@@ -6622,6 +6979,10 @@ class LiveChatStore:
                     row.filename,
                     row.by_email,
                     row.created_at,
+                    1 if row.live else 0,
+                    row.device_id,
+                    row.last_chunk_at,
+                    row.duration_ms,
                 ),
             )
 
@@ -6630,18 +6991,61 @@ class LiveChatStore:
             row = conn.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
             return _row_to_upload(row) if row is not None else None
 
+    def record_live_chunk(
+        self, upload_id: str, *, size_bytes: int, duration_ms: int | None, now: float
+    ) -> bool:
+        """A live upload accepted a slice: its running size, the arrival time and (when the client
+        sent one) its elapsed-recording figure. `False` when the row is gone (deleted or wiped
+        while the slice was being stored) or is not a live upload."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE uploads SET size_bytes = ?, last_chunk_at = ?, "
+                "duration_ms = COALESCE(?, duration_ms) WHERE id = ? AND live = 1",
+                (size_bytes, now, duration_ms, upload_id),
+            )
+            return cursor.rowcount == 1
+
+    def set_live_upload_size(self, upload_id: str, size_bytes: int) -> bool:
+        """Settle a live upload's size to the bytes that were actually assembled."""
+        with self._write_txn() as conn:
+            cursor = conn.execute(
+                "UPDATE uploads SET size_bytes = ? WHERE id = ? AND live = 1",
+                (size_bytes, upload_id),
+            )
+            return cursor.rowcount == 1
+
+    def unsent_live_uploads(self, *, device_id: str, idle_before: float) -> list[UploadRow]:
+        """Live voice uploads of one device that were never completed (never promoted to an
+        attachment) and have gone quiet: their latest slice arrived at or before `idle_before`.
+        A recording that has not stored a slice yet has nothing to send and is left out. Newest
+        first."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM uploads AS u WHERE u.live = 1 AND u.device_id = ? "
+                "AND u.last_chunk_at IS NOT NULL AND u.last_chunk_at <= ? "
+                "AND NOT EXISTS (SELECT 1 FROM attachments AS a WHERE a.id = u.id) "
+                "ORDER BY u.created_at DESC, u.id DESC",
+                (device_id, idle_before),
+            ).fetchall()
+            return [_row_to_upload(row) for row in rows]
+
     def delete_upload(self, upload_id: str) -> None:
         with self._write_txn() as conn:
             self._queue_deleted_storage(conn, kind="upload", ids=[upload_id], now=time.time())
             conn.execute("DELETE FROM uploads WHERE id = ?", (upload_id,))
 
-    def delete_stale_upload_if_unpromoted(self, upload_id: str, *, now: float) -> bool:
-        """Delete and journal an upload only if it has not been promoted meanwhile."""
+    def delete_stale_upload_if_unpromoted(
+        self, upload_id: str, *, now: float, older_than: float | None = None
+    ) -> bool:
+        """Delete and journal an upload only if it has not been promoted meanwhile — and, when
+        `older_than` is given, only if it is still that stale: a live recording that stored a
+        slice between the sweep's scan and this delete is active again and is kept."""
         with self._write_txn() as conn:
             cursor = conn.execute(
                 "DELETE FROM uploads WHERE id = ? "
-                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?)",
-                (upload_id, upload_id),
+                "AND NOT EXISTS (SELECT 1 FROM attachments WHERE id = ?) "
+                "AND (? IS NULL OR COALESCE(last_chunk_at, created_at) < ?)",
+                (upload_id, upload_id, older_than, older_than),
             )
             if cursor.rowcount != 1:
                 return False
@@ -6658,9 +7062,12 @@ class LiveChatStore:
             return cursor.rowcount
 
     def stale_upload_ids(self, *, older_than: float) -> list[str]:
+        """Uploads whose last activity is older than `older_than`: for a live recording that is
+        its latest slice (`last_chunk_at`), so a four-hour recording is never swept mid-way."""
         with self._read_txn() as conn:
             rows = conn.execute(
-                "SELECT id FROM uploads WHERE created_at < ?", (older_than,)
+                "SELECT id FROM uploads WHERE COALESCE(last_chunk_at, created_at) < ?",
+                (older_than,),
             ).fetchall()
             return [row["id"] for row in rows]
 

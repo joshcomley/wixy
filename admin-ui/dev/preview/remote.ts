@@ -109,7 +109,7 @@ export class RemoteSwipe {
       tracker.add(angle, tt);
       if (tt >= durationMs) break;
     }
-    return planSpin(this.points[this.points.length - 1]?.angle ?? this.startAngle, tracker.release(durationMs + 4));
+    return planSpin(this.points[this.points.length - 1]?.angle ?? this.startAngle, tracker.release(durationMs + 4), this.axis, rng());
   }
 
   private buildFrames(): void {

@@ -35,7 +35,10 @@ import { ServerLockedError } from "./api/http";
 import type { Message } from "./api/messages";
 import { createDrawGesture, type DrawGestureEffect } from "./drawGesture";
 import {
+  canvasColumnWidth,
+  canvasPlacement,
   chooseAnchor,
+  cssZoom,
   declaredColumnWidth,
   drawScale,
   hitTestDrawings,
@@ -48,6 +51,7 @@ import {
   wirePoint,
   type Bounds,
   type HitCandidate,
+  type Placement,
   type SvgBox,
 } from "./drawingGeometry";
 import { createLiveReceiver, createLiveSender, type LiveStroke, type OutgoingLiveFrame } from "./drawingLive";
@@ -63,6 +67,7 @@ import {
   LIVE_STROKE_TIMEOUT_MS,
   MAX_DRAWINGS_PER_ANCHOR,
   MAX_STROKES_PER_DRAWING,
+  SELECT_HIT_RADIUS_PX,
   type DrawingColor,
   type DrawingWidth,
 } from "./drawings";
@@ -112,6 +117,9 @@ export interface DrawingLayerDeps {
   anchors(): readonly DrawingAnchor[];
   /** A confirmed, on-screen bubble by `seq`, or null. */
   anchorElement(seq: number): HTMLElement | null;
+  /** The drawing surface of `seq` when it is a CANVAS message on screen, else null: drawings on it
+   * are placed by that surface, not by the column (decisions/00206). */
+  canvasSurface?(seq: number): HTMLElement | null;
   /** Holds the thread where it is (no stick-to-bottom) until the returned release runs. */
   holdScroll(): () => void;
   /** The toolbar just changed the thread's height and this layer already kept the content in
@@ -158,12 +166,19 @@ export interface DrawingLayer {
   redo(): void;
   /** Immediately exits draw mode and abandons this session's drawings. */
   abandon(): void;
+  /** Turns the pen on (Draw mode, toolbar shown) or off (the session ends; every stored stroke
+   * stays), as the Pen button and Done do. Turning it on needs a session. */
+  setPen(on: boolean): void;
 }
 
+/** Content px are the thread content's own LAYOUT px — what `left`/`top`/`width` are written in.
+ * Client px are what boxes and pointers are measured in. They differ by `zoom` (cssZoom). */
 interface Frame {
   /** The content wrapper's box, in client px. */
   readonly contentLeft: number;
   readonly contentTop: number;
+  /** Client px per content px: 1 unless CSS `zoom` applies (the admin's zoom control). */
+  readonly zoom: number;
   /** The column's left edge and width, in content px. */
   readonly columnLeft: number;
   readonly columnWidth: number;
@@ -514,7 +529,8 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       change();
       const delta = toolbarHeight() - before;
       if (delta !== 0) {
-        thread.scrollTop += delta;
+        // Measured in client px; `scrollTop` is the thread's layout px.
+        thread.scrollTop += delta / zoomOf(thread);
         deps.adoptScrollPosition?.();
       }
     } finally {
@@ -563,20 +579,38 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // -- Measuring and positioning ---------------------------------------------------------------
 
+  /** Client px per layout px of `element` (cssZoom): its measured border box over its layout one. */
+  function zoomOf(element: HTMLElement, box: DOMRect = element.getBoundingClientRect()): number {
+    const current = (element as { currentCSSZoom?: number }).currentCSSZoom;
+    const style = element.ownerDocument.defaultView?.getComputedStyle(element);
+    if (style === undefined) return cssZoom(current, NaN, NaN);
+    let layoutWidth = Number.parseFloat(style.width);
+    if (style.boxSizing !== "border-box") {
+      for (const side of [style.paddingLeft, style.paddingRight, style.borderLeftWidth, style.borderRightWidth]) {
+        layoutWidth += Number.parseFloat(side) || 0;
+      }
+    }
+    return cssZoom(current, box.width, layoutWidth);
+  }
+
   function measureFrame(): Frame | null {
     const columnWidth = column.clientWidth;
     if (!(columnWidth > 0)) return null;
     const contentRect = content.getBoundingClientRect();
     const columnRect = column.getBoundingClientRect();
     const threadRect = thread.getBoundingClientRect();
-    const threadInnerLeft = threadRect.left + thread.clientLeft;
+    // Measured client distances are divided by `zoom` into content px; `clientLeft`/`clientWidth`
+    // are already layout px.
+    const zoom = zoomOf(content, contentRect);
+    const clipLeft = (threadRect.left - contentRect.left) / zoom + thread.clientLeft;
     return {
       contentLeft: contentRect.left,
       contentTop: contentRect.top,
-      columnLeft: columnRect.left - contentRect.left,
+      zoom,
+      columnLeft: (columnRect.left - contentRect.left) / zoom,
       columnWidth,
-      clipLeft: threadInnerLeft - contentRect.left,
-      clipRight: threadInnerLeft + thread.clientWidth - contentRect.left,
+      clipLeft,
+      clipRight: clipLeft + thread.clientWidth,
     };
   }
 
@@ -584,7 +618,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
   function anchorTop(seq: number, frame: Frame): number | null {
     const element = deps.anchorElement(seq);
     if (element === null) return null;
-    return element.getBoundingClientRect().top - frame.contentTop;
+    return (element.getBoundingClientRect().top - frame.contentTop) / frame.zoom;
   }
 
   function applyBox(view: SvgView, box: SvgBox | null): void {
@@ -602,18 +636,41 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     view.svg.setAttribute("viewBox", `${vb.minX} ${vb.minY} ${vb.maxX - vb.minX} ${vb.maxY - vb.minY}`);
   }
 
+  /** The canvas surface of the message `seq` on this screen (`deps.canvasSurface`), or null. */
+  function canvasSurfaceOf(seq: number): HTMLElement | null {
+    return deps.canvasSurface?.(seq) ?? null;
+  }
+
+  /** Where drawings anchored to `seq` (declared at `columnWidth`) sit right now, in content px: by
+   * the canvas's surface for a canvas message (decisions/00206), else by the column's left edge and
+   * the anchor's top (§1). Null when the anchor is not on screen. */
+  function placementOf(seq: number, columnWidth: number, frame: Frame): Placement | null {
+    const surface = canvasSurfaceOf(seq);
+    if (surface !== null) {
+      const box = surface.getBoundingClientRect();
+      if (!(box.width > 0)) return null;
+      return canvasPlacement(
+        (box.left - frame.contentLeft) / frame.zoom,
+        (box.top - frame.contentTop) / frame.zoom,
+        box.width / frame.zoom,
+        columnWidth,
+      );
+    }
+    const top = anchorTop(seq, frame);
+    if (top === null) return null;
+    return { originX: frame.columnLeft, originY: top, scale: drawScale(frame.columnWidth, columnWidth) };
+  }
+
   function positionView(view: SvgView, anchorSeq: number, columnWidth: number, frame: Frame | null): void {
-    if (frame === null || view.bounds === null) {
+    const placement = frame === null || view.bounds === null ? null : placementOf(anchorSeq, columnWidth, frame);
+    if (frame === null || view.bounds === null || placement === null) {
       applyBox(view, null);
       return;
     }
-    const top = anchorTop(anchorSeq, frame);
-    if (top === null) {
-      applyBox(view, null);
-      return;
-    }
-    const scale = drawScale(frame.columnWidth, columnWidth);
-    applyBox(view, svgBox(view.bounds, frame.columnLeft, top, scale, frame.clipLeft, frame.clipRight));
+    applyBox(
+      view,
+      svgBox(view.bounds, placement.originX, placement.originY, placement.scale, frame.clipLeft, frame.clipRight),
+    );
   }
 
   function positionSelection(): void {
@@ -840,15 +897,18 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
 
   // -- Drawing a stroke ----------------------------------------------------------------------
 
-  /** The draw-space origin of `drawing` in CLIENT px right now, and its scale, or null. */
+  /** The draw-space origin of `drawing` in CLIENT px right now, and its scale in client px per
+   * draw px (so a pointer's client position maps straight into draw space, zoom included), or
+   * null. */
   function originOf(drawing: ModelDrawing): { x: number; y: number; scale: number } | null {
     const frame = measureFrame();
-    const anchor = deps.anchorElement(drawing.anchorSeq);
-    if (frame === null || anchor === null) return null;
+    if (frame === null || deps.anchorElement(drawing.anchorSeq) === null) return null;
+    const placement = placementOf(drawing.anchorSeq, drawing.columnWidth, frame);
+    if (placement === null) return null;
     return {
-      x: frame.contentLeft + frame.columnLeft,
-      y: anchor.getBoundingClientRect().top,
-      scale: drawScale(frame.columnWidth, drawing.columnWidth),
+      x: frame.contentLeft + placement.originX * frame.zoom,
+      y: frame.contentTop + placement.originY * frame.zoom,
+      scale: placement.scale * frame.zoom,
     };
   }
 
@@ -881,12 +941,15 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
       setStatus(`That message already has ${MAX_DRAWINGS_PER_ANCHOR} drawings. Delete one to draw there.`);
       return null;
     }
+    // On a canvas, draw space is the canvas bubble its surface belongs to (decisions/00206).
+    const surface = canvasSurfaceOf(anchor.seq);
+    const surfaceWidth = surface === null ? 0 : surface.getBoundingClientRect().width / frame.zoom;
     const clientId = newId(win);
     ownClientIds.add(clientId);
     const drawing = model.addOwn({
       clientId,
       anchorSeq: anchor.seq,
-      columnWidth: declaredColumnWidth(frame.columnWidth),
+      columnWidth: surfaceWidth > 0 ? canvasColumnWidth(surfaceWidth) : declaredColumnWidth(frame.columnWidth),
       sender: identity.getName() ?? "",
     });
     sessionDrawingKey = drawing.key;
@@ -1173,7 +1236,8 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
         case "panEnd":
           break;
         case "panBy":
-          thread.scrollTop += effect.dy;
+          // The fingers moved `dy` client px; `scrollTop` is the thread's layout px.
+          thread.scrollTop += effect.dy / zoomOf(thread);
           break;
       }
     }
@@ -1282,15 +1346,9 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     for (const [key, view] of drawingViews) {
       const drawing = model.get(key);
       if (drawing === undefined || view.box === null) continue;
-      const top = anchorTop(drawing.anchorSeq, frame);
-      if (top === null) continue;
-      candidates.push({
-        key,
-        originX: frame.columnLeft,
-        originY: top,
-        scale: drawScale(frame.columnWidth, drawing.columnWidth),
-        strokes: drawing.strokes,
-      });
+      const placement = placementOf(drawing.anchorSeq, drawing.columnWidth, frame);
+      if (placement === null) continue;
+      candidates.push({ key, ...placement, strokes: drawing.strokes });
     }
     return candidates;
   }
@@ -1318,7 +1376,13 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     if (now() - tap.at > TAP_MAX_MS) return;
     const frame = measureFrame();
     if (frame === null) return;
-    const hit = hitTestDrawings(tap.x - frame.contentLeft, tap.y - frame.contentTop, hitCandidates(frame));
+    // In content px, like the candidates; the reach stays SELECT_HIT_RADIUS_PX on screen.
+    const hit = hitTestDrawings(
+      (tap.x - frame.contentLeft) / frame.zoom,
+      (tap.y - frame.contentTop) / frame.zoom,
+      hitCandidates(frame),
+      SELECT_HIT_RADIUS_PX / frame.zoom,
+    );
     if (hit !== null) {
       select(hit);
       swallowClickUntil = now() + SWALLOW_CLICK_MS;
@@ -1624,7 +1688,14 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     syncMessages(messages: readonly Message[]): void {
       if (torndown) return;
       const alive = new Set(messages.map((message) => message.seq));
-      for (const seq of model.anchorSeqs()) if (!alive.has(seq)) dropAnchor(seq);
+      const activeAnchor = activeStroke === null ? undefined : model.get(activeStroke.key)?.anchorSeq;
+      for (const seq of model.anchorSeqs()) {
+        if (alive.has(seq)) continue;
+        // No longer held (the chat left a stretch of old history) is not deleted, which arrives by
+        // `messageDeleted`. Work not yet stored stays until it is, for the next call to drop.
+        if (seq === activeAnchor || sync.anchorHasPending(seq)) continue;
+        dropAnchor(seq);
+      }
       for (const message of messages) {
         const summaries = parseDrawingSummaries(message.drawings);
         if (summaries !== null) sync.observe(message.seq, summaries);
@@ -1663,6 +1734,7 @@ export function mountDrawingLayer(deps: DrawingLayerDeps): DrawingLayer {
     undo,
     redo,
     abandon,
+    setPen,
   };
 }
 

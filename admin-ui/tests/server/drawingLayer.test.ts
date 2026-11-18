@@ -468,6 +468,43 @@ describe("drawingLayer: drawing a stroke (§1, §2, §4)", () => {
     expect(s.releaseHold).toHaveBeenCalledTimes(1); // the scroll hold ended with the stroke
   });
 
+  it("under the admin's 90% zoom: honest draw-space points, the ink placed in layout px, and Select still hits it (decisions/00205)", async () => {
+    const s = setup();
+    const zoom = 0.9;
+    // zoom.ts's CSS `zoom` on <html>: boxes and pointers are in client px (0.9x), while the
+    // column's clientWidth and the svg's left/top are layout px.
+    const content = s.deps.content;
+    Object.defineProperty(content, "currentCSSZoom", { value: zoom, configurable: true });
+    stubRect(content, { left: CONTENT.left, top: CONTENT.top, width: COLUMN_WIDTH * zoom, height: 4000 * zoom });
+    stubRect(s.deps.column, { left: CONTENT.left, top: CONTENT.top, width: COLUMN_WIDTH * zoom, height: 4000 * zoom });
+    // Bubble 2 sits 1000 layout px down the thread content: 900 client px below its top.
+    s.addBubble(2, CONTENT.top + 1000 * zoom);
+    s.layer.attach(SESSION);
+    s.layer.penButton.click();
+
+    const at = (x: number, y: number): [number, number] => [CONTENT.left + x * zoom, CONTENT.top + (1000 + y) * zoom];
+    drawMouseStroke(s, [at(30, 20), at(50, 40), at(70, 20)]);
+    await flush();
+
+    const [, input] = s.api.createDrawing.mock.calls[0] as [ServerSession, { columnWidth: number; stroke: { points: number[][] } }];
+    expect(input.columnWidth).toBe(COLUMN_WIDTH);
+    // The same draw-space points as the unzoomed stroke above: another screen shows it the same.
+    expect(input.stroke.points).toEqual([[30, 20], [50, 40], [70, 20]]);
+
+    // The svg is written in content LAYOUT px: on the anchor (1000) + 17, never 0.9x of that.
+    const svg = s.svgs()[0]!;
+    expect(parseFloat(svg.style.top)).toBeCloseTo(1017, 5);
+    expect(parseFloat(svg.style.left)).toBeCloseTo(27, 5);
+    expect(parseFloat(svg.style.width)).toBeCloseTo(46, 5);
+
+    // A Select-mode tap on the stroke's middle point (client px) selects it.
+    s.toolbarButton('.wx-srv-pen-mode[data-mode="select"]').click();
+    const [tx, ty] = at(50, 40);
+    s.thread.dispatchEvent(pointer("pointerdown", { pointerId: 7, x: tx, y: ty }));
+    s.thread.dispatchEvent(pointer("pointerup", { pointerId: 7, x: tx, y: ty }));
+    expect(svg.classList.contains("wx-srv-drawing-selected")).toBe(true);
+  });
+
   it("a stroke starting above the first bubble anchors to that first bubble with a negative offset", async () => {
     const s = setup();
     s.addBubble(5, 400);
@@ -673,6 +710,29 @@ describe("drawingLayer: a lock destroys the session, the surface and every timer
     expect((s.api.createDrawing.mock.calls[1]![1] as { clientId: string }).clientId).toBe(
       (s.api.createDrawing.mock.calls[0]![1] as { clientId: string }).clientId,
     );
+  });
+
+  it("a waiting stroke survives its message no longer being held, and is dropped once stored", async () => {
+    const s = setup();
+    s.addBubble(2, 300);
+    s.api.createDrawing.mockResolvedValueOnce({ kind: "retry" });
+    s.layer.attach(SESSION);
+    s.layer.penButton.click();
+    drawMouseStroke(s, [[40, 320], [60, 330]]);
+    await flush();
+    s.layer.detach();
+    // The chat left a stretch of old history on the lock: not held is not deleted.
+    s.layer.syncMessages([]);
+    const renewed: ServerSession = { token: "tok-2", expiresAt: 9_999_999_999 };
+    s.layer.attach(renewed);
+    await flush();
+    expect(s.api.createDrawing).toHaveBeenCalledTimes(2);
+    expect(s.api.createDrawing.mock.calls[1]![0]).toBe(renewed);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await flush();
+    s.layer.syncMessages([]);
+    expect(s.svgs()).toHaveLength(0);
+    s.layer.detach();
   });
 
   it("a 401 on a live batch locks the chat", async () => {
