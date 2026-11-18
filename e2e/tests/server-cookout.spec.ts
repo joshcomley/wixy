@@ -14,6 +14,9 @@
 // one tap on a picture card picks, the basket is the progress button and its sheet. Set WIXY_E2E_SHOTS=<dir> to also
 // save screenshots of the main flow's key moments.
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
@@ -779,6 +782,26 @@ test.describe("Cookout chef stage", () => {
 // Where the pane is at least 411 px both card pictures are at least 96 px. The skip and Twists buttons sit
 // side by side in the actions row, each at least 44 px high, wrapping a label rather than clipping it.
 
+/**
+ * The table is measured with two dealt pairs, both FIXED so the measurement is the same every run (the deal is random from a
+ * 3,491-ingredient bank, which is how CI once met a name nobody had tested):
+ *  - TYPICAL: two short names; the pictures then fill the cards (at least 96 px where the pane is 411 px or more).
+ *  - WORST: the names that wrap to the MOST lines in a 135 px card at 14 px with the wide-font stress (four, measured over the
+ *    whole bank; CI's own font wraps them like this too: "Frozen Yorkshire pudding wraps" was the draw that failed). A real
+ *    player is dealt these on a small phone with a bigger font, and the table must still FIT, not scroll: the compact card
+ *    lets the picture shrink to 64 px for them.
+ */
+const TYPICAL_NAMES = ["Sweet potato", "Roast chicken"] as const;
+const WORST_NAMES = ["Frozen Yorkshire pudding wraps", "Chicken-flavour instant noodles"] as const;
+const WORST_PICTURE_FLOOR = 64;
+
+/** The pinned names must be real bank names, or "worst case" would quietly stop meaning anything. */
+function bankNames(): ReadonlySet<string> {
+  const file = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "wixy_server", "livechat", "cookout_ingredients.json");
+  const bank = JSON.parse(readFileSync(file, "utf8")) as { ingredients: Array<{ name: string }>; staples: Array<{ name: string }> };
+  return new Set([...bank.ingredients, ...bank.staples].map((i) => i.name));
+}
+
 const WIDE_FONT_STRESS = ".wx-srv-ck, .wx-srv-ck * { letter-spacing: 0.15em !important; }";
 
 /** The view's `mode` block of a Toasted sandwich round (09c §5.4). */
@@ -864,7 +887,7 @@ async function measureTable(page: Page): Promise<TableFit> {
   });
 }
 
-function expectTableFits(fit: TableFit, where: string): void {
+function expectTableFits(fit: TableFit, where: string, pictureFloor = 95.5): void {
   expect(fit.missing, `${where}: parts of the table not found`).toEqual([]);
   expect(fit.pageScrolls, `${where}: the page scrolls`).toBe(false);
   expect(fit.overflow, `${where}: overflowing elements`).toEqual([]);
@@ -872,8 +895,8 @@ function expectTableFits(fit: TableFit, where: string): void {
   expect(fit.pictures, `${where}: both card pictures`).toHaveLength(2);
   if (fit.paneHeight >= 411) {
     for (const pic of fit.pictures) {
-      expect(pic.width, `${where} (P ${fit.paneHeight}): picture width`).toBeGreaterThanOrEqual(95.5);
-      expect(pic.height, `${where} (P ${fit.paneHeight}): picture height`).toBeGreaterThanOrEqual(95.5);
+      expect(pic.width, `${where} (P ${fit.paneHeight}): picture width`).toBeGreaterThanOrEqual(pictureFloor);
+      expect(pic.height, `${where} (P ${fit.paneHeight}): picture height`).toBeGreaterThanOrEqual(pictureFloor);
     }
   }
   for (const b of fit.buttons) {
@@ -907,8 +930,11 @@ async function setStyle(page: Page, id: string, css: string): Promise<void> {
 }
 
 test.describe("Cookout picking table with a wider font", () => {
+  for (const deal of ["typical", "worst"] as const) {
   for (const toastie of [false, true]) {
-    test(`the ${toastie ? "toasted sandwich's bread turn" : "Classic table"} fits with a wider font at every 09b viewport`, async ({ browser }) => {
+    test(`the ${toastie ? "toasted sandwich's bread turn" : "Classic table"} fits with a wider font at every 09b viewport (${deal} names)`, async ({ browser }, testInfo) => {
+      const names = deal === "typical" ? TYPICAL_NAMES : WORST_NAMES;
+      for (const name of names) expect(bankNames().has(name), `"${name}" is a real bank name`).toBe(true);
       const context = await browser.newContext({ viewport: { width: 360, height: 640 } });
       const page = await context.newPage();
       const errors = trackConsoleErrors(page);
@@ -919,7 +945,8 @@ test.describe("Cookout picking table with a wider font", () => {
         const response = await route.fetch();
         const json = (await response.json()) as Record<string, unknown>;
         const current = json["current"] as Record<string, unknown> | null;
-        const view = current === null ? json : { ...json, current: { ...current, canLucky: true, canChaos: true, ...(toastie ? { role: "bread" } : {}) } };
+        const options = current === null ? null : (current["options"] as Array<Record<string, unknown>>).map((o, i) => ({ ...o, name: names[i] ?? o["name"] }));
+        const view = current === null ? json : { ...json, current: { ...current, ...(options === null ? {} : { options }), canLucky: true, canChaos: true, ...(toastie ? { role: "bread" } : {}) } };
         await route.fulfill({ response, json: toastie ? { ...view, mode: TOASTIE_MODE } : view });
       });
       await startCookout(page, false);
@@ -944,9 +971,12 @@ test.describe("Cookout picking table with a wider font", () => {
           await setStyle(page, "e2e-inset", inset > 0 ? `.wx-srv-tabs { padding-bottom: ${inset}px !important }` : "");
           await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
           const where = `${toastie ? "toastie" : "classic"} ${width}x${height} inset ${inset}${stress === "" ? "" : " wide font"}`;
-          expectTableFits(await measureTable(page), where);
+          expectTableFits(await measureTable(page), where, deal === "worst" ? WORST_PICTURE_FLOOR - 0.5 : 95.5);
           if (inset === 0 && width === 360) {
-            await page.screenshot({ path: test.info().outputPath(`table-${toastie ? "toastie" : "classic"}-${width}x${height}${stress === "" ? "" : "-wide"}.png`) });
+            const shot = testInfo.outputPath(`table-${deal}-${toastie ? "toastie" : "classic"}-${width}x${height}${stress === "" ? "" : "-wide"}.png`);
+            await page.screenshot({ path: shot });
+            // The worst-case table at every small phone height is part of the report, 360x480 included.
+            if (deal === "worst") await testInfo.attach(`worst-names ${toastie ? "toastie" : "classic"} ${width}x${height}${stress === "" ? "" : " wide font"}`, { path: shot, contentType: "image/png" });
           }
         }
       }
@@ -954,5 +984,6 @@ test.describe("Cookout picking table with a wider font", () => {
       expect(errors.filter((m) => !/favicon/i.test(m))).toEqual([]);
       await context.close();
     });
+  }
   }
 });

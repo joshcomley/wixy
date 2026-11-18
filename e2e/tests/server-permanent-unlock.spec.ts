@@ -16,6 +16,7 @@
 import { expect, test } from "../fixtures";
 import type { Browser, Page } from "@playwright/test";
 import { freezeClock, tapThreadGap, trackConsoleErrors } from "./helpers";
+import { LOADED_WAIT_MS } from "./server-helpers";
 
 const TEST_PIN = "246813";
 const WRONG_PIN = "000000";
@@ -101,11 +102,12 @@ async function revealAndOpenPinPad(page: Page): Promise<void> {
 
 async function enterNameIfPrompted(page: Page): Promise<void> {
   const prompt = page.locator(".wx-srv-name-prompt");
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible();
+  // What follows the unlock answer is a render waiting on the server: the 5 s default was outrun on a loaded CI runner.
+  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: LOADED_WAIT_MS });
   if (!(await prompt.isVisible())) return;
   await page.locator(".wx-srv-name-prompt-input").fill("Tester");
   await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.clock.runFor(401);
 }
 

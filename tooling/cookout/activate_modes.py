@@ -8,8 +8,8 @@ the checked, last step that sets it, on the hub. Run it with the hub's own Pytho
 `psutil`, e.g. `%LOCALAPPDATA%\\Python\\pythoncore-3.14-64\\python.exe`) from the canonical clone or a
 worktree, NEVER with a Wixy slot's venv (it has no `psutil`, so check (d) can never pass):
 
-    python tooling/cookout/activate_modes.py --enable toastie --token <server token>
-    python tooling/cookout/activate_modes.py --disable toastie --token <server token>
+    python tooling/cookout/activate_modes.py --enable toastie
+    python tooling/cookout/activate_modes.py --disable toastie
     python tooling/cookout/activate_modes.py --check-rollback <commit>
 
 `--enable` REFUSES (non-zero exit, nothing changed) unless every check holds, and prints each check
@@ -19,11 +19,12 @@ and its result:
   (b) the active slot (`active.txt`) holds a `store.py` with `_LATEST_SCHEMA_VERSION >= 24`;
   (c) every live database has `PRAGMA user_version >= 24`;
   (d) no running process has a command line or working directory under the OTHER slot;
-  (e) `GET /cookout/options` on the live server answers.
+  (e) `GET /internal/cookout/modes` on the live server answers (loopback-only, no token: the
+      in-app unlock token needs the PIN entered in the operator's browser, which no agent can do).
 
 It then writes `WIXY_COOKOUT_MODES=<ids>` into `Storage\\.env` (every other line preserved byte for
 byte; UTF-8, LF), bounces Wixy in place through Devfleet (`POST /restart/Wixy`; no older code
-starts) and verifies that the options now list the mode. `--disable` removes the id the same way
+starts) and verifies that `GET /internal/cookout/modes` now lists the mode. `--disable` removes the id the same way
 (no slot checks are needed to switch off). `--check-rollback <commit>` says whether rolling Wixy
 back to that commit is safe: its `store.py` is >= v24, or no non-Classic round exists.
 
@@ -197,7 +198,7 @@ def evaluate_enable(facts: Facts, *, slots_root: str) -> Decision:
     )
     checks.append(
         Check(
-            "(e) the live server answers GET /cookout/options",
+            "(e) the live server answers GET /internal/cookout/modes",
             facts.options_modes is not None,
             f"modes listed: {list(facts.options_modes)}"
             if facts.options_modes is not None
@@ -262,9 +263,9 @@ def enable(probe: Probe, mode_id: str, *, slots_root: str) -> int:
     print("Wixy restarted in place.")
     listed = probe.options_modes()
     if listed is None or mode_id not in listed:
-        print(f"FAIL: after the restart GET /cookout/options lists {listed}, not {mode_id}.")
+        print(f"FAIL: after the restart GET /internal/cookout/modes lists {listed}, not {mode_id}.")
         return 2
-    print(f"Verified: GET /cookout/options now lists {mode_id}.")
+    print(f"Verified: GET /internal/cookout/modes now lists {mode_id}.")
     return 0
 
 
@@ -276,7 +277,7 @@ def disable(probe: Probe, mode_id: str) -> int:
     probe.bounce()
     listed = probe.options_modes()
     if listed is not None and mode_id in listed:
-        print(f"FAIL: after the restart GET /cookout/options still lists {mode_id}.")
+        print(f"FAIL: after the restart GET /internal/cookout/modes still lists {mode_id}.")
         return 2
     print(f"Verified: {mode_id} is no longer offered.")
     return 0
@@ -306,7 +307,6 @@ def check_rollback(probe: Probe, commit: str) -> int:
 class MachineProbe:
     root: Path
     repo: Path
-    token: str
     devfleet_url: str = DEVFLEET_URL
     wixy_url: str = WIXY_URL
     _timeout: float = field(default=15.0)
@@ -326,16 +326,13 @@ class MachineProbe:
 
     def options_modes(self) -> Sequence[str] | None:
         try:
-            body = self._get(
-                f"{self.wixy_url}/api/admin/server/cookout/options",
-                {"X-Wixy-Server-Token": self.token},
-            )
+            body = self._get(f"{self.wixy_url}/internal/cookout/modes")
         except urllib.error.URLError, OSError, ValueError:
             return None
         modes = body.get("modes") if isinstance(body, dict) else None
         if not isinstance(modes, list):
             return []
-        return [str(m.get("id")) for m in modes if isinstance(m, dict)]
+        return [str(m) for m in modes]
 
     def _devfleet_running(self) -> bool | None:
         try:
@@ -501,10 +498,9 @@ def main(argv: Sequence[str] | None = None, probe: Probe | None = None) -> int:
         "--root", default=str(Path(os.environ.get("AIM_ROOT", "D:\\")) / "Servers" / "Wixy")
     )
     parser.add_argument("--repo", default=".")
-    parser.add_argument("--token", default=os.environ.get("WIXY_SERVER_TOKEN", ""))
     args = parser.parse_args(argv)
     root = Path(args.root)
-    machine = probe or MachineProbe(root=root, repo=Path(args.repo), token=args.token)
+    machine = probe or MachineProbe(root=root, repo=Path(args.repo))
     if args.check_rollback:
         return check_rollback(machine, args.check_rollback)
     if args.disable:
