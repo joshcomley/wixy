@@ -196,7 +196,9 @@ def _create_ready_photo(
     assert comp_resp.status_code == 202
 
     store: LiveChatStore = client.app.state.livechat_store  # type: ignore[attr-defined]
-    deadline = time.monotonic() + 5.0
+    # Returns the moment it is ready; the long bound only matters on a saturated host,
+    # where the below-normal-priority queue is starved (decisions/00209).
+    deadline = time.monotonic() + 30.0
     while time.monotonic() < deadline:
         row = store.get_attachment(upload_id)
         if row is not None and row.status == "ready":

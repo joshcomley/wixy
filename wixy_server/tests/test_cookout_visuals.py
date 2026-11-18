@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -147,13 +148,16 @@ class TestReloadCost:
         lookups: list[str] = []
         real_relpath = object_relpath
         real_is_file = Path.is_file
+        this_thread = threading.get_ident()  # Path.is_file is patched process-wide: count only ours
 
         def counting_relpath(sha: str) -> Any:
-            lookups.append(sha)
+            if threading.get_ident() == this_thread:
+                lookups.append(sha)
             return real_relpath(sha)
 
         def counting_is_file(self: Path, *args: Any, **kwargs: Any) -> bool:
-            lookups.append(str(self))
+            if threading.get_ident() == this_thread:
+                lookups.append(str(self))
             return real_is_file(self, *args, **kwargs)
 
         monkeypatch.setattr("wixy_server.livechat.cookout_visuals.object_relpath", counting_relpath)

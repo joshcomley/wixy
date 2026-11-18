@@ -2,9 +2,15 @@
 //
 // Pure maths, no DOM: a finger drags the globe (the globe follows it, `dragDeltaDeg`), and on release
 // the finger's angular speed decides whether it was a flick and, if so, how far and for how long the
-// globe keeps turning. The plan is a function of two numbers (`from`, `omega`), so the screen that
-// made the move posts `{from, delta, durationMs}` and every other screen replays exactly the same
-// motion from those stored values with `spinAngleAt`.
+// globe keeps turning. The plan is a function of the start, the speed, the axis and one random draw,
+// so the screen that made the move posts `{from, delta, durationMs}` and every other screen replays
+// exactly the same motion from those stored values with `spinAngleAt`.
+//
+// The flick decides the MINIMUM distance (`1.5 x speed`, 720..3600 degrees) and the duration. The place
+// the globe comes to rest is drawn fairly and does not depend on where the spin began or how hard it
+// was flicked: a random extra of under one more turn is added so that `from + delta` lands, modulo 360,
+// on `restingAngle(axis, u)`. (Without it every gentle or capped flick ended a whole number of turns
+// from its start, and the second spin's latitude piled up at the poles.)
 //
 // The ease-out cubic starts at speed 3·Δ/D, and `D = 3·|Δ|/|ω|` before clamping, so the globe leaves
 // the finger at the finger's own speed — the hand-off from drag to spin has no jerk.
@@ -14,7 +20,9 @@ export const MIN_FLICK_DEG_S = 120;
 
 /** Spin distance bounds, degrees. The server validates the same numbers (spec §3.1). */
 export const MIN_SPIN_DELTA_DEG = 720;
-export const MAX_SPIN_DELTA_DEG = 3600;
+/** The flick's own distance never exceeds this; the random extra (under one turn) comes on top. */
+export const MAX_FLICK_DELTA_DEG = 3600;
+export const MAX_SPIN_DELTA_DEG = MAX_FLICK_DELTA_DEG + 360;
 /** Spin duration bounds, milliseconds (the server validates these too). */
 export const MIN_SPIN_MS = 3500;
 export const MAX_SPIN_MS = 7000;
@@ -34,7 +42,10 @@ const SAMPLE_HORIZON_MS = 400;
 export interface SpinPlan {
   /** The angle (degrees) the spin starts from: where the finger let go. */
   readonly from: number;
-  /** Signed distance to travel, degrees: `720 ≤ |delta| ≤ 3600`. */
+  /**
+   * Signed distance to travel, degrees: `720 ≤ |delta| ≤ 3960`. The flick sets `clamp(1.5 x speed, 720,
+   * 3600)`; a random extra of under 360 is added so `from + delta` rests on the fairly drawn angle.
+   */
   readonly delta: number;
   /** How long the whole spin takes, milliseconds: `3500 ≤ durationMs ≤ 7000`. */
   readonly durationMs: number;
@@ -55,18 +66,55 @@ export function easeInOutCubic(t: number): number {
   return x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2;
 }
 
+/** `x` modulo 360, always in [0, 360) (a tiny negative remainder cannot round up to 360). */
+function mod360(x: number): number {
+  const m = ((x % 360) + 360) % 360;
+  return m >= 360 ? 0 : m;
+}
+
+/** `u` clamped into [0, 1); a non-finite draw counts as 0. */
+function unit(u: number): number {
+  if (!Number.isFinite(u) || u < 0) return 0;
+  return u >= 1 ? 1 - Number.EPSILON : u;
+}
+
+const RAD = Math.PI / 180;
+const clampUnitInterval = (x: number): number => clamp(x, -1, 1);
+
 /**
- * The spin a release at `omegaDegPerS` (signed) makes from angle `from`, or `null` when the release
- * was too slow to count as a flick (or `omega` is not a finite number).
+ * Where (degrees, modulo 360) a spin on `axis` comes to rest for the uniform draw `u` in [0, 1).
+ *
+ * `lng`: every longitude equally likely, `360·u`.
+ * `lat`: the globe's centre latitude satisfies `sin(lat) = -sin(phi)` whatever lambda is, so a uniform
+ * `phi` would put a third of the stops within 30° of a pole (13 % of the Earth's area). Giving `phi`
+ * the density `|cos phi| / 4` makes `sin(lat)` uniform on [-1, 1]: every latitude band in proportion to
+ * its area. The inverse CDF over phi in [-90, 270) has two halves: `phi = asin(4u - 1)` (the globe not
+ * tumbled) and `phi = 180 - asin(3 - 4u)` (tumbled over a pole; the same latitude law with the longitude
+ * flipped by 180°, which stays uniform because lambda's own rest is uniform).
  */
-export function planSpin(from: number, omegaDegPerS: number): SpinPlan | null {
+export function restingAngle(axis: "lng" | "lat", u: number): number {
+  const x = unit(u);
+  if (axis === "lng") return 360 * x;
+  if (x < 0.5) return Math.asin(clampUnitInterval(4 * x - 1)) / RAD;
+  return 180 - Math.asin(clampUnitInterval(3 - 4 * x)) / RAD;
+}
+
+/**
+ * The spin a release at `omegaDegPerS` (signed) makes from angle `from` on `axis`, or `null` when the
+ * release was too slow to count as a flick (or a number is not finite). `u` is a uniform draw in [0, 1)
+ * that picks the resting place (`restingAngle`); the plan ends there modulo 360 whatever `from` and the
+ * flick were.
+ */
+export function planSpin(from: number, omegaDegPerS: number, axis: "lng" | "lat", u: number): SpinPlan | null {
   if (!Number.isFinite(from) || !Number.isFinite(omegaDegPerS)) return null;
   const speed = Math.abs(omegaDegPerS);
   if (speed < MIN_FLICK_DEG_S) return null;
-  const magnitude = clamp(speed * DISTANCE_PER_SPEED, MIN_SPIN_DELTA_DEG, MAX_SPIN_DELTA_DEG);
-  const delta = Math.sign(omegaDegPerS) * magnitude;
+  const sign = Math.sign(omegaDegPerS);
+  const base = clamp(speed * DISTANCE_PER_SPEED, MIN_SPIN_DELTA_DEG, MAX_FLICK_DELTA_DEG);
+  const extra = mod360(sign * (restingAngle(axis, u) - (from + sign * base)));
+  const magnitude = base + extra;
   const durationMs = clamp(((3 * magnitude) / speed) * 1000, MIN_SPIN_MS, MAX_SPIN_MS);
-  return { from, delta, durationMs };
+  return { from, delta: sign * magnitude, durationMs };
 }
 
 /** The angle `elapsedMs` after the spin began; clamped to the start and to the end. */

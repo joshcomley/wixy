@@ -123,14 +123,14 @@ never exist while an older process can reach the database.
   delivery coordinator runs it with the hub's Python (`%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`):
   `python tooling/cookout/activate_modes.py --enable toastie --token <server token>`. It refuses
   (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
-  schema >= 22, the live database's `user_version` is >= 22, no process runs from the OTHER slot (this check fails
+  schema >= 24, the live database's `user_version` is >= 24, no process runs from the OTHER slot (this check fails
   closed: it needs `psutil` from the `dev` extra and refuses if the process list or any python/wixy process's
   working directory cannot be read) and `GET /cookout/options` answers; it prints every check, writes the setting atomically (a temp file in the same directory, fsynced, then `os.replace`d, so an interruption
   leaves the old `.env` whole; the previous file is kept as `.env.bak`; other `.env` lines kept
   byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies the options now list
   the mode. `--disable toastie` removes it the same way (no checks needed).
 - **Rollback:** run `python tooling/cookout/activate_modes.py --check-rollback <commit>` FIRST. Never
-  roll back to a schema-21 commit while a non-Classic round exists; targets must be v22-or-later.
+  roll back to a commit below schema 24 while a non-Classic round exists; targets must be v24-or-later.
 
 ## Rollback
 
@@ -239,7 +239,7 @@ unclaimed orphan attachments after 24 hours, removes raw upload sources for read
 retries archiving failed originals, expires an unarchived failed original after seven days, and
 prunes completed cleanup tombstones after seven days. Pending cleanup rows are not aged out.
 
-## Cookout ingredient pictures (livechat.md §24.3, Inv 58, decisions/00202)
+## Cookout ingredient pictures (livechat.md §24.3, Inv 60, decisions/00202)
 
 The pictures are **not in git**. The repo holds only the manifest (`wixy_server/livechat/cookout_ingredient_images.json`)
 and the catalogue (`cookout_catalogue.json`); the picture bytes are content-addressed files, delivered as one immutable

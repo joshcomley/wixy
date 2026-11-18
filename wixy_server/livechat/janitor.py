@@ -18,13 +18,14 @@ from pathlib import Path
 import anyio
 
 from wixy_server.livechat.grants import GRANT_IDLE_EXPIRY_S, REVOKED_ROW_RETENTION_S
+from wixy_server.livechat.models import FAILED_ORIGINAL_RETENTION_S
 from wixy_server.livechat.notifier import LiveChatNotifier
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
 
 STALE_UPLOAD_AGE_S = 24 * 60 * 60.0
 ORPHAN_ATTACHMENT_AGE_S = 24 * 60 * 60.0
-FAILED_RETENTION_S = 7 * 24 * 60 * 60.0
+FAILED_RETENTION_S = FAILED_ORIGINAL_RETENTION_S
 SWEEP_INTERVAL_S = 60 * 60.0
 SCRUB_INTERVAL_S = 2.0
 SCRUB_TICK_DEADLINE_S = 1.5
@@ -43,8 +44,9 @@ class JanitorReport:
 
 def run_once(*, store: LiveChatStore, paths: ProjectPaths, now: float) -> JanitorReport:
     stale_uploads = 0
-    for upload_id in store.stale_upload_ids(older_than=now - STALE_UPLOAD_AGE_S):
-        if store.delete_stale_upload_if_unpromoted(upload_id, now=now):
+    stale_before = now - STALE_UPLOAD_AGE_S
+    for upload_id in store.stale_upload_ids(older_than=stale_before):
+        if store.delete_stale_upload_if_unpromoted(upload_id, now=now, older_than=stale_before):
             cleanup_deleted_storage_once(
                 store=store, paths=paths, only_items={("upload", upload_id)}
             )

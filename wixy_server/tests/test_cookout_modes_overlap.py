@@ -3,7 +3,7 @@
 A v21 server process accepts a database at a higher schema version and ignores the mode column.
 These tests load the DEPLOYED v21 `wixy_server` from git history (the pinned commit below, on
 `origin/main`, schema 21) into a separate interpreter and run its real write logic over a database
-migrated to v22:
+migrated to v24:
 
 1. the canary proves the barrier is still needed (v21 corrupts a Toasted sandwich round);
 2. before activation the v22 routes refuse to create such a round: the database holds only Classic
@@ -253,8 +253,8 @@ def good_facts(**changes: Any) -> am.Facts:
     base: dict[str, Any] = {
         "devfleet_wixy_running": True,
         "active_slot": "blue",
-        "slot_schema": {"blue": 22, "green": 21},
-        "db_versions": [22],
+        "slot_schema": {"blue": 24, "green": 21},
+        "db_versions": [24],
         "processes": [am.ProcessInfo(10, SLOTS + "\\blue\\launcher.py", SLOTS + "\\blue")],
         "options_modes": ["classic"],
     }
@@ -315,7 +315,7 @@ class TestActivationTool:
             ({"devfleet_wixy_running": False}, "(a)"),
             ({"devfleet_wixy_running": None}, "(a)"),
             ({"slot_schema": {"blue": 21, "green": 21}}, "(b)"),
-            ({"slot_schema": {"blue": None, "green": 22}}, "(b)"),
+            ({"slot_schema": {"blue": None, "green": 24}}, "(b)"),
             ({"active_slot": None}, "(b)"),
             ({"db_versions": [21]}, "(c)"),
             ({"db_versions": []}, "(c)"),
@@ -382,7 +382,7 @@ class TestActivationTool:
         assert "UNSAFE" in capsys.readouterr().out
         probe.non_classic = 0
         assert am.check_rollback(probe, "abc1234") == 0
-        probe.target_schema, probe.non_classic = 22, 5
+        probe.target_schema, probe.non_classic = 24, 5
         assert am.check_rollback(probe, "def5678") == 0
 
     def test_the_machine_probe_reads_schema_env_and_rounds_from_a_slot_tree(
@@ -391,14 +391,14 @@ class TestActivationTool:
         root = tmp_path / "Wixy"
         store_py = root / "Slots" / "blue" / "wixy_server" / "livechat" / "store.py"
         store_py.parent.mkdir(parents=True)
-        store_py.write_text("X = 1\n_LATEST_SCHEMA_VERSION = 22\n", encoding="utf-8")
+        store_py.write_text("X = 1\n_LATEST_SCHEMA_VERSION = 24\n", encoding="utf-8")
         (root / "active.txt").write_text("blue\n", encoding="utf-8")
         db = root / "Storage" / "projects" / "ca" / "server" / "server.db"
         make_round(db, bank, mode="toastie", schedule=None)
         probe = am.MachineProbe(root=root, repo=REPO_ROOT, token="t")
         assert probe._active_slot() == "blue"
-        assert probe._slot_schema("blue") == 22 and probe._slot_schema("green") is None
-        assert probe._db_versions() == [22]
+        assert probe._slot_schema("blue") == 24 and probe._slot_schema("green") is None
+        assert probe._db_versions() == [24]
         assert probe.non_classic_round_count() == 1
         probe.write_env("A=1\n")
         assert probe.read_env() == "A=1\n"

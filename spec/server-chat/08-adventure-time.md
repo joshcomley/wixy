@@ -135,10 +135,17 @@ esbuild (self-hosted; no CDN, no framework).
   Release velocity = the angular speed over the last ~80 ms of samples. **A flick is
   |ω| ≥ 120°/s**; anything slower just leaves the globe where it was dragged ("Flick it
   harder!").
-- **Spin outcome** (`physics.ts`, pure): `Δ = sign(ω) · clamp(|ω| · 1.5, 720, 3600)` degrees,
+- **Spin outcome** (`physics.ts`, pure): the flick decides the minimum distance and the duration:
+  `base = clamp(|ω| · 1.5, 720, 3600)` degrees. The resting place is drawn fairly, independent of the
+  start and the flick: a random extra of under one more turn is added so `from + Δ` lands, modulo 360,
+  on `restingAngle(axis, u)` (`u` uniform in [0, 1) from the scene's `random()`):
+  `extra = mod(sign · (rest − (from + sign · base)), 360)`, `Δ = sign(ω) · (base + extra)`,
   `D = clamp(3 · |Δ| / |ω| · 1000, 3500, 7000)` ms, angle(t) = from + Δ · easeOutCubic(t / D).
-  The server validates `720 ≤ |delta| ≤ 3600`, `3500 ≤ durationMs ≤ 7000`, `from` finite and
-  |from| ≤ 1e6.
+  `lng` rests at `360·u` (every longitude equally likely). The `lat` spin turns φ, and the landing
+  latitude satisfies `sin(lat) = −sin(φ)` for every λ, so φ is drawn with density `|cos φ| / 4`
+  (`sin(lat)` uniform: each latitude band in proportion to its area): `φ = asin(4u − 1)` for `u < ½`,
+  `φ = 180 − asin(3 − 4u)` otherwise (the globe tumbled over a pole). The server validates
+  `720 ≤ |delta| ≤ 3960`, `3500 ≤ durationMs ≤ 7000`, `from` finite and |from| ≤ 1e6.
 - Before the first spin the globe idles slowly (local only) at φ = −15.
 
 ### 3.2 Landing

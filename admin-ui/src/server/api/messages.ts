@@ -9,16 +9,18 @@ import type { AdventureSummary } from "../adventure/api";
 import type { CookoutSummary } from "../cookout/api";
 import type { ServerSession } from "../types";
 
-import type { AttachmentTranscript } from "../mediaRender";
+import type { AttachmentTranscript, RetryResult } from "../mediaRender";
 
 export type AttachmentKind = "photo" | "video" | "voice";
-export type AttachmentStatus = "processing" | "ready" | "failed";
+export type AttachmentStatus = "live" | "processing" | "ready" | "failed";
 export type { AttachmentTranscript };
 
 export interface Attachment {
   readonly id: string;
   readonly kind: AttachmentKind;
   readonly status: AttachmentStatus;
+  /** Only while `status` is `live` (spec/server-chat/07-live-voice-notes.md §6.1). */
+  readonly liveState?: "recording" | "paused";
   readonly width: number | null;
   readonly height: number | null;
   readonly durationS: number | null;
@@ -34,6 +36,8 @@ export interface Attachment {
   /** True for a ready animated GIF: the bubble shows the moving `full` rendition, not the
    * still `thumb`. Absent on a server that predates the flag. */
   readonly animated?: boolean;
+  /** True when `failed` and the original is still kept, so it can be tried again. */
+  readonly retryable?: boolean;
 }
 
 /** One emoji on one message: who reacted, oldest first (spec/server-chat/04-reactions.md). */
@@ -124,6 +128,8 @@ export function parseWyrRefKind(value: unknown): WyrRefKind | null {
 export interface HistoryPage {
   readonly messages: readonly Message[];
   readonly hasMore: boolean;
+  /** Only for `around` and `after`: anything newer than this page exists. */
+  readonly hasNewer?: boolean;
   readonly cursor: number;
 }
 
@@ -131,11 +137,13 @@ export interface HistoryPage {
  * pages by passing the oldest loaded message's `seq` back in as `before`. */
 export async function getHistory(
   session: ServerSession,
-  opts: { before?: number; limit?: number } = {},
+  opts: { before?: number; limit?: number; around?: number; after?: number } = {},
 ): Promise<HistoryPage> {
   const params = new URLSearchParams();
   if (opts.before !== undefined) params.set("before", String(opts.before));
   params.set("limit", String(opts.limit ?? 50));
+  if (opts.around !== undefined) params.set("around", String(opts.around));
+  if (opts.after !== undefined) params.set("after", String(opts.after));
   const response = await serverFetch(`/messages?${params.toString()}`, { method: "GET" }, session);
   if (!response.ok) throw new Error(`Couldn't load history (${response.status}).`);
   return (await response.json()) as HistoryPage;
@@ -339,9 +347,13 @@ export type TranscribeAnswer =
   /** Anything else, including a dropped connection: nothing is known to have started. */
   | { readonly kind: "failed" };
 
-function parseTranscript(value: unknown): AttachmentTranscript | null {
+/** A transcript object off the wire, or `null` when it is not one. Exported for tests. */
+export function parseTranscript(value: unknown): AttachmentTranscript | null {
   if (typeof value !== "object" || value === null) return null;
-  const record = value as { status?: unknown; text?: unknown };
+  const record = value as { status?: unknown; text?: unknown; tail?: unknown };
+  if (record.status === "live" && typeof record.text === "string") {
+    return { status: "live", text: record.text, tail: typeof record.tail === "string" ? record.tail : "" };
+  }
   if (record.status === "pending" || record.status === "failed") {
     const text = typeof record.text === "string" ? record.text : undefined;
     return text !== undefined ? { status: record.status, text } : { status: record.status };
@@ -385,6 +397,30 @@ export async function transcribeAttachment(
     const retryAfterS = typeof body?.retryAfterS === "number" ? body.retryAfterS : 60;
     return { kind: "rate_limited", retryAfterS };
   }
+  return { kind: "failed" };
+}
+
+/** `POST /attachments/{id}/retry` — no body. 202: reprocessing started (a `message_updated`
+ * event follows); 410: the original is gone; 409: not failed any more. A 401 propagates as a
+ * lock. */
+export async function retryAttachment(
+  session: ServerSession,
+  attachmentId: string,
+): Promise<RetryResult> {
+  let response: Response;
+  try {
+    response = await serverFetch(
+      `/attachments/${encodeURIComponent(attachmentId)}/retry`,
+      { method: "POST" },
+      session,
+    );
+  } catch (error) {
+    if (error instanceof ServerLockedError) throw error;
+    return { kind: "failed" };
+  }
+  if (response.status === 202) return { kind: "started" };
+  if (response.status === 410) return { kind: "gone" };
+  if (response.status === 409) return { kind: "in_progress" };
   return { kind: "failed" };
 }
 

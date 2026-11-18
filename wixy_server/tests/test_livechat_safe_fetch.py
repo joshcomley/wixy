@@ -737,11 +737,10 @@ class TestResponses:
     @pytest.mark.parametrize("content_type", ["text/html", "application/json", "text/plain", None])
     def test_a_non_image_is_refused_before_its_body_is_read(self, content_type: str | None) -> None:
         async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
-            started = time.monotonic()
             with pytest.raises(SafeFetchError) as caught:
                 await fetcher.get(url(web, "n.test", "/"), max_bytes=1000, accept=IMAGE)
+            # Refused on the headers: had the endless body been read the reason would be TIMEOUT.
             assert caught.value.reason == FetchFailure.CONTENT_TYPE
-            assert time.monotonic() - started < 3.0  # the endless body was never read
 
         with_web(
             body,
@@ -776,11 +775,10 @@ class TestResponses:
 
     def test_a_body_over_the_cap_is_aborted_even_with_no_length_at_all(self) -> None:
         async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
-            started = time.monotonic()
             with pytest.raises(SafeFetchError) as caught:
                 await fetcher.get(url(web, "end.test", "/"), max_bytes=100_000, accept=IMAGE)
+            # Aborted at the cap: an endless read would end in TIMEOUT instead.
             assert caught.value.reason == FetchFailure.TOO_LARGE
-            assert time.monotonic() - started < 5.0
             await anyio.sleep(0.2)
             assert web.max_in_flight == 1  # and the server's endless writer was cut off
 
@@ -830,7 +828,8 @@ class TestResponses:
             with pytest.raises(SafeFetchError) as caught:
                 await fetcher.get(url(web, "slow.test", "/"), max_bytes=10_000_000, accept=IMAGE)
             assert caught.value.reason == FetchFailure.TIMEOUT
-            assert time.monotonic() - started < 3.0
+            # The 1 s deadline fired, not the end of the 25 s body: a wide margin for a loaded box.
+            assert time.monotonic() - started < 20.0
 
         # Each 1 KiB piece arrives well inside the read timeout, but the whole body would take 50 s.
         with_web(
@@ -959,12 +958,11 @@ class TestPoliteness:
     @pytest.mark.parametrize("header", ["30", "11", None, "soon"])
     def test_a_long_or_missing_retry_after_gives_up_at_once(self, header: str | None) -> None:
         async def body(web: FakeWeb, fetcher: SafeFetcher) -> None:
-            started = time.monotonic()
             with pytest.raises(SafeFetchError) as caught:
                 await fetcher.get(url(web, "rl.test", "/"), max_bytes=100, accept=IMAGE)
             assert caught.value.reason == FetchFailure.RATE_LIMITED
+            # Gave up at once: waiting and retrying would have made a second request.
             assert len(web.requests) == 1
-            assert time.monotonic() - started < 2.0
 
         headers = {} if header is None else {"Retry-After": header}
         with_web(

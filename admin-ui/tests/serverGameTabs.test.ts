@@ -324,6 +324,22 @@ describe("game tabs: which chat a message belongs to", () => {
     expect(h.tabs.chatTarget()).toBeNull();
   });
 
+  it("an item with no chat of its own (a canvas, decisions/00206) is never a target: its tab sends to the main chat", () => {
+    const h = make();
+    const canvas: GameRegistration = { ...fakeGame("canvas", "Canvas"), itemChat: false };
+    h.tabs.register(canvas);
+    h.tabs.open("canvas", 12);
+    expect(h.tabs.activeTab()).toBe("canvas");
+    expect(h.tabs.chatTarget()).toBeNull();
+    // One second tab: a game replaces the canvas and becomes the target as usual, and back again.
+    h.tabs.open("wyr", 7);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "WYR"]);
+    expect(h.tabs.chatTarget()).toBe(7);
+    h.tabs.open("canvas", 12);
+    expect(visibleTabs(h.tabs)).toEqual(["Chat", "Canvas"]);
+    expect(h.tabs.chatTarget()).toBeNull();
+  });
+
   it("an offered (not showing) game is not a target", () => {
     const h = make();
     h.tabs.offer("wyr", 7);

@@ -57,6 +57,7 @@ from wixy_server.livechat.grants import (
     new_grant,
     secret_hash_from_wire,
 )
+from wixy_server.livechat.live_voice import LiveVoiceHub, LiveVoiceUnavailableError
 from wixy_server.livechat.models import (
     LEGACY_TEASE_WIRE_KEY,
     DrawingRow,
@@ -64,8 +65,10 @@ from wixy_server.livechat.models import (
     MessageHook,
     MessageRow,
     PushSubscriptionRow,
+    SearchHit,
     TranscriptRow,
     drawing_json,
+    live_tail,
     message_json,
     transcript_json,
 )
@@ -78,6 +81,7 @@ from wixy_server.livechat.push import (
     validate_push_endpoint,
 )
 from wixy_server.livechat.reactions import is_allowed_reaction, reactor_key
+from wixy_server.livechat.search import MAX_QUERY_CHARS, excerpt, query_words
 from wixy_server.livechat.store import (
     AttachmentNotReadyError,
     DrawingAnchorNotFoundError,
@@ -485,14 +489,40 @@ async def revoke_all_device_grants(request: Request) -> Response:
 
 
 @router.get("/messages", response_model=None)
-async def get_history(request: Request, before: int | None = None, limit: int = 50) -> JsonObject:
+async def get_history(
+    request: Request,
+    before: int | None = None,
+    limit: int = 50,
+    around: int | None = None,
+    after: int | None = None,
+) -> JsonObject:
+    """One page of history: the newest, or older than `before`. `around` is a message's own
+    neighbourhood (going straight to it from Search, decisions/00208) and `after` the next page
+    newer than a seq; both also say whether anything newer exists (`hasNewer`)."""
     auth = await require_server_token(request)
     if not (1 <= limit <= 100):
         raise HTTPException(status_code=422, detail="limit must be between 1 and 100")
+    if sum(value is not None for value in (before, around, after)) > 1:
+        raise HTTPException(status_code=422, detail="before, around and after are exclusive")
 
     store: LiveChatStore = request.app.state.livechat_store
     secret: bytes = request.app.state.livechat_secret
     signer = MediaSigner.for_auth(secret, auth)
+
+    def _neighbourhood() -> tuple[list[MessageRow], bool, bool, int]:
+        if around is not None:
+            return store.list_messages_around(seq=around, limit=limit)
+        assert after is not None
+        return store.list_messages_after(after=after, limit=limit)
+
+    if around is not None or after is not None:
+        rows, has_older, has_newer, position = await anyio.to_thread.run_sync(_neighbourhood)
+        return {
+            "messages": [message_json(m, signer) for m in rows],
+            "hasMore": has_older,
+            "hasNewer": has_newer,
+            "cursor": position,
+        }
 
     def _list() -> tuple[list[MessageRow], bool, int]:
         return store.list_messages(before=before, limit=limit)
@@ -527,6 +557,58 @@ async def get_link_messages(
         lambda: store.list_link_messages(before=before, limit=limit)
     )
     return {"messages": [message_json(m, signer) for m in messages], "hasMore": has_more}
+
+
+# ---------------------------------------------------------------------------
+# POST /messages/search — the Search screen (decisions/00208). A POST so that what somebody
+# searched for sits in a request body: a query string lands in access logs and in anything
+# between the browser and here. Never logged, never kept, and the answer is never cached.
+# ---------------------------------------------------------------------------
+
+
+class SearchMessagesIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    q: str
+    before: int | None = None
+    only: int | None = None
+    limit: int = 30
+
+
+def _search_hit_json(hit: SearchHit, words: tuple[str, ...]) -> JsonObject:
+    found = excerpt(hit.text, words)
+    return {
+        "seq": hit.seq,
+        "sender": hit.sender,
+        "createdAt": hit.created_at,
+        "source": hit.source,
+        "parts": [{"text": part.text, "match": part.match} for part in found.parts],
+        "matched": list(found.matched),
+    }
+
+
+@router.post("/messages/search", response_model=None)
+async def search_messages(body: SearchMessagesIn, request: Request) -> JSONResponse:
+    await require_server_token(request)
+    if not (1 <= len(body.q) <= MAX_QUERY_CHARS):
+        return _invalid(f"q must be 1-{MAX_QUERY_CHARS} characters")
+    if not (1 <= body.limit <= 100):
+        return _invalid("limit must be between 1 and 100")
+
+    store: LiveChatStore = request.app.state.livechat_store
+    words = query_words(body.q)
+
+    def _search() -> JsonObject:
+        hits, has_more, total = store.search_messages(
+            words=words, before=body.before, only=body.only, limit=body.limit
+        )
+        return {
+            "results": [_search_hit_json(hit, words) for hit in hits],
+            "hasMore": has_more,
+            "total": total,
+        }
+
+    return JSONResponse(await anyio.to_thread.run_sync(_search), headers=_NO_STORE)
 
 
 # ---------------------------------------------------------------------------
@@ -976,6 +1058,10 @@ async def delete_message(seq: int, request: Request) -> Response:
     attachment_ids, _pending_token = await anyio.to_thread.run_sync(
         lambda: store.delete_message_for_scrub(seq=seq, now=time.time())
     )
+    # A live voice note being recorded and heard (spec/server-chat/07 §6.1): stop its decoder and
+    # tell its listeners it is over, before the erasure removes its files.
+    live_hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live_hub.deleted(attachment_ids)
     commit_returned_at = time.monotonic()
     return await _finish_committed_erasure(
         store=store,
@@ -998,6 +1084,8 @@ async def wipe_chat(body: WipeChatIn, request: Request) -> Response:
     attachment_ids, upload_ids, _pending_token, wipe_token = await anyio.to_thread.run_sync(
         lambda: store.wipe_for_scrub(now=time.time())
     )
+    live_hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live_hub.deleted(attachment_ids)
     commit_returned_at = time.monotonic()
     return await _finish_committed_erasure(
         store=store,
@@ -1900,6 +1988,8 @@ async def transcribe_attachment(
     attachment = await anyio.to_thread.run_sync(store.get_attachment, att_id)
     if attachment is None or attachment.kind != "voice" or attachment.message_seq is None:
         return _not_found()
+    if attachment.status == "live":
+        return await _transcribe_live(request, auth.email, att_id)
     if attachment.status != "ready":
         return JSONResponse(status_code=409, content={"error": "not_ready"})
 
@@ -1950,6 +2040,61 @@ async def transcribe_attachment(
     if begin.state == "done":
         return _stored(begin.transcript, status_code=200)
     return _not_found()  # "gone": deleted while we were deciding
+
+
+async def _transcribe_live(request: Request, identity: str, att_id: str) -> JSONResponse:
+    """`transcribe` on a voice note that is still being recorded (spec/server-chat/07 §3): the same
+    opt-in, private-mode, rate-limited request, but the job is the live transcription loop, and the
+    answer is always the live transcript shape `{"status":"live","text","tail"}` (202)."""
+    store: LiveChatStore = request.app.state.livechat_store
+    runtime: TranscriptionRuntime = request.app.state.livechat_transcription
+    notifier: LiveChatNotifier = request.app.state.livechat_notifier
+    hub: LiveVoiceHub = request.app.state.livechat_live_voice
+    live = hub.transcriber
+    assert live is not None
+
+    def _live_shape(text: str) -> JSONResponse:
+        return JSONResponse(
+            status_code=202,
+            content={"transcript": {"status": "live", "text": text, "tail": live_tail(att_id)}},
+        )
+
+    if att_id in live.active:
+        current = await anyio.to_thread.run_sync(store.get_attachment, att_id)
+        text = current.transcript.text if current is not None and current.transcript else None
+        return _live_shape(text or "")  # single-flight: a loop is already running for the note
+    if not await runtime.available():
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    retry_after = runtime.rate_limiter.hit(identity)
+    if retry_after is not None:
+        seconds = max(1, math.ceil(retry_after))
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate_limited", "retryAfterS": seconds},
+            headers={"Retry-After": str(seconds)},
+        )
+    begin = await anyio.to_thread.run_sync(
+        lambda: store.begin_transcript(att_id=att_id, now=time.time(), restart_pending=True)
+    )
+    if begin.state != "started":
+        return JSONResponse(status_code=404, content={"error": "not_found"})
+    try:
+        live.start(att_id)
+    except LiveVoiceUnavailableError:
+        await anyio.to_thread.run_sync(
+            lambda: store.finish_transcript(
+                att_id=att_id,
+                status="failed",
+                text=None,
+                failure="unavailable",
+                engine=None,
+                now=time.time(),
+            )
+        )
+        notifier.publish()
+        return JSONResponse(status_code=503, content={"error": "not_configured"})
+    notifier.publish()  # the other device's live transcript
+    return _live_shape("")
 
 
 # ---------------------------------------------------------------------------

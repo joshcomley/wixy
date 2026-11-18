@@ -1,5 +1,5 @@
 # ruff: noqa: F811  (fixtures re-used from test_livechat_view_once are rebound as parameters)
-"""Cookout game modes on the server (workspace 00058, spec 09c §5 and §8.2): the v21 -> v22
+"""Cookout game modes on the server (workspace 00058, spec 09c §5 and §8.2): the v21 -> v24
 migration from a REAL v21 database, the Toasted sandwich draft through the store (turn plan, kinds,
 skips, Open/Blind redaction, starters by kind, twist adjustments), the Classic regression golden,
 the unknown-mode guards, and the HTTP gate (`TestRoutes`). The overlap with a still-running v21
@@ -190,7 +190,7 @@ def raw(db_path: Path, sql: str, *args: object) -> list[tuple[Any, ...]]:
 
 
 def _strip_mode_fields(node: Any, *, top: bool = True) -> Any:
-    """Remove what schema v22 ADDS to a Classic view (`mode`, `kind`, `build`) so the rest can be
+    """Remove what schema v24 ADDS to a Classic view (`mode`, `kind`, `build`) so the rest can be
     compared to the pre-modes golden."""
     if isinstance(node, dict):
         out = {}
@@ -237,7 +237,7 @@ class TestMigrationFromRealV21:
         turns_before = raw(copy, "SELECT * FROM cookout_turns ORDER BY anchor_message_seq, turn")
         migrated = LiveChatStore(copy)
         migrated.list_messages(before=None, limit=1)
-        assert raw(copy, "PRAGMA user_version") == [(22,)]
+        assert raw(copy, "PRAGMA user_version") == [(24,)]
         assert {r[0] for r in raw(copy, "SELECT mode FROM cookout_rounds")} == {"classic"}
         after = raw(copy, "SELECT * FROM cookout_rounds ORDER BY anchor_message_seq")
         # every pre-existing column of every round is untouched (the new column sits last)
@@ -260,11 +260,11 @@ class TestMigrationFromRealV21:
         copy = tmp_path / "v21.db"
         shutil.copy(FIXTURES / "livechat_v21.db", copy)
         LiveChatStore(copy).list_messages(before=None, limit=1)
-        assert raw(copy, "PRAGMA user_version") == [(22,)]
+        assert raw(copy, "PRAGMA user_version") == [(24,)]
         first = raw(copy, "SELECT * FROM cookout_rounds ORDER BY anchor_message_seq")
         LiveChatStore(copy).list_messages(before=None, limit=1)
         assert raw(copy, "SELECT * FROM cookout_rounds ORDER BY anchor_message_seq") == first
-        assert raw(copy, "PRAGMA user_version") == [(22,)]
+        assert raw(copy, "PRAGMA user_version") == [(24,)]
 
     def test_a_retried_migration_that_already_added_the_column_skips_the_alter(
         self, tmp_path: Path
@@ -276,10 +276,10 @@ class TestMigrationFromRealV21:
         conn.commit()
         conn.close()
         LiveChatStore(copy).list_messages(before=None, limit=1)
-        assert raw(copy, "PRAGMA user_version") == [(22,)]
+        assert raw(copy, "PRAGMA user_version") == [(24,)]
 
     def test_the_schema_version_constant(self) -> None:
-        assert store_module._LATEST_SCHEMA_VERSION == 22
+        assert store_module._LATEST_SCHEMA_VERSION == 24
 
 
 # -- Classic is today's game, byte for byte ----------------------------------------------------

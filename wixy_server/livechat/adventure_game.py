@@ -31,7 +31,7 @@ from wixy_server.livechat.models import (
 
 # §3.1: a spin's committed consequence.
 SPIN_MIN_DELTA_DEG = 720.0
-SPIN_MAX_DELTA_DEG = 3600.0
+SPIN_MAX_DELTA_DEG = 3960.0  # the flick's own 3600 plus the client's random extra of under one turn
 SPIN_MIN_DURATION_MS = 3500.0
 SPIN_MAX_DURATION_MS = 7000.0
 SPIN_MAX_ABS_FROM_DEG = 1e6
@@ -98,7 +98,7 @@ def parse_spin(
     """Validate a spin request (`POST /adventure/{seq}/spin`). Returns the typed spin or the 422
     `detail` string.
 
-    §3.1: `720 <= |delta| <= 3600`, `3500 <= durationMs <= 7000`, `from` finite with
+    §3.1: `720 <= |delta| <= 3960`, `3500 <= durationMs <= 7000`, `from` finite with
     `|from| <= 1e6`. `result` is REQUIRED for the `lat` spin and REFUSED for `lng`; it carries
     `{point, sea, land, centre, landUnit, candidates}` (§3.2): each point `[lng, lat]` in range,
     `sea` a boolean, `landUnit` and 1-10 unique `candidates` all playable bank units (a unit

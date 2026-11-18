@@ -170,6 +170,16 @@ describe("game float: FAB, floating message, quick reply", () => {
   });
   afterEach(() => document.body.replaceChildren());
 
+  it("a FAB with its own action (the Canvas tab's: back to the chat) runs it instead of opening a pop-up", () => {
+    const h = make();
+    const onFab = vi.fn();
+    const own = h.float.createOverlay({ fabLabel: "Back to the chat", popupTitle: "Chat", item: () => null, onFab });
+    h.host.append(own);
+    own.querySelector<HTMLButtonElement>(".wx-srv-float-fab")!.click();
+    expect(onFab).toHaveBeenCalledTimes(1);
+    expect(h.itemChat.openPopup).not.toHaveBeenCalled();
+  });
+
   it("starts quiet: a FAB with a name, no dot, no floating message", () => {
     const h = make();
     expect(fab(h).getAttribute("aria-label")).toBe("Open this card's chat");

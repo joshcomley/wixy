@@ -550,7 +550,10 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    transparency, not the source format — see the photo table below.
 3. **Voice**: AAC-LC mono 64kb/s `m4a`, duration from the **output** (MediaRecorder webm has
    none in its own header), 64-bucket RMS peaks normalized against the clip's own loudest
-   bucket.
+   bucket. A voice note may run **4 hours** (`VOICE_DURATION_CAP_S`; it was 15 minutes — R11,
+   spec/server-chat/06). The peaks pass decodes PCM at `voice_peak_sample_rate(duration)` =
+   `clamp(floor(7_200_000 / duration_s), 100, 8000)` Hz — the full 8 kHz up to 15 minutes, 500 Hz at
+   4 hours — so it never decodes more than 7.2 million samples.
 4. **Video**: remux (`-c copy`) iff h264/yuv420p/long-edge≤1920/fps≤60/audio is aac-or-absent
    — the display-matrix rotation side data survives untouched (`-map_metadata -1` strips
    metadata *tags*, not stream side data). Otherwise transcode (libx264 veryfast crf23, same
@@ -560,9 +563,16 @@ function takes explicit input/output paths and (for voice/video) explicit `ffmpe
    The video's renditions are therefore `play`, `poster`, `thumb`. Media sent before this
    existed is caught up by `livechat/thumbnails.py` (see §21).
 5. **Subprocess hygiene**: Windows `BELOW_NORMAL_PRIORITY_CLASS|CREATE_NO_WINDOW`, POSIX
-   `nice -n 10`; hard timeouts (30min video / 5min else) with kill-on-timeout; every
-   ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every rendition write is
-   atomic (temp name, then `os.replace`).
+   `nice -n 10`; every ffprobe/ffmpeg call pins `-f <demuxer> -protocol_whitelist file`; every
+   rendition write is atomic (temp name, then `os.replace`). **Timeouts (decisions/00209):** a
+   *transcode* (voice encode, voice peaks pass, video encode/remux) runs through
+   `_run_transcode` with `-nostdin -nostats -progress <file>` and is killed only when ffmpeg's
+   `out_time_us` stops advancing for `_STALL_S` (120 s) or it passes a per-kind ceiling
+   (`_VOICE_CEILING_S` 6 h, `_VIDEO_CEILING_S` 3 h) — never on a fixed wall clock, because the
+   low-priority child is starved, not stuck, on a host at 100% CPU. Only the small fixed-cost
+   steps (ffprobe, the one-frame poster) keep the 5-minute `_DEFAULT_TIMEOUT_S`. Every failure is
+   logged by the queue as a WARNING (kind, id, seconds taken, reason, ffmpeg's own diagnostic —
+   never message content).
 
 **Photo renditions** (`processing.process_photo`; the first matching row applies):
 
@@ -585,7 +595,7 @@ media-pipeline gate (ffmpeg **and** ffprobe **and** `pillow-heif` all available 
 `resolve_binaries` below), the declared MIME type against a per-kind allowlist, the declared
 size (`sizeBytes` must be at least 1: the route's request model rejects 0 or a negative value
 with a 422, and `init_upload` itself refuses it as defence in depth, so such a size cannot
-bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB / video
+bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 512MiB / video
 1GiB), then quota
 (`media_bytes_used + pending_upload_bytes + size > quota`) and the free-space floor
 (injectable `disk_usage`, default `shutil.disk_usage`). `write_chunk` is idempotent
@@ -595,12 +605,42 @@ bypass the quota arithmetic) against the per-kind cap (photo 30MiB / voice 25MiB
 upload returns the same attachment rather than re-assembling or erroring (same posture as
 `create_message`'s `clientId` replay).
 
+**Live uploads (spec/server-chat/06, decisions/00210).** A voice note is uploaded *while it is recorded*:
+`POST /uploads` with `live: true` + `deviceId` (voice only, 422 otherwise; `sizeBytes` omitted/ignored,
+ the row starts at 0 and quota/free space are checked against zero bytes). The recorder's 15 s slices are
+ `PUT`  as chunks, **strictly in order** (`prepare_live_chunk`): the index must be the next missing
+ one (count of contiguous chunk files) or an existing one (idempotent overwrite); a gap is 409
+ `out_of_order` with `next`. The running total over the kind's cap is 413 `too_large` and
+ quota/free-space is 507 `storage_full`, both before the slice is written. Each accepted slice
+ (`store.record_live_chunk`) sets the row's `size_bytes` (sum of the slices), `last_chunk_at` and
+ (`?durationMs=`) `duration_ms`. `complete` takes an optional `{"chunkCount": n}` (omitted = every
+ present contiguous chunk; slices missing below it are 409 `incomplete`) and `assemble` joins them by
+ plain concatenation — slices of one `MediaRecorder` session are one continuous WebM/MP4 stream — settling
+ the row's size to the bytes joined (a live upload has no declared size to mismatch). `GET
+ /uploads/unsent?deviceId=` (`store.unsent_live_uploads`) lists this device's live uploads that were
+ never promoted and have stored no slice for ≥ 20 s (`UNSENT_IDLE_S`), newest first — the client
+ offers them as an "Unsent voice note" to Send (`complete`) or Discard (`DELETE`); nothing is ever
+ sent automatically. Schema v22 adds `uploads.live` / `device_id` / `last_chunk_at` /
+ `duration_ms` (existing rows migrate as ordinary uploads). Wipe and the deletion journal treat a live
+ upload exactly like any upload.
+
 **The upload id becomes the attachment id.** There is no separate "original file path"
 column on `AttachmentRow` — the convention *is* the pointer: the media queue looks for its
 source at `uploads/<attachmentId>/assembled`. The `uploads` DB row stays alive (for
 `pending_upload_bytes` accounting) until the queue resolves the attachment, success or
 failure, at which point it — and the staged file — are removed (success) or the original is
-archived to `failed/<id>/original.<ext>` (failure, kept 7 days).
+archived to `failed/<id>/original.<ext>` (failure, kept 7 days after the latest failure).
+
+**Try again (decisions/00209).** `POST /attachments/{id}/retry` puts a `failed` attachment of
+a sent message back to `processing` (`store.requeue_failed_attachment`, which emits the same
+`message_updated` events as `finish_attachment`). The queue's `_do_work` then finds no staged
+`uploads/<id>/assembled` and processes `failed/<id>/original.<ext>` **in place**
+(`media_queue.failed_original_path`) — never moved back under `uploads/`, whose id is already
+tombstoned for cleanup. Success removes the archive; a further failure leaves it untouched and
+`utime`s its folder, restarting the seven-day window; neither file present fails
+`original_missing`. The wire's `Attachment.retryable` (`models.attachment_retryable`) is true for
+a failed attachment of a sent message inside `FAILED_ORIGINAL_RETENTION_S`; the admin UI shows a
+"Try again" button only then.
 
 **The queue (`livechat/media_queue.py`, P2b) — `run_forever`, one app-lifetime task.**
 Claims via `store.claim_processing` (`owner=f"{pid}-{uuid}"`, 120s lease), spawns one child
@@ -635,7 +675,8 @@ all (nothing valid to run it with), and text chat is unaffected. The janitor sti
 DB/filesystem housekeeping, no ffmpeg dependency).
 
 **Janitor (`livechat/janitor.py`, P2b/P8) — `run_once`/`run_forever`, hourly.** Ages out
-uploads >24h (`stale_upload_ids`), unreferenced attachments >24h (`orphan_attachment_ids`,
+uploads >24h (`stale_upload_ids`; measured from `COALESCE(last_chunk_at, created_at)`, so a live
+recording is never swept while it is still sending slices, and rechecked in the delete transaction), unreferenced attachments >24h (`orphan_attachment_ids`,
 keyed off `message_seq IS NULL` — never touches anything a message references, regardless of
 its processing status), and `failed/` entries >7 days (by directory `mtime`, since there's no
 DB row backing them). It rechecks orphan/upload eligibility in the delete transaction and queues
@@ -840,6 +881,21 @@ same player, skip buttons and transcript block, minus the message-action menu �
 button. A note finished while the view is open leaves the list live the moment it stops playing (never
 cut off mid-playback: it waits for `ended`/`pause`); transcript updates patch in place. `detach()`/`teardown()` close it.
 
+**Going to each unheard note in the chat** (`thread.ts`, decisions/00207). Each list item also has
+**Go to message** (`.wx-srv-unheard-goto`, a gesture boundary): it closes the list and reveals that
+note in the thread, in context (`revealMessage`: scrolled to the middle and highlighted, as a
+quote's jump to its original is), and opens `.wx-srv-unheard-nav`, a bar floating at the bottom of
+the thread just above the composer: `‹ Previous` · `"2 of 3 unread voice notes"` · `Next ›` · ✕.
+Previous / Next go to the nearest unheard note before / after the current one, oldest first, and
+show only where there is one; once the current note is listened to the label reads `"N more unread
+voice notes"` and the steps still work from where it was; the bar goes when nothing is left unheard,
+on ✕, and on every lock or teardown. The count tab hides while the bar shows. The bar is
+`data-srv-gesture-exempt`: Next is tapped in quick succession on purpose and must never trip R3's
+double-tap lock (Escape and the panic ✕ still lock at once). **A jump holds the thread**
+(`threadScroll.hold()` until `scrollend`, at most `REVEAL_HOLD_MAX_MS`): while a smooth scroll
+runs the thread still reads as stuck to the bottom, and a message arriving meanwhile snapped it back
+there, undoing the jump (measured 3 of 10 e2e runs; it applied to a quote's jump too).
+
 **Composer focus + the header ... menu.** With `promoteToFullWidthOnMultiline` (Server chat only) the
 text box takes its own full-width line the moment it is focused (`chatComposer.ts`
 `promotedByFocus`), not only once the text wraps. When focus leaves it goes back to its place —
@@ -851,13 +907,32 @@ above) under the tap that caused it, so a double-tap on a message or a tap on a 
 Attach/mic stay at the left and Send keeps its place at
 the right edge (`margin-left: auto` in the promoted row), so no button moves when the box jumps up.
 The header's `⋯` button (`.wx-srv-more-button`, first of the right-hand buttons) opens
-`.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and scrolls to the new
-message. A **canvas message** (schema v14, `messages.canvas INTEGER NOT NULL DEFAULT 0`; wire
-`canvas: true`; no text, no attachments) renders as a full-width bubble holding
-`.wx-srv-canvas-surface`, a muted theme-coloured surface at a fixed 4:5 aspect ratio (a ratio, not a
-pixel height, so the pen's uniform draw-space scale stays right at every width — spec 07 §1). It
-exists so the pen, whose drawings anchor to a message, has reserved space instead of drawing over
-other text. The pen is still turned on with its own button. Quoting a canvas shows only the sender.
+`.wx-srv-more-menu`; its first item, **Canvas**, calls `POST /messages/canvas` and opens the new
+canvas in the **Canvas tab** (below; decisions/00206). A **canvas message** (schema v14,
+`messages.canvas INTEGER NOT NULL DEFAULT 0`; wire `canvas: true`; no text, no attachments) renders in
+the thread as a full-width bubble: a head row (`.wx-srv-canvas-bubble-head`) with an **Open** button
+(`.wx-srv-canvas-open`, a gesture boundary) and `.wx-srv-canvas-surface`, a muted theme-coloured
+surface at a fixed 4:5 aspect ratio, carrying the canvas's drawing. The thread keeps it as the record
+of when the canvas was started; it is drawn on in the tab. Quoting a canvas shows only the sender.
+
+**The Canvas tab** (`canvasPane.ts`, decisions/00206). A canvas takes the chat's ONE second tab —
+`gameTabs.ts` `GameKey` includes `"canvas"` — so opening one replaces whatever game held it (still only
+Chat plus one tab), and a game started later replaces the canvas the same way. Starting a canvas opens
+its tab on the starter's screen; a canvas started on another screen (the other person's, or the same
+person's other device) is OFFERED (the tab with a dot) — never one already in the chat when it loads
+(`canvasBaseline`, set from the first fully loaded history), and never over a game that is on screen
+right now (it waits in the chat, where Open opens it). Open on any canvas, an older one too, shows it in
+the tab and drawing carries on there. The pane is full screen like a game's (the chat header and
+composer hide): a head with "Your canvas" / "<name>'s canvas", the pen's Undo, Redo and Pen buttons and
+✕ (closes the tab; the canvas stays in the chat), the pen toolbar, and the largest 4:5 canvas that fits
+(`.wx-srv-canvas-frame`, width set by a ResizeObserver; never scrolled). It runs its OWN
+`mountDrawingLayer` whose only anchor is the canvas shown (`threadWrap` = the frame, so a stroke can
+only start on the canvas); the pen comes on when the tab shows and goes off (session ended, strokes
+stored) when it hides. The thread forwards every pen event to it (`attach`, `detach`, `teardown`,
+`sync` after each render, `handleLive` for that canvas only, `messageDeleted`, `wiped`). The canvas has
+no chat of its own: its registration says `itemChat: false`, so `chatTarget()` is the main chat while
+it shows; its FAB (`OverlayOptions.onFab`) goes back to the Chat tab, and a new message floats in as
+over a game. A deleted canvas closes its tab.
 
 **Extend auto-lock to 1 minute** is a per-device checkbox in the chat's settings sheet
 (`settingsSheet.ts`: a real `<label for>` row, at least 44px tall, default off). It stores `"1"`
@@ -914,10 +989,26 @@ The 🎤 control uses `server/recorder.ts`. It requests microphone permission, h
 text input and Send button in favour of a dedicated recording row, provides a Pause/Resume button
 that freezes the elapsed recording timer and excludes paused intervals from the delivered audio
 duration, supports stop and cancel, and passes the resulting `File` into the same staged-upload
-flow. Locking calls the recorder's `detach()` to discard an unfinished recording and release
+flow. Locking calls the recorder's `detach()` to end an unfinished recording and release
 the microphone. A new recorder is created on the next attach because a detached recorder is
 terminal. Recordings shorter than one second are discarded with a “Too short” hint and never
 uploaded.
+
+A voice note is uploaded **while it is recorded** (spec/server-chat/06, decisions/00210):
+`recorder.start(15000)` emits a slice every 15 s (`onSlice(blob, index, elapsedMs)`, 64 kbit/s
+requested, `VOICE_MAX_DURATION_MS` = 4 h as a runaway guard only — there is no 15:00 auto-stop,
+and the timer shows h:mm:ss past an hour). `liveUpload.ts` inits a live upload at start, PUTs
+slices strictly in order with one in flight (resyncing to the server's `next` on a 409
+`out_of_order`), and on Stop sends the last slice then `complete` with `chunkCount` (retried on a
+transient failure or a 409 `incomplete`). The recorder still keeps every slice in memory until the
+upload is confirmed, so if the live upload fails permanently the Stop path uploads the kept blob
+the ordinary way and nothing is lost. **Cancel** deletes the live upload (`DELETE /uploads/{id}`);
+a **lock or page loss mid-recording abandons it instead**, leaving it on the server. On the next
+attach `unsentVoice.ts` asks `GET /uploads/unsent` for this device (excluding its own upload still
+in progress) and shows an "Unsent voice note · 12:31" card beside the composer with **Send**
+(`complete` without `chunkCount`, then the ordinary message send; it sends to the main chat if the
+original thread is gone) and **Discard**. Nothing is ever sent automatically, and nothing is kept
+in browser storage — the recording lives on the server.
 
 The Server-chat composer and the AI chat composer share cmd's key rules (`chatComposer.ts`): on a
 keyboard device Enter sends while the draft is a single line; Shift+Enter or Ctrl/Cmd+Enter inserts
@@ -940,6 +1031,118 @@ timeout, a 5xx, a gateway 403) keeps the note and offers Retry. A 401 locks the 
 keeps the note. An uploaded attachment left
 behind by a discard is reaped by the server's janitor. Covered by
 `admin-ui/tests/serverThread.test.ts`.
+
+### Live voice notes: the client (spec/server-chat/07, decisions/00211)
+
+Wire contract: [`07-live-voice-notes.md`](../../spec/server-chat/07-live-voice-notes.md) §6 (this section
+is the client's side of it; the server's is built against the same text).
+
+**Mode switch (`liveVoice/modeMenu.ts`, `thread.ts`).** Long-pressing the mic (500 ms, a move of more
+than 10 px cancels it) opens a small `role="menu"` of **Voice note** / **Live voice note** (menuitemradio),
+fixed above the button and kept inside the viewport (320 px included). The press that opened it must not
+also record: `consumeClickSuppression()` swallows the click that follows (and expires after 700 ms, so a
+finger slid off the button never eats the next tap). Other ways in: `contextmenu` (a right click, the
+ContextMenu key, Shift+F10, Android's touch long-press) and ArrowUp/ArrowDown on the focused button;
+Escape, an outside press, Tab, a resize and every lock close it; it cannot open while recording, sending
+or in a call. The mic button carries `aria-haspopup="menu"`, `aria-expanded` and an `aria-description`.
+The choice (`voiceMode` in `thread.ts`) lives **in memory only, for the life of the page**: it survives a
+lock/unlock (the view instance does) but never touches localStorage, sessionStorage or IndexedDB.
+In live mode the idle mic is red-tinted with a pulsing LIVE dot (`wx-srv-record-button--live`) and is named
+"Record a live voice note".
+
+**Sender (`thread.ts`, `liveUpload.ts`, `recorder.ts`).** The recorder's `sliceMs()` is read at each start:
+`VOICE_SLICE_MS` (15 s) or `LIVE_SLICE_MS` (1 s). On `onStart` in live mode the thread creates a
+**listened-to** live uploader (`createServerLiveUploader(..., { listen: true })`: the init also carries
+`listen:true` and returns the live `attachment`). `uploader.opened()` settles to `opened` (with the
+attachment), `too_many_live` (409) or `failed`. On `opened` the message goes out **at once** through the
+ordinary `POST /messages` with `attachmentIds:[uploadId]` (reply target and game chat captured at that
+moment; retried 1/2/4 s with the same `clientId` while the network answers `unavailable`). The recording
+row reads **LIVE · 0:42** (**LIVE · Paused 0:05**) with a pulsing dot. **Pause/Resume** call
+`uploader.setLiveState` (`POST /uploads/{id}/live-state`, the latest wish wins, a few retries, ignored once
+the server says 404/409) and the recorder flushes the audio so far with `requestData()` just before pausing,
+so listeners are not left missing the last second until the resume. **Stop** is spec 06's `complete`;
+nothing is posted again because the message already exists (a retry after a lock or failure reuses the
+upload, never a second message). **Cancel** becomes **Delete for everyone** (a trash icon) once the message
+exists, behind a confirm ("They may already have heard part of it", Keep recording / Delete for everyone);
+confirming runs the existing message delete (`deleteForEveryone`), which ends the decoder, closes
+listeners and removes the upload on the server, so the client does not also `DELETE /uploads/{id}`. Before
+the message exists nobody can have heard anything, so Cancel is the plain cancel (and a message that lands
+afterwards is deleted at once). A recording under one second is taken out of the chat the same way.
+
+**What happens when it goes wrong (decisions taken, never losing audio).**
+- *409 `too_many_live`*: the same recording carries on as an ordinary spec 06 live upload; the slices
+  recorded so far (kept only until the init is answered) are replayed into it, and a short neutral notice
+  says why. Any other failure to open: no live message; Stop uploads the kept recording whole as before.
+- *A listened-to upload is patient.* A slice that cannot be sent because of the network or a 5xx is retried
+  with backoff for up to 45 s (`patienceMs`, inside the server's 60 s no-chunk auto-end) instead of giving
+  up after three tries; a definite refusal (`not_live`, 4xx) fails at once. It **never deletes** what the
+  server holds when it fails (a message references it and people may be listening): the server ends it
+  after 60 s and processes what arrived.
+- *If it cannot be finished* (`finish()` resolves `null`: the connection stayed down, or the server had
+  already ended the note), the **whole kept recording** is uploaded as an ordinary voice note and sent as a
+  **new** message (a new `clientId`, so it cannot be mistaken for the live one) with the notice "The live
+  voice note was cut short, so the whole recording was sent again". Listeners keep the live note with what
+  they heard; the sender loses nothing. (Only the remainder cannot be uploaded alone: later slices of one
+  MediaRecorder stream are not decodable without the first one's header.)
+- *A lock mid-recording* abandons the uploader and deletes nothing: the live note stays in the chat and the
+  server ends it itself after 60 s without audio.
+
+**Listener (`liveVoice/`).** `renderAttachment` draws a voice attachment with status `live` through
+`liveVoice/bubble.ts` (without a hub it is a plain "Live voice note…" line). The bubble has a **LIVE** badge,
+a waveform of the newest 64 seconds (one bar per second from the hub's `peaks`, the newest bar red while
+recording), **Play** (from the start), **Jump to live**, ordinary pause/resume (pause = `stop`, resume =
+`play` from the position reached), a time `0:09 / 0:23`, and a status line: **Paused** while the sender is
+paused, **Finishing…** after the sender stops, **Reconnecting…** when the socket dropped, or why audio did
+not start (`too_many_listeners` and so on). The sender's own device shows the same growing waveform without
+Play or Jump to live (`ownMessage`): it must not play the microphone it is recording into. Audio holds the
+`mediaPlaying` idle suspension; the per-device "ask before playing" confirm applies. A `message_updated` for
+a live note that changes only its status (`live`/`processing`), `liveState`, peaks, duration or transcript
+is **patched into the same bubble** (`differOnlyInLiveOrTranscript` + `patchLiveVoiceBlocks`), never a
+rebuild, so a stream that is playing is not cut off. When the note becomes `ready` the thread rebuilds the
+bubble as the ordinary player; the disposed live bubble leaves a **handover** in the hub (position and
+whether it was playing), which the new file bubble takes (`takeHandover`): it loads the file's metadata,
+seeks to the same position and plays on if it was playing (a browser that refuses `play()` without a tap
+leaves it paused at that position). A listener whose stream reaches `eof` simply hears the tail play out
+(the position is the note's end; the note is marked heard).
+
+**The hub (`liveVoice/hub.ts`, `protocol.ts`).** One WebSocket per page, `/api/admin/server/live-voice/ws`,
+subprotocol `wixy-live-voice-v1`, opened only while something watches or plays. First frame
+`{"type":"auth","v":1,"token","label"}`; after `ready` it sends `watch` for every registered bubble (peaks
+are accumulated from `state` messages; a gap in `peaksFrom` re-watches once). `play` is called from the
+user's tap (that is what starts the AudioContext on iOS) and is followed by `credit` 50; the hub then tops
+up so that **frames buffered + credit granted and not yet received never exceeds 100 (2 s)**, in grants of
+10-500 once outstanding credit falls under 25. A frame the server had no credit for, a repeat, a wrong
+attachment, a call frame (byte 1 = 1) or one not contiguous with the last is never played. One audio
+stream at a time (a new `play` replaces the old); `error` frames reach the bubble; `ping` is answered with
+`pong`. A drop reconnects with backoff (0.5 s doubling to 15 s), re-authenticates, re-watches and resumes
+an audio stream from the sample after the last frame received, keeping what is queued. Close code 4401
+locks the chat. A renewed token reconnects (resuming the stream); `detach()` (every lock) closes the socket
+and stops audio but keeps the registrations of bubbles still on screen for the next `attach()`.
+
+**Audio (`liveVoice/worklet.ts`, `player.ts`).** The call's worklet processor keeps a 200 ms ring under
+300 ms leases, which cannot hold the up-to-2 s a credit window allows, so live voice has a sibling
+processor, `wixy-live-voice`, **in the same self-hosted module** (`call/worklet.ts` imports it, so the one
+fingerprinted `call-worklet.js` carries both and the call's processor is still registered last). It has a
+fixed 3 s ring (never grows; a frame that does not fit is dropped and reported), starts after 100 ms
+queued, resamples 24 kHz to the context rate, reports samples played about every 65 ms (that is what the
+credit and the position are computed from) and `drained` once an `eof`-marked stream has played out.
+`LiveVoiceAudio` owns the context and node; epochs make a report from before a `clear` harmless. The audio
+frame decoding is the call's header (`!BBH16sIQII8s`) with byte 1 = 2.
+
+**Transcript.** The transcript object gains `{"status":"live","text","tail"}` (spec 07 §6.3). Transcribe is
+offered on a `live` note (and on a stopped note still showing its live transcript: `isTranscribableVoice`),
+the finished sentences render normally and the unfinished tail greyed italic, repainted on every pass
+(possibly shorter, when the engine decides a sentence ended earlier); "Listening…" until words arrive;
+Hide/Show work; after Stop the normal `done` object replaces it. Text is set with `textContent`.
+
+**Layout.** Every piece works at 320-360 px and on desktop (rendered and screenshotted at 320, 360 and
+1200 px in light and dark: no horizontal overflow; the menu, the live row, the confirm and the bubble all
+wrap). New styles are at the end of `server/chat.css` and use the shared tokens (`--wx-danger*`).
+
+**Tests.** `tests/server/liveVoice{Protocol,Worklet,Player,Hub,Bubble}.test.ts`,
+`tests/serverThreadLive{Send,Listen}.test.ts` (mode switch, the sender flow, the fallbacks, patch-in-place
+and the handover), `tests/serverLiveUploadListen.test.ts`, `tests/serverRecorderLive.test.ts`,
+`tests/serverTranscriptLive.test.ts`.
 
 `server/api/uploads.ts` adapts `server/upload.ts` to the authenticated `serverFetch` wrapper.
 It captures the current `ServerSession` when an upload starts, sends the chunked
@@ -1053,15 +1256,14 @@ Tapping a sent bubble's quote (`scrollToOriginal` in `thread.ts`) scrolls to the
 it, and highlights it for ~1.5s (`scrollIntoView`'s own `behavior` option is `"auto"` under
 `prefers-reduced-motion`, never a CSS `scroll-behavior` — that would also make `loadOlderPage`'s
 own precise `scrollTop` restoration animate, breaking its "never visually jump" guarantee). If the
-original isn't loaded yet, it pages backwards with the existing `before` cursor at its own larger
-page size (`SCROLL_TO_ORIGINAL_PAGE_SIZE`, 100 vs. the ordinary 50) via the same
-`loadOlderPage`, which returns one of `"loaded"|"blocked"|"exhausted"|"error"` rather than a bare
-boolean — `"blocked"` (another load, ordinary or a sibling scroll-to-original, holds the single
-history-load slot) is distinct from `"exhausted"` precisely so a second quote tapped mid-page
-retries instead of wrongly concluding its target was deleted. A `scrollToOriginalGeneration`
-counter aborts a stale run's continuation (never its underlying network call) on a lock, a wipe, or
-another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Never found once paging
-exhausts (deleted in the meantime) removes the quote via the same path `message_deleted` uses.
+original isn't on screen, it is shown in its own neighbourhood, one request however old it is
+(`showMessage`; see "Search, the date strip and Message info", decisions/00208). A tap in a game's
+pop-up goes to the chat first. A load already holding the single history-load slot is waited for,
+so a second quote tapped mid-load is not mistaken for a deleted target. A
+`scrollToOriginalGeneration` counter aborts a stale run's continuation (never its underlying network
+call) on a lock, a wipe, or another tap; the quote shows busy (`.wx-srv-quote-busy`) meanwhile. Only
+the server's answer lacking the original (deleted in the meantime) removes the quote, via the same
+path `message_deleted` uses; a network failure leaves it.
 
 Client-side erasure (Inv 46/Inv 51) — see Inv 51's own text for the full three-mechanism picture
 (audit F3/F9: an earlier version of this doc called `message_deleted` the "only signal", which is
@@ -1169,6 +1371,22 @@ could not be recorded) is restarted by the next request (`begin_transcript(resta
 `media/<id[:2]>/<id>/play.m4a`, asks cmd afresh whether it still promises private mode, sends it with a budget of **60 s + 0.5 × the
 note's seconds**, and records `done`/`failed`, which appends `message_updated`; the stream delivers
 `Attachment.transcript` to every device. `GET /usage` gains `transcriptionAvailable`.
+
+**A note longer than 15 minutes (spec/server-chat/06 §2.4).** One request to cmd never carries more
+than `TRANSCRIBE_STRETCH_S` (15 minutes) of audio, so the 60 s + 0.5 × seconds budget stays per
+request. `plan_stretches(duration)` cuts the note into consecutive stretches (all but the last exactly
+15 minutes, the last running to the end; a note within 15 minutes + 0.5 s tolerance is one stretch and
+is sent whole, exactly as before). For each stretch `processing.cut_voice_stretch` copies
+`-ss/-t` of `play.m4a` (`-c:a copy`, under the progress watchdog) into a temporary file at
+`server/transcribe-tmp/<job>/stretch.m4a` in the server's private storage; the file is deleted as soon
+as it is read, the job directory is removed in a `finally` (so also on failure and cancellation), and
+`reset_loop_state` empties `transcribe-tmp/` at startup. Before **every** stretch cmd is asked afresh
+that it still promises private mode (Inv 50), then the stretch goes through the same
+`Transcriber.transcribe` call. The texts are joined with one space in order (an empty stretch — pure
+silence — adds nothing); one failed stretch fails the whole transcript with that stretch's failure
+code (`error` if the cut itself failed), retryable as ever. `TranscriptionRuntime` takes the ffmpeg
+path (`ffmpeg=`; `None` when the media pipeline is unavailable). The 200 000-character response bound
+of `transcribe.py` applies per stretch; the joined text has no further bound.
 
 **Frontend (`admin-ui/src/server/transcript.ts`).** Per voice note, one `.wx-srv-transcript` block:
 Transcribe (only while `transcriptionAvailable`, read once per attach) → "Transcribing…" spinner →
@@ -1715,6 +1933,31 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   uniformly and a circle stays a circle. The box is clipped to the thread's visible width, so
   there is never a sideways scrollbar. Vertically it is never clipped, so a drawing below the
   last bubble grows the scroll area.
+- **Two kinds of pixel, kept apart (decisions/00205).** The admin's own zoom control
+  (`admin-ui/src/zoom.ts`, Settings → zoom; Ctrl +/−) puts CSS `zoom` on `<html>`. Under it,
+  `getBoundingClientRect` and pointer `clientX/Y` are CLIENT px (0.9× at 90%), while
+  `clientWidth`, `scrollTop` and the svg's `left`/`top`/`width` are LAYOUT px. `measureFrame`
+  reads the factor once (`cssZoom`: `Element.currentCSSZoom` where the browser has it,
+  otherwise the content's box width over its unrounded computed width — WebKit has no
+  `currentCSSZoom`) and every measured distance is divided by it before it is written back or
+  compared with a layout value; `originOf`'s scale is client px per draw px, so pointer
+  positions still map straight into honest draw space; Select's tap and its 12 px reach, the
+  two-finger pan and the toolbar's scroll compensation are converted the same way. Mixing the
+  two placed every drawing `zoom` × its distance from the top of the whole thread — at 90% in a
+  long chat, thousands of px off screen — so the person using zoom saw canvases and never any
+  ink, while the other screen saw her strokes ~10% small. Drawings stored before the fix by a
+  zoomed screen keep that ~10% shrink (it cannot be told apart afterwards); they stay on the
+  right message.
+- **A drawing on a canvas is placed by the canvas's surface (decisions/00206),** not by the column
+  and the bubble's top: draw space is the canvas bubble at the drawing's `columnWidth`, whose surface
+  spans `[CANVAS_INSET_PX, columnWidth - CANVAS_INSET_PX]` (7 px: the canvas bubble's border plus
+  padding). `canvasPlacement` maps it onto any surface box, so the inline canvas (whatever sits above
+  its surface in the bubble, such as the Open row) and the Canvas tab's full-screen canvas show the same
+  drawing on the same spot at any width; `deps.canvasSurface(seq)` hands the layer the surface, and a new
+  drawing on a canvas declares `canvasColumnWidth(surface width)`. Drawings made inline before the tab
+  were bubble-relative with the surface 7 px inside, so they keep their place exactly — except ones
+  drawn on the OTHER person's canvas, which then had a name label above the surface: they now sit that
+  label's height (about 20 px) higher.
 - **Positions are always read from the live DOM**, never copied. They are re-read on every
   `renderThreadList` (`drawingLayer.syncMessages`, called before the stick-to-bottom
   decision), by a ResizeObserver on the column and the thread (images loading, rotation, the
@@ -1855,7 +2098,10 @@ side (schema, routes, the live relay and erasure) is §18. This section covers t
   message above grows. B selects and deletes it and it vanishes for both. Deleting the anchor
   message removes it. Rapid dots never lock, and Escape mid-stroke locks at once and B's
   preview goes. At phone widths every control is hit-tested with `elementFromPoint`, one
-  finger draws, and two fingers scroll without drawing. The fixture runs ONE chat per worker
+  finger draws, and two fingers scroll without drawing. At the admin's 90% zoom on a canvas
+  under a long thread, the drawer's ink is under the pen mid-stroke and once stored, the other
+  (unzoomed) screen shows it at the same place and size on the canvas, and a Select tap on it
+  selects it (decisions/00205). The fixture runs ONE chat per worker
   with no reset, so assertions are scoped per anchor
   (`svg.wx-srv-drawing[data-anchor-seq="N"]`).
 
@@ -2104,6 +2350,57 @@ question bank's categories (25 today, each with its question count), **Select al
 - **Tests.** `test_livechat_wyr_topics.py`, `admin-ui/tests/serverWyrTopics.test.ts`, `e2e/tests/server-wyr.spec.ts`
   (topics at 360 px).
 
+### Search, the date strip and Message info (workspace 00061, decisions/00208)
+
+**Search** (`searchView.ts`, `searchMarks.ts`, `api/search.ts`, server `livechat/search.py`). The ⋯ menu's
+**Search** entry (straight after Gallery) opens a full-height screen with a box to type in, closed and forgotten by
+every lock, wipe and teardown (`reset()`; nothing is written to storage). A pause of 250 ms or Enter runs
+`POST /messages/search`: messages holding every word in any order, matching inside longer words, ignoring case,
+accents and curly punctuation, from the message's text or a voice note's finished transcript ("Voice note:"), never a
+view-once message. Newest first, a page of 30, with a short excerpt and the words marked. Tapping one closes the list
+and shows it in the chat (`revealSearchResult`). It is centred and highlighted like a quote's original, and its words are
+marked with the CSS Custom Highlight API (`wx-srv-search-match`; no DOM change, nothing where unsupported).
+A result not on screen is shown in its own neighbourhood: ONE `GET /messages?around=`, 50 messages, however old it is. If
+those don't reach what is already loaded, the thread enters a **detached view** (`detachedView`, `{high, mainFloor}`):
+it renders only messages up to `high`, while the newest messages from `mainFloor` up stay held and keep arriving, off
+screen, with a gap between that neither side has loaded. The game models still observe every held message. Scrolling up
+pages older as usual; reaching `.wx-srv-thread-sentinel-newer` pages newer (`GET /messages?after=`) until the two meet and
+the chat is simply the chat again. `.wx-srv-jump-pill` reads "↓ Latest messages" throughout, and it, sending anything, or
+going to a result or an unheard note in the newest messages leaves the view (`goToLatest`/`leaveDetachedView`), forgetting
+the old stretch. So does every lock and token renewal (`attach`), because attaching refreshes everything held back to the
+oldest and must never page across the gap. `threadScroll.unstick()` keeps the end of the view from being followed like the
+end of the chat. Rules that keep the gap honest: a stream event for a message `belongsInHeldRange` rejects (older than
+anything held, or in the gap) is not taken in, because its page brings it; a page for a view since left is dropped; only
+the newest jump may change the chat (`revealToken`), and closing the search, sending or locking cancels one; a deleted
+target's quote is cleared from every held copy and pending echo, not only the bubbles (`removeQuotesTargeting`); the drawing layer gets every held
+message, since a missing anchor means "deleted" to it. Sending from a game's tab doesn't leave the view, because a game
+opened from the old stretch needs it. A stroke not yet stored survives its message going off screen (`anchorHasPending`,
+for the chat and the canvas). Quote jumps use the same neighbourhood (`showMessage`), so an old original is one request away
+too. *Honest limits:* leaving from the chat closes a tab opened from the old stretch, and jumping stops a voice note playing
+in a bubble that goes off screen. Opening an old banked trip (`ensureMessageLoaded`) still pages older 100 at a time.
+`.wx-srv-search-nav`, in the same place as the unread voice notes bar, which it replaces (each closes the other), offers
+`‹ Older` · `3 of 57` (back to the list as it was) · `Newer ›` · ✕, is `data-srv-gesture-exempt`, and Older loads the
+next page when it runs out. A delete leaves the results at once; an arrival or a finished transcript is asked about with
+`only:<seq>`, one at a time. A result found gone when going to it is dropped and the steps still work from where it was.
+
+A jump of more than `REVEAL_SMOOTH_MAX_SCREENS` goes straight there instead of scrolling smoothly (`revealMessage`, so
+quote jumps too). There is no search index, on purpose: see decisions/00208 and Inv 58.
+
+**The date strip** (`.wx-srv-day-strip`, `syncDayStrip` in `thread.ts`). Once the top of the chat is on a day before
+today, a small label stays at the top saying which: "Yesterday", or the weekday and date as the day separators word it
+(`formatDaySeparator`). Hidden on today, and while that day's own separator is at the top. It runs on each scroll and
+render, bisecting `daysInOrder`, and takes no taps.
+
+**Message info** (`messageInfo.ts`, `messageActions.ts`). An item in a message's ⋯ menu that swaps the menu's list for a
+pane: the exact send time to the second with weekday, date and timezone, the sender, the kind of message, its length in
+words and characters, each attachment's size, duration and whether it was transcribed, who it replies to, who reacted,
+drawings, and its message number. A view-once message gets its time and timer only. Built from the `Message` already held,
+so nothing new leaves the server, and live if a reaction lands while it is open. The chat records no delivered or read
+state, so none is shown.
+
+*Tests:* `wixy_server/tests/test_livechat_search.py`, `admin-ui/tests/serverSearch.test.ts`,
+`admin-ui/tests/serverMessageInfo.test.ts`, `e2e/tests/server-search.spec.ts` (320 and 390 px).
+
 ### Links view (workspace 00052)
 
 The ⋯ menu's **Links** entry opens a full-height screen (`linksView.ts`, created next to the gallery in
@@ -2194,7 +2491,7 @@ geometry implementation, in TypeScript; the pair are trusted, Inv 40).
   mutation is idempotent**: the SAME move replayed (same axis+from+delta, same stage+choice, same decision) answers
   200 with the unchanged view and appends nothing; a DIFFERENT move after the state advanced is 409 `bad_state`; of two
   racing writers the first wins.
-- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3600`,
+- **Spin validation** (`adventure_game.parse_spin`): `|from| <= 1e6`, `720 <= |delta| <= 3960` (the flick's own `clamp(1.5·speed, 720, 3600)` plus a client-drawn extra of under one turn),
   `3500 <= durationMs <= 7000`, all finite; the `lat` spin REQUIRES `result` (`point`, `land`, `centre` as `[lng, lat]`
   in degrees, `sea`, `landUnit`, 1-10 unique `candidates`), the `lng` spin REFUSES it; `landUnit` and every candidate
   must be playable bank units (a whole-country-advised unit only while the preference is on). The `lat` spin stores the
@@ -2656,7 +2953,7 @@ Twelve optional twists sit on top of the core game. **A round that uses none of 
 states, same draws, same prompts (the prompt builders emit no twist text at all), new view fields at their "off"
 values. The twist columns were folded into the then-undeployed `_SCHEMA_V21_COOKOUT`, so the single v20 → v21 migration
 builds the final twist shape. v21 is now deployed and never edited: the game modes of §24.2/§24.4 are the separate, additive
-schema v22 (`cookout_rounds.mode`).
+schema v24 (`cookout_rounds.mode`).
 
 | # | Twist | Where it lives |
 |---|---|---|
@@ -2770,11 +3067,11 @@ The chef and picture code is mode-aware; a mode is data (`cookout_modes.json`, `
 - **Pictures.** `build_image_prompt(..., mode=, bread_name=, build=)` uses the mode's template; fillings only (no bread, no staples) and the style's picture phrase becomes the setting. `concept_prompts` reads `mode`, `bread_id` and each concept's `build`; an unknown mode has no prompts.
 - **Tests.** `test_livechat_cookout_ai.py` (`TestClassicIsByteIdentical` against `fixtures/cookout_chef_classic_golden.json`, recorded before modes; `TestToastie*`), `test_livechat_cookout_images.py` (`TestToastiePictures`), `fake_cmd.py` (canned Toasted sandwich answers). The real-run trial is `tooling/cookout/chef_trial.py --mode toastie` (report `triad/cookout/modes/toastie-trial.md`).
 
-### 24.3 Cookout pictures, catalogue and the picture-first table (spec `spec/server-chat/09b-cookout-visual.md`, decisions/00202, Inv 58)
+### 24.3 Cookout pictures, catalogue and the picture-first table (spec `spec/server-chat/09b-cookout-visual.md`, decisions/00202, Inv 60)
 
 Round 2 of Cookout. Every ingredient on screen gets a studio photograph and a plain "what it is" line; the pick screen is
 rebuilt around two big picture cards that fit a phone without scrolling; the chef's waiting time shows each chosen
-ingredient with fun facts. All of it is **engine catalogue data**, not chat content (Inv 58): it is generated offline from
+ingredient with fun facts. All of it is **engine catalogue data**, not chat content (Inv 60): it is generated offline from
 ingredient names alone, the same for every player, and message delete / chat wipe have nothing of it to erase. The
 rules, drawing and Blind redaction of §24 and §24.1 (Inv 57) are untouched; this section is presentation plus read-only
 wire fields.
@@ -2963,3 +3260,65 @@ its tile picture and its tests; the only code a mode may need is a new `facet` o
   badge and the mode's numbers ("Picking ingredients (3/8)…", "3 toasted sandwich ideas ready"); the Recipe book shows a 🥪 badge.
 - **Activation.** The mode ships switched off (runbook: "Cookout game modes"). The e2e fixture enables it with
   `WIXY_COOKOUT_MODES=toastie`; `e2e/tests/server-cookout-toastie.spec.ts` is the end-to-end proof.
+
+## 25. Live voice notes (spec `spec/server-chat/07-live-voice-notes.md`, decisions/00211 + 00212, Inv 59)
+
+A voice note recorded in live mode is heard while it is made. The sender uses spec 06's live upload with a 1 s
+timeslice and `listen:true`; the other people listen over `/api/admin/server/live-voice/ws`.
+
+**Rows.** `POST /uploads {live, listen}` creates the `uploads` row AND the `attachments` row in one transaction
+(`LiveChatStore.create_live_upload`, at most `uploads.MAX_LIVE_PER_CHAT` = 2 live at once, else `TooManyLiveError`
+-> 409 `too_many_live`). Schema v23 adds `attachments.live_state` (`recording`/`paused`). The `status` column stays
+`processing` while live (its `CHECK` cannot be widened, and every `status IN ('processing','ready')` rule and an
+older blue/green process keep working); `_row_to_attachment` presents it as `status:"live"` and
+`attachment_json` adds `liveState`. `claim_processing` and the orphan sweep skip `live_state IS NOT NULL`.
+`POST /messages` accepts the live attachment unchanged. `durationS` is 0 and `peaks` `[]` on the wire while live:
+growth travels only on the socket (the stored peaks stay 0..1 floats, 64 buckets, set by the finished note).
+`message_updated` fires only for a status / `liveState` change and a transcript pass.
+
+**End of the live phase** (`LiveVoiceHub.finish`, used by `complete`, auto-end and startup recovery):
+`uploads.assemble` joins the slices and calls `store.end_live` (`live -> processing`, `message_updated`), holding
+the media queue off with a lease (`uploads.LIVE_DRAIN_LEASE_OWNER`) while the decoder drains the last slices from
+the assembled file; `_drain` then releases it, flushes the last partial peak bucket, marks the note `ended` and
+the listeners get `state ended` and (streams) `eof`. A note with no stored slice is `failed`
+(`empty_recording`). A late slice is 409 `not_live` (`uploads.LiveEndedError`); a `complete` for a note this
+process ended itself is 409 `not_live` (`hub.server_ended`), the sender's own repeat stays 202.
+
+**Auto-end** (`hub.tick`, once a second, injected `clock`): no slice for 60 s while recording, or paused for
+30 min, ends the note exactly like `complete` with every contiguous slice. Startup (`hub.recover`, before the
+media queue starts) ends every note still `live` the same way: nothing is lost, nothing hangs. A DB backstop
+every 5 ticks notices a note deleted by a process this hub never heard from.
+
+**Decoder** (`live_voice.Decoder`): one long-lived ffmpeg per note (and one per catch-up listener or live
+transcription), stdin <- slices (chunk files, or `assembled` once joined), stdout -> 24 kHz mono s16le in 960-byte
+frames, below-normal priority. decisions/00209's rules: killed only when no decoded output follows pending input for
+`STALL_S` (120 s; the clock is frozen while paused or while a consumer holds output back) or past the 6 h voice
+ceiling (`StallClock`), then restarted from slice 0 (deterministic, frames already delivered are skipped) up to 3
+times, after which the note is `decoder_dead` (its listeners get `error not_live`; the upload and the finished
+note are unaffected). `LiveNote` keeps per-second peaks (0..255), the decoded duration and a 1500-frame ring.
+
+**Listeners.** `Listener` (one per socket) has a bounded control queue (16; overflow drops the socket), lazily
+built coalesced `state` messages and credit-limited audio. A stream reads the ring; one behind it (or `from:"start"`
+on a long note) gets its own catch-up decode over the stored slices through a 16-frame bounded buffer, so its
+credit holds ffmpeg back, and hands over to the ring when it reaches it (and back if it falls behind). At most 4
+streams per note. Auth, close codes, capacity (8 sockets, 4 pending) and the grant refresh are the call socket's
+(`routes_livechat_live_voice.py` reuses `access_identity` / `upgrade_allowed`).
+
+**Live transcription** (`livechat/live_transcription.py`, started by `POST /attachments/{id}/transcribe` on a
+`live` note): see Inv 50 and 59. A bounded in-memory PCM window (<= 300 s; best effort, the final pass is
+authoritative), a pass every ~8 s of new audio over `[last finalised point, edge)` capped at 90 s, sent as a
+private temp WAV (`transcribe-tmp/<uuid>/live.wav`, deleted after) through `TranscriptionRuntime.transcribe_audio`
+(the same one-at-a-time limiter, cmd asked afresh first). Split at the last sentence end; the engine gives no
+timestamps, so the finalised point is placed by character proportion and settled on the quietest 20 ms within 3 s.
+A window of 90 s with no sentence end is finalised whole. The finalised text goes in the transcript row (status
+stays `pending`; `record_live_transcript`), the tail only in `models.live_tail` memory; the wire shape is
+`{"status":"live","text","tail"}`. Three consecutive failed passes fail the transcript (text kept). After Stop one
+full-note pass (`run_job`, spec 06 stretches) runs once the finished file is `ready` and replaces the live text.
+
+Tests: `test_livechat_live_voice.py` (wire shapes, store, upload and state routes, real-ffmpeg sockets, end,
+delete, auto-end, recovery, client contract), `test_livechat_live_voice_auth.py` (real JWTs),
+`test_livechat_live_transcription.py`.
+
+## Sender hues
+
+Other members' bubbles carry a muted hue keyed on the sender name (`admin-ui/src/server/senderHue.ts`, 8 hues, FNV-1a over the trimmed lower-cased name; applied via `--wx-sender-hue` and `.wx-srv-bubble-hued` in `chat.css`, light and dark). Pure and stateless: the same name gets the same colour on every device. Own bubbles are unchanged.

@@ -15,7 +15,7 @@ is `None` and the client shows the emoji tile.
 registered before anything else touches the store, its lease refresh, the self-heal fetch, the daily
 GC and the clean-shutdown retire.
 
-Everything here is engine catalogue data (Inv 58): generated from ingredient names only, never from
+Everything here is engine catalogue data (Inv 60): generated from ingredient names only, never from
 chat content, so message delete and chat wipe have nothing of it to erase."""
 
 from __future__ import annotations

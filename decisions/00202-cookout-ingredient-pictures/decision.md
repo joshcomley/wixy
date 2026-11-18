@@ -3,7 +3,7 @@ Playing Cookout, the ingredient cards were an emoji and a name: the operator cou
 were, the pick screen scrolled on a phone, and the wait for the chef was dead time. He asked for an actual picture of every
 ingredient, a plain "what it is" line, fun facts while the chef thinks, and a pick screen that fits a phone. The spec is
 `spec/server-chat/09b-cookout-visual.md`; docs are livechat.md §24.3, contracts.md, runbook.md "Cookout ingredient
-pictures", Inv 58.
+pictures", Inv 60.
 
 # The need
 About 3,494 pictures (3,491 bank ingredients plus the three free seasonings), two renditions each (512 px card, 160 px
@@ -35,7 +35,7 @@ standalone Docker edition and on a fork, must not bloat git history, and must ne
    is serialised (`facts` only on picks after `picking`, staples gain `image`). The stored snapshot never changes (it freezes
    what was OFFERED; the picture is a presentation of that id and may improve later). Enrichment only decorates snapshots the
    redacted view already contains, so Inv 57's Blind guarantee is untouched.
-5. **Not chat content (Inv 58).** Pictures and catalogue text are generated from ingredient names only, are not erased by delete
+5. **Not chat content (Inv 60).** Pictures and catalogue text are generated from ingredient names only, are not erased by delete
    or wipe, and are served only by manifest hash. The route sits under `/admin` (Cloudflare Access, like the admin bundles),
    not behind the chat unlock token, which keeps the "every `/api/admin/server/cookout*` route calls `require_server_token`
    first" rule free of exceptions.
@@ -97,7 +97,7 @@ standalone Docker edition and on a fork, must not bloat git history, and must ne
 - The empty manifest (`pack: null`) and an empty catalogue are valid and are what the repo shipped before any run; CI skips
   the real-pack proof for it.
 - Keep the picture prompt server-owned and the tooling offline: nothing from chat (names, baskets, votes) may ever reach a
-  catalogue, picture or checker prompt (Inv 58).
+  catalogue, picture or checker prompt (Inv 60).
 - The pilot ran as a hub scheduled task in an Interactive session, not on the Grid (the hub's Grid workers take CI jobs
   only); the spec still says Grid, the `images.py` docstring now says scheduled task.
 - `images.py publish` runs two checks: the history check (every manifest ever committed still answers its byte count) and, from
