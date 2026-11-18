@@ -143,6 +143,19 @@ async function resetProbe(page: Page): Promise<void> {
   });
 }
 
+/**
+ * Reset for a "the output went quiet" check. The analyser still holds the last `fftSize` samples
+ * (about 43 ms at 48 kHz) of what played BEFORE the stop, and the probe samples it every 40 ms, so
+ * resetting at the instant of the stop reads that remnant as sound: a perfectly instant stop read
+ * above 0.002 in 9 of 15 browser trials (worst 0.13); after this flush, 0 of 15. The wait is the
+ * analyser window plus a sampling tick plus slack, and the 1.5 s of silence that follows is unchanged.
+ */
+const ANALYSER_FLUSH_MS = 250;
+async function resetProbeAfterSilenceFlush(page: Page): Promise<void> {
+  await page.waitForTimeout(ANALYSER_FLUSH_MS);
+  await resetProbe(page);
+}
+
 async function probeRms(page: Page): Promise<number> {
   return page.evaluate(() => (window as unknown as { __liveProbe: { maxRms: number } }).__liveProbe.maxRms);
 }
@@ -514,7 +527,7 @@ for (const [label, viewport] of [
         await expect(recordStatus(s)).toBeHidden({ timeout: SLOW_MS });
         await expect(mic(s)).toHaveAttribute("aria-label", "Record a live voice note");
         // The listener's audio stopped with it: the output goes quiet.
-        await resetProbe(l);
+        await resetProbeAfterSilenceFlush(l);
         await l.waitForTimeout(1_500);
         expect(await probeRms(l)).toBeLessThan(0.002);
       } finally {
