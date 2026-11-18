@@ -2639,6 +2639,13 @@ class TestDeleteWipeRoutes:
             if store.scrub_pending():
                 livechat_janitor.scrub_once(store=store, deadline_s=_SCRUB_SUCCESS_DEADLINE_S)
             assert not store.scrub_pending()
+            # The 0.1 s deadline above exists only to make the BLOCKED delete give up quickly. The
+            # delete after the reader is gone must get the real one: its absolute deadline also pays
+            # for the thread hops and the storage cleanup before the scrub, so on a loaded box 0.1 s
+            # was already spent and the route answered 202 (CI run 44278343703).
+            monkeypatch.setattr(
+                routes_livechat_module, "_DELETE_SCRUB_DEADLINE_S", _SCRUB_SUCCESS_DEADLINE_S
+            )
             completed = client.delete(
                 f"/api/admin/server/messages/{message.seq}",
                 headers=headers,
