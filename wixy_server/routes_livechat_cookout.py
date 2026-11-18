@@ -272,7 +272,7 @@ _STORE_ERRORS = (
 )
 
 
-def _enabled_modes(request: Request) -> list[CookoutMode]:
+def enabled_cookout_modes(request: Request) -> list[CookoutMode]:
     """The game modes that may be created and listed (spec 09c §5.6): Classic always, first, then
     each loaded mode named by `WIXY_COOKOUT_MODES`. An id that is not a loaded mode is ignored
     with a warning (once per id)."""
@@ -384,7 +384,7 @@ async def get_cookout_options(request: Request) -> JSONResponse:
             "challenges": _catalogue_entries(cookout_twists.CHALLENGES),
             "chef": bool(runner.available),
             "pictures": bool(runner.images_available),
-            "modes": [_mode_option(m) for m in _enabled_modes(request)],
+            "modes": [_mode_option(m) for m in enabled_cookout_modes(request)],
         },
         headers=_NO_STORE,
     )
@@ -407,7 +407,7 @@ async def search_cookout_ingredients(request: Request) -> JSONResponse:
         mode = default_modes().mode(mode_id)
         if mode is None:
             return _invalid("unknown game")
-        if mode not in _enabled_modes(request):
+        if mode not in enabled_cookout_modes(request):
             return _unavailable()
         if mode.fridge_kinds is not None:
             pool = tuple(
@@ -487,7 +487,7 @@ async def create_cookout(body: CreateCookoutIn, request: Request) -> JSONRespons
     game_mode = default_modes().mode(body.mode)
     if game_mode is None:
         return _invalid("unknown game")
-    if game_mode not in _enabled_modes(request):
+    if game_mode not in enabled_cookout_modes(request):
         return _unavailable()
     bank = _bank(request)
     if bank is None:

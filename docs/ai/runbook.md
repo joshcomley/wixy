@@ -121,13 +121,13 @@ never exist while an older process can reach the database.
 - **Release with it absent**, let Slots deploy, and wait until no process runs from the previous slot.
 - **Then, on the hub**, from the canonical clone or a worktree (NEVER a Wixy slot, whose venv has no `psutil`), the
   delivery coordinator runs it with the hub's Python (`%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`):
-  `python tooling/cookout/activate_modes.py --enable toastie --token <server token>`. It refuses
+  `python tooling/cookout/activate_modes.py --enable toastie` (no token: it reads the loopback-only `GET /internal/cookout/modes`, because the in-app unlock token needs the PIN entered in the operator's browser, which no agent can do). It refuses
   (non-zero, nothing changed) unless Devfleet shows Wixy running, the active slot's `store.py` is
   schema >= 24, the live database's `user_version` is >= 24, no process runs from the OTHER slot (this check fails
   closed: it needs `psutil` from the `dev` extra and refuses if the process list or any python/wixy process's
-  working directory cannot be read) and `GET /cookout/options` answers; it prints every check, writes the setting atomically (a temp file in the same directory, fsynced, then `os.replace`d, so an interruption
+  working directory cannot be read) and `GET /internal/cookout/modes` answers; it prints every check, writes the setting atomically (a temp file in the same directory, fsynced, then `os.replace`d, so an interruption
   leaves the old `.env` whole; the previous file is kept as `.env.bak`; other `.env` lines kept
-  byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies the options now list
+  byte for byte), restarts Wixy in place (`POST :9999/restart/Wixy`) and verifies `/internal/cookout/modes` now lists
   the mode. `--disable toastie` removes it the same way (no checks needed).
 - **Rollback:** run `python tooling/cookout/activate_modes.py --check-rollback <commit>` FIRST. Never
   roll back to a commit below schema 24 while a non-Classic round exists; targets must be v24-or-later.
@@ -477,7 +477,7 @@ only `/admin*`/`/api/admin*` sit behind CF Access. This lives entirely in the **
 
 ## Health & internal surface
 
-`/healthz` (alias of `/internal/ready`), `/internal/warmup`, `/internal/ready`, `/api/version`.
+`/healthz` (alias of `/internal/ready`), `/internal/warmup`, `/internal/ready`, `/internal/cookout/modes`, `/api/version`.
 `/internal/*` + `/healthz` return a bare **404** to any request carrying a `Cf-Ray`/
 `Cf-Connecting-Ip` header (they answer loopback probes only — Inv 12); `/api/version` is public
 by design. With no `live.json` the public surface returns **503**, never a crash. Node index:

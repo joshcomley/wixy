@@ -152,3 +152,47 @@ class TestWarmup:
         with TestClient(app) as client:
             response = client.post("/internal/warmup")
         assert response.status_code == 503
+
+
+class TestCookoutModes:
+    """`GET /internal/cookout/modes`: what `tooling/cookout/activate_modes.py` reads instead of the
+    token-gated options route (the in-app unlock token needs a PIN no agent can enter)."""
+
+    def test_it_lists_classic_alone_until_a_mode_is_switched_on(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("WIXY_COOKOUT_MODES", raising=False)
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/internal/cookout/modes")
+        assert response.status_code == 200
+        assert response.json() == {"modes": ["classic"]}
+
+    def test_a_switched_on_mode_is_listed_after_classic_with_no_token(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_COOKOUT_MODES", "toastie")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/internal/cookout/modes")  # no unlock token, no Access header
+        assert response.status_code == 200
+        assert response.json() == {"modes": ["classic", "toastie"]}
+
+    def test_an_unknown_id_in_the_setting_is_not_listed(
+        self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("WIXY_COOKOUT_MODES", "toastie, nonsense")
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/internal/cookout/modes")
+        assert response.json() == {"modes": ["classic", "toastie"]}
+
+    @pytest.mark.parametrize("header", ["Cf-Ray", "Cf-Connecting-Ip"])
+    def test_a_request_carrying_a_cloudflare_edge_header_gets_the_bare_404(
+        self, storage_root: Path, wixy_repo_root: Path, header: str
+    ) -> None:
+        app = create_app(storage_root=storage_root, wixy_repo_root=wixy_repo_root)
+        with TestClient(app) as client:
+            response = client.get("/internal/cookout/modes", headers={header: "x"})
+        assert response.status_code == 404
+        assert "modes" not in response.text

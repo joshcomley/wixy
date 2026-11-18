@@ -425,6 +425,9 @@ refuses to start if it's set while `WIXY_ENV=prod`. `/api/version` is public by 
 The Server chat's `/api/admin/server/*` routes also require its short-lived in-app unlock
 token (except PIN unlock and signed media URLs); this is an additional gate layered on CF
 Access, never a replacement. The PIN is verified by cmd and Wixy stores no PIN value.
+`/internal/cookout/modes` is the one `/internal` route that lists game state (only the ids of the
+switched-on Cookout modes, nothing about any chat); it follows the same loopback-only rule (bare 404 behind
+a Cloudflare edge header), so operator tooling needs no unlock token.
 
 ### Inv 13 — All AI inference goes through cmd; never the Anthropic API
 No direct Anthropic/Claude API calls anywhere in the engine. `wixy_server/cmdchat.py` is the

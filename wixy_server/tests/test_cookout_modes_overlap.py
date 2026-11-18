@@ -395,7 +395,7 @@ class TestActivationTool:
         (root / "active.txt").write_text("blue\n", encoding="utf-8")
         db = root / "Storage" / "projects" / "ca" / "server" / "server.db"
         make_round(db, bank, mode="toastie", schedule=None)
-        probe = am.MachineProbe(root=root, repo=REPO_ROOT, token="t")
+        probe = am.MachineProbe(root=root, repo=REPO_ROOT)
         assert probe._active_slot() == "blue"
         assert probe._slot_schema("blue") == 24 and probe._slot_schema("green") is None
         assert probe._db_versions() == [24]
@@ -411,7 +411,7 @@ class TestEnvWriteIsAtomic:
         (root / "Storage").mkdir(parents=True)
         env = root / "Storage" / ".env"
         env.write_bytes(b"WIXY_PORT=9380\nOTHER=1\n")
-        return am.MachineProbe(root=root, repo=REPO_ROOT, token="t"), env
+        return am.MachineProbe(root=root, repo=REPO_ROOT), env
 
     def test_it_replaces_the_file_and_keeps_a_backup_of_the_original(self, tmp_path: Path) -> None:
         probe, env = self.probe(tmp_path)
@@ -500,3 +500,48 @@ class TestCheckDFailsClosed:
 
         monkeypatch.setattr(importlib, "import_module", fake)
         assert am._cwd_of({"ProcessId": 1}) is None
+
+
+class TestOptionsModesNeedsNoToken:
+    """The tool reads the enabled modes from the loopback-only `/internal/cookout/modes`, so it
+    needs no in-app unlock token (which takes a PIN entered in the operator's browser)."""
+
+    def serve(self, body: bytes, seen: list[dict[str, str]]) -> Any:
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self) -> None:  # noqa: N802
+                seen.append({"path": self.path, **{k.lower(): v for k, v in self.headers.items()}})
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args: object) -> None:
+                return
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server
+
+    def test_it_reads_the_internal_route_and_sends_no_token(self, tmp_path: Path) -> None:
+        seen: list[dict[str, str]] = []
+        server = self.serve(b'{"modes": ["classic", "toastie"]}', seen)
+        try:
+            probe = am.MachineProbe(
+                root=tmp_path, repo=REPO_ROOT, wixy_url=f"http://127.0.0.1:{server.server_port}"
+            )
+            assert probe.options_modes() == ["classic", "toastie"]
+        finally:
+            server.shutdown()
+        assert [s["path"] for s in seen] == ["/internal/cookout/modes"]
+        assert "x-wixy-server-token" not in seen[0]
+
+    def test_an_unreachable_server_is_none_not_an_empty_list(self, tmp_path: Path) -> None:
+        probe = am.MachineProbe(root=tmp_path, repo=REPO_ROOT, wixy_url="http://127.0.0.1:9")
+        assert probe.options_modes() is None
+
+    def test_the_command_line_has_no_token_option(self) -> None:
+        with pytest.raises(SystemExit):
+            am.main(["--enable", "toastie", "--token", "x"], probe=object())  # type: ignore[arg-type]
