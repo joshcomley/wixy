@@ -16,6 +16,7 @@
 // be a window of time.
 
 import { expect, test } from "../fixtures";
+import { LOADED_WAIT_MS } from "./server-helpers";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 
 const MULTI_TAP_INTERVAL_MS = 400;
@@ -78,10 +79,10 @@ async function unlock(page: Page, name: string): Promise<void> {
   await page.goto("/admin/server");
   await expect(page.locator(".wx-srv-decoy")).toBeVisible();
   await openPinPad(page);
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
+  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.locator(".wx-srv-name-prompt-input").fill(name);
   await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.waitForTimeout(TAP_GAP_MS);
 }
 

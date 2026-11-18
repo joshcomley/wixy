@@ -24,6 +24,7 @@
 // fast-forwarding the page.
 
 import { expect, test } from "../fixtures";
+import { LOADED_WAIT_MS } from "./server-helpers";
 import type { Browser, Locator, Page } from "@playwright/test";
 import { freezeClock, tapThreadGap, trackConsoleErrors } from "./helpers";
 
@@ -108,11 +109,11 @@ async function enterNameIfPrompted(page: Page): Promise<void> {
   const prompt = page.locator(".wx-srv-name-prompt");
   // `:visible` scopes each side to what is actually shown: the thread element
   // exists in the DOM (inside a hidden parent) while the name prompt is up.
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible();
+  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: LOADED_WAIT_MS });
   if (!(await prompt.isVisible())) return;
   await page.locator(".wx-srv-name-prompt-input").fill("Tester");
   await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.clock.runFor(401);
 }
 
