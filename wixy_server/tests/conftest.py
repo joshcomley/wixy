@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Iterator
 
 import httpx
 import pytest
@@ -11,6 +12,7 @@ import wixy_server.app as wixy_app_module
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.livechat.adventure_pack import CmdAdventureResearcher
 from wixy_server.livechat.transcribe import CmdTranscriber
+from wixy_server.tests import leak_guard
 
 
 @pytest.fixture(autouse=True)
@@ -49,3 +51,14 @@ def _default_adventure_researcher_never_reaches_a_real_cmd(
         return CmdAdventureResearcher(CmdChatClient(transport=httpx.MockTransport(_inert)))
 
     monkeypatch.setattr(wixy_app_module, "CmdAdventureResearcher", _inert_researcher)
+
+
+@pytest.fixture(autouse=True)
+def _no_background_sweep_outlives_its_test(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """The Cookout picture sweep's first tick runs on an abandonable worker thread, so a short test
+    ended with it still running and it leaked into the next test of the same xdist worker. Count
+    sweeps in flight and wait for them as the test ends (this fixture is set up first, so it is torn
+    down after every other fixture, including `live_env`'s app shutdown)."""
+    leak_guard.install(monkeypatch)
+    yield
+    assert leak_guard.drain(), "a Cookout picture sweep thread is still running after the test"
