@@ -1,12 +1,19 @@
-// The Cookout GAME PANE (workspace 00058; spec/server-chat/09-cookout.md §5.3): when a round is opened
-// its tab shows the kitchen full-height, phone-first (360 px is THE layout; wider screens put the two
-// ingredient cards and the three dishes side by side):
+// The Cookout GAME PANE (workspace 00058; spec/server-chat/09-cookout.md §5.3, and round 2's picture-first
+// table, spec/server-chat/09b-cookout-visual.md §D): when a round is opened its tab shows the kitchen
+// full-height, phone-first. While the round is being PICKED the pane is a fixed table that fits the phone
+// without scrolling (09b §D.3 — every row height below is budgeted against the pane's own height):
 //
-//   [ 🍳 Cookout  (Blind)                 Recipe book  End game / New  ✕ ]
-//   [ the basket progress: 5 pills each, and whose turn it is ("Your turn — Pick 2 of 5 (Go 1 of 3)") ]
-//   [ the stage: two tactile ingredient cards + the skip button — or the Blind cloche — or the chef ]
-//   [ the basket tray: what is in the basket so far, and the cupboard staples ]
-//   [ the chat row: a floating message (left) and the chat FAB (right) ]   <- reserved, never over a control
+//   [ 🍳 (Blind)                     ?  Recipe book  End game / New  ✕ ]   title row, 44 px
+//   [ Twists ⭐ 🛎️ 🎡 ]                                                    only with start-sheet twists
+//   [ Your turn — tap the one you want / Pick 2 of 5 · 🍗 protein · … ]   the turn banner
+//   [ (J) ▣ ▣ ▢ ▢ ▢  |  (C) ▣ ▢ ▢ ▢ ▢ ]                                    "Basket so far": one button
+//   [ picture card   or   picture card ]                                  the stage: one tap picks
+//   [ Deal two new ones (2 left)                         🎲 Twists ]     the actions
+//   [ the chat row: a floating message (left) and the chat FAB (right) ]  reserved, never over a control
+//
+// A container query on the pane's height switches to a compact table (no twists strip, a one-line banner,
+// no what-line on the cards) and, below that, lets only the stage scroll. A light intro card explains the
+// round the first time this device opens it (`intro.ts`); `?` brings it back.
 //
 // The games run FULL SCREEN (decisions/00194): the chat header and the composer are hidden while this tab
 // shows, so everything that must stay reachable lives in the pane's own title row. The conversation is the
@@ -14,10 +21,14 @@
 // row under the scrolling column (as WYR's), so it never covers a pick, a skip or a Bank at any scroll
 // position; and the round's pop-up chat.
 //
-// When all ten are picked the progress and the tray give way to the chef stage: the revealed basket
-// (in a Blind round the ten flip open together), "Chef is inventing…", then three dish cards whose
+// When all ten are picked the table gives way to the chef stage (it scrolls): the revealed basket as a grid
+// of pictures (in a Blind round the ten flip open together) and the cupboard staples, then while the chef
+// works a carousel of the chosen ingredients with fun facts (`carousel.ts`), then three dish cards whose
 // picture placeholders fill in as the photos arrive, each with "Bank this ✓" → "Writing recipe…" →
 // "Banked ✓ — View full recipe".
+//
+// PICTURES. Every ingredient is drawn through `pictures.ts`: its catalogue photograph, or the same-size
+// emoji tile when there is none (09b §D.6). A new pair on the table is decoded before it swaps in.
 //
 // BLIND MODE never reaches this file as data: the server leaves the partner's options, offers and picks
 // out of the view (spec §1.3), so the cloche and the "🔒 Secret pick" cards are drawn from counts alone and
@@ -45,6 +56,12 @@
 // GENERATION. A vote, a Bank or a retry is sent with the `generation` of the view its button was drawn
 // from (captured when drawn, never re-read when tapped), so a tap that lands after a rescue swap is
 // refused by the server instead of acting on a different dish with the same letter.
+//
+// GAME MODES (spec/server-chat/09c-cookout-modes.md §6): the round's mode (`view.mode`) sets every count
+// (turns, picks each) and, outside Classic, the words: the title row's emoji, a banner per pick kind
+// ("Your turn — pick the bread"), 4 + 4 progress slots with the bread slot first, the basket sheet by kind,
+// no chaos shelf on the bread turn, the bread first on the reveal and in the chef's carousel, and dish cards
+// with the build pill, an "On <bread>" line and "Uses 6/7 fillings". A Classic round draws exactly as before.
 
 import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
@@ -57,10 +74,11 @@ import {
   CONCEPT_IDS,
   formatMinutes,
   isChallengeId,
+  isClassic,
   isStyleId,
-  PICKS_PER_PLAYER,
   type Concept,
   type ConceptId,
+  type CookoutOptions,
   type CookoutOutcome,
   type CookoutPlayer,
   type CookoutRole,
@@ -68,13 +86,33 @@ import {
   type FullRecipe,
   type GenerationView,
   type IngredientSnap,
+  type ModeOption,
   type PhotosResult,
   type PickSnap,
   type Picture,
   type RecipeSlot,
+  type Staple,
 } from "./api";
+import { createCarousel, type Carousel } from "./carousel";
 import { createCookedControls } from "./cookedSheet";
+import { createIntro, twistPhrases } from "./intro";
 import type { CookoutModel } from "./model";
+import {
+  anchorFirst,
+  anchorKind,
+  anchorMark,
+  anchorPick,
+  capitalise,
+  dishNoun,
+  fillingTurns,
+  isAnchorPick,
+  kindNoun,
+  kindOf,
+  numberWord,
+  ordinal,
+  plural,
+} from "./modes";
+import { DECODE_WAIT_MS, decodeAll, ingredientPicture, type Picturable } from "./pictures";
 import type { StartPreset } from "./startSheet";
 
 export interface TableMove {
@@ -147,6 +185,11 @@ export interface CookoutGameDeps {
   newId?(): string;
   /** Whether the viewer asked for less motion (the coin flip, the wheel and the lid then do not play). */
   reducedMotion?(): boolean;
+  /** The device's storage for the intro's "seen" flags (default: `localStorage`; a throw counts as none). */
+  storage?(): Pick<Storage, "getItem" | "setItem"> | null;
+  /** `GET /cookout/options` (cached by the caller): a mode round's intro lines (09c §6.2). Never awaited
+   * before drawing; absent or failing, the intro builds its lines from the view. */
+  loadOptions?(): Promise<CookoutOptions | null>;
 }
 
 export interface CookoutGame {
@@ -192,25 +235,116 @@ export function categoryName(id: string): string {
   return words === "" ? "Ingredient" : words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-const ROLE_WORDS: Readonly<Record<CookoutRole, { readonly icon: string; readonly name: string }>> = {
-  base: { icon: "🍞", name: "a base" },
-  protein: { icon: "🍗", name: "a protein" },
-  produce: { icon: "🥕", name: "fresh produce" },
-  accent: { icon: "🌿", name: "a flavour accent" },
+const ROLE_WORDS: Readonly<Record<CookoutRole, string>> = {
+  base: "🍞 base",
+  protein: "🍗 protein",
+  produce: "🥕 produce",
+  accent: "🌿 accent",
 };
 
-/** "🍗 This turn: a protein", or "" when the role is not known to this viewer. */
-export function roleLine(role: CookoutRole | null): string {
-  if (role === null) return "";
-  const words = ROLE_WORDS[role];
-  return `${words.icon} This turn: ${words.name}`;
+/** "🍗 protein" for the banner's second line, or "" when the role is not a Classic role known to this viewer. */
+export function roleShort(role: string | null): string {
+  return role === null ? "" : (ROLE_WORDS[role as CookoutRole] ?? "");
 }
 
-/** The skip button's words for the offer on screen (spec §5.3). */
-export function skipLabel(offerIndex: number): string {
-  if (offerIndex <= 0) return "Neither — deal 2 new options (2 skips left)";
-  if (offerIndex === 1) return "Neither — deal final 2 options (1 skip left)";
-  return "Final pair — pick one of the two above";
+/** The skip button's words for the offer on screen (09b §D.3): two new pairs at most, then the final one. */
+export function skipLabel(offerIndex: number, skipsRemaining: number | null = null): string {
+  const left = skipsRemaining ?? Math.max(0, 2 - offerIndex);
+  if (offerIndex >= 2 || left <= 0) return "Final pair";
+  return `Deal two new ones (${left} left)`;
+}
+
+/** A partner name longer than this is "your partner" in the banner (09b §D.3: a copy rule, never a clip). */
+export const BANNER_NAME_MAX = 12;
+
+/** The banner's name for somebody: their name when short enough, else "your partner". */
+export function bannerName(name: string | null): string {
+  return name !== null && name.trim() !== "" && name.length <= BANNER_NAME_MAX ? name : "your partner";
+}
+
+function sentence(text: string): string {
+  return text === "" ? "" : text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/** The turn banner (09b §D.3): one big line saying whose turn it is and what to do, and a small one. */
+export interface TurnBanner {
+  readonly line1: string;
+  readonly line2: string;
+  /** The viewer is the joiner: a Join button stands in for line 2. */
+  readonly join: boolean;
+  /** It is the viewer's own turn. */
+  readonly mine: boolean;
+}
+
+/** The banner for a round being picked. `sweeping`: the watcher chose "Sweep one" and is choosing which. */
+export function turnBanner(view: CookoutView, partnerFallback: string | null, sweeping = false): TurnBanner {
+  const current = view.current;
+  if (view.state !== "picking" || current === null) return { line1: "", line2: "", join: false, mine: false };
+  const pick = `Pick ${pickNumber(current.turn)} of ${view.mode.picksPerPlayer}`;
+  const mine = view.you !== null && view.you.slot === current.player;
+  const activeName = bannerName(
+    playerOf(view, current.player).name ?? (current.player === 2 ? partnerFallback : null) ?? (current.player === 1 ? "Player 1" : null),
+  );
+  // Somebody who is not playing may join whenever Slot 2 is free — on Player 1's turn as well as their own.
+  if (view.you === null && view.players[1].name === null) {
+    return { line1: "Join to take your turn", line2: "", join: true, mine: false };
+  }
+  if (current.waitingForJoin || (current.player === 2 && view.players[1].name === null)) {
+    if (view.you?.slot === 1) {
+      return { line1: `Waiting for ${bannerName(partnerFallback)} to join`, line2: `${pick} is theirs`, join: false, mine: false };
+    }
+    return { line1: "Join to take your turn", line2: "", join: false, mine: false };
+  }
+  if (mine) {
+    const offer = current.offerIndex ?? 0;
+    let note = "";
+    if (current.chaosPair === true) note = "Straight from the chaos shelf";
+    else if (current.vetoed !== null) {
+      note = `${sentence(bannerName(playerOf(view, current.player === 1 ? 2 : 1).name ?? partnerFallback))} swept one off your table`;
+    }
+    const skips = offer >= 2 || current.skipsRemaining === 0 ? "final pair" : `${current.skipsRemaining ?? 2 - offer} new ${(current.skipsRemaining ?? 2 - offer) === 1 ? "pair" : "pairs"} left`;
+    if (!isClassic(view.mode)) {
+      // 09c §6.3: the kind's own prompt, and where this pick sits in the sandwich.
+      const kind = kindOf(view.mode, current.role);
+      const line2 = note !== "" ? note : [modePosition(view, current.turn, current.role), skips].filter((part) => part !== "").join(" · ");
+      return { line1: kind !== null ? `Your turn — ${kind.prompt}` : "Your turn — tap the one you want", line2, join: false, mine: true };
+    }
+    const line2 = note !== "" ? note : [pick, roleShort(current.role), skips].filter((part) => part !== "").join(" · ");
+    return { line1: "Your turn — tap the one you want", line2, join: false, mine: true };
+  }
+  if (sweeping && current.options !== null) {
+    return { line1: "Tap the one to sweep away", line2: `It goes off ${activeName}'s table`, join: false, mine: false };
+  }
+  const line1 = `${sentence(activeName)} is choosing…`;
+  // Blind: "is choosing…", never the kind (the server leaves it out; neither is it guessed from the turn).
+  if (current.options === null) return { line1, line2: `Secret pick · ${pick}`, join: false, mine: false };
+  if (!isClassic(view.mode)) {
+    const anchor = anchorKind(view.mode);
+    const watching =
+      anchor !== null && current.role === anchor.id
+        ? `${sentence(activeName)} is picking ${anchor.label}…`
+        : current.role !== null
+          ? `${sentence(activeName)} is adding a filling…`
+          : line1;
+    if (current.chaosPair === true) return { line1: watching, line2: "A pair from the chaos shelf!", join: false, mine: false };
+    return { line1: watching, line2: modePosition(view, current.turn, current.role), join: false, mine: false };
+  }
+  if (current.chaosPair === true) return { line1, line2: "A pair from the chaos shelf!", join: false, mine: false };
+  return { line1, line2: [pick, roleShort(current.role)].filter((part) => part !== "").join(" · "), join: false, mine: false };
+}
+
+/** Where a mode round's turn sits (09c §6.3 line 2): "Bread · then 7 fillings" on the anchor's turn,
+ * "Filling 3 of 7" after it; a mode without an anchor counts picks as Classic does. */
+export function modePosition(view: CookoutView, turn: number, role: string | null): string {
+  const mode = view.mode;
+  const anchor = anchorKind(mode);
+  if (anchor === null) {
+    const kind = kindOf(mode, role);
+    return [`Pick ${pickNumber(turn)} of ${mode.picksPerPlayer}`, kind === null ? "" : capitalise(kindNoun(kind))].filter((p) => p !== "").join(" · ");
+  }
+  const fillings = fillingTurns(mode);
+  if (role === anchor.id || (role === null && turn === 1)) return `${capitalise(kindNoun(anchor))} · then ${fillings} fillings`;
+  return `Filling ${Math.max(1, turn - 1)} of ${fillings}`;
 }
 
 const DISH_EMOJI: Readonly<Record<string, string>> = {
@@ -253,24 +387,6 @@ function nameOf(view: CookoutView, slot: 1 | 2, fallback: string): string {
   return playerOf(view, slot).name ?? fallback;
 }
 
-/** The banner's prompt for a round being picked (spec §5.3). */
-export function turnPrompt(view: CookoutView, partnerFallback: string | null): string {
-  const current = view.current;
-  if (view.state !== "picking" || current === null) return "";
-  const pick = `Pick ${pickNumber(current.turn)} of ${PICKS_PER_PLAYER}`;
-  const mine = view.you !== null && view.you.slot === current.player;
-  if (current.waitingForJoin || (current.player === 2 && view.players[1].name === null)) {
-    if (view.you?.slot === 1) return `Waiting for ${partnerFallback ?? "your partner"} to join — ${pick}`;
-    return `Join to take your turn — ${pick}`;
-  }
-  if (mine) {
-    const go = current.offerIndex === null ? "" : ` (Go ${current.offerIndex + 1} of 3)`;
-    return `Your turn — ${pick}${go}`;
-  }
-  const who = nameOf(view, current.player, current.player === 2 ? (partnerFallback ?? "your partner") : "Player 1");
-  return `Waiting for ${who} — ${pick}`;
-}
-
 /** Elapsed seconds as "0:42" / "3:07". */
 export function formatElapsed(seconds: number): string {
   const s = Math.max(0, Math.floor(seconds));
@@ -308,7 +424,9 @@ export function viaBadge(view: CookoutView, snap: PickSnap): string {
 /** The chef gate's words for this viewer (09a §1.4: the pane shows who it is waiting for). */
 export function starsGateText(view: CookoutView, partner: string): string {
   if (!view.gate.waitingFor.includes("stars")) return "";
-  if (view.you !== null && view.stars.mine === null) return "⭐ Star one of your five picks — the chef will make it a hero";
+  if (view.you !== null && view.stars.mine === null) {
+    return `⭐ Star one of your ${numberWord(view.mode.picksPerPlayer)} picks — the chef will make it a hero`;
+  }
   if (view.you !== null) return `Waiting for ${partner} to star one`;
   return "Waiting for the secret stars";
 }
@@ -337,6 +455,8 @@ const MOVE_ATTEMPTS = 2;
 const MOVE_RETRY_MS = 800;
 const TOAST_MS = 4_000;
 const REVEAL_STAGGER_MS = 90;
+/** A blurb longer than this is left off the pick card (never clipped): the catalogue's `what` maximum. */
+export const CARD_WHAT_MAX = 60;
 /** The coin flip and the lid lift (09a §9: ≈1.2 s). */
 const FX_MS = 1_200;
 
@@ -385,22 +505,30 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   const pane = el("div", "wx-srv-game wx-srv-ck");
   pane.setAttribute("data-game", "cookout");
+  // British English (the catalogue's): lets ingredient names hyphenate at a syllable instead of breaking
+  // anywhere in a narrow tile ("Caramel-ised", never "Caramelis/ed").
+  pane.lang = "en-GB";
   pane.hidden = true;
 
   const bar = el("header", "wx-srv-ck-bar");
   const title = el("div", "wx-srv-ck-title");
-  title.append(emojiSpan("wx-srv-ck-title-icon", "🍳"), el("span", "wx-srv-ck-title-text", "Cookout"));
+  /** The mode's emoji in a mode round (09c §6.3); 🍳 for Classic. */
+  const titleIcon = emojiSpan("wx-srv-ck-title-icon", "🍳");
+  title.append(titleIcon, el("span", "wx-srv-ck-title-text", "Cookout"));
   const modeBadge = el("span", "wx-srv-ck-badge");
   modeBadge.hidden = true;
   title.append(modeBadge);
   const actions = el("div", "wx-srv-ck-bar-actions");
+  /** `?`: the intro again (09b §D.2). In compact mode it carries a dot when the round has twists. */
+  const helpButton = button("wx-srv-ck-chip wx-srv-ck-help", "?", () => openIntro(), "How to play this round");
+  helpButton.hidden = true;
   const bookButton = button("wx-srv-ck-chip wx-srv-ck-book", "", () => deps.openBook(), "Recipe book");
   bookButton.append(emojiSpan("wx-srv-ck-chip-icon", "📖"), el("span", "wx-srv-ck-chip-text", "Recipe book"));
   const endButton = button("wx-srv-ck-chip wx-srv-ck-end", "", () => askEnd(), "End this Cookout");
   endButton.append(el("span", "wx-srv-ck-end-long", "End game"), el("span", "wx-srv-ck-end-short", "End"));
   const newButton = button("wx-srv-ck-chip wx-srv-ck-new", "New", () => startNew(), "Start a new Cookout");
   const closeButton = button("wx-srv-ck-chip wx-srv-ck-close", "✕", () => close(), "Close the game");
-  actions.append(bookButton, endButton, newButton, closeButton);
+  actions.append(helpButton, bookButton, endButton, newButton, closeButton);
   bar.append(title, actions);
 
   const confirmEnd = el("div", "wx-srv-ck-confirm");
@@ -413,15 +541,30 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   confirmEnd.append(confirmText, keepPlaying, endNow);
 
   const scroll = el("div", "wx-srv-ck-scroll");
-  /** The round's start-sheet twists, as chips (hidden for a twist-free round). */
+  /** The round's start-sheet twists as chips, once the basket is full (hidden for a twist-free round). */
   const rules = el("div", "wx-srv-ck-rules");
   rules.setAttribute("aria-label", "This round's twists");
   rules.hidden = true;
-  const progress = el("section", "wx-srv-ck-progress");
-  progress.setAttribute("aria-label", "Basket progress");
+  /** The picking table (09b §D.3): a fixed grid that fits the pane — strip, banner, progress, stage, actions. */
+  const table = el("div", "wx-srv-ck-table");
+  table.hidden = true;
+  /** While picking, the start-sheet twists as a strip of icons: not a target (`?` explains them). */
+  const strip = el("div", "wx-srv-ck-strip");
+  strip.hidden = true;
+  const turnLine = el("div", "wx-srv-ck-banner");
+  turnLine.setAttribute("role", "status");
+  const progress = button("wx-srv-ck-progress", "", () => openSheet("basket"));
+  const pickStage = el("section", "wx-srv-ck-table-stage");
+  pickStage.setAttribute("aria-label", "The table");
+  const tableActions = el("div", "wx-srv-ck-actions");
+  table.append(strip, turnLine, progress, pickStage, tableActions);
+  /** Everything but picking: loading, the chef stage, an ended round. */
   const stage = el("section", "wx-srv-ck-stage");
-  const tray = el("section", "wx-srv-ck-tray");
-  scroll.append(rules, progress, stage, tray);
+  scroll.append(table, rules, stage);
+
+  /** The basket sheet and the 🎲 Twists sheet: a bottom sheet over the pane, one at a time. */
+  const sheetHost = el("div", "wx-srv-ck-sheet");
+  sheetHost.hidden = true;
 
   const toast = el("div", "wx-srv-ck-toast");
   toast.setAttribute("role", "status");
@@ -467,7 +610,40 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       item: () => deps.tabs.seqOf("cookout"),
     }),
   );
-  pane.append(bar, confirmEnd, scroll, chatRow, toast, fx, cooked.chooser);
+  /** The options' modes once read (for a mode round's intro); null until then or when the read failed. */
+  let modeOptions: readonly ModeOption[] | null = null;
+  let optionsAsked = false;
+  const intro = createIntro({
+    document: doc,
+    storage: () => (deps.storage !== undefined ? deps.storage() : typeof window === "undefined" ? null : window.localStorage),
+    onChange: () => deps.afterChange(),
+    modeOption: (id) => modeOptions?.find((m) => m.id === id) ?? null,
+  });
+
+  /** Reads the options once (in the background) for a mode round's intro lines; the card already shows. */
+  function askOptions(view: CookoutView): void {
+    if (isClassic(view.mode) || optionsAsked || deps.loadOptions === undefined) return;
+    optionsAsked = true;
+    const asked = deps.loadOptions;
+    void (async () => {
+      let options: CookoutOptions | null = null;
+      try {
+        options = await asked();
+      } catch {
+        options = null;
+      }
+      if (options === null) {
+        // A failed read may be asked again by the next mode round opened here.
+        optionsAsked = false;
+        return;
+      }
+      modeOptions = options.modes;
+      const seq = drawnSeq;
+      const now = seq === null ? undefined : deps.model.view(seq);
+      if (now !== undefined) intro.update(now);
+    })();
+  }
+  pane.append(bar, confirmEnd, scroll, chatRow, toast, fx, cooked.chooser, sheetHost, intro.element);
 
   // -- Per-round view state ------------------------------------------------------------------------------
 
@@ -484,7 +660,16 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   const expanded = new Set<ConceptId>();
   /** Ticked-off recipe ingredients, `"<concept>:<ingredient>"`. Local to this screen. */
   const checked = new Set<string>();
-  let trayOpen = true;
+  /** The bottom sheet on show: the basket so far, or the 🎲 Twists menu. */
+  let sheet: "basket" | "twists" | null = null;
+  /** The watcher chose "Sweep one": the two cards on the table sweep instead of nothing. */
+  let sweeping = false;
+  /** The pair the table shows (`"<turn>:<offer>:<a>:<b>"`); a new one is decoded before it swaps in. */
+  let shownPair: string | null = null;
+  /** The pair being decoded right now (a newer view replaces it). */
+  let decodingPair: string | null = null;
+  /** The chef carousel while it is on screen. */
+  let carousel: Carousel | null = null;
   let ending = false;
   /** A dish to open at once (the Recipe book's tap), consumed when its recipe is on screen. */
   let focusConcept: { readonly seq: number; readonly id: ConceptId; readonly generation: number | null } | null = null;
@@ -497,7 +682,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   let toastTimer: number | null = null;
   let moveRetryTimer: number | null = null;
   /** The keys the sections were last drawn for. */
-  const drawn = { progress: "", stage: "", tray: "", rules: "" };
+  const drawn = { progress: "", stage: "", banner: "", actions: "", strip: "", sheet: "", rules: "" };
   /** Each dish card's element and the key it was drawn for. */
   const conceptCards = new Map<ConceptId, { readonly element: HTMLElement; key: string }>();
   /** The finished stage's sections (in order) and the keys they were drawn for. */
@@ -640,6 +825,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     busy.add("move");
     tableBusy = { kind, target: ingredientId };
     pickingId = kind === "pick" ? ingredientId : null;
+    // A twist chosen from the 🎲 sheet closes it: the table shows what happens.
+    if (sheet === "twists") sheet = null;
     redraw();
     const send = (): Promise<CookoutOutcome> => {
       switch (kind) {
@@ -671,10 +858,13 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     busy.delete("move");
     tableBusy = null;
     pickingId = null;
+    // A sweep answered either way ends sweep mode (a refusal shows why; the table is redrawn fresh).
+    if (kind === "veto") sweeping = false;
     if (outcome.ok) {
       if (kind === "pick") {
         const chosen = current.options.find((o) => o.id === ingredientId);
-        if (chosen !== undefined) showToast(`${chosen.name} is in the basket ✓`);
+        // The tenth pick ends picking: the reveal says it all, and a toast would sit over the chef's carousel.
+        if (chosen !== undefined && outcome.view.state === "picking") showToast(`${chosen.name} is in the basket ✓`);
       } else if (kind === "lucky") {
         // The server already chose; the coin only shows its answer.
         const chosen = choiceOf(outcome.view, current.turn);
@@ -859,12 +1049,16 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const styleId = setup.style?.id;
     const challengeId = setup.challenge?.id;
     deps.openStartSheet({
+      mode: view.mode.id,
       blind: view.blind,
       style: setup.styleSpun ? "spin" : isStyleId(styleId) ? styleId : null,
       challenge: isChallengeId(challengeId) ? challengeId : null,
       wildcard: setup.wildcard,
       stars: setup.stars,
-      fridge: fridge === null ? null : { id: fridge.id, name: fridge.name, category: fridge.category, emoji: fridge.emoji, blurb: fridge.blurb },
+      fridge:
+        fridge === null
+          ? null
+          : { id: fridge.id, name: fridge.name, category: fridge.category, emoji: fridge.emoji, blurb: fridge.blurb, what: fridge.what, image: fridge.image },
     });
   }
 
@@ -879,12 +1073,14 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         conceptId: concept.id,
         kind: "leftovers",
         title: concept.title,
-        candidates: concept.omitted.map((o) => o.ingredient),
+        // Each starter with its pick kind from the basket (a mode round seats them by kind, 09c §2.5).
+        candidates: concept.omitted.map((o) => ({ ...o.ingredient, kind: allPicks(view).find((p) => p.id === o.ingredient.id)?.kind ?? null })),
+        mode: view.mode.id,
       },
     });
   }
 
-  // -- Drawing: the progress pills and the turn banner -----------------------------------------------------
+  // -- Drawing: the turn banner, the progress button and the sheets (09b §D.3) ------------------------------
 
   function slotLabel(view: CookoutView, slot: 1 | 2): string {
     if (view.you?.slot === slot) return "You";
@@ -903,101 +1099,500 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     return view.stars.enabled && (view.stars.mine === id || (view.stars.revealed && view.stars.partner === id));
   }
 
-  function pillsRow(view: CookoutView, slot: 1 | 2): HTMLElement {
+  /** The two players left to right: the viewer first (a non-player sees Slot 1 first). */
+  function slotOrder(view: CookoutView): readonly [1 | 2, 1 | 2] {
+    return view.you?.slot === 2 ? [2, 1] : [1, 2];
+  }
+
+  /** A one-letter chip for a player ("Y" for the viewer). */
+  function initialOf(view: CookoutView, slot: 1 | 2): string {
+    const label = view.you?.slot === slot ? "You" : (playerOf(view, slot).name ?? (slot === 2 ? (partnerFallback() ?? "Partner") : "Player"));
+    const first = Array.from(label.trim())[0] ?? "?";
+    return first.toUpperCase();
+  }
+
+  /** What a basket item says it is: the catalogue's line, else the bank's blurb. */
+  function whatOf(snap: IngredientSnap): string {
+    return snap.what ?? snap.blurb;
+  }
+
+  /** One player's progress slots (five in Classic, four in a toasted sandwich): passive tiles (the whole row
+   * is the one button). In a mode with an anchor, the starter's first slot is the anchor's (09c §6.3). */
+  function progressGroup(view: CookoutView, slot: 1 | 2): HTMLElement {
     const player = playerOf(view, slot);
-    const row = el("div", "wx-srv-ck-pills");
-    row.dataset["slot"] = String(slot);
+    const group = el("span", "wx-srv-ck-prog-group");
+    group.dataset["slot"] = String(slot);
     const active = view.current?.player === slot;
-    row.classList.toggle("wx-srv-ck-pills-active", active);
-    row.append(el("span", "wx-srv-ck-pills-name", slotLabel(view, slot)));
-    const dots = el("span", "wx-srv-ck-pills-dots");
+    group.classList.toggle("wx-srv-ck-prog-active", active);
+    const who = el("span", "wx-srv-ck-prog-who", initialOf(view, slot));
+    who.setAttribute("aria-hidden", "true");
+    group.append(who);
     // A hidden partner's public starters still show (they are first in pick order).
-    const visible: readonly PickSnap[] = player.picks ?? startersOf(view, slot);
-    for (let i = 0; i < PICKS_PER_PLAYER; i += 1) {
-      const pill = el("span", "wx-srv-ck-pill");
-      const pick = visible[i];
+    const known: readonly PickSnap[] = player.picks ?? startersOf(view, slot);
+    const anchorSlot = slot === 1 && anchorKind(view.mode) !== null;
+    for (let i = 0; i < view.mode.picksPerPlayer; i += 1) {
+      const pick = known[i];
+      let tile: HTMLElement;
       if (pick !== undefined) {
-        pill.classList.add("wx-srv-ck-pill-full");
-        pill.textContent = pick.emoji !== "" ? pick.emoji : "•";
-        pill.title = pick.via === "seed" ? `Starter: ${pick.name}` : pick.name;
-        pill.classList.toggle("wx-srv-ck-pill-starter", pick.via === "seed");
-        if (isStarred(view, pick.id)) {
-          pill.classList.add("wx-srv-ck-pill-star");
-          pill.append(emojiSpan("wx-srv-ck-pill-star-mark", "★"));
-        }
+        tile = ingredientPicture(doc, pick, { rendition: "thumb", className: "wx-srv-ck-prog-slot wx-srv-ck-prog-full", alt: "" });
+        tile.removeAttribute("role");
+        tile.removeAttribute("aria-label");
+        tile.dataset["picked"] = pick.id;
+        tile.classList.toggle("wx-srv-ck-prog-starter", pick.via === "seed");
+        if (isStarred(view, pick.id)) tile.classList.add("wx-srv-ck-prog-star");
       } else if (i < player.pickCount) {
-        pill.classList.add("wx-srv-ck-pill-secret");
-        pill.textContent = "🔒";
-        pill.title = "Secret pick";
-      } else if (active && i === player.pickCount) {
-        pill.classList.add("wx-srv-ck-pill-now");
+        tile = el("span", "wx-srv-ck-prog-slot wx-srv-ck-prog-secret", "🔒");
+      } else {
+        tile = el("span", "wx-srv-ck-prog-slot wx-srv-ck-prog-empty");
+        tile.classList.toggle("wx-srv-ck-prog-now", active && i === player.pickCount);
       }
-      dots.append(pill);
+      tile.setAttribute("aria-hidden", "true");
+      if (anchorSlot && i === 0) {
+        tile.classList.add("wx-srv-ck-prog-anchor");
+        tile.append(el("span", "wx-srv-ck-prog-mark", anchorMark(view.mode)));
+      }
+      group.append(tile);
     }
-    row.append(dots);
-    return row;
+    return group;
+  }
+
+  /** "Bread: Sourdough loaf" / "Secret bread" / "Bread not picked yet" for the progress row's label. */
+  function anchorWords(view: CookoutView): string | null {
+    const anchor = anchorKind(view.mode);
+    if (anchor === null) return null;
+    const noun = capitalise(kindNoun(anchor));
+    const pick = anchorPick(view.mode, allPicks(view)) ?? anchorPick(view.mode, view.starters);
+    if (pick !== null) return `${noun}: ${pick.name}`;
+    if (view.players[0].pickCount > 0) return `Secret ${kindNoun(anchor)}`;
+    return `${noun} not picked yet`;
+  }
+
+  function progressLabel(view: CookoutView): string {
+    const parts = slotOrder(view).map((slot) => {
+      const player = playerOf(view, slot);
+      const who = view.you?.slot === slot ? "you have" : `${playerOf(view, slot).name ?? "your partner"} has`;
+      return `${who} ${player.pickCount} of ${view.mode.picksPerPlayer}`;
+    });
+    const anchor = anchorWords(view);
+    return `Basket so far: ${parts.join(", ")}.${anchor === null ? "" : ` ${anchor}.`} Show the basket.`;
   }
 
   function drawProgress(view: CookoutView): void {
-    const showJoin = view.state === "picking" && view.players[1].name === null && view.you?.slot !== 1;
     const key = JSON.stringify([
-      view.state,
-      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via]) ?? null]),
+      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via, x.image?.thumb ?? null]) ?? null]),
+      view.starters.map((s) => [s.id, s.turn, s.image?.thumb ?? null]),
       view.stars,
       view.you?.slot ?? null,
-      view.current === null ? null : [view.current.turn, view.current.player, view.current.offerIndex, view.current.waitingForJoin, view.current.role],
-      showJoin,
-      busy.has("join"),
+      view.current === null ? null : [view.current.player, view.current.turn],
       deps.partner(),
+      view.mode,
     ]);
-    if (view.state !== "picking") {
-      progress.hidden = true;
-      drawn.progress = "";
-      return;
-    }
-    progress.hidden = false;
     if (drawn.progress === key) return;
     drawn.progress = key;
-    const banner = el("p", "wx-srv-ck-turn", turnPrompt(view, partnerFallback()));
-    const mine = view.you !== null && view.current !== null && view.you.slot === view.current.player;
-    banner.classList.toggle("wx-srv-ck-turn-mine", mine);
-    const children: HTMLElement[] = [pillsRow(view, 1), pillsRow(view, 2), banner];
-    if (showJoin) {
+    const [left, right] = slotOrder(view);
+    progress.setAttribute("aria-label", progressLabel(view));
+    progress.setAttribute("aria-haspopup", "dialog");
+    progress.replaceChildren(progressGroup(view, left), el("span", "wx-srv-ck-prog-divider"), progressGroup(view, right));
+  }
+
+  function drawBanner(view: CookoutView): void {
+    const words = turnBanner(view, partnerFallback(), sweeping);
+    const key = JSON.stringify([words, busy.has("join")]);
+    if (drawn.banner === key) return;
+    drawn.banner = key;
+    turnLine.classList.toggle("wx-srv-ck-banner-mine", words.mine);
+    turnLine.classList.toggle("wx-srv-ck-banner-join", words.join);
+    const children: HTMLElement[] = [el("p", "wx-srv-ck-turn", words.line1)];
+    if (words.join) {
       const join = button(
         "wx-srv-ck-join",
-        busy.has("join") ? "Joining…" : "Join Cookout",
+        busy.has("join") ? "Joining…" : "Join",
         () => void simple("join", (seq) => deps.api.join(seq), "Couldn't join — try again."),
+        "Join this Cookout",
       );
       join.disabled = busy.has("join");
       children.push(join);
+    } else if (words.line2 !== "") {
+      children.push(el("p", "wx-srv-ck-turn-sub", words.line2));
     }
-    progress.replaceChildren(...children);
+    turnLine.replaceChildren(...children);
   }
 
-  // -- Drawing: the stage (drafting) ----------------------------------------------------------------------
+  /** The drafting twists this viewer could use right now (09a §9): the 🎲 button shows only when one is. */
+  function usableTwists(view: CookoutView): boolean {
+    const current = view.current;
+    if (current === null || current.options === null || view.you === null) return false;
+    if (view.you.slot === current.player) return current.canLucky === true || current.canChaos === true;
+    return current.canVeto === true;
+  }
+
+  function drawActions(view: CookoutView): void {
+    const current = view.current;
+    const mine = current !== null && view.you !== null && view.you.slot === current.player;
+    const key = JSON.stringify([
+      current === null ? null : [current.turn, current.offerIndex, current.skipsRemaining, current.options !== null, current.canLucky, current.canChaos, current.canVeto],
+      mine,
+      sweeping,
+      busy.has("move"),
+      tableBusy,
+      sheet,
+      view.you,
+      decodingPair,
+    ]);
+    if (drawn.actions === key) return;
+    // While a new pair is still decoding the old one is on screen: nothing may act on a pair not yet seen.
+    const settling = decodingPair !== null;
+    drawn.actions = key;
+    const out: HTMLElement[] = [];
+    if (current !== null && current.options !== null) {
+      if (mine) {
+        const offer = current.offerIndex ?? 0;
+        const final = offer >= 2 || current.skipsRemaining === 0;
+        const skip = button("wx-srv-ck-skip", skipLabel(offer, current.skipsRemaining), () => void move("skip", null));
+        if (final) {
+          skip.disabled = true;
+          skip.classList.add("wx-srv-ck-skip-final");
+        } else {
+          skip.disabled = busy.has("move") || settling;
+          if (tableBusy?.kind === "skip") skip.textContent = "Dealing…";
+        }
+        out.push(skip);
+      } else if (sweeping) {
+        const cancel = button("wx-srv-ck-sweep-cancel", "Cancel", () => {
+          sweeping = false;
+          redraw();
+        }, "Cancel the sweep");
+        cancel.disabled = busy.has("move");
+        out.push(cancel);
+      }
+      if (!sweeping && usableTwists(view)) {
+        const twists = button("wx-srv-ck-twists-btn", "🎲 Twists", () => openSheet("twists"), "Twists you can use now");
+        twists.setAttribute("aria-haspopup", "dialog");
+        twists.setAttribute("aria-expanded", sheet === "twists" ? "true" : "false");
+        twists.disabled = busy.has("move") || settling;
+        out.push(twists);
+      }
+    }
+    tableActions.replaceChildren(...out);
+  }
+
+  /** The twist strip while picking (09b §D.3): "Twists" then one icon per start-sheet twist. */
+  function drawStrip(view: CookoutView): void {
+    const setup = view.setup;
+    const spin = setup.styleSpun && setup.style !== null && !wheelPlayed.has(view.seq);
+    // `spin` is not part of the key: the very next refresh must not redraw the strip and cut the wheel short.
+    const key = JSON.stringify(setup);
+    if (drawn.strip === key) return;
+    drawn.strip = key;
+    const icons: HTMLElement[] = [];
+    if (setup.style !== null) icons.push(styleIcon(setup.style.emoji, spin, "wx-srv-ck-strip-icon"));
+    if (spin) wheelPlayed.add(view.seq);
+    if (setup.challenge !== null) icons.push(emojiSpan("wx-srv-ck-strip-icon", setup.challenge.emoji));
+    if (setup.wildcard) icons.push(emojiSpan("wx-srv-ck-strip-icon", "🛎️"));
+    if (setup.stars) icons.push(emojiSpan("wx-srv-ck-strip-icon", "⭐"));
+    if (setup.fridgeRaid) icons.push(emojiSpan("wx-srv-ck-strip-icon", "🧊"));
+    if (setup.encore !== null) icons.push(emojiSpan("wx-srv-ck-strip-icon", "🔁"));
+    const phrases = twistPhrases(view);
+    strip.hidden = icons.length === 0;
+    helpButton.classList.toggle("wx-srv-ck-help-twists", icons.length > 0);
+    strip.setAttribute("aria-label", phrases.length === 0 ? "" : `Twists on: ${phrases.join(", ")}`);
+    strip.setAttribute("role", "img");
+    const word = el("span", "wx-srv-ck-strip-word", "Twists");
+    word.setAttribute("aria-hidden", "true");
+    strip.replaceChildren(word, ...icons.slice(0, 6));
+  }
+
+  /** A style's icon: its emoji, or — the first time a spun style is seen here — the wheel landing on it. */
+  function styleIcon(emoji: string, spin: boolean, className: string): HTMLElement {
+    if (!spin || reduced()) return emojiSpan(className, emoji);
+    const wheel = el("span", `wx-srv-ck-wheel ${className}`);
+    wheel.setAttribute("aria-hidden", "true");
+    const reel = el("span", "wx-srv-ck-wheel-reel");
+    for (const face of [...WHEEL_FACES, ...WHEEL_FACES, emoji]) reel.append(el("span", "wx-srv-ck-wheel-face", face));
+    wheel.append(reel);
+    return wheel;
+  }
+
+  // -- The sheets: the basket so far, and the 🎲 Twists menu --------------------------------------------------
+
+  function openSheet(which: "basket" | "twists"): void {
+    sheet = which;
+    redraw();
+    sheetHost.querySelector<HTMLElement>(".wx-srv-ck-sheet-close")?.focus();
+  }
+
+  function closeSheet(): void {
+    if (sheet === null) return;
+    const was = sheet;
+    sheet = null;
+    redraw();
+    (was === "basket" ? progress : tableActions.querySelector<HTMLElement>(".wx-srv-ck-twists-btn"))?.focus();
+  }
+
+  function sheetFrame(title: string, body: HTMLElement[]): HTMLElement[] {
+    const backdrop = el("div", "wx-srv-ck-sheet-backdrop");
+    backdrop.setAttribute("data-srv-gesture-boundary", "");
+    backdrop.addEventListener("click", () => closeSheet());
+    const panel = el("div", "wx-srv-ck-sheet-panel");
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-label", title);
+    const head = el("div", "wx-srv-ck-sheet-head");
+    head.append(el("h3", "wx-srv-ck-sheet-title", title), button("wx-srv-ck-sheet-close", "✕", () => closeSheet(), "Close"));
+    const content = el("div", "wx-srv-ck-sheet-body");
+    content.append(...body);
+    panel.append(head, content);
+    return [backdrop, panel];
+  }
+
+  /** One basket line in the sheet: the picture, the name, what it is, how it got in, and its star. */
+  function basketLine(view: CookoutView, snap: PickSnap, mine: boolean): HTMLElement {
+    const line = el("li", "wx-srv-ck-bline");
+    line.dataset["picked"] = snap.id;
+    line.append(ingredientPicture(doc, snap, { rendition: "thumb", className: "wx-srv-ck-bline-pic" }));
+    const words = el("span", "wx-srv-ck-bline-words");
+    words.append(el("span", "wx-srv-ck-bline-name", snap.name));
+    const what = whatOf(snap);
+    if (what !== "") words.append(el("span", "wx-srv-ck-bline-what", what));
+    const badge = snap.via === "seed" || snap.via === "wildcard" || snap.via === "swap" ? viaBadge(view, snap) : "";
+    if (badge !== "") words.append(el("span", "wx-srv-ck-chip-badge", badge));
+    line.append(words);
+    const star = starControl(view, snap, mine, "Star this");
+    if (star !== null) line.append(star);
+    return line;
+  }
+
+  /** A mode round's basket sheet (09c §6.3): the anchor first, then the fillings grouped by kind, then the
+   * partner's secret picks as 🔒 lines (Blind), then how many are still to come. */
+  function modeBasketSheet(view: CookoutView): HTMLElement[] {
+    const mode = view.mode;
+    const body: HTMLElement[] = [];
+    const mineIds = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
+    const owner = (snap: PickSnap): string =>
+      snap.turn === null ? "" : slotLabel(view, snap.turn % 2 === 1 ? 1 : 2);
+    // Everything this viewer may know: both players' visible picks plus the public starters.
+    const known: PickSnap[] = [];
+    for (const slot of [1, 2] as const) {
+      for (const snap of playerOf(view, slot).picks ?? startersOf(view, slot)) {
+        if (!known.some((k) => k.id === snap.id)) known.push(snap);
+      }
+    }
+    const anchor = anchorKind(mode);
+    const groups: Array<{ readonly id: string; readonly title: string; readonly items: PickSnap[] }> = [];
+    if (anchor !== null) groups.push({ id: anchor.id, title: capitalise(kindNoun(anchor)), items: known.filter((s) => isAnchorPick(mode, s)) });
+    for (const kind of mode.kinds) {
+      if (kind.id === mode.anchorKind) continue;
+      groups.push({ id: kind.id, title: capitalise(kindNoun(kind)), items: known.filter((s) => s.kind === kind.id && !isAnchorPick(mode, s)) });
+    }
+    const grouped = new Set(groups.flatMap((g) => g.items.map((i) => i.id)));
+    const other = known.filter((s) => !grouped.has(s.id));
+    if (other.length > 0) groups.push({ id: "other", title: "Fillings", items: other });
+    for (const group of groups) {
+      if (group.items.length === 0) continue;
+      const box = el("section", "wx-srv-ck-bgroup");
+      box.dataset["kind"] = group.id;
+      box.append(el("h4", "wx-srv-ck-bgroup-who", group.title));
+      const list = el("ul", "wx-srv-ck-blist");
+      for (const snap of group.items) {
+        const line = basketLine(view, snap, mineIds.has(snap.id));
+        const who = owner(snap);
+        if (who !== "") line.querySelector(".wx-srv-ck-bline-words")?.append(el("span", "wx-srv-ck-bline-who", who));
+        list.append(line);
+      }
+      box.append(list);
+      body.push(box);
+    }
+    // The partner's picks this viewer may not see yet (Blind): one 🔒 line each, the anchor named as such.
+    const secrets = el("ul", "wx-srv-ck-blist");
+    for (const slot of [1, 2] as const) {
+      const player = playerOf(view, slot);
+      if (player.picks !== null) continue;
+      const shown = startersOf(view, slot);
+      for (let i = shown.length; i < player.pickCount; i += 1) {
+        const secret = el("li", "wx-srv-ck-bline wx-srv-ck-bline-secret");
+        const tile = el("span", "wx-srv-ck-pic wx-srv-ck-pic-thumb wx-srv-ck-bline-pic wx-srv-ck-pic-secret", "🔒");
+        tile.setAttribute("aria-hidden", "true");
+        const isAnchor = slot === 1 && i === 0 && anchor !== null;
+        secret.append(tile, el("span", "wx-srv-ck-bline-name", isAnchor ? `Secret ${kindNoun(anchor)}` : `Secret pick · ${slotLabel(view, slot)}`));
+        secrets.append(secret);
+      }
+    }
+    if (secrets.childElementCount > 0) {
+      const box = el("section", "wx-srv-ck-bgroup");
+      box.dataset["kind"] = "secret";
+      box.append(el("h4", "wx-srv-ck-bgroup-who", "Secret picks"), secrets);
+      body.push(box);
+    }
+    const picked = view.players[0].pickCount + view.players[1].pickCount;
+    const left = mode.turns - picked;
+    if (left > 0) body.push(el("p", "wx-srv-ck-bline-left", `${left} to go`));
+    const hint = starHint(view);
+    if (hint !== null) body.push(hint);
+    return sheetFrame("Basket so far", body);
+  }
+
+  function basketSheet(view: CookoutView): HTMLElement[] {
+    if (!isClassic(view.mode)) return modeBasketSheet(view);
+    const body: HTMLElement[] = [];
+    for (const slot of slotOrder(view)) {
+      const player = playerOf(view, slot);
+      const group = el("section", "wx-srv-ck-bgroup");
+      group.dataset["slot"] = String(slot);
+      group.append(el("h4", "wx-srv-ck-bgroup-who", `${slotLabel(view, slot)} · ${player.pickCount} of ${view.mode.picksPerPlayer}`));
+      const list = el("ul", "wx-srv-ck-blist");
+      const mine = view.you?.slot === slot;
+      if (player.picks !== null) {
+        for (const pick of player.picks) list.append(basketLine(view, pick, mine));
+      } else {
+        // Starters are public in both modes: a Blind partner's starter shows, their drafted picks do not.
+        const starters = startersOf(view, slot);
+        for (const pick of starters) list.append(basketLine(view, pick, false));
+        for (let i = starters.length; i < player.pickCount; i += 1) {
+          const secret = el("li", "wx-srv-ck-bline wx-srv-ck-bline-secret");
+          const tile = el("span", "wx-srv-ck-pic wx-srv-ck-pic-thumb wx-srv-ck-bline-pic wx-srv-ck-pic-secret", "🔒");
+          tile.setAttribute("aria-hidden", "true");
+          secret.append(tile, el("span", "wx-srv-ck-bline-name", "Secret pick"));
+          list.append(secret);
+        }
+      }
+      const known = player.picks?.length ?? Math.max(player.pickCount, startersOf(view, slot).length);
+      const left = view.mode.picksPerPlayer - known;
+      if (left > 0) list.append(el("li", "wx-srv-ck-bline-left", `${left} to go`));
+      group.append(list);
+      body.push(group);
+    }
+    const hint = starHint(view);
+    if (hint !== null) body.push(hint);
+    return sheetFrame("Basket so far", body);
+  }
+
+  function twistItem(className: string, title: string, hint: string, enabled: boolean, onTap: () => void): HTMLElement {
+    const item = button(`wx-srv-ck-twist-item ${className}`, "", onTap, title);
+    item.append(el("span", "wx-srv-ck-twist-item-name", title), el("span", "wx-srv-ck-twist-item-hint", hint));
+    item.disabled = !enabled || busy.has("move");
+    return item;
+  }
+
+  function twistsSheet(view: CookoutView): HTMLElement[] {
+    const current = view.current;
+    const body: HTMLElement[] = [];
+    if (current !== null && view.you !== null) {
+      if (view.you.slot === current.player) {
+        if (current.canLucky !== null) {
+          body.push(twistItem("wx-srv-ck-lucky", "🪙 Lucky dip", "A coin picks one of these two for you.", current.canLucky, () => void move("lucky", null)));
+        }
+        // The chaos shelf is not offered on a mode's anchor turn (09c §4 T12: too few exotic breads).
+        const anchorTurn = !isClassic(view.mode) && view.mode.anchorKind !== null && current.role === view.mode.anchorKind;
+        if (current.canChaos !== null && !anchorTurn) {
+          body.push(
+            twistItem(
+              "wx-srv-ck-chaos",
+              view.you.chaosUsed ? "🌋 Chaos shelf (used)" : "🌋 Chaos shelf",
+              "Swap these two for two weird and exotic ones — once a game.",
+              current.canChaos,
+              () => void move("chaos", null),
+            ),
+          );
+        }
+      } else if (current.canVeto !== null) {
+        body.push(
+          twistItem(
+            "wx-srv-ck-sweep",
+            view.you.vetoUsed ? "🧹 Sweep one (used)" : "🧹 Sweep one",
+            `Sweep one of these off ${bannerName(playerOf(view, current.player).name)}'s table — once a game.`,
+            current.canVeto,
+            () => {
+              sheet = null;
+              sweeping = true;
+              redraw();
+            },
+          ),
+        );
+      }
+    }
+    return sheetFrame("Twists", body);
+  }
+
+  function drawSheet(view: CookoutView | undefined): void {
+    // The 🎲 sheet closes itself once nothing in it can be used (the turn moved on, the twist was spent).
+    if (sheet === "twists" && (view === undefined || !usableTwists(view))) sheet = null;
+    const open = view !== undefined && view.state === "picking" ? sheet : null;
+    if (open === null) {
+      sheet = null;
+      if (drawn.sheet !== "") {
+        drawn.sheet = "";
+        sheetHost.hidden = true;
+        sheetHost.replaceChildren();
+      }
+      return;
+    }
+    const key = JSON.stringify([
+      open,
+      view?.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via, x.what, x.image]) ?? null]),
+      view?.starters.map((s) => s.id),
+      view?.stars,
+      view?.you,
+      view?.current === null || view?.current === undefined
+        ? null
+        : [view.current.turn, view.current.player, view.current.canLucky, view.current.canChaos, view.current.canVeto],
+      busy.has("star"),
+      busy.has("move"),
+    ]);
+    if (drawn.sheet === key || view === undefined) return;
+    drawn.sheet = key;
+    sheetHost.dataset["sheet"] = open;
+    sheetHost.replaceChildren(...(open === "basket" ? basketSheet(view) : twistsSheet(view)));
+    sheetHost.hidden = false;
+  }
+
+  // -- Drawing: the table's two picture cards (09b §D.3) -------------------------------------------------------
 
   interface CardAction {
     readonly onPick: () => void;
-    readonly cta: string;
+    /** The card's accessible name ("Pick Ribeye steak"). */
+    readonly label: string;
+    /** Shown over the card while its move is on its way ("Picking…"). */
+    readonly busyText: string;
     readonly chosen: boolean;
     readonly disabled: boolean;
   }
 
-  /** One tactile ingredient card: a button when it can be chosen (`action`), else a plain card. */
-  function ingredientCard(snap: IngredientSnap, action: CardAction | null, exotic = false): HTMLElement {
-    const card = el(action !== null ? "button" : "div", "wx-srv-ck-opt");
+  let describedCount = 0;
+
+  /** One picture card: a button when it can be chosen (`action`), else a plain card. The whole card is the
+   * target; the picture flexes, the name and the what-line never clip (09b §D.3). */
+  function ingredientCard(snap: IngredientSnap, action: CardAction | null, exotic = false, dim = false): HTMLElement {
+    const card = el(action !== null ? "button" : "div", "wx-srv-ck-card");
     card.dataset["ingredient"] = snap.id;
-    card.classList.toggle("wx-srv-ck-opt-exotic", exotic);
-    card.append(emojiSpan("wx-srv-ck-opt-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"));
-    card.append(el("span", "wx-srv-ck-opt-cat", categoryName(snap.category)));
-    card.append(el("span", "wx-srv-ck-opt-name", snap.name));
-    if (snap.blurb !== "") card.append(el("span", "wx-srv-ck-opt-blurb", snap.blurb));
+    card.classList.toggle("wx-srv-ck-card-exotic", exotic);
+    card.classList.toggle("wx-srv-ck-card-dim", dim);
+    const inner = el("span", "wx-srv-ck-card-in");
+    inner.append(ingredientPicture(doc, snap, { rendition: "card", className: "wx-srv-ck-card-pic", eager: true }));
+    inner.append(el("span", "wx-srv-ck-card-name", snap.name));
+    // The what-line: the catalogue's, else a blurb short enough to show whole; a longer blurb stays in the
+    // card's accessible description only (never clipped).
+    const id = `wx-srv-ck-desc-${(describedCount += 1)}`;
+    const shown = snap.what ?? (snap.blurb !== "" && snap.blurb.length <= CARD_WHAT_MAX ? snap.blurb : null);
+    if (shown !== null) {
+      const what = el("span", "wx-srv-ck-card-what", shown);
+      what.id = id;
+      inner.append(what);
+    } else if (snap.blurb !== "") {
+      // `hidden`, not visually-clipped: aria-describedby still reads a hidden element, and a clipped box would
+      // be overflow on a table that must have none.
+      const hidden = el("span", "wx-srv-ck-card-desc", snap.blurb);
+      hidden.id = id;
+      hidden.hidden = true;
+      inner.append(hidden);
+    }
+    card.append(inner);
     if (card instanceof HTMLButtonElement && action !== null) {
       card.type = "button";
       card.setAttribute("data-srv-gesture-boundary", "");
-      card.append(el("span", "wx-srv-ck-opt-cta", action.cta));
+      card.setAttribute("aria-label", action.label);
+      if (shown !== null || snap.blurb !== "") card.setAttribute("aria-describedby", id);
       card.disabled = action.disabled;
-      card.classList.toggle("wx-srv-ck-opt-chosen", action.chosen);
+      card.classList.toggle("wx-srv-ck-card-chosen", action.chosen);
+      if (action.chosen) card.append(el("span", "wx-srv-ck-card-busy", action.busyText));
       card.addEventListener("click", action.onPick);
     }
     return card;
@@ -1006,54 +1601,22 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
   function pickAction(snap: IngredientSnap): CardAction {
     return {
       onPick: () => void move("pick", snap.id),
-      cta: pickingId === snap.id ? "Adding…" : "Pick this",
+      label: `Pick ${snap.name}`,
+      busyText: "Picking…",
       chosen: pickingId === snap.id,
       disabled: busy.has("move"),
     };
   }
 
-  /** The waiting partner's view of one option in Open mode, with 🧹 Sweep it when their sweep is unused. */
-  function watchedCard(view: CookoutView, snap: IngredientSnap, exotic: boolean): HTMLElement {
-    const current = view.current;
-    const wrap = el("div", "wx-srv-ck-optwrap");
-    wrap.append(ingredientCard(snap, null, exotic));
-    // `canVeto` is null when the server has no sweep for this viewer (Blind, a non-player, an older server).
-    if (current === null || current.canVeto === null || view.you === null || view.you.slot === current.player) return wrap;
-    const sweeping = tableBusy?.kind === "veto" && tableBusy.target === snap.id;
-    const used = view.you.vetoUsed;
-    const sweep = button(
-      "wx-srv-ck-sweep",
-      sweeping ? "Sweeping…" : used ? "🧹 Sweep used" : "🧹 Sweep it (once)",
-      () => void move("veto", snap.id),
-      `Sweep ${snap.name} off the table`,
-    );
-    sweep.disabled = !current.canVeto || busy.has("move");
-    wrap.append(sweep);
-    return wrap;
-  }
-
-  /** The active player's twist buttons beside the skip (09a §9): only those the server offers. */
-  function tableTwists(current: NonNullable<CookoutView["current"]>, view: CookoutView): HTMLElement[] {
-    const out: HTMLElement[] = [];
-    if (current.canLucky !== null) {
-      const dipping = tableBusy?.kind === "lucky";
-      const lucky = button("wx-srv-ck-lucky", dipping ? "Flipping…" : "🪙 Lucky dip", () => void move("lucky", null), "Lucky dip: let a coin pick one of the two");
-      lucky.disabled = !current.canLucky || busy.has("move");
-      out.push(lucky);
-    }
-    if (current.canChaos !== null) {
-      const raiding = tableBusy?.kind === "chaos";
-      const used = view.you?.chaosUsed === true;
-      const chaos = button(
-        "wx-srv-ck-chaos",
-        raiding ? "Raiding the shelf…" : used ? "🌋 Chaos shelf used" : "🌋 Chaos shelf (once)",
-        () => void move("chaos", null),
-        "Chaos shelf: swap these two for two weird and exotic ones (once a game)",
-      );
-      chaos.disabled = !current.canChaos || busy.has("move");
-      out.push(chaos);
-    }
-    return out;
+  function sweepAction(snap: IngredientSnap): CardAction {
+    const going = tableBusy?.kind === "veto" && tableBusy.target === snap.id;
+    return {
+      onPick: () => void move("veto", snap.id),
+      label: `Sweep ${snap.name} off the table`,
+      busyText: "Sweeping…",
+      chosen: going,
+      disabled: busy.has("move"),
+    };
   }
 
   function drawDraft(view: CookoutView): HTMLElement[] {
@@ -1065,97 +1628,99 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       const cloche = el("div", "wx-srv-ck-cloche");
       cloche.append(emojiSpan("wx-srv-ck-cloche-dome", "🛎️"));
       const waitingJoin = current.waitingForJoin || (current.player === 2 && view.players[1].name === null);
-      const who =
-        current.player === 2 ? (view.players[1].name ?? partnerFallback() ?? "your partner") : nameOf(view, 1, "Player 1");
+      const who = current.player === 2 ? (view.players[1].name ?? partnerFallback() ?? "your partner") : nameOf(view, 1, "Player 1");
       const words = waitingJoin
         ? view.you?.slot === 1
           ? `Waiting for ${partnerFallback() ?? "your partner"} to join…`
-          : "Press Join Cookout to take the next turn."
+          : "Press Join to take the next turn."
         : `🕵️ Secret turn: ${mine ? "you are" : `${who} is`} choosing…`;
       cloche.append(el("p", "wx-srv-ck-cloche-text", words));
       if (!waitingJoin && view.blind) {
-        cloche.append(el("p", "wx-srv-ck-cloche-sub", "Blind mode: everything is revealed once all 10 are picked."));
+        cloche.append(el("p", "wx-srv-ck-cloche-sub", `Blind mode: everything is revealed once all ${view.mode.turns} are picked.`));
       }
       return [cloche];
     }
-    const out: HTMLElement[] = [];
-    const role = roleLine(current.role);
-    if (role !== "") out.push(el("p", "wx-srv-ck-role", role));
-    if (mine && current.vetoed !== null) {
-      const sweeper = nameOf(view, current.player === 1 ? 2 : 1, partnerFallback() ?? "your partner");
-      const swept = el("p", "wx-srv-ck-swept");
-      swept.append(emojiSpan("wx-srv-ck-swept-icon", "🧹"), doc.createTextNode(`${sweeper} swept `));
-      swept.append(el("em", "wx-srv-ck-swept-name", current.vetoed.name), doc.createTextNode(" off your table"));
-      out.push(swept);
-    }
     const exotic = current.chaosPair === true;
-    if (exotic) {
-      out.push(el("p", "wx-srv-ck-chaos-note", mine ? "🌋 Straight from the chaos shelf — dare you?" : "🌋 A pair from the chaos shelf!"));
-    }
-    if (!mine) {
-      const who = nameOf(view, current.player, "your partner");
-      out.push(el("p", "wx-srv-ck-watch", `${who} is choosing between:`));
-    }
     const pair = el("div", "wx-srv-ck-pair");
-    pair.classList.toggle("wx-srv-ck-pair-watch", !mine);
+    pair.classList.toggle("wx-srv-ck-pair-watch", !mine && !sweeping);
+    pair.classList.toggle("wx-srv-ck-pair-sweep", !mine && sweeping);
     pair.classList.toggle("wx-srv-ck-pair-chaos", exotic);
     pair.dataset["offer"] = String(current.offerIndex ?? 0);
     const [a, b] = current.options;
-    const side = (snap: IngredientSnap): HTMLElement => (mine ? ingredientCard(snap, pickAction(snap), exotic) : watchedCard(view, snap, exotic));
-    pair.append(side(a), el("span", "wx-srv-ck-or", "or"), side(b));
-    out.push(pair);
-    if (mine) {
-      const row = el("div", "wx-srv-ck-actions");
-      const offer = current.offerIndex ?? 0;
-      if (offer >= 2 || current.skipsRemaining === 0) {
-        row.append(el("p", "wx-srv-ck-final", skipLabel(2)));
-      } else {
-        const skip = button("wx-srv-ck-skip", skipLabel(offer), () => void move("skip", null));
-        skip.disabled = busy.has("move");
-        if (tableBusy?.kind === "skip") skip.textContent = "Dealing…";
-        row.append(skip);
-      }
-      const twists = tableTwists(current, view);
-      if (twists.length > 0) {
-        const extra = el("div", "wx-srv-ck-twistbar");
-        extra.append(...twists);
-        row.append(extra);
-      }
-      out.push(row);
-    }
-    return out;
+    const going = mine ? pickingId : tableBusy?.kind === "veto" ? tableBusy.target : null;
+    const side = (snap: IngredientSnap): HTMLElement => {
+      const dim = (going !== null && going !== snap.id) || (!mine && !sweeping);
+      if (mine) return ingredientCard(snap, pickAction(snap), exotic, dim);
+      if (sweeping && view.you !== null && current.canVeto === true) return ingredientCard(snap, sweepAction(snap), exotic, dim);
+      return ingredientCard(snap, null, exotic, dim);
+    };
+    const or = el("span", "wx-srv-ck-or", "or");
+    or.setAttribute("aria-hidden", "true");
+    pair.append(side(a), or, side(b));
+    return [pair];
   }
 
-  // -- Drawing: the basket tray ----------------------------------------------------------------------------
-
-  function basketChip(snap: IngredientSnap, className = "wx-srv-ck-chip-ing"): HTMLElement {
-    const chip = el("span", className);
-    chip.append(emojiSpan("wx-srv-ck-chip-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"));
-    chip.append(el("span", "wx-srv-ck-chip-name", snap.name));
-    return chip;
+  /** The pair on the table as a key: a new one is decoded before it swaps in (09b §D.6). */
+  function pairKey(view: CookoutView): string | null {
+    const current = view.current;
+    if (current === null || current.options === null) return null;
+    return `${current.turn}:${current.offerIndex ?? 0}:${current.options[0].id}:${current.options[1].id}`;
   }
 
-  /** A basket chip with how it got in (starter, wildcard, swap) and its star: a ☆/★ toggle on the viewer's
-   * own picks while stars can still change, a plain ★ otherwise. */
-  function pickChip(view: CookoutView, snap: PickSnap, className: string, mine: boolean): HTMLElement {
-    const chip = basketChip(snap, className);
-    // `data-picked`, never `data-ingredient`: that marks an option on the table, and a basket chip is not one.
-    chip.dataset["picked"] = snap.id;
-    const badge = snap.via === "seed" || snap.via === "wildcard" || snap.via === "swap" ? viaBadge(view, snap) : "";
-    if (badge !== "") {
-      chip.classList.add(`wx-srv-ck-chip-${snap.via}`);
-      chip.append(el("span", "wx-srv-ck-chip-badge", badge));
+  function drawTable(view: CookoutView): void {
+    const current = view.current;
+    const key = JSON.stringify([
+      "picking",
+      current,
+      view.you,
+      view.players.map((p) => p.name),
+      busy.has("move"),
+      pickingId,
+      tableBusy,
+      sweeping,
+      deps.partner(),
+    ]);
+    if (drawn.stage === key) return;
+    const pk = pairKey(view);
+    if (pk !== null && shownPair !== null && pk !== shownPair) {
+      // A new pair: keep the old cards (disabled) until both new pictures decode, at most 400 ms.
+      if (decodingPair === pk) return;
+      const options = current?.options ?? null;
+      const urls = options === null ? [] : options.flatMap((o) => (o.image === null ? [] : [o.image.card]));
+      if (urls.length > 0) {
+        decodingPair = pk;
+        for (const card of pickStage.querySelectorAll<HTMLButtonElement>("button.wx-srv-ck-card")) card.disabled = true;
+        const started = generation;
+        void decodeAll(doc, urls, DECODE_WAIT_MS, clock).then(() => {
+          if (started !== generation || decodingPair !== pk) return;
+          decodingPair = null;
+          shownPair = pk;
+          drawn.stage = "";
+          redraw();
+        });
+        return;
+      }
     }
+    decodingPair = null;
+    shownPair = pk;
+    drawn.stage = key;
+    pickStage.replaceChildren(...drawDraft(view));
+  }
+
+  // -- Stars: the ☆/★ toggle on the viewer's own picks (09a §1.5) ---------------------------------------------
+
+  /** The viewer's ☆/★ toggle on one of their own picks while stars can still change; a plain ★ on a star they
+   * may see; else null. `label` is the toggle's words when it shows them. */
+  function starControl(view: CookoutView, snap: PickSnap, mine: boolean, label: string | null): HTMLElement | null {
     const stars = view.stars;
     const starred = isStarred(view, snap.id);
-    chip.classList.toggle("wx-srv-ck-chip-starred", starred);
     // The wildcard is nobody's pick and cannot be starred; a swapped-in item is not one of the five.
     const starrable = mine && stars.enabled && view.you !== null && snap.via !== "wildcard" && snap.via !== "swap";
     if (starrable) {
       const on = stars.mine === snap.id;
       const toggle = button(
         "wx-srv-ck-star",
-        on ? "★" : "☆",
+        label === null ? (on ? "★" : "☆") : on ? "★ Your star" : `☆ ${label}`,
         () => {
           if (!on) doStar(snap.id);
         },
@@ -1165,11 +1730,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       toggle.classList.toggle("wx-srv-ck-star-on", on);
       // Revealed is locked (09a §1.5): a secret commitment cannot change once shown.
       toggle.disabled = stars.revealed || busy.has("star") || view.state === "abandoned";
-      chip.append(toggle);
-    } else if (starred) {
-      chip.append(el("span", "wx-srv-ck-star-mark", "★"));
+      return toggle;
     }
-    return chip;
+    if (starred) return el("span", "wx-srv-ck-star-mark", "★");
+    return null;
   }
 
   function starHint(view: CookoutView): HTMLElement | null {
@@ -1180,97 +1744,135 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       "p",
       "wx-srv-ck-star-hint",
       view.stars.mine === null
-        ? "⭐ Tap ☆ to secretly star one of your picks — the chef will make it a hero."
-        : "⭐ Your star is secret until you've both chosen. Tap another ☆ to change it.",
+        ? "⭐ Star one of your picks — it stays secret, and the chef will make it a hero."
+        : "⭐ Your star is secret until you've both chosen. Star another to change it.",
     );
   }
 
-  function drawTray(view: CookoutView): void {
-    if (view.state === "finished") {
-      tray.hidden = true;
-      drawn.tray = "";
-      return;
-    }
-    tray.hidden = false;
-    const key = JSON.stringify([
-      view.state,
-      view.players.map((p) => [p.name, p.pickCount, p.picks?.map((x) => [x.id, x.via]) ?? null]),
-      view.you?.slot ?? null,
-      view.staples.map((s) => s.id),
-      view.stars,
-      view.setup.fridgeRaid,
-      busy.has("star"),
-      trayOpen,
-    ]);
-    if (drawn.tray === key) return;
-    drawn.tray = key;
-    const toggle = button("wx-srv-ck-tray-toggle", "", () => {
-      trayOpen = !trayOpen;
-      redraw();
-      deps.afterChange();
-    });
-    toggle.setAttribute("aria-expanded", trayOpen ? "true" : "false");
-    const total = view.players[0].pickCount + view.players[1].pickCount;
-    toggle.append(emojiSpan("wx-srv-ck-tray-icon", "🧺"), el("span", "wx-srv-ck-tray-title", `Basket ${total}/10`));
-    toggle.append(el("span", "wx-srv-ck-tray-caret", trayOpen ? "▾" : "▸"));
-    const body = el("div", "wx-srv-ck-tray-body");
-    body.hidden = !trayOpen;
-    const order: Array<1 | 2> = view.you?.slot === 2 ? [2, 1] : [1, 2];
-    for (const slot of order) {
-      const player = playerOf(view, slot);
-      const row = el("div", "wx-srv-ck-tray-row");
-      row.append(el("span", "wx-srv-ck-tray-who", slotLabel(view, slot)));
-      const chips = el("div", "wx-srv-ck-tray-chips");
-      if (player.picks !== null) {
-        for (const pick of player.picks) chips.append(pickChip(view, pick, "wx-srv-ck-chip-ing", view.you?.slot === slot));
-      } else {
-        // Starters are public in both modes: a Blind partner's starter shows, their drafted picks do not.
-        const starters = startersOf(view, slot);
-        for (const pick of starters) chips.append(pickChip(view, pick, "wx-srv-ck-chip-ing", false));
-        for (let i = starters.length; i < player.pickCount; i += 1) {
-          const secret = el("span", "wx-srv-ck-chip-secret");
-          secret.append(emojiSpan("wx-srv-ck-chip-emoji", "🔒"), el("span", "wx-srv-ck-chip-name", "Secret pick"));
-          chips.append(secret);
-        }
-      }
-      const known = player.picks?.length ?? Math.max(player.pickCount, startersOf(view, slot).length);
-      const left = PICKS_PER_PLAYER - known;
-      if (left > 0) chips.append(el("span", "wx-srv-ck-chip-empty", `${left} to go`));
-      row.append(chips);
-      body.append(row);
-    }
-    const hint = starHint(view);
-    if (hint !== null) body.append(hint);
-    if (view.staples.length > 0) {
-      body.append(el("p", "wx-srv-ck-staples", `Always in the cupboard: ${view.staples.map((s) => s.name).join(", ")}`));
-    }
-    tray.replaceChildren(toggle, body);
+  /** A small inline thumb (dish "uses", recipe lines) with the name for screen readers and on hover. */
+  function smallThumb(item: Picturable, className: string, title: string): HTMLElement {
+    const wrap = el("span", `wx-srv-ck-mini ${className}`);
+    wrap.title = title;
+    wrap.dataset["ingredient"] = item.id;
+    const pic = ingredientPicture(doc, item, { rendition: "thumb", className: "wx-srv-ck-mini-pic", alt: "" });
+    pic.removeAttribute("role");
+    pic.removeAttribute("aria-label");
+    pic.setAttribute("aria-hidden", "true");
+    wrap.append(pic, el("span", "wx-srv-ck-sr", title));
+    return wrap;
   }
 
   // -- Drawing: the chef stage -----------------------------------------------------------------------------
 
+  /** One revealed basket item: its picture, its name under it (wrapping, never clamped) and its badges in the
+   * corners. On the viewer's own picks while stars can change, the whole tile is the ☆/★ toggle. */
+  function revealTile(view: CookoutView, snap: PickSnap, mine: boolean): HTMLElement {
+    const star = starControl(view, snap, mine, null);
+    const tile = star instanceof HTMLButtonElement ? star : el("div", "wx-srv-ck-rtile");
+    tile.classList.add("wx-srv-ck-rtile");
+    tile.textContent = "";
+    tile.dataset["picked"] = snap.id;
+    tile.append(ingredientPicture(doc, snap, { rendition: "thumb", className: "wx-srv-ck-rtile-pic" }));
+    tile.append(el("span", "wx-srv-ck-rtile-name", snap.name));
+    const badge = snap.via === "seed" || snap.via === "wildcard" || snap.via === "swap" ? viaBadge(view, snap) : "";
+    if (badge !== "") {
+      tile.classList.add(`wx-srv-ck-rtile-${snap.via}`);
+      const corner = el("span", "wx-srv-ck-rtile-via", Array.from(badge)[0] ?? "");
+      corner.title = badge;
+      tile.append(corner);
+    }
+    const starred = isStarred(view, snap.id);
+    tile.classList.toggle("wx-srv-ck-rtile-starred", starred);
+    if (star instanceof HTMLButtonElement) {
+      tile.append(el("span", "wx-srv-ck-rtile-star", view.stars.mine === snap.id ? "★" : "☆"));
+    } else if (starred) {
+      tile.append(el("span", "wx-srv-ck-rtile-star", "★"));
+    }
+    return tile;
+  }
+
+  /** The basket once full (09b §D.5): picture tiles grouped by player (the cloche's wildcard and a rescue
+   * swap's replacement after them), then the cupboard staples. */
   function revealBanner(view: CookoutView, animate: boolean): HTMLElement {
     const banner = el("div", "wx-srv-ck-reveal");
     const head = el("p", "wx-srv-ck-reveal-title");
-    head.append(emojiSpan("wx-srv-ck-reveal-icon", "🧺"), doc.createTextNode(view.blind ? "The big reveal — your 10 ingredients" : "Your 10 ingredients"));
-    const chips = el("div", "wx-srv-ck-reveal-chips");
-    const mine = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
-    allPicks(view).forEach((snap, index) => {
-      const chip = pickChip(view, snap, "wx-srv-ck-chip-ing wx-srv-ck-reveal-chip", mine.has(snap.id));
-      if (animate) {
-        chip.classList.add("wx-srv-ck-flip");
-        chip.style.animationDelay = `${index * REVEAL_STAGGER_MS}ms`;
+    const count = view.mode.turns;
+    head.append(
+      emojiSpan("wx-srv-ck-reveal-icon", "🧺"),
+      doc.createTextNode(view.blind ? `The big reveal — your ${count} ingredients` : `Your ${count} ingredients`),
+    );
+    banner.append(head);
+    const picks = allPicks(view);
+    const mineIds = new Set((view.you === null ? null : playerOf(view, view.you.slot).picks)?.map((p) => p.id) ?? []);
+    // A mode's anchor (the bread) gets its own first row (09c §6.4); the fillings follow, by player.
+    const anchor = anchorKind(view.mode);
+    const anchorItem = anchor === null ? null : anchorPick(view.mode, picks);
+    const rest = anchorItem === null ? picks : picks.filter((p) => p !== anchorItem);
+    const groups: Array<{ readonly label: string; readonly key: string; readonly items: PickSnap[] }> = [];
+    if (anchor !== null && anchorItem !== null) groups.push({ label: capitalise(kindNoun(anchor)), key: "anchor", items: [anchorItem] });
+    for (const slot of slotOrder(view)) {
+      groups.push({
+        label: slotLabel(view, slot),
+        key: String(slot),
+        items: rest.filter((p) => p.turn !== null && (p.turn % 2 === 1 ? 1 : 2) === slot),
+      });
+    }
+    groups.push({ label: "Extras", key: "extra", items: picks.filter((p) => p.turn === null) });
+    let index = 0;
+    for (const group of groups) {
+      if (group.items.length === 0) continue;
+      const box = el("div", "wx-srv-ck-rgroup");
+      box.dataset["group"] = group.key;
+      box.append(el("p", "wx-srv-ck-rgroup-who", group.label));
+      const grid = el("div", "wx-srv-ck-reveal-grid");
+      // At most one player's picks to a row (5 Classic, 4 toasted sandwich): wide panes keep their rows full.
+      grid.style.setProperty("--ck-reveal-cols", String(view.mode.picksPerPlayer));
+      for (const snap of group.items) {
+        const tile = revealTile(view, snap, mineIds.has(snap.id));
+        if (animate) {
+          tile.classList.add("wx-srv-ck-flip");
+          tile.style.animationDelay = `${index * REVEAL_STAGGER_MS}ms`;
+        }
+        index += 1;
+        grid.append(tile);
       }
-      chips.append(chip);
-    });
-    banner.append(head, chips);
+      box.append(grid);
+      banner.append(box);
+    }
     if (view.stars.enabled && view.stars.revealed && (view.stars.mine !== null || view.stars.partner !== null)) {
       banner.append(el("p", "wx-srv-ck-stars-revealed", "★ The stars are out — the chef makes them the heroes of every dish."));
     }
-    if (view.staples.length > 0) {
-      banner.append(el("p", "wx-srv-ck-staples", `Plus cupboard staples: ${view.staples.map((s) => s.name).join(", ")}`));
-    }
+    if (view.staples.length > 0) banner.append(staplesRow(view.staples, !isClassic(view.mode) && view.mode.anchorKind === "bread"));
     return banner;
+  }
+
+  /** The staple a toasted sandwich gets free (09c §3.1): listed first and marked so. */
+  const FREE_SANDWICH_STAPLE = "butter";
+
+  /** "Plus cupboard staples:" and their thumbs (09b §D.5). `butterFree`: a toasted sandwich's butter goes first,
+   * marked "free" (09c §6.4). */
+  function staplesRow(staples: readonly Staple[], butterFree = false): HTMLElement {
+    const row = el("div", "wx-srv-ck-staples");
+    row.append(el("span", "wx-srv-ck-staples-label", "Plus cupboard staples:"));
+    const list = el("span", "wx-srv-ck-staples-list");
+    const free = butterFree ? staples.find((s) => s.id === FREE_SANDWICH_STAPLE) : undefined;
+    const ordered = free === undefined ? staples : [free, ...staples.filter((s) => s !== free)];
+    for (const staple of ordered) {
+      const item = el("span", "wx-srv-ck-staple");
+      item.dataset["ingredient"] = staple.id;
+      const pic = ingredientPicture(doc, staple, { rendition: "thumb", className: "wx-srv-ck-mini-pic", alt: "" });
+      pic.removeAttribute("role");
+      pic.removeAttribute("aria-label");
+      pic.setAttribute("aria-hidden", "true");
+      item.append(pic, el("span", "wx-srv-ck-staple-name", staple.name));
+      if (staple === free) {
+        item.classList.add("wx-srv-ck-staple-free");
+        item.append(el("span", "wx-srv-ck-staple-free-tag", "free"));
+      }
+      list.append(item);
+    }
+    row.append(list);
+    return row;
   }
 
   function partnerName(view: CookoutView): string {
@@ -1296,7 +1898,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       const card = el("div", "wx-srv-ck-gate wx-srv-ck-cloche-gate");
       card.append(emojiSpan("wx-srv-ck-gate-icon wx-srv-ck-cloche-bell", "🛎️"));
       const words = el("div", "wx-srv-ck-gate-words");
-      words.append(el("p", "wx-srv-ck-gate-text", "Lift the cloche? One surprise 11th ingredient"));
+      words.append(el("p", "wx-srv-ck-gate-text", `Lift the cloche? One surprise ${ordinal(view.mode.turns + 1)} ingredient`));
       words.append(el("p", "wx-srv-ck-gate-sub", "Neither of you chose it — the chef has to use it."));
       card.append(words);
       if (view.you !== null) {
@@ -1346,12 +1948,18 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
           const pair = el("div", "wx-srv-ck-pair wx-srv-ck-swap-pair");
           const [a, b] = swap.pair;
           const option = (snap: IngredientSnap): HTMLElement =>
-            ingredientCard(snap, {
-              onPick: () => void doChooseSwap(snap.id),
-              cta: swapChoice === snap.id ? "Swapping…" : "Swap this in",
-              chosen: swapChoice === snap.id,
-              disabled: working,
-            });
+            ingredientCard(
+              snap,
+              {
+                onPick: () => void doChooseSwap(snap.id),
+                label: `Swap in ${snap.name}`,
+                busyText: "Swapping…",
+                chosen: swapChoice === snap.id,
+                disabled: working,
+              },
+              false,
+              swapChoice !== null && swapChoice !== snap.id,
+            );
           pair.append(option(a), el("span", "wx-srv-ck-or", "or"), option(b));
           box.append(pair);
         }
@@ -1386,7 +1994,10 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         swapTarget = snap.id;
         redraw();
       }, starred ? `${snap.name} is a star and can't be swapped` : `Send back ${snap.name}`);
-      item.append(emojiSpan("wx-srv-ck-chip-emoji", snap.emoji !== "" ? snap.emoji : "🍽️"), el("span", "wx-srv-ck-chip-name", snap.name));
+      item.append(
+        ingredientPicture(doc, snap, { rendition: "thumb", className: "wx-srv-ck-swap-pic", alt: "" }),
+        el("span", "wx-srv-ck-swap-name", snap.name),
+      );
       if (starred) item.append(el("span", "wx-srv-ck-star-mark", "★"));
       item.disabled = starred || working;
       item.dataset["ingredient"] = snap.id;
@@ -1434,13 +2045,21 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const box = el("div", "wx-srv-ck-chef");
     if (state === "pending" || state === "none") {
       box.classList.add("wx-srv-ck-chef-working");
-      box.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
-      const count = allPicks(view).length;
-      const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
-      box.append(el("p", "wx-srv-ck-chef-text", `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`));
+      // One heading row (the hat, the line, the clock), so the carousel below gets the rest of the screen.
+      const head = el("div", "wx-srv-ck-chef-head");
+      head.append(emojiSpan("wx-srv-ck-chef-hat", "👩‍🍳"));
+      head.append(el("p", "wx-srv-ck-chef-text", chefWorkingText(view)));
       const elapsed = el("span", "wx-srv-ck-elapsed", formatElapsed(chefSince === null ? 0 : (clock.now() - chefSince) / 1000));
       elapsed.setAttribute("aria-hidden", "true");
-      box.append(elapsed);
+      head.append(elapsed);
+      box.append(head);
+      // While the chef works: the chosen ingredients go round with their fun facts (09b §D.4).
+      const slides = anchorFirst(view.mode, allPicks(view));
+      if (slides.length > 0) {
+        carousel = createCarousel({ document: doc, clock, reducedMotion: () => reduced() }, slides);
+        box.append(carousel.element);
+        if (visible) carousel.start();
+      }
       return box;
     }
     box.classList.add("wx-srv-ck-chef-failed");
@@ -1459,6 +2078,31 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     retry.disabled = busy.has("concepts");
     box.append(retry);
     return box;
+  }
+
+  /** The chef's working line: Classic's as before; a mode round names its dish and its anchor (09c §6.4). */
+  function chefWorkingText(view: CookoutView): string {
+    const count = allPicks(view).length;
+    if (isClassic(view.mode)) {
+      const fresh = view.generation > 1 ? "3 new dishes" : "3 dishes";
+      return `Chef is inventing ${fresh} from your ${count > 0 ? count : 10} ingredients…`;
+    }
+    const dishes = `three ${view.generation > 1 ? "new " : ""}${plural(dishNoun(view.mode))}`;
+    const anchor = anchorPick(view.mode, allPicks(view));
+    if (anchor !== null) return `The chef is making ${dishes} with your ${anchor.name}…`;
+    return `The chef is making ${dishes} from your ${count > 0 ? count : view.mode.turns} ingredients…`;
+  }
+
+  /** The plate shown while a dish has no picture: the dish type's, or the mode's own emoji. */
+  function plateEmoji(view: CookoutView, concept: Concept): string {
+    return !isClassic(view.mode) && view.mode.emoji !== "" ? view.mode.emoji : dishEmoji(concept.dishType);
+  }
+
+  /** A snap with the basket's picture when it came without one (a dish's copy of a basket item). */
+  function withPicture(view: CookoutView, snap: IngredientSnap): IngredientSnap {
+    if (snap.image !== null) return snap;
+    const known = allPicks(view).find((p) => p.id === snap.id);
+    return known === undefined || known.image === null ? snap : { ...snap, image: known.image };
   }
 
   function nameLookup(view: CookoutView, concept: Concept): Map<string, string> {
@@ -1485,14 +2129,14 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       img.addEventListener("error", () => {
         open.remove();
         header.classList.add("wx-srv-ck-dish-pic-empty");
-        header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+        header.append(emojiSpan("wx-srv-ck-dish-plate", plateEmoji(view, concept)));
       });
       open.append(img);
       header.append(open);
       return header;
     }
     header.classList.add("wx-srv-ck-dish-pic-empty");
-    header.append(emojiSpan("wx-srv-ck-dish-plate", dishEmoji(concept.dishType)));
+    header.append(emojiSpan("wx-srv-ck-dish-plate", plateEmoji(view, concept)));
     if (archived) return header;
     if (view.images.state === "pending") {
       header.classList.add("wx-srv-ck-dish-pic-pending");
@@ -1519,6 +2163,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const box = el("div", "wx-srv-ck-recipe");
     box.dataset["concept"] = concept.id;
     box.dataset["generation"] = String(slot.generation);
+    if (concept.build !== null) box.append(el("p", "wx-srv-ck-recipe-build", concept.build.label));
     box.append(cooked.section(view, concept, slot, picture));
     const facts = el("div", "wx-srv-ck-recipe-facts");
     for (const [label, value] of [
@@ -1538,6 +2183,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
     box.append(el("h4", "wx-srv-ck-recipe-head", "Ingredients"));
     const list = el("ul", "wx-srv-ck-recipe-ings");
+    const basket = new Map(allPicks(view).map((p) => [p.id, p] as const));
     for (const item of recipe.ingredients) {
       const li = el("li", "wx-srv-ck-recipe-ing");
       const label = el("label", "wx-srv-ck-recipe-ing-label");
@@ -1553,11 +2199,20 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
         li.classList.toggle("wx-srv-ck-recipe-ing-done", box2.checked);
       });
       li.classList.toggle("wx-srv-ck-recipe-ing-done", box2.checked);
+      // A basket ingredient gets its 24 px picture (09b §D.5); a staple or a pantry extra does not.
+      const fromBasket = basket.get(item.id);
+      const thumb = fromBasket === undefined ? null : ingredientPicture(doc, fromBasket, { rendition: "thumb", className: "wx-srv-ck-recipe-pic", alt: "" });
+      if (thumb !== null) {
+        thumb.removeAttribute("role");
+        thumb.removeAttribute("aria-label");
+        thumb.setAttribute("aria-hidden", "true");
+      }
       const words = el("span", "wx-srv-ck-recipe-ing-words");
       words.append(el("span", "wx-srv-ck-recipe-qty", item.quantity));
       words.append(el("span", "wx-srv-ck-recipe-ing-name", item.name ?? names.get(item.id) ?? tidy(item.id)));
       if (item.note !== "") words.append(el("span", "wx-srv-ck-recipe-note", item.note));
-      label.append(box2, words);
+      if (thumb !== null) label.append(box2, thumb, words);
+      else label.append(box2, words);
       li.append(label);
       list.append(li);
     }
@@ -1653,6 +2308,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     readonly match: ConceptId | null;
     /** The basket the dish was made from (for "Uses n/total"). */
     readonly basketSize: number;
+    /** The basket itself: a mode round's anchor (the bread) is found in it. */
+    readonly basket: readonly IngredientSnap[];
   }
 
   function currentDish(view: CookoutView, concept: Concept): DishContext {
@@ -1664,6 +2321,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       votes: view.vote?.votes ?? null,
       match: view.vote?.match ?? null,
       basketSize: allPicks(view).length,
+      basket: allPicks(view),
     };
   }
 
@@ -1676,6 +2334,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       votes: set.vote.votes,
       match: set.vote.match,
       basketSize: set.basket.length,
+      basket: set.basket,
     };
   }
 
@@ -1818,25 +2477,43 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const more = view.state === "finished" ? dishMore(view, concept, ctx) : null;
     if (more !== null) titleRow.append(more);
     body.append(titleRow);
+    const modeRound = !isClassic(view.mode);
+    const anchor = modeRound ? dishAnchor(view, ctx) : null;
+    if (anchor !== null) body.append(anchorLine(view, anchor));
     const tags = el("div", "wx-srv-ck-dish-tags");
     if (concept.vibe !== "") tags.append(el("span", "wx-srv-ck-tag wx-srv-ck-tag-vibe", concept.vibe));
-    if (concept.dishType !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.dishType)));
-    if (concept.technique !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.technique)));
+    if (modeRound && concept.build !== null) {
+      // 09c §6.4: the build ("Skillet-fried") in place of the dish type and technique.
+      tags.append(el("span", "wx-srv-ck-tag wx-srv-ck-tag-build", concept.build.label));
+    } else if (!modeRound || concept.build === null) {
+      if (concept.dishType !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.dishType)));
+      if (concept.technique !== "") tags.append(el("span", "wx-srv-ck-tag", tidy(concept.technique)));
+    }
     if (tags.childElementCount > 0) body.append(tags);
     const rule = ruleBadge(view, concept);
     if (rule !== null) body.append(rule);
     body.append(el("p", "wx-srv-ck-dish-desc", concept.description));
     const total = Math.max(ctx.basketSize, concept.pickedIngredients.length + concept.omitted.length);
     const uses = el("div", "wx-srv-ck-dish-uses");
-    uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${concept.pickedIngredients.length}/${total}`));
+    if (anchor !== null) {
+      // "Uses 6/7 fillings": the anchor is always used and not counted (09c §6.4).
+      const used = concept.pickedIngredients.filter((s) => s.id !== anchor.id).length;
+      uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${used}/${Math.max(total - 1, used)} fillings`));
+    } else {
+      uses.append(el("span", "wx-srv-ck-uses-count", `Uses ${concept.pickedIngredients.length}/${total}`));
+    }
+    // 28 px thumbs (09b §D.5): the name in the tooltip and for screen readers; left-out ones faded.
     const chips = el("div", "wx-srv-ck-uses-chips");
     for (const snap of concept.pickedIngredients) {
-      const chip = basketChip(snap, "wx-srv-ck-chip-ing wx-srv-ck-chip-small");
+      const thumb = smallThumb(withPicture(view, snap), "wx-srv-ck-use", snap.name);
       if (isStarred(view, snap.id)) {
-        chip.classList.add("wx-srv-ck-chip-starred");
-        chip.append(el("span", "wx-srv-ck-star-mark", "★"));
+        thumb.classList.add("wx-srv-ck-use-starred");
+        thumb.append(el("span", "wx-srv-ck-use-star", "★"));
       }
-      chips.append(chip);
+      chips.append(thumb);
+    }
+    for (const item of concept.omitted) {
+      chips.append(smallThumb(withPicture(view, item.ingredient), "wx-srv-ck-use wx-srv-ck-use-omitted", `Left out: ${item.ingredient.name}`));
     }
     uses.append(chips);
     if (concept.staplesUsed.length > 0) {
@@ -1865,6 +2542,37 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     }
     card.append(body);
     return card;
+  }
+
+  /** The anchor (the bread) of the basket a dish was made from, from the basket's own snapshot (09c §3.4:
+   * the canonical name, never the chef's prose). */
+  function dishAnchor(view: CookoutView, ctx: DishContext): IngredientSnap | null {
+    if (anchorKind(view.mode) === null) return null;
+    const fromBasket = ctx.basket.find((s) => "kind" in s && isAnchorPick(view.mode, s as PickSnap));
+    if (fromBasket !== undefined) return fromBasket;
+    // An earlier set's basket carries plain snaps: its anchor is the current basket's when unswapped.
+    const current = anchorPick(view.mode, allPicks(view));
+    return current !== null && ctx.basket.some((s) => s.id === current.id) ? current : null;
+  }
+
+  /** "On Sourdough loaf" with the bread's thumbnail, under a dish's title. */
+  function anchorLine(view: CookoutView, anchor: IngredientSnap): HTMLElement {
+    const line = el("p", "wx-srv-ck-dish-anchor");
+    const pic = ingredientPicture(doc, withPicture(view, anchor), { rendition: "thumb", className: "wx-srv-ck-dish-anchor-pic", alt: "" });
+    pic.removeAttribute("role");
+    pic.removeAttribute("aria-label");
+    pic.setAttribute("aria-hidden", "true");
+    line.append(pic, el("span", "wx-srv-ck-dish-anchor-name", `On ${anchor.name}`));
+    return line;
+  }
+
+  /** The chef stage's header in a mode round: "🥪 Toasted sandwich" over the dishes (09c §6.4). */
+  function modeHeadSection(view: CookoutView): HTMLElement[] {
+    if (isClassic(view.mode) || view.concepts.state !== "ready") return [];
+    const head = el("p", "wx-srv-ck-stagehead");
+    if (view.mode.emoji !== "") head.append(emojiSpan("wx-srv-ck-stagehead-icon", view.mode.emoji));
+    head.append(doc.createTextNode(view.mode.label));
+    return [head];
   }
 
   /** The dish sets a rescue swap replaced: collapsed under "Earlier dishes", read-only. */
@@ -1924,7 +2632,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   /** The finished stage's sections, top to bottom. The swap shows above the dishes once proposed or done
    * (both players need it first), and below them as the "Rescue swap" button before that. */
-  const FINISHED_SECTIONS = ["basket", "gate", "chef", "swapTop", "vote", "dishes", "swapBottom", "earlier"] as const;
+  const FINISHED_SECTIONS = ["basket", "gate", "chef", "swapTop", "vote", "modeHead", "dishes", "swapBottom", "earlier"] as const;
   type FinishedSection = (typeof FINISHED_SECTIONS)[number];
 
   /** Redraws one section of the finished stage when its key changed. */
@@ -1935,11 +2643,39 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     entry.element.replaceChildren(...build());
   }
 
+  function stopCarousel(): void {
+    carousel?.destroy();
+    carousel = null;
+  }
+
+  /** While picking, the table shows and the stage below it does not; otherwise the other way round. */
+  function showTable(picking: boolean): void {
+    // Leaving the table (the basket is full, the round ended): a toast about a move on it is stale.
+    if (!picking && !table.hidden) hideToast();
+    table.hidden = !picking;
+    stage.hidden = picking;
+    scroll.classList.toggle("wx-srv-ck-scroll-table", picking);
+    if (!picking) {
+      // Nothing of the table outlives picking, not even hidden (an ended round keeps no pair in the DOM).
+      pickStage.replaceChildren();
+      tableActions.replaceChildren();
+      sweeping = false;
+      shownPair = null;
+      decodingPair = null;
+      drawn.banner = "";
+      drawn.actions = "";
+      drawn.progress = "";
+      drawn.strip = "";
+    }
+  }
+
   function drawStage(view: CookoutView): void {
+    showTable(view.state === "picking");
     if (view.state === "abandoned") {
       const key = JSON.stringify(["abandoned"]);
       if (drawn.stage === key) return;
       drawn.stage = key;
+      stopCarousel();
       conceptCards.clear();
       sections.clear();
       const box = el("div", "wx-srv-ck-ended");
@@ -1950,33 +2686,37 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       return;
     }
     if (view.state === "picking") {
+      stopCarousel();
       conceptCards.clear();
       sections.clear();
+      if (stage.childElementCount > 0) stage.replaceChildren();
+      if (!drawn.stage.startsWith('["picking"')) pickStage.replaceChildren();
+      // Sweep mode lasts only while this viewer can still sweep the pair on the table.
       const current = view.current;
-      const key = JSON.stringify([
-        "picking",
-        current,
-        view.you,
-        view.players.map((p) => p.name),
-        busy.has("move"),
-        pickingId,
-        tableBusy,
-        deps.partner(),
-      ]);
-      if (drawn.stage === key) return;
-      drawn.stage = key;
-      stage.replaceChildren(...drawDraft(view));
+      if (sweeping && (current === null || current.options === null || current.canVeto !== true || view.you === null || view.you.slot === current.player)) {
+        sweeping = false;
+      }
+      drawStrip(view);
+      drawBanner(view);
+      drawProgress(view);
+      drawTable(view);
+      drawActions(view);
       return;
     }
+    pickStage.replaceChildren();
+    tableActions.replaceChildren();
     // Finished: the basket, the chef gate, the chef's status, the dinner vote, the three dishes, the rescue
     // swap and any earlier dishes — each redrawn only when what it shows changed.
     const frameKey = JSON.stringify(["finished", view.seq]);
     if (drawn.stage !== frameKey) {
       drawn.stage = frameKey;
+      stopCarousel();
       conceptCards.clear();
       sections.clear();
       const hosts: HTMLElement[] = [];
       for (const name of FINISHED_SECTIONS) {
+        // A Classic round's stage is exactly as before: no mode header host at all.
+        if (name === "modeHead" && isClassic(view.mode)) continue;
         const host = el("div", name === "dishes" ? "wx-srv-ck-dishes" : `wx-srv-ck-sec wx-srv-ck-sec-${name}`);
         sections.set(name, { element: host, key: "" });
         hosts.push(host);
@@ -2008,8 +2748,15 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     );
     section(
       "chef",
-      JSON.stringify([view.concepts.state, busy.has("concepts"), view.gate.waitingFor.length, view.generation, allPicks(view).length]),
+      JSON.stringify([
+        view.concepts.state,
+        busy.has("concepts"),
+        view.gate.waitingFor.length,
+        view.generation,
+        allPicks(view).map((p) => [p.id, p.what, p.image, p.facts]),
+      ]),
       () => {
+        stopCarousel();
         const status = chefStatus(view);
         return status === null ? [] : [status];
       },
@@ -2023,6 +2770,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       () => (!swapUp && view.concepts.state === "ready" ? swapSection(view) : []),
     );
     section("vote", JSON.stringify([view.vote, view.concepts.data?.map((c) => c.title) ?? null, you, names]), () => voteSection(view));
+    section("modeHead", JSON.stringify([view.mode, view.concepts.state]), () => modeHeadSection(view));
     drawChef(view);
     section(
       "earlier",
@@ -2072,11 +2820,19 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
 
   function drawBar(view: CookoutView | undefined): void {
     if (view === undefined) {
+      titleIcon.textContent = "🍳";
+      title.removeAttribute("aria-label");
       modeBadge.hidden = true;
+      helpButton.hidden = true;
       endButton.hidden = true;
       newButton.hidden = true;
       return;
     }
+    helpButton.hidden = view.state !== "picking";
+    const modeRound = !isClassic(view.mode);
+    titleIcon.textContent = modeRound && view.mode.emoji !== "" ? view.mode.emoji : "🍳";
+    if (modeRound) title.setAttribute("aria-label", `${view.mode.label} Cookout`);
+    else title.removeAttribute("aria-label");
     modeBadge.hidden = false;
     modeBadge.textContent = view.blind ? "Blind" : "Open";
     modeBadge.dataset["mode"] = view.blind ? "blind" : "open";
@@ -2097,7 +2853,12 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     pickingId = null;
     expanded.clear();
     checked.clear();
-    trayOpen = true;
+    sheet = null;
+    sweeping = false;
+    shownPair = null;
+    decodingPair = null;
+    stopCarousel();
+    intro.close();
     ending = false;
     confirmEnd.hidden = true;
     sawPicking = false;
@@ -2115,21 +2876,32 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     expandedEarlier.clear();
     dishMenu = null;
     cooked.reset();
-    drawn.progress = "";
-    drawn.stage = "";
-    drawn.tray = "";
-    drawn.rules = "";
+    for (const name of Object.keys(drawn) as Array<keyof typeof drawn>) drawn[name] = "";
     conceptCards.clear();
     sections.clear();
     rules.replaceChildren();
     rules.hidden = true;
+    strip.replaceChildren();
+    strip.hidden = true;
+    turnLine.replaceChildren();
     progress.replaceChildren();
+    pickStage.replaceChildren();
+    tableActions.replaceChildren();
+    sheetHost.replaceChildren();
+    sheetHost.hidden = true;
+    table.hidden = true;
+    stage.hidden = false;
     stage.replaceChildren();
-    tray.replaceChildren();
   }
 
-  /** The round's start-sheet twists as chips under the header. A spun style lands its wheel once. */
+  /** The round's start-sheet twists as chips once the basket is full (while picking they are the table's
+   * icon strip). A spun style lands its wheel once — wherever it is first seen. */
   function drawRules(view: CookoutView): void {
+    if (view.state === "picking") {
+      rules.hidden = true;
+      drawn.rules = "";
+      return;
+    }
     const setup = view.setup;
     const spin = setup.styleSpun && setup.style !== null && !wheelPlayed.has(view.seq);
     // `spin` is not part of the key: the very next refresh must not redraw the chip and cut the wheel short.
@@ -2139,17 +2911,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const chips: HTMLElement[] = [];
     if (setup.style !== null) {
       const chip = el("span", "wx-srv-ck-rule-chip wx-srv-ck-rule-style");
-      if (spin && !reduced()) {
-        // The wheel spins through the faces and lands on the server's answer (it chose at creation).
-        const wheel = el("span", "wx-srv-ck-wheel");
-        wheel.setAttribute("aria-hidden", "true");
-        const reel = el("span", "wx-srv-ck-wheel-reel");
-        for (const face of [...WHEEL_FACES, ...WHEEL_FACES, setup.style.emoji]) reel.append(el("span", "wx-srv-ck-wheel-face", face));
-        wheel.append(reel);
-        chip.append(wheel);
-      } else {
-        chip.append(emojiSpan("wx-srv-ck-rule-icon", setup.style.emoji));
-      }
+      // The wheel spins through the faces and lands on the server's answer (it chose at creation).
+      chip.append(styleIcon(setup.style.emoji, spin, "wx-srv-ck-rule-icon"));
       chip.append(el("span", "wx-srv-ck-rule-text", setup.styleSpun ? `${setup.style.label} (spun)` : setup.style.label));
       chips.push(chip);
     }
@@ -2224,8 +2987,8 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     const view = deps.model.view(seq);
     drawBar(view);
     if (view === undefined) {
-      progress.hidden = true;
-      tray.hidden = true;
+      showTable(false);
+      drawSheet(undefined);
       if (drawn.stage !== "loading") {
         drawn.stage = "loading";
         stage.replaceChildren(el("p", "wx-srv-ck-loading", "Getting the kitchen ready…"));
@@ -2235,11 +2998,20 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
     if (view.state === "picking") sawPicking = true;
     syncElapsed(view);
     drawRules(view);
-    drawProgress(view);
     drawStage(view);
-    drawTray(view);
+    drawSheet(view);
     applyFocus(view);
+    if (carousel !== null) carousel.start();
+    // The first time this device opens this round while it is being picked: the intro (09b §D.2).
+    if (view.state === "picking") askOptions(view);
+    if (view.state === "picking" && !intro.isOpen() && intro.isNew(view.seq)) intro.open(view);
+    if (view.state !== "picking") intro.close();
     deps.afterChange();
+  }
+
+  function openIntro(): void {
+    const view = drawnSeq === null ? undefined : deps.model.view(drawnSeq);
+    if (view !== undefined) intro.open(view);
   }
 
   function forget(): void {
@@ -2268,6 +3040,7 @@ export function createCookoutGame(deps: CookoutGameDeps): CookoutGame {
       visible = false;
       stopTimers();
       stopFx();
+      carousel?.stop();
       if (ending) cancelEnd();
     },
     reset: forget,

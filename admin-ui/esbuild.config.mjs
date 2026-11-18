@@ -24,12 +24,22 @@ for (const [style, constant] of [["satellite", "WIXY_ADVENTURE_SATELLITE_URL"], 
   imageryDefines[constant] = JSON.stringify(`/admin/static/admin/adventure-${style}.webp?v=${hash}`);
 }
 
+// Cookout's start-sheet mode tiles (spec/server-chat/09c-cookout-modes.md §6.1): two 512x512 WebP pictures,
+// copied and addressed by content hash like the Adventure imagery. The pane falls back to the mode's emoji.
+const modeTiles = {};
+for (const mode of ["classic", "toastie"]) {
+  await copyFile(`data/cookout-mode-${mode}.webp`, `../wixy_server/static/admin/cookout-mode-${mode}.webp`);
+  const hash = createHash("sha256").update(await readFile(`../wixy_server/static/admin/cookout-mode-${mode}.webp`)).digest("hex").slice(0, 10);
+  modeTiles[mode] = `/admin/static/admin/cookout-mode-${mode}.webp?v=${hash}`;
+}
+
 await esbuild.build({
   entryPoints: ["src/index.ts"],
   define: {
     WIXY_CALL_WORKLET_URL: JSON.stringify(`/admin/static/admin/call-worklet.js?v=${workletHash}`),
     WIXY_ADVENTURE_WORLD_URL: JSON.stringify(`/admin/static/admin/adventure-world.json?v=${worldHash}`),
     ...imageryDefines,
+    WIXY_COOKOUT_MODE_TILES: JSON.stringify(modeTiles),
   },
   bundle: true,
   minify: true,

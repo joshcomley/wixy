@@ -314,7 +314,7 @@ Flat rice noodles |  | base | rice-noodle | everyday | Broad noodles for pad tha
 Pad thai noodles |  | base | rice-noodle | uncommon | Medium-flat rice noodles that stir-fry beautifully
 Pho noodles | banh pho | base | rice-noodle | uncommon | Silky flat rice noodles for Vietnamese broth
 Fresh rice noodles | ho fun | base | rice-noodle | uncommon | Slippery, wide fresh noodles for wok-fried beef
-Bun noodles | bún | base | rice-noodle | uncommon | Round Vietnamese vermicelli for grilled meats and herbs
+Bun noodles |  | base | rice-noodle | uncommon | Round Vietnamese vermicelli for grilled meats and herbs
 Laksa noodles |  | base | rice-noodle | uncommon | Thick round rice noodles that hold up in spicy coconut broth
 Tteok | rice cake sticks | base | rice-noodle | exotic | Chewy Korean rice cylinders for spicy stir-fried dishes
 Shirataki noodles | konjac noodles | base | glass-noodle | exotic | Translucent, near-zero calorie Japanese yam noodles

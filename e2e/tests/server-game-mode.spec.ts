@@ -6,30 +6,14 @@
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
+import { unlockServer as unlock } from "./server-helpers";
 
 test.use({ launchOptions: { args: ["--use-fake-device-for-media-stream", "--use-fake-ui-for-media-stream"] } });
 test.describe.configure({ timeout: 120_000 });
 
 const MULTI_TAP_INTERVAL_MS = 400;
 
-async function unlock(page: Page, name: string): Promise<void> {
-  const { pin } = (await (await page.request.post("/test/server/config")).json()) as { pin: string };
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  for (const digit of pin) await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function startWyr(page: Page): Promise<void> {
   await page.locator(".wx-srv-more-button").click();
@@ -49,8 +33,7 @@ test("a game tab hides the header and composer; Chat brings them back; a ringing
   const pb = await b.newPage();
   const errors = [trackConsoleErrors(pa), trackConsoleErrors(pb)];
   try {
-    await unlock(pa, "Caller");
-    await unlock(pb, "Receiver");
+    await unlockTogether(unlock, [[pa, "Caller"], [pb, "Receiver"]], { keepAwakeAfter: false });
     await startWyr(pb);
 
     // Receiver is in the game tab: full screen.

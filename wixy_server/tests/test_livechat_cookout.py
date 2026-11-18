@@ -29,6 +29,7 @@ from wixy_server.livechat.cookout_game import (
     cookout_view_json,
     current_turn,
 )
+from wixy_server.livechat.cookout_visuals import IngredientVisuals
 from wixy_server.livechat.models import AttachmentResult, CookoutRoundRow, message_json
 from wixy_server.livechat.store import (
     _LATEST_SCHEMA_VERSION,
@@ -43,6 +44,7 @@ from wixy_server.livechat.store import (
     WyrRoundNotFoundError,
 )
 from wixy_server.tests.adventure_testkit import run_concurrently
+from wixy_server.tests.no_visuals import no_visuals
 
 ROLES = ("base", "protein", "produce", "accent")
 V20_TABLES = ("messages", "wyr_rounds", "adv_rounds", "wyr_chat", "events")
@@ -447,6 +449,7 @@ def view_for(
     seq: int,
     viewer: str | None,
     email: str | None = None,
+    visuals: IngredientVisuals | None = None,
 ) -> dict[str, Any]:
     from wixy_server.livechat.reactions import reactor_key
 
@@ -461,6 +464,7 @@ def view_for(
             viewer_key=reactor_key(viewer) if viewer else None,
             viewer_email=email,
             signer=_Signer(),
+            visuals=visuals if visuals is not None else no_visuals(),
         )
     )
 
@@ -469,8 +473,8 @@ def view_for(
 
 
 class TestSchema:
-    def test_the_latest_schema_version_is_at_least_21(self) -> None:
-        assert _LATEST_SCHEMA_VERSION >= 21  # v22 (live voice uploads) is additive on top
+    def test_the_latest_schema_version_is_24(self) -> None:
+        assert _LATEST_SCHEMA_VERSION == 24  # v22+v23 live voice, v24 Cookout modes
 
     def test_a_fresh_database_has_the_three_tables(
         self, store: LiveChatStore, db_path: Path
@@ -582,6 +586,7 @@ class TestCreate:
             "swap": "none",
             "dinnerDecided": False,
             "cookedCount": 0,
+            "mode": "classic",
         }
         first, second = data_of(store, seq).turns[0].offers[0]
         blob = json.dumps(wire)
@@ -1252,14 +1257,19 @@ class TestBlindRedaction:
         assert set(v) == {
             "seq", "state", "rev", "blind", "revealed", "players", "you", "current",
             "history", "staples", "concepts", "images", "recipes", "setup", "generation",
-            "starters", "basket", "gate", "wildcard", "stars", "vote", "swap", "generations",
+            "starters", "basket", "gate", "wildcard", "stars", "vote", "swap",
+            "generations", "mode",
         }  # fmt: skip
         assert v["players"][1] == {
             "slot": 2, "name": None, "pickCount": 0, "picks": [], "chaosUsed": False,
             "vetoUsed": False,
         }  # fmt: skip
-        assert set(v["current"]["options"][0]) == {"id", "name", "category", "emoji", "blurb"}
-        assert len(v["staples"]) == 8 and v["staples"][0] == {"id": "water", "name": "Water"}
+        assert set(v["current"]["options"][0]) == {
+            "id", "name", "category", "emoji", "blurb", "what", "image",
+        }  # fmt: skip
+        assert len(v["staples"]) == 8 and v["staples"][0] == {
+            "id": "water", "name": "Water", "image": None,
+        }  # fmt: skip
         assert v["concepts"] == {"state": "none", "data": None, "error": None}
         assert v["images"] == {"state": "none", "pictures": {"a": None, "b": None, "c": None}}
         assert v["recipes"]["a"] == {
@@ -1327,8 +1337,8 @@ class TestConcepts:
         first = view["concepts"]["data"][0]
         assert first["id"] == "a" and len(first["pickedIngredients"]) == 8
         assert first["staplesUsed"] == [
-            {"id": "salt", "name": "Salt"},
-            {"id": "butter", "name": "Butter"},
+            {"id": "salt", "name": "Salt", "image": None},
+            {"id": "butter", "name": "Butter", "image": None},
         ]
         assert len(first["omitted"]) == 2 and set(first["omitted"][0]) == {"ingredient", "reason"}
 

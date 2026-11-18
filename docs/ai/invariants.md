@@ -1,5 +1,42 @@
 # Invariants
 
+### Inv 60 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
+
+The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to
+any conversation (livechat.md §24.3, workspace 00058 round 2, decisions/00202). Four rules:
+
+1. **Generated from ingredient names only.** The catalogue (`livechat/cookout_catalogue.json`) and every picture are
+   produced offline by `tooling/cookout/visual/` from the committed ingredient bank. No chat message, player name, basket,
+   round, vote, rating or photo ever reaches a catalogue, picture, checker or calibration prompt; the picture prompt is a
+   fixed server-owned template with only the catalogue's `visual` sentence substituted.
+2. **Not erased by delete or wipe.** Nothing in them is chat-specific, so deleting the round's message or wiping the chat
+   neither has nor needs anything to erase: the catalogue is a committed file, the manifest a committed file, and the
+   pictures content-addressed files shared by every round and by both slots under `<storage>/cookout-images/objects`
+   (the Cookout tables hold no ingredient-picture reference at all; the enrichment is read-time. The three AI-drawn DISH pictures are different: those are chat content, Inv 57).
+3. **Served only by content hash from the manifest.** `GET /admin/cookout-img/{sha}.webp` answers only a 64-hex sha that is
+   a card or thumb of the loaded manifest and whose file exists here; anything else is `404`, so the route cannot probe
+   the disk. It sits under `/admin` (Cloudflare Access like the admin bundles) and needs no unlock token precisely because
+   it can serve nothing but catalogue data. Responses are `private`, immutable and `nosniff`.
+4. **Attached only to snapshots already in the viewer's redacted view.** `_snap_json` decorates a snapshot the view builder
+   has already decided to send; it never decides what is sent. Inv 57's Blind guarantee is therefore unaffected: a partner's
+   ingredient id, name, `what`, picture URL or picture hash cannot appear in a Blind viewer's response, and the client's
+   Blind "secret turn" card is drawn from counts alone.
+
+A violation looks like: a picture, `what` or fact derived from a message; a cookout wipe path that deletes anything under
+`cookout-images/` (GC is the only deleter, and it deletes only objects no manifest pin holds); a route that serves a file
+by a name not in the manifest; or enrichment that fetches an ingredient the view did not already contain.
+
+*Enforced by:* `test_cookout_visuals.py` (every snapshot carries `what`/`image`, `image` is `null` unless both
+renditions exist, `facts` only on picks and only after `picking`, staples and fridge search enriched, and the Blind
+regression: no partner id, name or picture hash enters the viewer's view),
+`test_cookout_image_route.py` (a manifest sha is served as immutable `image/webp` with no unlock token, `If-None-Match`
+gives `304`, malformed names, an unlisted sha even with a file present, and a listed sha with no file are all `404`),
+`test_cookout_pack.py` (the manifest bounds, pins and GC, so an object a pin holds is never collected),
+`test_cookout_catalogue.py` / `test_cookout_catalogue_data.py` (the committed catalogue passes every rule),
+`test_cookout_visual_tooling.py` (the offline tooling: prompts, decoys, neutral check file names, the gate, the ladder, pack building),
+`admin-ui/tests/cookout/apiVisual.test.ts` (URL shape vetted client-side) and `pickTable.test.ts` (Blind partner turn: no
+ingredient text or image URL in the DOM). Decision: [00201](../../decisions/00202-cookout-ingredient-pictures/decision.md).
+
 ### Inv 59 — Live voice audio goes only to the chat's authenticated participants, lives only in memory, and ends with its note
 A voice note recorded live (spec/server-chat/07, decisions/00211/00212) is relayed over `/api/admin/server/live-voice/ws`
 only after BOTH gates the call socket needs (Inv 55): the Cloudflare Access assertion verified before the socket is
@@ -28,8 +65,15 @@ delete, a stale page), `e2e/tests/server-search.spec.ts` (the words never appear
 
 ### Inv 57 — A Cookout round is chat content: Blind mode redacts on the server and never reveals an abandoned round; prompts carry food only; cmd keeps its own food-only copy
 
-The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21, workspace 00058) is
-chat content, the Inv 54 / Inv 56 pattern. `cookout_rounds` is keyed by its anchor message (`anchor_message_seq
+The ingredient-picking game (`cookout_rounds`, `cookout_turns`, `cookout_recipes`, schema v21; v22 adds `cookout_rounds.mode`, workspace 00058) is
+chat content, the Inv 54 / Inv 56 pattern. **Game modes (spec 09c, decisions/00203) extend it without loosening it:** the game
+mode is fixed per round and public (a setting, like Open/Blind: `Message.cookout.mode` and `view.mode` carry the id, label, turn
+count and kind list, never a pick); the pools, pick kinds and plan are server-side, so a client never learns what a kind will
+offer, and the schedule of kinds stays out of a non-active Blind viewer's view exactly as the role schedule does (`current.role`
+is `null` for them); Blind hides the bread like any other pick (`🔒` in its slot until all eight are in, and `PickSnap.kind`
+rides with the pick, so it is hidden with it); and the mode's prompt text, build list, phrases and picture template are server
+constants chosen by mode id (food-free, tested), so what cmd retains stays food records plus constants. A non-Classic round is
+never created while `WIXY_COOKOUT_MODES` is absent, and an unknown mode is read-only and never blocks a new game. `cookout_rounds` is keyed by its anchor message (`anchor_message_seq
 REFERENCES messages(seq) ON DELETE CASCADE`; `cookout_turns` and `cookout_recipes` cascade from the round), and a wipe
 issues `DELETE FROM cookout_recipes`, `cookout_turns` and `cookout_rounds` explicitly in the same transaction as every
 other table. Deleting the message therefore erases everything the pair did: every offered and picked ingredient, the
@@ -1047,6 +1091,10 @@ operations. The hourly janitor conditionally deletes still-orphaned attachment r
 unpromoted upload rows before queueing their files; completed tombstones age out after seven days,
 while pending tombstones remain.
 Every store connection sets `PRAGMA secure_delete=ON`; both delete and wipe TRUNCATE the WAL.
+`scrub()` runs a `PASSIVE` checkpoint first (it never takes the writer lock) and tries `TRUNCATE` only once PASSIVE has
+checkpointed the whole WAL, or after five PASSIVE misses in a row (a steady writer keeps the log ahead for
+ever) when it forces one TRUNCATE with a 50 ms busy wait; it still returns True only after a TRUNCATE with busy 0 and an empty -wal, so the
+guarantee is unchanged (`test_livechat_store_locking.py`, decisions/00203).
 Recovery removes media files before retrying the DB scrub. A 204 requires an empty WAL and
 completed media cleanup. 202 returns one `erasurePending` flag covering both; the settings
 sheet waits until it clears. Route and background WAL scrubs serialize through

@@ -1,0 +1,28 @@
+{
+  "packVersion": 1,
+  "pack": {
+    "url": "http://127.0.0.1:8099/cookout-test-pack.tar",
+    "sha256": "b498043535dba3b8598a91007b166eea8bd7843a8d8026488544a704b73bd3a4",
+    "bytes": 10240,
+    "objects": 4,
+    "installedBytes": 152
+  },
+  "renditions": {
+    "card": 512,
+    "thumb": 160
+  },
+  "items": {
+    "andouille-sausage": {
+      "card": "8f2cb5a64d07cd503e16352a699d89c057f139a5b467f589fb87676fcb770113",
+      "thumb": "46c81b84b66643133ab80f5ba9146c32c36aa3792ced32bbf62e142c90ae350c",
+      "attempt": 1,
+      "acceptedBy": "ci-test-pack"
+    },
+    "apricot": {
+      "card": "335532ea4ea8da487b34f61b8b7bdce074d30f28de49f1410f6afbc8ad4e75d3",
+      "thumb": "a1ce4450c62d664bc9673aeeda8e878e2f712d762905212425fe692646d5bccb",
+      "attempt": 1,
+      "acceptedBy": "ci-test-pack"
+    }
+  }
+}

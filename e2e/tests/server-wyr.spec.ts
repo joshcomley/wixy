@@ -11,38 +11,14 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.describe.configure({ timeout: 120_000 });
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function humanPause(page: Page): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
@@ -102,8 +78,7 @@ test.describe("Would you rather", () => {
     const pageB = await contextB.newPage();
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     // Full screen: the shell's status bar, top bar and navigation are all gone, and the chat
     // reaches the top of the window.
@@ -217,8 +192,7 @@ test.describe("Would you rather", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     const seq = await startRound(pageA);
     await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bob sees the round");
@@ -241,8 +215,7 @@ test.describe("Would you rather", () => {
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
     const errors = [trackConsoleErrors(pageA), trackConsoleErrors(pageB)];
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
 
     async function say(page: Page, text: string): Promise<void> {
       await page.locator(".wx-chat-composer-input").fill(text);
@@ -399,8 +372,7 @@ test.describe("Would you rather", () => {
     const contextB = await browser.newContext(phone);
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
-    await unlockServer(pageA, "Cupcake");
-    await unlockServer(pageB, "Bubble");
+    await unlockTogether(unlockServer, [[pageA, "Cupcake"], [pageB, "Bubble"]]);
 
     const seq = await startRound(pageA);
     await eventually([pageA, pageB], async () => await pageB.locator(`.wx-srv-bubble-wyr[data-message-seq="${seq}"]`).isVisible(), "Bubble sees the round");

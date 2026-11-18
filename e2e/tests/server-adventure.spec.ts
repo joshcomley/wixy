@@ -17,6 +17,8 @@ import type { Browser, BrowserContext, BrowserContextOptions, Locator, Page } fr
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { trackConsoleErrors } from "./helpers";
+import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -25,32 +27,6 @@ const MULTI_TAP_INTERVAL_MS = 400;
 /** The canned pack the fake cmd researcher returns (wixy_server/tests/fake_cmd.py `CANNED_ADVENTURE_PACK`). */
 const CANNED_HEADLINE = "Sun, tiles and custard tarts on the Atlantic edge of Europe";
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function humanPause(page: Page): Promise<void> {
   await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
@@ -67,13 +43,6 @@ async function keepAlive(page: Page): Promise<void> {
 }
 
 /** Keeps every page awake for the whole of a test (stop it before closing the contexts). */
-function keepAwake(pages: readonly Page[]): () => void {
-  const timer = setInterval(() => {
-    for (const page of pages) void keepAlive(page);
-  }, 2500);
-  return () => clearInterval(timer);
-}
-
 async function eventually(
   pages: readonly Page[],
   check: () => Promise<boolean>,
@@ -105,6 +74,13 @@ async function fact(page: Page, name: string): Promise<string> {
 async function waitFact(pages: readonly Page[], name: string, value: string, timeoutMs = 20_000): Promise<void> {
   for (const page of pages) {
     await eventually(pages, async () => (await fact(page, name)) === value, `data-${name}=${value}`, timeoutMs);
+  }
+}
+
+/** Waits until a pane fact has any one of `values` on every page. */
+async function waitFactAnyOf(pages: readonly Page[], name: string, values: readonly string[], timeoutMs = 20_000): Promise<void> {
+  for (const page of pages) {
+    await eventually(pages, async () => values.includes(await fact(page, name)), `data-${name} in ${values.join("|")}`, timeoutMs);
   }
 }
 
@@ -317,7 +293,17 @@ async function playToChosen(
   const country = await pressStop(pages, a);
   expect(country).not.toBe("");
   await waitFact(pages, "country", country);
-  await waitFact(pages, "state", "destination");
+  // A country with exactly ONE destination left (a small island state, e.g. Tuvalu) skips the destination
+  // roulette: the round goes straight to `chosen` (stop_adventure). The roulette's country is random, so the
+  // test cannot know; it accepts either and plays the destination roulette only when there is one.
+  await waitFactAnyOf(pages, "state", ["destination", "chosen"]);
+  if ((await fact(a, "state")) === "chosen") {
+    await waitFact(pages, "state", "chosen");
+    const only = await fact(a, "place");
+    expect(only).not.toBe("");
+    await waitFact(pages, "place", only);
+    return { seq, country, place: only };
+  }
 
   // The destination roulette: Bob stops it.
   await waitFact(pages, "phase", "destination", 30_000);
@@ -337,10 +323,9 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
 
     // The game is a tab of its own, the thread is out of the way.
     await expect(a.locator(".wx-srv-tabs")).toBeHidden();
@@ -594,10 +579,9 @@ test.describe("Adventure Time", () => {
     const a = await contextA.newPage();
     const b = await contextB.newPage();
     const errors = [trackConsoleErrors(a), trackConsoleErrors(b)];
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     const { place } = await playToChosen(a, b);
 
     // Bob passes: the question is asked once, "Keep it" backs out, "Never show again" confirms.
@@ -725,8 +709,7 @@ test.describe("Adventure Time", () => {
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
     const b = await contextB.newPage();
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     await startAdventure(a);
     await expect(adv(a)).toBeVisible();
 
@@ -769,10 +752,9 @@ test.describe("Adventure Time", () => {
     const contextB = await newGameContext(browser);
     const a = await contextA.newPage();
     const b = await contextB.newPage();
-    await unlockServer(a, "Alice");
-    await unlockServer(b, "Bob");
+    // Awake from the first moment: the second unlock can outlast the 10 s idle lock under load and lock the first device.
     const pages = [a, b];
-    const stopAwake = keepAwake(pages);
+    const stopAwake = await unlockTogether(unlockServer, [[a, "Alice"], [b, "Bob"]]);
     await playToChosen(a, b);
     await waitFact(pages, "pack-state", "ready", 60_000);
     const dishes = a.locator(".wx-srv-adv-dishes");

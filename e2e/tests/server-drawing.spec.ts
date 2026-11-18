@@ -14,6 +14,8 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, CDPSession, Locator, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { keepPagesAwake as keepAwake, unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -25,32 +27,6 @@ const PHONES = [
   { width: 360, height: 780 },
 ] as const;
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({ timeout: 5000 });
-  if (await page.locator(".wx-srv-name-prompt").isVisible()) {
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // Two taps less than 400ms apart lock the chat (R3): let that window pass.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function seed(page: Page, label: string, count = 3): Promise<void> {
   const response = await page.request.post("/test/server/seed-messages", {
@@ -96,6 +72,10 @@ async function keepAlive(page: Page): Promise<void> {
   await page.mouse.move(3 + Math.random() * 4, 3 + Math.random() * 4);
 }
 
+/** Keeps every page awake for a whole test: R7 idle-locks a page after 10 s without activity, and a
+ * page the test is only waiting on (the second device) otherwise locks on any slow run, taking its
+ * elements out from under the next step. A key press counts as activity and, unlike a mouse move,
+ * cannot disturb a hover or click another call is making on the same page. Stop it before closing. */
 /** Polls `check` while keeping `pages` from idle-locking. */
 async function eventually(pages: readonly Page[], check: () => Promise<boolean>, what: string, timeoutMs = 8_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
@@ -218,12 +198,13 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-live-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const targetA = bubbleWith(pageA, `${label} #2`);
     const targetB = bubbleWith(pageB, `${label} #2`);
     await expect(targetA).toBeVisible();
@@ -270,6 +251,7 @@ test.describe("server-drawing.spec.ts", () => {
 
     expect(errorsA).toEqual([]);
     expect(errorsB).toEqual([]);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -278,43 +260,46 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const label = `draw-stick-${Date.now()}`;
     await seed(pageA, label, 12);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
-    const anchor = bubbleWith(pageA, `${label} #11`);
-    await anchor.scrollIntoViewIfNeeded();
-    await turnPenOn(pageA);
-    await mouseStroke(pageA, anchor);
-    const svg = await storedOn(pageA, anchor);
-    await expect(svg).toHaveCount(1);
-    await pageA.locator(".wx-srv-pen-done").click();
-    const before = await offsetFromAnchor(svg, anchor);
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
+    try {
+      const anchor = bubbleWith(pageA, `${label} #11`);
+      await anchor.scrollIntoViewIfNeeded();
+      await turnPenOn(pageA);
+      await mouseStroke(pageA, anchor);
+      const svg = await storedOn(pageA, anchor);
+      await expect(svg).toHaveCount(1);
+      await pageA.locator(".wx-srv-pen-done").click();
+      const before = await offsetFromAnchor(svg, anchor);
 
-    // Scrolling moves the drawing with its message, exactly.
-    const thread = pageA.locator(".wx-srv-thread");
-    await thread.evaluate((el) => {
-      el.scrollTop = Math.max(0, el.scrollTop - 120);
-    });
-    await pageA.waitForTimeout(100);
-    const scrolled = await offsetFromAnchor(svg, anchor);
-    expect(Math.abs(scrolled.dy - before.dy)).toBeLessThan(1);
+      // Scrolling moves the drawing with its message, exactly.
+      const thread = pageA.locator(".wx-srv-thread");
+      await thread.evaluate((el) => {
+        el.scrollTop = Math.max(0, el.scrollTop - 120);
+      });
+      await expect.poll(async () => Math.abs((await offsetFromAnchor(svg, anchor)).dy - before.dy), { message: "the drawing moves with its message" }).toBeLessThan(1);
 
-    // The message ABOVE grows (B reacts to it: a reactions row appears) — the drawing follows
-    // its anchor down instead of staying where it was painted.
-    const above = bubbleWith(pageB, `${label} #10`);
-    await above.scrollIntoViewIfNeeded();
-    const anchorTopBefore = (await anchor.boundingBox())!.y;
-    await above.hover();
-    await above.locator(".wx-srv-message-actions-trigger").click();
-    await above.getByRole("menuitemcheckbox", { name: "Thumbs up" }).click();
-    const aboveOnA = bubbleWith(pageA, `${label} #10`);
-    await eventually([pageA, pageB], async () => (await aboveOnA.locator(".wx-srv-reaction-chip").count()) === 1, "the reaction on A");
-    await eventually([pageA], async () => ((await anchor.boundingBox())!.y) > anchorTopBefore + 5, "the anchor to move down");
-    const grown = await offsetFromAnchor(svg, anchor);
-    expect(Math.abs(grown.dy - before.dy)).toBeLessThan(1);
-    expect(Math.abs(grown.dx - before.dx)).toBeLessThan(1);
-    await closeAll(contextA, contextB);
+      // The message ABOVE grows (B reacts to it: a reactions row appears) — the drawing follows
+      // its anchor down instead of staying where it was painted.
+      const above = bubbleWith(pageB, `${label} #10`);
+      await above.scrollIntoViewIfNeeded();
+      const anchorTopBefore = (await anchor.boundingBox())!.y;
+      await above.hover();
+      await above.locator(".wx-srv-message-actions-trigger").click();
+      await above.getByRole("menuitemcheckbox", { name: "Thumbs up" }).click();
+      const aboveOnA = bubbleWith(pageA, `${label} #10`);
+      await eventually([pageA, pageB], async () => (await aboveOnA.locator(".wx-srv-reaction-chip").count()) === 1, "the reaction on A");
+      await eventually([pageA], async () => ((await anchor.boundingBox())!.y) > anchorTopBefore + 5, "the anchor to move down");
+      const grown = await offsetFromAnchor(svg, anchor);
+      expect(Math.abs(grown.dy - before.dy)).toBeLessThan(1);
+      expect(Math.abs(grown.dx - before.dx)).toBeLessThan(1);
+    } finally {
+      stopAwake();
+      await closeAll(contextA, contextB);
+    }
   });
 
   // The admin's own zoom control (admin-ui/src/zoom.ts) puts CSS `zoom` on <html>. Under it a
@@ -432,10 +417,11 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const label = `draw-delete-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     await turnPenOn(pageA);
@@ -467,6 +453,7 @@ test.describe("server-drawing.spec.ts", () => {
     // The message itself is untouched, on both.
     await expect(anchorA).toBeVisible();
     await expect(anchorB).toBeVisible();
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -475,10 +462,11 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const label = `draw-anchor-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     const seq = await seqOf(anchorA);
@@ -500,6 +488,7 @@ test.describe("server-drawing.spec.ts", () => {
       "B's copy to go",
     );
     await expect(anchorB).toHaveCount(0);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -508,10 +497,11 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const label = `draw-lock-${Date.now()}`;
     await seed(pageA, label);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const anchorA = bubbleWith(pageA, `${label} #2`);
     const anchorB = bubbleWith(pageB, `${label} #2`);
     await turnPenOn(pageA);
@@ -543,6 +533,7 @@ test.describe("server-drawing.spec.ts", () => {
     // The withdrawn stroke was never stored: B still has exactly the two dots.
     await pageB.waitForTimeout(1_000);
     await expect(storedB.locator("path")).toHaveCount(2);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 
@@ -759,12 +750,13 @@ test.describe("server-drawing.spec.ts", () => {
     const contextB = await browser.newContext();
     const pageA = await contextA.newPage();
     const pageB = await contextB.newPage();
+    // Awake from the first moment: under load the second unlock can outlast the 10 s idle lock, which would lock
+    // the first device while it waits (R7), taking its page out from under the next step.
     const errorsA = trackConsoleErrors(pageA);
     const errorsB = trackConsoleErrors(pageB);
     const label = `draw-undo-${Date.now()}`;
     await seed(pageA, label, 3);
-    await unlockServer(pageA, "Alice");
-    await unlockServer(pageB, "Bob");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Alice"], [pageB, "Bob"]]);
     const targetA = bubbleWith(pageA, `${label} #2`);
     const targetB = bubbleWith(pageB, `${label} #2`);
     await expect(targetA).toBeVisible();
@@ -842,6 +834,7 @@ test.describe("server-drawing.spec.ts", () => {
 
     expect(errorsA).toEqual([]);
     expect(errorsB).toEqual([]);
+    stopAwake();
     await closeAll(contextA, contextB);
   });
 });

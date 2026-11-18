@@ -378,6 +378,11 @@ def live_env(
 ) -> Iterator[LiveEnv]:
     """The app (dev auth bypass, a fake cmd for the PIN and, unless `transcriber` is given, for
     transcription), its lifespan running, unlocked. `base` is the test's own directory."""
+    # The heartbeat runs on the real clock; a test process starved for seconds (a loaded box) is
+    # not a dead client and must not be dropped mid-test. Heartbeat tests set `pong_at` directly.
+    from wixy_server.livechat import live_voice as live_voice_module
+
+    monkeypatch.setattr(live_voice_module, "PONG_TIMEOUT_S", 3600.0)
     monkeypatch.setenv("WIXY_DEV_NO_AUTH", "1")
     state = FakeCmdState()
     state.register_pin_app(TEST_APP_KEY, TEST_PIN)

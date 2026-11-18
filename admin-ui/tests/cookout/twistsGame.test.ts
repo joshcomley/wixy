@@ -49,39 +49,69 @@ function button(h: Harness, selector: string): HTMLButtonElement {
   return q<HTMLButtonElement>(h.pane, selector);
 }
 
+/** Opens the 🎲 Twists sheet (the button shows only when a drafting twist is usable right now). */
+function openTwists(h: Harness): HTMLElement {
+  button(h, ".wx-srv-ck-twists-btn").click();
+  return q(h.pane, '.wx-srv-ck-sheet[data-sheet="twists"]');
+}
+
+function closeSheet(h: Harness): void {
+  button(h, ".wx-srv-ck-sheet-close").click();
+}
+
+const itemName = (item: Element): string | null => q(item as HTMLElement, ".wx-srv-ck-twist-item-name").textContent;
+
 describe("lucky dip and chaos shelf", () => {
   it("render only when the server offers them (canLucky / canChaos non-null)", () => {
     const h = makeHarness();
     h.show(table());
+    // Nothing on offer: no 🎲 button, so no sheet to open.
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-lucky")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-chaos")).toBeNull();
     h.show(table({ canLucky: true, canChaos: true }));
-    expect(button(h, ".wx-srv-ck-lucky").textContent).toBe("🪙 Lucky dip");
-    expect(button(h, ".wx-srv-ck-lucky").disabled).toBe(false);
-    expect(button(h, ".wx-srv-ck-chaos").textContent).toBe("🌋 Chaos shelf (once)");
-    expect(button(h, ".wx-srv-ck-chaos").disabled).toBe(false);
+    const sheet = openTwists(h);
+    expect(itemName(q(sheet, ".wx-srv-ck-lucky"))).toBe("🪙 Lucky dip");
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-lucky").disabled).toBe(false);
+    expect(itemName(q(sheet, ".wx-srv-ck-chaos"))).toBe("🌋 Chaos shelf");
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-chaos").disabled).toBe(false);
+    closeSheet(h);
     h.show(table({ canLucky: true }));
-    expect(h.pane.querySelector(".wx-srv-ck-lucky")).not.toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-chaos")).toBeNull();
+    const lucky = openTwists(h);
+    expect(lucky.querySelector(".wx-srv-ck-lucky")).not.toBeNull();
+    expect(lucky.querySelector(".wx-srv-ck-chaos")).toBeNull();
   });
 
   it("are disabled when the server says no, and the chaos shelf reads 'used' once spent", () => {
     const h = makeHarness();
+    // Neither usable: the 🎲 button itself is not drawn (it shows only when at least one is true).
     h.show(table({ canLucky: false, canChaos: false }));
-    expect(button(h, ".wx-srv-ck-lucky").disabled).toBe(true);
-    expect(button(h, ".wx-srv-ck-chaos").disabled).toBe(true);
-    expect(button(h, ".wx-srv-ck-chaos").textContent).toBe("🌋 Chaos shelf (once)");
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
+    h.show(table({ canLucky: true, canChaos: false }));
+    let sheet = openTwists(h);
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-lucky").disabled).toBe(false);
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-chaos").disabled).toBe(true);
+    expect(itemName(q(sheet, ".wx-srv-ck-chaos"))).toBe("🌋 Chaos shelf");
+    closeSheet(h);
+    h.show(table({ canLucky: false, canChaos: true }));
+    sheet = openTwists(h);
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-lucky").disabled).toBe(true);
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-chaos").disabled).toBe(false);
+    closeSheet(h);
     h.show(table({ canLucky: true, canChaos: false }, {}, { you: { slot: 1, chaosUsed: true, vetoUsed: false } }));
-    expect(button(h, ".wx-srv-ck-chaos").textContent).toBe("🌋 Chaos shelf used");
-    expect(button(h, ".wx-srv-ck-chaos").disabled).toBe(true);
+    sheet = openTwists(h);
+    expect(itemName(q(sheet, ".wx-srv-ck-chaos"))).toBe("🌋 Chaos shelf (used)");
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-chaos").disabled).toBe(true);
   });
 
   it("the waiting player and a non-player never get them", () => {
     const h = makeHarness();
     h.show(table({ canLucky: true, canChaos: true }, { you: 2 }));
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-lucky")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-chaos")).toBeNull();
     h.show(table({ canLucky: true, canChaos: true }, { you: null }));
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-lucky")).toBeNull();
   });
 
@@ -89,10 +119,13 @@ describe("lucky dip and chaos shelf", () => {
     const h = makeHarness();
     h.show(table({ canLucky: true, canChaos: true }));
     h.api.lucky.mockResolvedValue(h.ok(twistPicking({ you: 1, turn: 2, showOptions: false, p1Picks: [pick(RIBEYE, 1, "lucky")] })));
-    button(h, ".wx-srv-ck-lucky").click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-lucky").click();
     expect(h.api.lucky).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 1, offer: 0, optionIds: ["ribeye-steak", "salmon-fillet"] });
-    expect(button(h, ".wx-srv-ck-lucky").textContent).toBe("Flipping…");
-    expect(button(h, ".wx-srv-ck-lucky").disabled).toBe(true);
+    // Choosing a twist closes the sheet, and the table waits: the twist, the skip and both cards are off.
+    expect(h.pane.querySelector(".wx-srv-ck-sheet-panel")).toBeNull();
+    expect(button(h, ".wx-srv-ck-twists-btn").disabled).toBe(true);
+    expect(button(h, ".wx-srv-ck-skip").disabled).toBe(true);
+    expect(qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-card").every((c) => c.disabled)).toBe(true);
     await settle();
   });
 
@@ -102,7 +135,7 @@ describe("lucky dip and chaos shelf", () => {
     const fx = q(h.pane, ".wx-srv-ck-fx");
     expect(fx.hidden).toBe(true);
     h.api.lucky.mockResolvedValue(h.ok(twistPicking({ you: 1, turn: 2, showOptions: false, p1Picks: [pick(RIBEYE, 1, "lucky")] })));
-    button(h, ".wx-srv-ck-lucky").click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-lucky").click();
     await settle();
     expect(fx.hidden).toBe(false);
     expect(fx.querySelector(".wx-srv-ck-fx-coin")).not.toBeNull();
@@ -117,7 +150,7 @@ describe("lucky dip and chaos shelf", () => {
     const h = makeHarness({ reducedMotion: true });
     h.show(table({ canLucky: true }));
     h.api.lucky.mockResolvedValue(h.ok(twistPicking({ you: 1, turn: 2, showOptions: false, p1Picks: [pick(RIBEYE, 1, "lucky")] })));
-    button(h, ".wx-srv-ck-lucky").click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-lucky").click();
     await settle();
     expect(q(h.pane, ".wx-srv-ck-fx").hidden).toBe(true);
     const toast = q(h.pane, ".wx-srv-ck-toast");
@@ -129,91 +162,115 @@ describe("lucky dip and chaos shelf", () => {
     const h = makeHarness();
     h.show(table({ canChaos: true, canLucky: true }));
     h.api.chaos.mockResolvedValue(h.ok(table({ options: [DURIAN, NATTO], chaosPair: true, canChaos: false, canLucky: true }, {}, { you: { slot: 1, chaosUsed: true, vetoUsed: false } })));
-    button(h, ".wx-srv-ck-chaos").click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-chaos").click();
     expect(h.api.chaos).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 1, offer: 0, optionIds: ["ribeye-steak", "salmon-fillet"] });
     await settle();
     expect(q(h.pane, ".wx-srv-ck-toast").textContent).toBe("🌋 Two from the chaos shelf — dare you?");
-    expect(qa(h.pane, ".wx-srv-ck-opt").map((c) => c.dataset["ingredient"])).toEqual(["fresh-durian", "fermented-natto"]);
-    expect(qa(h.pane, ".wx-srv-ck-opt-exotic")).toHaveLength(2);
+    expect(qa(h.pane, "button.wx-srv-ck-card").map((c) => c.dataset["ingredient"])).toEqual(["fresh-durian", "fermented-natto"]);
+    expect(qa(h.pane, ".wx-srv-ck-card-exotic")).toHaveLength(2);
     expect(h.pane.querySelector(".wx-srv-ck-pair-chaos")).not.toBeNull();
-    expect(q(h.pane, ".wx-srv-ck-chaos-note").textContent).toBe("🌋 Straight from the chaos shelf — dare you?");
-    expect(button(h, ".wx-srv-ck-chaos").textContent).toBe("🌋 Chaos shelf used");
+    // The chaos note is the banner's second line now.
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Straight from the chaos shelf");
+    expect(itemName(q(openTwists(h), ".wx-srv-ck-chaos"))).toBe("🌋 Chaos shelf (used)");
   });
 
   it("the watching partner sees the chaos pair worded for them, with no buttons of the active player's", () => {
     const h = makeHarness();
     h.show(table({ chaosPair: true, options: [DURIAN, NATTO], canVeto: true }, { you: 2 }, { you: YOU_2 }));
-    expect(q(h.pane, ".wx-srv-ck-chaos-note").textContent).toBe("🌋 A pair from the chaos shelf!");
-    expect(qa(h.pane, ".wx-srv-ck-opt-exotic")).toHaveLength(2);
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("A pair from the chaos shelf!");
+    expect(qa(h.pane, ".wx-srv-ck-card-exotic")).toHaveLength(2);
     expect(h.pane.querySelector(".wx-srv-ck-chaos")).toBeNull();
+    const sheet = openTwists(h);
+    expect(sheet.querySelector(".wx-srv-ck-chaos")).toBeNull();
+    expect(sheet.querySelector(".wx-srv-ck-lucky")).toBeNull();
   });
 
   it("a table that is not exotic has no chaos note", () => {
     const h = makeHarness();
     h.show(table({ chaosPair: false, canChaos: true }));
-    expect(h.pane.querySelector(".wx-srv-ck-chaos-note")).toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-opt-exotic")).toBeNull();
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).not.toContain("chaos");
+    expect(h.pane.querySelector(".wx-srv-ck-card-exotic")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-pair-chaos")).toBeNull();
   });
 
   it("a refused twist says why in plain words and re-reads the round", async () => {
     const h = makeHarness();
     h.show(table({ canChaos: true }));
     h.api.chaos.mockResolvedValue({ ok: false, kind: "token_used" });
-    button(h, ".wx-srv-ck-chaos").click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-chaos").click();
     await settle();
     expect(q(h.pane, ".wx-srv-ck-toast").textContent).toBe("You've already used that once this game.");
   });
 });
 
 describe("the sweep (Open mode)", () => {
-  it("the waiting partner sees '🧹 Sweep it (once)' on each card", () => {
+  it("the waiting partner picks '🧹 Sweep one' from the Twists sheet, then taps the card to sweep", () => {
     const h = makeHarness();
     h.show(table({ canVeto: true }, { you: 2 }, { you: YOU_2 }));
-    const sweeps = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-sweep");
-    expect(sweeps).toHaveLength(2);
-    expect(sweeps.map((s) => s.textContent)).toEqual(["🧹 Sweep it (once)", "🧹 Sweep it (once)"]);
-    expect(sweeps.every((s) => !s.disabled)).toBe(true);
-    // They sit with the two cards, which are read-only for the watcher.
-    expect(qa(h.pane, "div.wx-srv-ck-opt")).toHaveLength(2);
+    // The two cards are read-only for the watcher until the sweep is chosen.
+    expect(qa(h.pane, "div.wx-srv-ck-card")).toHaveLength(2);
+    expect(qa(h.pane, "button.wx-srv-ck-card")).toHaveLength(0);
+    const sheet = openTwists(h);
+    expect(itemName(q(sheet, ".wx-srv-ck-sweep"))).toBe("🧹 Sweep one");
+    expect(q<HTMLButtonElement>(sheet, ".wx-srv-ck-sweep").disabled).toBe(false);
+    q<HTMLButtonElement>(sheet, ".wx-srv-ck-sweep").click();
+    // Sweep mode: the sheet closed, the banner says what to do, and each card is now a sweep button.
+    expect(h.pane.querySelector(".wx-srv-ck-sheet-panel")).toBeNull();
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Tap the one to sweep away");
+    const cards = qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-card");
+    expect(cards.map((c) => c.getAttribute("aria-label"))).toEqual(["Sweep Ribeye steak off the table", "Sweep Salmon fillet off the table"]);
+    expect(cards.every((c) => !c.disabled)).toBe(true);
+    // Cancel goes back to watching.
+    button(h, ".wx-srv-ck-sweep-cancel").click();
+    expect(qa(h.pane, "button.wx-srv-ck-card")).toHaveLength(0);
+    expect(q(h.pane, ".wx-srv-ck-turn").textContent).toBe("Josh is choosing…");
   });
 
   it("a sweep sends the card's ingredient id with the table it saw", async () => {
     const h = makeHarness();
     h.show(table({ canVeto: true }, { you: 2, turn: 3, offerIndex: 1, options: [SALMON, LENTILS] }, { you: YOU_2 }));
     h.api.veto.mockResolvedValue(h.ok(table({ canVeto: false, options: [SALMON, TOAST] }, { you: 2, turn: 3, offerIndex: 1 }, { you: { slot: 2, chaosUsed: false, vetoUsed: true } })));
-    qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-sweep")[1]?.click();
+    q<HTMLButtonElement>(openTwists(h), ".wx-srv-ck-sweep").click();
+    qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-card")[1]?.click();
     expect(h.api.veto).toHaveBeenCalledWith(41, { moveId: "move-1", turn: 3, offer: 1, ingredientId: "red-lentils" });
     await settle();
     expect(q(h.pane, ".wx-srv-ck-toast").textContent).toBe("🧹 Red lentils swept off the table");
-    // Spent now: the buttons are still there but disabled and say so.
-    const after = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-sweep");
-    expect(after.map((s) => s.textContent)).toEqual(["🧹 Sweep used", "🧹 Sweep used"]);
-    expect(after.every((s) => s.disabled)).toBe(true);
+    // Spent now: sweep mode is over, the cards are read-only again and the 🎲 button has nothing left to offer.
+    expect(qa(h.pane, "button.wx-srv-ck-card")).toHaveLength(0);
+    expect(h.pane.querySelector(".wx-srv-ck-sweep-cancel")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
   });
 
-  it("is disabled when the server says canVeto is false, and absent when it is null", () => {
+  it("goes when the server says canVeto is false or null: the open sheet closes itself, no 🎲 button is left", () => {
     const h = makeHarness();
+    h.show(table({ canVeto: true }, { you: 2 }, { you: YOU_2 }));
+    openTwists(h);
+    expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-sweep").disabled).toBe(false);
+    // The sheet is open while the sweep is spent under it: nothing in it can be used, so it closes.
     h.show(table({ canVeto: false }, { you: 2 }, { you: YOU_2 }));
-    expect(qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-sweep").every((s) => s.disabled)).toBe(true);
+    expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     h.show(table({ canVeto: null }, { you: 2 }, { you: YOU_2 }));
     expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
   });
 
   it("the active player and a non-player have no sweep", () => {
     const h = makeHarness();
     h.show(table({ canVeto: true }, { you: 1 }));
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
     h.show(table({ canVeto: true }, { you: null }));
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
   });
 
-  it("the active player sees who swept what off their table", () => {
+  it("the active player sees who swept something off their table", () => {
     const h = makeHarness();
     h.show(table({ vetoed: { snap: SALMON }, options: [RIBEYE, LENTILS] }));
-    const banner = q(h.pane, ".wx-srv-ck-swept");
-    expect(banner.textContent).toContain("Cupcake swept Salmon fillet off your table");
-    expect(q(banner, ".wx-srv-ck-swept-name").textContent).toBe("Salmon fillet");
-    expect(qa(h.pane, ".wx-srv-ck-opt").map((c) => c.dataset["ingredient"])).toEqual(["ribeye-steak", "red-lentils"]);
+    // The note is the banner's second line now (it says "one", not which).
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Cupcake swept one off your table");
+    expect(qa(h.pane, "button.wx-srv-ck-card").map((c) => c.dataset["ingredient"])).toEqual(["ribeye-steak", "red-lentils"]);
   });
 });
 
@@ -227,22 +284,26 @@ describe("starters", () => {
       },
     );
 
-  it("pills carry a Starter title and a starter class; a normal pick has neither", () => {
+  it("starters carry a starter class on their progress tile; a normal pick has none", () => {
     const h = makeHarness();
     h.show(withStarters());
-    const starterPills = qa(h.pane, ".wx-srv-ck-pill-starter");
-    expect(starterPills.map((p) => p.title)).toEqual(["Starter: Cherry tomatoes", "Starter: Fermented natto"]);
-    expect(q(h.pane, '.wx-srv-ck-pills[data-slot="1"]').querySelectorAll(".wx-srv-ck-pill-full")).toHaveLength(2);
-    expect(qa(h.pane, ".wx-srv-ck-pill-full").filter((p) => !p.classList.contains("wx-srv-ck-pill-starter"))).toHaveLength(2);
+    const starterTiles = qa(h.pane, ".wx-srv-ck-prog-starter");
+    expect(starterTiles.map((p) => p.dataset["picked"])).toEqual(["cherry-tomatoes", "fermented-natto"]);
+    expect(q(h.pane, '.wx-srv-ck-prog-group[data-slot="1"]').querySelectorAll(".wx-srv-ck-prog-full")).toHaveLength(2);
+    expect(qa(h.pane, ".wx-srv-ck-prog-full").filter((p) => !p.classList.contains("wx-srv-ck-prog-starter"))).toHaveLength(2);
   });
 
-  it("during the draft only the table's option cards carry data-ingredient: a basket chip never looks like an option", () => {
+  it("during the draft only the table's option cards carry data-ingredient: a basket tile never looks like an option", () => {
     const h = makeHarness();
     h.show(withStarters());
-    expect(qa(h.pane, ".wx-srv-ck-chip-ing").length).toBeGreaterThan(0);
+    expect(qa(h.pane, ".wx-srv-ck-prog-full").length).toBeGreaterThan(0);
     const marked = qa(h.pane, "[data-ingredient]");
     expect(marked.length).toBeGreaterThan(0);
-    expect(marked.every((e) => e.classList.contains("wx-srv-ck-opt"))).toBe(true);
+    expect(marked.every((e) => e.classList.contains("wx-srv-ck-card"))).toBe(true);
+    // The same holds with the basket sheet open: its lines are `data-picked`, never `data-ingredient`.
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    expect(qa(h.pane, ".wx-srv-ck-bline").length).toBeGreaterThan(0);
+    expect(qa(h.pane, "[data-ingredient]").every((e) => e.classList.contains("wx-srv-ck-card"))).toBe(true);
     // A pick already in the basket is not on the table any more (the browser test's "it left the table").
     expect(h.pane.querySelector('[data-ingredient="parsley"], [data-ingredient="flat-leaf-parsley"]')).toBeNull();
   });
@@ -251,14 +312,21 @@ describe("starters", () => {
     const h = makeHarness();
     const view = h.show(withStarters());
     expect(view.starters.map((s) => viaBadge(view, s))).toEqual(["🧊 Starter", "🔁 Starter"]);
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
     expect(qa(h.pane, ".wx-srv-ck-chip-badge").map((b) => b.textContent)).toEqual(["🧊 Starter", "🔁 Starter"]);
-    expect(q(h.pane, '.wx-srv-ck-chip-ing[data-picked="cherry-tomatoes"]').classList.contains("wx-srv-ck-chip-seed")).toBe(true);
+    expect(q(h.pane, '.wx-srv-ck-prog-slot[data-picked="cherry-tomatoes"]').classList.contains("wx-srv-ck-prog-starter")).toBe(true);
   });
 
-  it("the header names the round's twists as chips", () => {
+  it("the table's twist strip shows one icon per start-sheet twist, and names them for screen readers", () => {
     const h = makeHarness();
     h.show(withStarters());
-    expect(qa(h.pane, ".wx-srv-ck-rule-chip .wx-srv-ck-rule-text").map((c) => c.textContent)).toEqual(["Fridge raid", "Remix of Lentil Traybake"]);
+    const strip = q(h.pane, ".wx-srv-ck-table .wx-srv-ck-strip");
+    expect(strip.hidden).toBe(false);
+    expect(qa(strip, ".wx-srv-ck-strip-icon").map((c) => c.textContent)).toEqual(["🧊", "🔁"]);
+    expect(strip.getAttribute("aria-label")).toBe("Twists on: 🧊 starts with your fridge pick, 🔁 a remix of Lentil Traybake");
+    // A round with no start-sheet twist has no strip at all.
+    h.show(table());
+    expect(q(h.pane, ".wx-srv-ck-strip").hidden).toBe(true);
   });
 
   it("in a Blind round the partner's starter is public but their drafted picks stay counted secrets", () => {
@@ -269,9 +337,15 @@ describe("starters", () => {
         { setup: setup({ fridgeRaid: true, encore: { kind: "leftovers", fromSeq: 30, fromTitle: null } }), starters: [pick(TOMATOES, 1, "seed"), pick(NATTO, 2, "seed")] },
       ),
     );
-    const partnerRow = qa(h.pane, ".wx-srv-ck-tray-row")[1] as HTMLElement;
-    expect(partnerRow.textContent).toContain("Fermented natto");
-    expect(partnerRow.querySelectorAll(".wx-srv-ck-chip-secret")).toHaveLength(1);
+    const partnerRow = q(h.pane, '.wx-srv-ck-prog-group[data-slot="2"]');
+    expect(partnerRow.querySelectorAll(".wx-srv-ck-prog-full")).toHaveLength(1);
+    expect(q(partnerRow, ".wx-srv-ck-prog-full").dataset["picked"]).toBe("fermented-natto");
+    expect(partnerRow.querySelectorAll(".wx-srv-ck-prog-secret")).toHaveLength(1);
+    // The basket sheet says the same in words: the starter by name, the drafted pick as a secret.
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    const group = q(h.pane, '.wx-srv-ck-bgroup[data-slot="2"]');
+    expect(group.textContent).toContain("Fermented natto");
+    expect(group.querySelectorAll(".wx-srv-ck-bline-secret")).toHaveLength(1);
     expect(h.pane.textContent).not.toContain("Fresh durian");
   });
 });
@@ -283,7 +357,8 @@ describe("secret stars and the chef gate", () => {
     const h = makeHarness();
     h.show(gateStars());
     expect(q(h.pane, ".wx-srv-ck-gate-text").textContent).toBe("Star one of your five picks — the chef will make it a hero");
-    const toggles = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-star");
+    // On the revealed tiles the whole tile is the star toggle, with a ☆ in its corner.
+    const toggles = qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-rtile.wx-srv-ck-star");
     expect(toggles).toHaveLength(5);
     expect(toggles.map((t) => t.closest<HTMLElement>("[data-picked]")?.dataset["picked"])).toEqual([
       "thick-white-toast",
@@ -292,7 +367,9 @@ describe("secret stars and the chef gate", () => {
       "smoked-paprika",
       "tinned-baked-beans",
     ]);
-    expect(toggles.every((t) => t.textContent === "☆" && !t.disabled)).toBe(true);
+    expect(toggles.every((t) => q(t, ".wx-srv-ck-rtile-star").textContent === "☆" && !t.disabled)).toBe(true);
+    // The partner's five are plain tiles, not toggles.
+    expect(qa(h.pane, "div.wx-srv-ck-rtile")).toHaveLength(5);
     expect(q(h.pane, ".wx-srv-ck-gate-sub").textContent).toBe("Tap ☆ on one of your picks above.");
   });
 
@@ -300,12 +377,13 @@ describe("secret stars and the chef gate", () => {
     const h = makeHarness();
     h.show(gateStars());
     h.api.star.mockResolvedValue(h.ok(gated(["stars"], { setup: setup({ stars: true }), stars: stars({ mine: "double-espresso" }) })));
-    qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-star")[2]?.click();
+    qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-rtile.wx-srv-ck-star")[2]?.click();
     expect(h.api.star).toHaveBeenCalledWith(41, "double-espresso");
     await settle();
     // Now yours is starred, and the gate waits for the partner.
     const on = q(h.pane, ".wx-srv-ck-star-on");
-    expect(on.textContent).toBe("★");
+    expect(q(on, ".wx-srv-ck-rtile-star").textContent).toBe("★");
+    expect(on.dataset["picked"]).toBe("double-espresso");
     expect(on.getAttribute("aria-pressed")).toBe("true");
     expect(q(h.pane, ".wx-srv-ck-gate-text").textContent).toBe("Waiting for Cupcake to star one");
   });
@@ -335,19 +413,20 @@ describe("secret stars and the chef gate", () => {
     h.show(ready({ setup: setup({ stars: true }), stars: stars({ mine: "double-espresso", partnerChosen: true, revealed: true, partner: "ribeye-steak" }) }));
     // Spec 09a §9: the toggles are disabled once revealed (a locked commitment). A toggle that is not drawn
     // at all cannot be tapped either, so the invariant is: whatever toggle exists is disabled.
-    const toggles = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-star");
+    const toggles = qa<HTMLButtonElement>(h.pane, "button.wx-srv-ck-rtile");
     expect(toggles.every((t) => t.disabled)).toBe(true);
     for (const t of toggles) t.click();
     expect(h.api.star).not.toHaveBeenCalled();
-    const ownChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="double-espresso"]');
-    expect(ownChip.classList.contains("wx-srv-ck-chip-starred")).toBe(true);
-    expect(ownChip.querySelector(".wx-srv-ck-star-mark, .wx-srv-ck-star-on")?.textContent).toBe("★");
-    const partnerChip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="ribeye-steak"]');
-    expect(partnerChip.classList.contains("wx-srv-ck-chip-starred")).toBe(true);
-    expect(partnerChip.querySelector(".wx-srv-ck-star-mark")?.textContent).toBe("★");
+    const ownChip = q(h.pane, '.wx-srv-ck-rtile[data-picked="double-espresso"]');
+    expect(ownChip.classList.contains("wx-srv-ck-rtile-starred")).toBe(true);
+    expect(q(ownChip, ".wx-srv-ck-rtile-star").textContent).toBe("★");
+    const partnerChip = q(h.pane, '.wx-srv-ck-rtile[data-picked="ribeye-steak"]');
+    expect(partnerChip.classList.contains("wx-srv-ck-rtile-starred")).toBe(true);
+    expect(q(partnerChip, ".wx-srv-ck-rtile-star").textContent).toBe("★");
+    expect(partnerChip.tagName).toBe("DIV");
     expect(partnerChip.querySelector("button")).toBeNull();
     // Nobody else's pick is starred.
-    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred")).toHaveLength(2);
+    expect(qa(h.pane, ".wx-srv-ck-rtile.wx-srv-ck-rtile-starred")).toHaveLength(2);
     expect(h.pane.querySelector(".wx-srv-ck-stars-revealed")).not.toBeNull();
   });
 });
@@ -396,7 +475,8 @@ describe("the wildcard cloche", () => {
     const dish = q(h.pane, ".wx-srv-ck-dish[data-concept='a']");
     expect(q(dish, ".wx-srv-ck-uses-count").textContent).toBe("Uses 11/11");
     expect(qa(dish, ".wx-srv-ck-uses-chips > *")).toHaveLength(11);
-    expect(qa(dish, ".wx-srv-ck-uses-chips .wx-srv-ck-chip-starred")).toHaveLength(2);
+    expect(qa(dish, ".wx-srv-ck-uses-chips .wx-srv-ck-use-starred")).toHaveLength(2);
+    expect(qa(dish, ".wx-srv-ck-use-star").map((n) => n.textContent)).toEqual(["★", "★"]);
   });
 
   it("a tap again after a lost answer resends the SAME move id (the lid may already be up); a refused one starts afresh", async () => {
@@ -491,9 +571,12 @@ describe("the wildcard cloche", () => {
     if (wild === undefined) throw new Error("fixture");
     expect(viaBadge(view, wild)).toBe("🛎️ Wildcard");
     // The basket section is drawn from the server's effective basket: the wildcard is there, with no ☆ on it.
-    const chip = q(h.pane, '.wx-srv-ck-reveal-chip[data-picked="red-lentils"]');
-    expect(q(chip, ".wx-srv-ck-chip-badge").textContent).toBe("🛎️ Wildcard");
-    expect(chip.querySelector(".wx-srv-ck-star")).toBeNull();
+    // (A reveal tile carries only the badge's icon in its corner, with the full badge as its title.)
+    const chip = q(h.pane, '.wx-srv-ck-rtile[data-picked="red-lentils"]');
+    expect(q(chip, ".wx-srv-ck-rtile-via").title).toBe("🛎️ Wildcard");
+    expect(chip.classList.contains("wx-srv-ck-rtile-wildcard")).toBe(true);
+    expect(chip.tagName).toBe("DIV");
+    expect(chip.querySelector(".wx-srv-ck-star, .wx-srv-ck-rtile-star")).toBeNull();
   });
 });
 
@@ -636,7 +719,7 @@ describe("the rescue swap", () => {
     const h = makeHarness();
     h.show(ready({ you: YOU_2, swap: swap({ state: "proposed", by: 1, out: PARSLEY, pair: [LENTILS, TOMATOES] }) }));
     expect(q(h.pane, ".wx-srv-ck-swap-text").textContent).toBe("Josh wants to send back Flat-leaf parsley. Choose a replacement:");
-    const options = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt");
+    const options = qa<HTMLButtonElement>(h.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-card");
     expect(options.map((o) => o.dataset["ingredient"])).toEqual(["red-lentils", "cherry-tomatoes"]);
     expect(button(h, ".wx-srv-ck-swap-keep").textContent).toBe("Keep these dishes");
     h.api.chooseSwap.mockResolvedValue(h.ok(ready({ generation: 2, you: YOU_2, swap: swap({ state: "done", by: 1, out: PARSLEY, in: TOMATOES }) })));
@@ -662,14 +745,14 @@ describe("the rescue swap", () => {
     const p = makeHarness();
     p.show(ready({ you: YOU_2, swap: swap({ state: "proposed", by: 1, out: PARSLEY, pair: [LENTILS, TOMATOES] }) }));
     p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
-    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[1]?.click();
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-card")[1]?.click();
     await settle();
     p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
-    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[1]?.click();
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-card")[1]?.click();
     await settle();
     // The other replacement is a different move.
     p.api.chooseSwap.mockResolvedValueOnce({ ok: false, kind: "unavailable" });
-    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-opt")[0]?.click();
+    qa<HTMLButtonElement>(p.pane, ".wx-srv-ck-swap-pair button.wx-srv-ck-card")[0]?.click();
     await settle();
     expect(p.api.chooseSwap.mock.calls.map((c: unknown[]) => [c[1], c[2]])).toEqual([
       ["move-1", "cherry-tomatoes"],

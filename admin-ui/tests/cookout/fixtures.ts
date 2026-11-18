@@ -231,3 +231,19 @@ export function bookBody(): Json {
     ],
   };
 }
+
+/** The URL of the catalogue picture whose content hash is `hex` (one hex digit, repeated 64 times). Both
+ * renditions share it in these fixtures: a test that asks "did this picture leak?" greps for this URL. */
+export function imageUrl(hex: string): string {
+  return `/admin/cookout-img/${hex.repeat(64)}.webp`;
+}
+
+/** The wire form of a catalogue picture whose content hash is `hex`. */
+export function imageOf(hex: string): Json {
+  return { card: imageUrl(hex), thumb: imageUrl(hex) };
+}
+
+/** An ingredient snap with a picture and a catalogue what-line (the new wire fields). */
+export function imaged(base: Json, hex: string, what: string | null = null): Json {
+  return { ...base, image: imageOf(hex), what };
+}

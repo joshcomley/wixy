@@ -87,6 +87,7 @@ import { loadWorld } from "./adventure/world";
 import {
   abandonCookout,
   bankCookoutConcept,
+  CLASSIC_MODE_ID,
   createCookout,
   getCookout,
   getCookoutOptions,
@@ -113,13 +114,14 @@ import {
   skipCookout,
   type ConceptId,
   type CookoutOptions,
+  type ModeOption,
 } from "./cookout/api";
 import { createCookoutCards, type CookoutCards } from "./cookout/cookoutCard";
 import { createCookoutGame, type CookoutGame } from "./cookout/cookoutGame";
 import { createCanvasPane, type CanvasPane } from "./canvasPane";
 import { createCookoutModel, type CookoutModel } from "./cookout/model";
 import { createRecipeBook, type RecipeBook } from "./cookout/recipeBook";
-import { createCookoutStartSheet, type CookoutStartSheet, type StartChoices } from "./cookout/startSheet";
+import { CookoutStartError, createCookoutStartSheet, type CookoutStartSheet, type StartChoices, type StartPreset } from "./cookout/startSheet";
 import type { ServerIdentity } from "./identity";
 import { linkifyInto } from "./linkify";
 import { mountMessageActions, type MessageActionsController } from "./messageActions";
@@ -531,7 +533,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
   });
   cookoutItem.addEventListener("click", () => {
     closeMoreMenu();
-    cookoutStart.open({}, header.offsetHeight);
+    openCookoutStart({});
   });
   recipeBookItem.addEventListener("click", () => {
     closeMoreMenu();
@@ -724,6 +726,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     model: cookoutModel,
     document: documentRef,
     openGame: (seq) => gameTabs.open("cookout", seq),
+    // A game mode's numbers for a card whose round is not read yet (09c §6.4), from the cached options.
+    modeOption: (id) => cookoutModeOptions?.find((mode) => mode.id === id) ?? null,
   });
   let voiceRecorder: VoiceRecorder | null = null;
   let callBusy = false;
@@ -1964,16 +1968,23 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     },
     roundMessage: (seq) => confirmedBySeq.get(seq),
     partner: () => partnerName,
-    openStartSheet: (preset) => cookoutStart.open(preset, header.offsetHeight),
+    openStartSheet: (preset) => openCookoutStart(preset),
     openBook: () => recipeBook.open(header.offsetHeight),
     openLightbox: (src, alt) => lightbox.open(src, alt),
     afterChange: () => threadScroll.afterContentChange(false),
     newId: () => cryptoRandomId(win),
+    loadOptions: () => loadCookoutOptions(),
   });
   // The start sheet (Open / Blind and the optional twists, then Start Cookout): from the ... menu, the
   // pane's New and the encore buttons. `GET /cookout/options` is read once per unlock (cleared on every
   // lock and wipe with `cookoutOptions = null`).
   let cookoutOptions: Promise<CookoutOptions | null> | null = null;
+  /** The game modes of the last options read, for the cards (null until one succeeded this unlock). */
+  let cookoutModeOptions: readonly ModeOption[] | null = null;
+  /** A card of a non-Classic round asked for the options once this unlock (09c §6.4). */
+  let cookoutModesAsked = false;
+  /** The `clientId` of a Cookout start whose answer was lost (its round may still arrive on the stream). */
+  let lostCookoutStart: string | null = null;
   function loadCookoutOptions(): Promise<CookoutOptions | null> {
     const session = currentSession;
     if (session === null) return Promise.resolve(null);
@@ -1986,19 +1997,40 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       // A failed read is not cached: the next open asks again.
       void asked.then((options) => {
         if (options === null && cookoutOptions === asked) cookoutOptions = null;
+        if (options !== null && cookoutOptions === asked) {
+          cookoutModeOptions = options.modes;
+          // Cards drawn without their mode's numbers can have them now.
+          for (const message of confirmedBySeq.values()) {
+            const summary = parseCookoutSummary(message.cookout);
+            if (summary !== null && summary.mode !== CLASSIC_MODE_ID) patchCookout(message.seq);
+          }
+        }
       });
     }
     return cookoutOptions;
+  }
+
+  /** A non-Classic round's card needs its mode's numbers: read the options once (the read is shared with the
+   * start sheet's, so at most one is ever in flight). */
+  function askCookoutModes(messages: readonly Message[]): void {
+    if (cookoutModesAsked || cookoutModeOptions !== null) return;
+    const modeRound = messages.some((message) => {
+      const summary = parseCookoutSummary(message.cookout);
+      return summary !== null && summary.mode !== CLASSIC_MODE_ID;
+    });
+    if (!modeRound) return;
+    cookoutModesAsked = true;
+    void loadCookoutOptions();
   }
   const cookoutStart: CookoutStartSheet = createCookoutStartSheet({
     document: documentRef,
     start: (choices, clientId) => addCookout(choices, clientId),
     loadOptions: () => loadCookoutOptions(),
-    async search(q) {
+    async search(q, mode) {
       const session = currentSession;
       if (session === null) return { ok: false, kind: "unavailable" };
       try {
-        return await searchIngredients(session, q);
+        return await searchIngredients(session, q, mode);
       } catch (error) {
         if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
         return { ok: false, kind: "unavailable" };
@@ -2239,7 +2271,7 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     hooks,
     getSession: () => currentSession,
     openRecipe: (seq, conceptId, generation) => void openCookoutRecipe(seq, conceptId, generation),
-    openEncore: (encore) => cookoutStart.open({ encore }, header.offsetHeight),
+    openEncore: (encore) => openCookoutStart({ encore }),
   });
   element.appendChild(recipeBook.element);
   element.appendChild(cookoutStart.element);
@@ -3115,14 +3147,18 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     const session = currentSession;
     if (session === null) return;
     const requestGeneration = contentGeneration;
+    // A new start supersedes any earlier lost one: its round, landing later, must not close this sheet.
+    lostCookoutStart = null;
     let result: Awaited<ReturnType<typeof createCookout>>;
-    try {
+    const create = (): ReturnType<typeof createCookout> =>
       // Only the twists actually chosen go on the wire: a twist-free start is the core request exactly.
-      result = await createCookout(session, {
+      createCookout(session, {
         clientId,
         sender: identity.getName() ?? "",
         deviceId: identity.getDeviceId(),
         blind: choices.blind,
+        // A Classic start sends no `mode`: the request is the core one exactly (09c A.3).
+        ...(choices.mode === CLASSIC_MODE_ID ? {} : { mode: choices.mode }),
         ...(choices.style === null ? {} : { style: choices.style }),
         ...(choices.challenge === null ? {} : { challenge: choices.challenge }),
         ...(choices.wildcard ? { wildcard: true } : {}),
@@ -3130,16 +3166,34 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
         ...(choices.fridgeSeedId === null ? {} : { fridgeSeedId: choices.fridgeSeedId }),
         ...(choices.encore === null ? {} : { encore: choices.encore }),
       });
+    try {
+      result = await create();
+      // A lost answer (a timeout under load, a dropped connection) does not mean no round: the start is
+      // idempotent on `clientId`, so the round the stream already brought is this start's, and a replay is
+      // answered with the round the server made rather than a second one. A real refusal is not replayed.
+      if (!result.ok && result.kind === "lost" && requestGeneration === contentGeneration) {
+        const arrived = ownCookout(clientId);
+        result = arrived !== undefined ? { ok: true, message: arrived } : await create();
+      }
     } catch (error) {
       if (error instanceof ServerLockedError) hooks.lockNow("unauthorized");
       return;
     }
     if (requestGeneration !== contentGeneration || currentSession === null) return;
+    // Still lost: the round may yet arrive on the stream, and then the starter lands in it (`landLostCookout`).
+    lostCookoutStart = !result.ok && result.kind === "lost" ? clientId : null;
     if (!result.ok) {
-      throw new Error(
+      // A game mode switched off meanwhile (09c §6.1): the cached options listed it, so they are read again.
+      const modeGone = result.kind === "game_unavailable" && choices.mode !== CLASSIC_MODE_ID;
+      if (modeGone) cookoutOptions = null;
+      // The failure's kind rides along: the sheet words a mode encore's refusal itself (09c §2.5).
+      throw new CookoutStartError(
+        result.kind,
         result.kind === "unsupported"
           ? "Cookout isn't available yet — try again in a moment."
-          : result.kind === "game_unavailable"
+          : modeGone
+            ? "That game isn't available right now"
+            : result.kind === "game_unavailable"
             ? "Cookout isn't available on this server right now."
             : result.kind === "invalid"
               ? "The kitchen can't start with those twists — change a choice and try again."
@@ -3150,6 +3204,32 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     renderThreadList();
     goToLatest();
     gameTabs.open("cookout", result.message.seq);
+  }
+
+  /** Opens the start sheet afresh: an earlier start's lost round no longer belongs to it. */
+  function openCookoutStart(preset: StartPreset): void {
+    lostCookoutStart = null;
+    cookoutStart.open(preset, header.offsetHeight);
+  }
+
+  /** The Cookout round a start with this `clientId` made, if it has reached this device. */
+  function ownCookout(clientId: string): Message | undefined {
+    for (const message of confirmedBySeq.values()) {
+      if (message.clientId === clientId && parseCookoutSummary(message.cookout) !== null) return message;
+    }
+    return undefined;
+  }
+
+  /** A start whose answer never came: when its round arrives on the stream while the sheet still shows the
+   * failure, the sheet closes and the starter lands in the round, exactly as a start that was answered. */
+  function landLostCookout(): void {
+    if (lostCookoutStart === null) return;
+    const arrived = ownCookout(lostCookoutStart);
+    if (arrived === undefined) return;
+    lostCookoutStart = null;
+    if (!cookoutStart.isOpen()) return;
+    cookoutStart.close();
+    gameTabs.open("cookout", arrived.seq);
   }
 
   /** The Recipe book's tap: open that round's dish in the Cookout tab, loading its message first. */
@@ -3690,9 +3770,11 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     wyrModel.observe(allMessages);
     adventureModel.observe(allMessages);
     cookoutModel.observe(allMessages);
+    askCookoutModes(messages);
     // The old stretch is history, never a new game to offer. Paging older could already bring one
     // in, but a single tap on a search result shouldn't retire the game on screen.
     syncGames(view === null ? allMessages : allMessages.filter((message) => message.seq > view.high));
+    landLostCookout();
     gameFloat.reconcile((seq) => confirmedBySeq.has(seq));
     // The end of a detached view is not the end of the chat: nothing may pull the reader along it.
     if (view !== null) threadScroll.unstick();
@@ -3781,6 +3863,9 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
     recipeBook.close();
     cookoutStart.close();
     cookoutOptions = null;
+    cookoutModeOptions = null;
+    cookoutModesAsked = false;
+    lostCookoutStart = null;
     partnerName = null;
     partnerSeq = 0;
     contentGeneration += 1;
@@ -4752,6 +4837,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       recipeBook.close();
       cookoutStart.close();
       cookoutOptions = null;
+      cookoutModeOptions = null;
+      cookoutModesAsked = false;
       wyrTopics.close();
       currentSession = null;
       endWipeReconcile("abandoned");
@@ -4914,6 +5001,8 @@ export function mountServerThread(deps: ServerThreadDeps): ServerThreadView {
       recipeBook.close();
       cookoutStart.close();
       cookoutOptions = null;
+      cookoutModeOptions = null;
+      cookoutModesAsked = false;
       wyrTopics.close();
       disposeAttachmentMedia(messageList);
       liveVoiceHub.dispose();

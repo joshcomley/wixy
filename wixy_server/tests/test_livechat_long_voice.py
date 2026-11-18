@@ -278,7 +278,7 @@ class TestSchema:
         db = tmp_path / "server" / "server.db"
         store = LiveChatStore(db)
         store.pending_upload_bytes()
-        assert _LATEST_SCHEMA_VERSION >= 22  # v23 (live voice notes) is additive on top
+        assert _LATEST_SCHEMA_VERSION == 24  # v22+v23 live voice, v24 Cookout mode
         conn = sqlite3.connect(str(db))
         try:
             assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION

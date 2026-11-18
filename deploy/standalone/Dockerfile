@@ -80,6 +80,19 @@ RUN mkdir -p /etc/ssh && { \
 
 WORKDIR /app
 
+# The Cookout ingredient pictures (spec/server-chat/09b section B.6): a content-addressed pack that
+# lives outside git, pinned by the committed manifest, baked in at build time exactly like the Node
+# tarball above is pinned by sha256. Only the stdlib-only fetcher and the manifest are copied (and
+# nothing else from wixy_server/), so this ~150 MB layer stays cached until either file changes, and
+# it runs before `pip install`. The fetch fails the build on any size or sha256 mismatch; an empty
+# manifest (`pack: null`) makes it a no-op. COOKOUT_PACK_URL overrides the URL for a mirror (the
+# sha256 still pins the content). The baked directory is read-only at runtime and never GC'd.
+ARG COOKOUT_PACK_URL=""
+COPY wixy_server/livechat/cookout_pack.py wixy_server/livechat/cookout_ingredient_images.json /app/pack-tools/
+RUN python /app/pack-tools/cookout_pack.py fetch       --manifest /app/pack-tools/cookout_ingredient_images.json       --dest /app/cookout-pack       ${COOKOUT_PACK_URL:+--url "$COOKOUT_PACK_URL"}
+# An image layout fact, not an edition setting (decisions/00051 #6), so it is baked with ENV.
+ENV WIXY_COOKOUT_IMAGES_BAKED_DIR=/app/cookout-pack/objects
+
 # Copy only what pip needs to resolve + install first so the dependency layer
 # stays cached across source-only changes; `projects/*.json` is the committed
 # default project template both editions ship (WIXY_SITE_REPO/WIXY_DOMAIN/

@@ -27,6 +27,7 @@ from wixy_server.livechat.cookout_bank import (
     CookoutExhaustedError,
     Ingredient,
     RarityKey,
+    RarityMode,
     RoleKey,
     Staple,
     load_cookout_bank,
@@ -553,11 +554,12 @@ def test_scan_is_word_boundary_not_substring() -> None:
 def test_scan_longest_span_wins_for_compound_foods() -> None:
     picks = {"peanut-butter", "chicken-breast"}
     assert _found("Peanut butter chicken", picks) == []
-    assert _found("peanut butter with extra butter", picks) == ["Butter"]
+    # the bare word is shorthand for a used pick whose name contains it (round 2)
+    assert _found("peanut butter with extra butter", picks) == []
     coconut = {"coconut-milk"}
     assert _found("Coconut milk curry", coconut) == []
-    assert _found("coconut milk plus milk", coconut) == ["Milk"]
-    assert _found("COCONUT MILK, then Milk", coconut) == ["Milk"]
+    assert _found("coconut milk plus milk", coconut) == []
+    assert _found("COCONUT MILK, then Milk", coconut) == []
     assert _found("peanut butter and butter") == ["Peanut butter", "Butter"]
 
 
@@ -598,7 +600,17 @@ def test_scan_staple_words_are_not_suppressed_by_families() -> None:
     found = bank.find_contraband_ingredients(
         "whole milk, then milk", allowed_ingredient_ids={"whole-milk"}, allowed_staple_ids=set()
     )
-    assert found == ["Milk"]
+    # round 2: the bare word "milk" is shorthand for the used "Whole milk" (a pick whose name
+    # contains it); the staple is no longer smuggled by saying so
+    assert found == []
+    other = _mini(
+        _item("Whole milk", "dairy", "milk", role="accent"),
+        _item("Milk", "dairy", "milk", role="accent"),
+        _item("Flour", "grain", "flour", role="base"),
+    )
+    assert other.find_contraband_ingredients(
+        "whole milk, then flour", allowed_ingredient_ids={"whole-milk"}, allowed_staple_ids=set()
+    ) == ["Flour"]
 
 
 def test_scan_on_the_committed_bank_catches_the_spec_examples() -> None:
@@ -659,7 +671,8 @@ def test_committed_stop_words_hold_no_food() -> None:
 
 def test_unpicked_stock_and_spirit_are_flagged_on_the_committed_bank() -> None:
     bank = load_cookout_bank()
-    for text in ("Simmer in stock", "Deglaze with a little stock"):
+    # (a bare "stock" is a cooking by-product and passes since round 2; a named one does not)
+    for text in ("Simmer in chicken stock", "Deglaze with a little white wine and spirit"):
         found = bank.find_contraband_ingredients(
             text, allowed_ingredient_ids=set(), allowed_staple_ids=set()
         )
@@ -1072,3 +1085,712 @@ def test_validator_twist_simulation_and_exotic_coverage(
     problems = validator.validate(broken)
     assert any("role produce: exotic entries span fewer" in p for p in problems)
     assert any("role produce: fewer than 40 exotic families" in p for p in problems)
+
+
+# -- round 2: the chef must succeed (operator first play, round 11132) ----------------------------
+
+PRODUCTION_PICKS = {
+    "guar-beans",
+    "pea-shoots",
+    "mantis-shrimp",
+    "rolled-beef-joint",
+    "dried-mixed-mushrooms",
+    "lemongrass",
+    "vegetable-oil",
+    "dried-onion-granules",
+    "baby-potato",
+    "linguine",
+}
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        # every false positive the operator's first game hit, verbatim
+        "Mushroom sauce",
+        "Crisp onion with a pan gravy",
+        "a gravy made from the roasting juices",
+        "lemongrass-scented oil",
+        "crisp-tender pea shoots",
+        "thickened with a little starch from the potato",
+        "roasting juices spooned over the beef",
+        "Mushroom broth with linguine",
+        "onion and mushroom stock",
+    ],
+)
+def test_ordinary_cooking_prose_passes_on_the_production_basket(prose: str) -> None:
+    bank = load_cookout_bank()
+    assert (
+        bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=PRODUCTION_PICKS, allowed_staple_ids=set()
+        )
+        == []
+    ), prose
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "with fresh mango",
+        "topped with salmon",
+        "streaky bacon lardons",
+        "melted chocolate",
+        "grated cheese and garlic",
+        "mango chutney on the side",
+        "a handful of crisps",
+        "served with olive oil",
+        "a dollop of butter",
+    ],
+)
+def test_a_distinct_unpicked_food_is_still_contraband_on_the_production_basket(
+    prose: str,
+) -> None:
+    bank = load_cookout_bank()
+    assert bank.find_contraband_ingredients(
+        prose, allowed_ingredient_ids=PRODUCTION_PICKS, allowed_staple_ids=set()
+    ), prose
+
+
+def test_an_omitted_pick_is_still_caught_by_its_full_name_in_prose() -> None:
+    bank = load_cookout_bank()
+    picks = PRODUCTION_PICKS - {"rolled-beef-joint"}
+    found = bank.find_contraband_ingredients(
+        "a rolled beef joint, sliced",
+        allowed_ingredient_ids=picks,
+        allowed_staple_ids=set(),
+        omitted_ingredient_ids={"rolled-beef-joint"},
+    )
+    assert found == ["Rolled beef joint"]
+
+
+def test_a_culinary_word_never_counts_as_mentioning_a_removed_ingredient() -> None:
+    bank = load_cookout_bank()
+    assert not bank.mentions("rich roasting juices", "apple-juice")
+    assert not bank.mentions("a crisp finish", "ready-salted-crisps")
+    assert bank.mentions("a glass of apple juice", "apple-juice")
+
+
+@pytest.mark.parametrize("word", ["butter", "oil", "salt", "mango", "honey", "two words", "Crisp"])
+def test_the_loader_refuses_bad_culinary_words(
+    raw_bank: dict[str, Any], tmp_path: Path, word: str
+) -> None:
+    doc = _mutated(raw_bank, lambda d: d["culinaryWords"].append(word))
+    with pytest.raises(CookoutBankError):
+        parse_cookout_bank(doc)
+
+
+def test_the_committed_culinary_words_are_valid_and_cover_the_production_failures() -> None:
+    bank = load_cookout_bank()
+    assert {"crisp", "juices", "gravy", "starch", "stock", "broth"} <= bank.culinary_words
+
+
+def test_date_night_and_choux_buns_are_not_read_as_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("Candlelit date night supper", "baked into golden buns"):
+        assert (
+            bank.find_contraband_ingredients(
+                prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+            )
+            == []
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "stewed dates", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
+
+
+def test_a_dab_of_and_wafer_thin_are_not_read_as_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("with a dab of heat", "wafer-thin slices", "leave any grit behind"):
+        assert (
+            bank.find_contraband_ingredients(
+                prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+            )
+            == []
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "grilled dab with a wafer", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
+
+
+def test_bitter_as_a_taste_word_is_not_real_ale() -> None:
+    # Trial 7, basket 15: "a bitter finish" / "bitter crunch" were read as the beer alias.
+    bank = load_cookout_bank()
+    for prose in ("scatter over for a bitter finish", "a bitter crunch"):
+        assert not bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        ), prose
+    assert bank.find_contraband_ingredients(
+        "simmer in real ale", allowed_ingredient_ids=set(), allowed_staple_ids=set()
+    )
+
+
+def test_a_tea_towel_and_a_crisping_salami_are_not_foods() -> None:
+    bank = load_cookout_bank()
+    for prose in ("keep a tea towel nearby", "dice it small so the skin crisps quickly"):
+        assert not bank.find_contraband_ingredients(
+            prose, allowed_ingredient_ids=set(), allowed_staple_ids=set()
+        ), prose
+
+
+# -- round 2 review fixes (H1 mixing, H2 prep words, M3 culinary holes, M4 crisps) ---------------
+
+
+def _scan(text: str, picks: set[str]) -> list[str]:
+    return load_cookout_bank().find_contraband_ingredients(
+        text, allowed_ingredient_ids=picks, allowed_staple_ids=set()
+    )
+
+
+def test_h1_a_phrase_is_not_shorthand_when_its_words_come_from_two_different_picks() -> None:
+    assert _scan("pork mince", {"pork-loin-chop", "chicken-mince"}) == ["Pork mince"]
+    assert _scan("beef mince", {"lamb-mince", "beef-topside"}) == ["Beef mince"]
+    # one pick supplies every food word: still shorthand
+    assert _scan("mushroom sauce", {"dried-mixed-mushrooms"}) == []
+    assert _scan("pork mince", {"pork-mince"}) == []
+
+
+def test_h2_a_prep_word_before_a_picked_name_is_not_a_second_food() -> None:
+    picks = {"pork-loin-chop"}
+    assert _scan("Pan-fry diced pork loin chop until golden", picks) == []
+    assert _scan("minced pork loin chop", picks) == []
+    assert _scan("add diced pork to the pan", picks) == ["Diced pork"]
+    # a containing unpicked food still wins longest-first (peanut butter vs a picked butter)
+    assert _scan("peanut butter", {"butter"}) == ["Peanut butter"]
+
+
+def test_m3_a_food_before_a_culinary_word_must_itself_be_picked() -> None:
+    assert _scan("a chicken broth", {"lemongrass"}) == ["chicken"]
+    assert _scan("a chicken broth", {"chicken-breast"}) == []
+    assert _scan("roasting juices and pan gravy", {"lemongrass"}) == []
+
+
+def test_m3_every_multi_word_bank_food_ending_in_a_culinary_word_is_still_flagged() -> None:
+    bank = load_cookout_bank()
+    for ingredient in bank.ingredients:
+        for name in (ingredient.name, *ingredient.aliases):
+            words = cookout_bank.tokenise(name)
+            if len(words) > 1 and words[-1] in bank.culinary_words:
+                assert _scan(name, set()), name
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "until the skin crisps",
+        "it crisps up in the pan",
+        "the edges crisps beautifully",
+        "the skin crisps nicely",
+        "the fat crisps at the edges",
+    ],
+)
+def test_m4_crisps_as_a_verb_passes(prose: str) -> None:
+    assert _scan(prose, set()) == []
+
+
+@pytest.mark.parametrize(
+    "prose", ["with crisps", "serve crisps on the side", "a handful of crisps", "some crisps"]
+)
+def test_m4_crisps_as_a_food_is_flagged(prose: str) -> None:
+    assert _scan(prose, set()) == ["crisps"]
+
+
+def test_h8_a_food_span_never_crosses_punctuation() -> None:
+    bank = load_cookout_bank()
+    found = bank.find_contraband_ingredients(
+        "Prepare the Lemon, Salt and Black pepper",
+        allowed_ingredient_ids={"lemon"},
+        allowed_staple_ids=set(),
+    )
+    assert found == []
+    for text in ("Lemon; salt", "Lemon. Salt", "Lemon (salt)", "Lemon - salt", "Lemon: salt"):
+        assert (
+            bank.find_contraband_ingredients(
+                text, allowed_ingredient_ids={"lemon"}, allowed_staple_ids=set()
+            )
+            == []
+        ), text
+    # the real compound is still one food, and a hyphen inside a word does not split
+    assert bank.find_contraband_ingredients(
+        "add lemon salt", allowed_ingredient_ids={"lemon"}, allowed_staple_ids=set()
+    ) == ["Lemon salt"]
+    assert bank.mentions("Prepare the Lemon, Salt", "lemon")
+    assert not bank.mentions("Lemon, Salt", "lemon-salt")
+
+
+def test_m3_verbs_and_adjectives_before_a_culinary_word_are_not_foods() -> None:
+    for prose in ("a tart gravy", "a sweet stock", "warm dip", "spread over toast", "dip it in"):
+        assert _scan(prose, set()) == [], prose
+    assert _scan("a chicken broth", {"lemongrass"}) == ["chicken"]
+    assert _scan("a salmon stock", {"lemongrass"}) == ["salmon"]
+
+
+def test_pastry_is_shorthand_only_for_a_picked_pie_pasty_or_tart() -> None:
+    assert _scan("pastry and filling", {"cheese-and-onion-pasty"}) == []
+    assert _scan("crisp pastry", {"lemongrass"}) == ["pastry"]
+
+
+def test_trial6_false_positives_bacon_fat_omelette_and_a_second_verb() -> None:
+    assert _scan("leaving the bacon fat in the pan", {"back-bacon"}) == []
+    assert _scan("a Spanish omelette", {"brown-egg"}) == []
+    assert _scan("an omelette", {"lemongrass"}) == ["Omelette"]
+    assert _scan("duck fat", {"lemongrass"}) == ["Duck fat"]
+    assert _scan("rough it up so it catches and crisps.", set()) == []
+    assert _scan("salt and crisps", set()) == ["crisps"]
+
+
+# -- round 2 review v2 (M1 crisps, M2 garlic butter, L1-L3) -------------------------------------
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "sprinkle crisps over",
+        "crisps on top",
+        "crisps in the bowl",
+        "Layer in crisps then",
+        "Add crisps beautifully",
+        "serves crisps nicely",
+    ],
+)
+def test_m1_crisps_after_an_imperative_or_without_a_subject_is_the_food(prose: str) -> None:
+    assert _scan(prose, {"chicken-breast"}) == ["crisps"], prose
+
+
+@pytest.mark.parametrize(
+    "prose",
+    [
+        "the skin crisps",
+        "it crisps up",
+        "the edges crisps beautifully",
+        "until the skin crisps",
+        "so it catches and crisps.",
+        "dice it small so the skin crisps quickly",
+    ],
+)
+def test_m1_crisps_with_a_subject_is_the_verb(prose: str) -> None:
+    assert _scan(prose, {"chicken-breast"}) == [], prose
+
+
+def test_m2_two_standalone_foods_from_two_sources_pass_but_a_single_head_does_not() -> None:
+    bank = load_cookout_bank()
+    assert (
+        bank.find_contraband_ingredients(
+            "garlic butter",
+            allowed_ingredient_ids={"garlic-cloves"},
+            allowed_staple_ids={"butter"},
+        )
+        == []
+    )
+    assert _scan("pork mince", {"pork-loin-chop", "chicken-mince"}) == ["Pork mince"]
+    assert _scan("beef mince", {"lamb-mince", "beef-topside"}) == ["Beef mince"]
+
+
+def test_l1_pastry_is_not_implied_by_a_bread_roll_but_is_by_a_sausage_roll() -> None:
+    assert _scan("wrap in pastry", {"hot-dog-roll"}) == ["pastry"]
+    assert _scan("wrap in pastry", {"sausage-roll"}) == []
+
+
+def test_l2_omelette_is_implied_by_a_raw_egg_pick_not_a_boiled_egg() -> None:
+    assert _scan("a Spanish omelette", {"brown-egg"}) == []
+    bank = load_cookout_bank()
+    assert "omelette" not in bank._covered_tokens({"boiled-egg"}, set())
+    assert "omelette" in bank._covered_tokens({"brown-egg"}, set())
+
+
+def test_l3_chicken_fond_and_brown_sugar_need_their_own_picks() -> None:
+    assert _scan("a chicken fond", {"lemongrass"}) == ["chicken"]
+    bank = load_cookout_bank()
+    assert bank.find_contraband_ingredients(
+        "brown sugar", allowed_ingredient_ids=set(), allowed_staple_ids={"granulated-sugar"}
+    )
+    assert (
+        bank.find_contraband_ingredients(
+            "a little sugar", allowed_ingredient_ids=set(), allowed_staple_ids={"granulated-sugar"}
+        )
+        == []
+    )
+
+
+# -- trial 7 (seed 6) false positives ----------------------------------------------------------
+
+
+def test_trial7_picked_foods_named_in_ordinary_ways_pass() -> None:
+    cases = [
+        ("with the fish juices soaking into the base", {"opah"}),
+        ("topped with a sage and onion crumb of stuffing mix", {"stuffing-mix"}),
+        ("tinned pineapple rings sit under the cake", {"tinned-pineapple"}),
+        ("a rich ragu-style gravy over pasta", {"lentil-pasta"}),
+        ("top each bowl with a poached egg", {"free-range-egg"}),
+        ("brush with the beaten egg", {"free-range-egg"}),
+        ("break the egg yolk into the soup", {"free-range-egg"}),
+    ]
+    for prose, picks in cases:
+        assert _scan(prose, picks) == [], prose
+
+
+def test_trial7_the_new_allowances_do_not_hide_smuggling() -> None:
+    assert _scan("flaked salmon with sage and onion", {"stuffing-mix"}) == ["salmon"]
+    assert _scan("a poached egg on top", {"opah"})
+    assert _scan("sage and onion", set())
+    assert _scan("a bolognese sauce base", {"lentil-pasta"})
+    assert _scan("chicken broth", {"opah"})
+
+
+def test_trial7_pasta_shapes_and_soft_boiled_eggs() -> None:
+    assert _scan("small shapes such as penne or fusilli", {"lentil-pasta"}) == []
+    assert _scan("top with a soft-boiled egg", {"free-range-egg"}) == []
+    assert _scan("small shapes such as penne", {"opah"})
+    assert _scan("serve with squid ink pasta", {"lentil-pasta"})
+
+
+# -- review v3 ----------------------------------------------------------------------------------
+
+
+def test_v3_fish_allowance_is_bare_and_only_for_fish_picks() -> None:
+    assert _scan("fish sauce and fish stock", {"opah"}) == ["Fish sauce", "Fish stock"]
+    assert _scan("a splash of fish stock", {"lemon"})
+    assert _scan("the fish juices pool", {"opah"}) == []
+    assert _scan("the fish juices pool", {"lemon"})
+
+
+def test_v3_picked_food_is_a_crisps_subject_only_in_verb_positions() -> None:
+    assert _scan("cook until the chicken crisps", {"chicken-breast"}) == []
+    assert _scan("the chicken crisps up", {"chicken-breast"}) == []
+    assert _scan("sprinkle the chicken crisps over", {"chicken-breast"})
+    assert _scan("serve with potato crisps.", {"potato"})
+
+
+def test_v3_allowance_words_do_not_combine_with_ring_or_other_words() -> None:
+    assert _scan("crispy onion rings on top", {"stuffing-mix"})
+    assert _scan("a sage and onion crumb", {"stuffing-mix"}) == []
+
+
+# -- game modes (spec 09c §2.3, A.2): `candidates` and the family facet -------------------------
+
+CLASSIC_GOLDEN = Path(__file__).parent / "fixtures" / "cookout_classic_golden.json"
+
+
+def _golden_bank() -> CookoutBank:
+    """A synthetic bank (4 roles x 4 categories x 3 families x 4 entries). The golden draws were
+    recorded from the code BEFORE `candidates`/`facet` existed; edit this only together with the
+    fixture."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "everyday", "uncommon", "exotic")
+    items = []
+    for role in ROLES:
+        for ci in range(4):
+            for fi in range(3):
+                family = f"{role}-{ci}-{fi}"
+                for e in range(4):
+                    items.append(
+                        Ingredient(
+                            id=f"{family}-{e}",
+                            name=f"{'Alpha' if e % 2 else 'Beta'} {role} {ci}{fi}{e}",
+                            aliases=(f"nick {family} {e}",),
+                            category=f"cat-{ci}",
+                            category_name=f"Cat {ci}",
+                            emoji="x",
+                            role=role,
+                            family=family,
+                            rarity=rarities[e],
+                            blurb="b",
+                        )
+                    )
+    return CookoutBank(
+        categories=tuple(Category(f"cat-{c}", f"cat-{c}", "x") for c in range(4)),
+        staples=(Staple("water", "Water", False),),
+        ingredients=tuple(items),
+    )
+
+
+def test_classic_golden_draws_are_unchanged_by_the_new_arguments() -> None:
+    golden = json.loads(CLASSIC_GOLDEN.read_text(encoding="utf-8"))
+    bank = _golden_bank()
+    modes: tuple[RarityMode, ...] = ("normal", "exotic")
+    pairs = []
+    for seed in range(6):
+        for role in ROLES:
+            for mode in modes:
+                a, b = bank.draw_pair(
+                    role=role,
+                    seen_ids={f"{role}-0-0-0"},
+                    picked_families={f"{role}-1-1"},
+                    offered_families={f"{role}-2-2"},
+                    player_offered_categories=["cat-0", "cat-1", "cat-0"],
+                    rng=random.Random(seed),
+                    rarity_mode=mode,
+                )
+                pairs.append([seed, role, mode, a.id, b.id])
+    assert pairs == golden["pairs"]
+    replacements = []
+    for seed in range(6):
+        for role in ROLES:
+            for mode in modes:
+                replacement = bank.draw_replacement(
+                    role=role,
+                    keep_id=f"{role}-0-0-{2 if mode == 'normal' else 3}",
+                    seen_ids=set(),
+                    picked_families=set(),
+                    offered_families={f"{role}-3-0"},
+                    player_offered_categories=["cat-1"],
+                    rarity_mode=mode,
+                    rng=random.Random(seed),
+                )
+                replacements.append([seed, role, mode, replacement.id])
+    assert replacements == golden["replacements"]
+    wildcards = [
+        [
+            seed,
+            bank.draw_wildcard(
+                seen_ids=set(),
+                picked_families={"base-0-0"},
+                offered_families={"protein-0-0"},
+                basket_categories={"cat-0"},
+                rng=random.Random(seed),
+            ).id,
+        ]
+        for seed in range(8)
+    ]
+    assert wildcards == golden["wildcards"]
+    searches = {
+        q: [i.id for i in bank.search(q, limit=6)]
+        for q in ("alp", "alpha base", "nick base", "zz", "1")
+    }
+    assert searches == golden["searches"]
+
+
+def _breads() -> list[Ingredient]:
+    """One category ("grains"), four families, four entries each: the shape of the bread kind."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "everyday", "uncommon", "exotic")
+    return [
+        _item(f"Loaf {family} {n}", "grains", family, rarities[n], role="base")
+        for family in ("sourdough", "bagel", "rye", "brioche")
+        for n in range(4)
+    ]
+
+
+def test_family_facet_pairs_two_families_of_one_category() -> None:
+    bank = _mini(*_breads())
+    for seed in range(60):
+        a, b = _draw(bank, seed, facet="family")
+        assert a.category == b.category == "grains"
+        assert a.family != b.family
+        assert "everyday" in (a.rarity, b.rarity)
+
+
+def test_category_facet_cannot_pair_a_single_category_pool() -> None:
+    bank = _mini(*_breads())
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1)
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1, facet="category")
+
+
+def test_family_facet_refuses_a_single_family_pool() -> None:
+    bank = _mini(*(i for i in _breads() if i.family == "rye"))
+    with pytest.raises(CookoutExhaustedError):
+        _draw(bank, 1, facet="family")
+
+
+def test_family_facet_least_shown_tie_break_counts_families() -> None:
+    bank = _mini(*_breads())
+    shown = ["sourdough", "sourdough", "bagel"]
+    for seed in range(40):
+        a, b = _draw(bank, seed, facet="family", player_offered_categories=shown)
+        assert {a.family, b.family} == {"rye", "brioche"}
+
+
+def test_family_facet_keeps_the_hard_and_soft_rules() -> None:
+    bank = _mini(*_breads())
+    for seed in range(40):
+        a, b = _draw(
+            bank,
+            seed,
+            facet="family",
+            seen_ids={"loaf-rye-0"},
+            picked_families={"bagel"},
+            offered_families={"brioche"},
+        )
+        assert "loaf-rye-0" not in (a.id, b.id)
+        assert {a.family, b.family} == {"sourdough", "rye"}  # the offered family is avoided
+    for seed in range(20):
+        a, b = _draw(bank, seed, facet="family", picked_families={"bagel"}, rarity_mode="exotic")
+        assert a.rarity == b.rarity == "exotic"
+        assert "bagel" not in (a.family, b.family)
+
+
+def test_family_facet_replacement_allows_the_same_category() -> None:
+    bank = _mini(*_breads())
+
+    def replace(seed: int, **over: Any) -> Ingredient:
+        kwargs: dict[str, Any] = {
+            "role": "base",
+            "keep_id": "loaf-rye-0",
+            "seen_ids": set(),
+            "picked_families": set(),
+            "offered_families": set(),
+            "player_offered_categories": [],
+            "rng": random.Random(seed),
+            "facet": "family",
+        }
+        kwargs.update(over)
+        return bank.draw_replacement(**kwargs)
+
+    for seed in range(30):
+        got = replace(seed)
+        assert got.category == "grains" and got.family != "rye"
+    with pytest.raises(CookoutExhaustedError):
+        bank.draw_replacement(
+            role="base",
+            keep_id="loaf-rye-0",
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            player_offered_categories=[],
+            rng=random.Random(1),
+        )
+    # The tie-break counts families: the unseen family always wins.
+    for seed in range(30):
+        got = replace(
+            seed,
+            player_offered_categories=["sourdough", "sourdough", "bagel"],
+            rarity_mode="normal",
+        )
+        assert got.family == "brioche"
+
+
+def _accents() -> list[Ingredient]:
+    """Nine accents in three categories and three families."""
+    rarities: tuple[RarityKey, ...] = ("everyday", "uncommon", "exotic")
+    return [
+        _item(f"Zest {family} {n}", category, family, rarity, role="accent")
+        for family, category in (("citrus", "fruit"), ("herb", "herbs"), ("chilli", "spices"))
+        for n, rarity in enumerate(rarities)
+    ]
+
+
+def test_candidates_replace_the_role_pool_in_every_draw() -> None:
+    accents = _accents()
+    bank = _mini(*_breads(), *accents)
+    pool = bank.by_role("accent")
+    for seed in range(20):
+        a, b = _draw(bank, seed, role="base", candidates=pool)
+        assert {a.id, b.id} <= {i.id for i in pool}
+    empty_role = _mini(*accents)
+    assert empty_role.by_role("base") == ()
+    a, b = _draw(empty_role, 1, role="base", candidates=empty_role.by_role("accent"))
+    assert {a.id, b.id} <= {i.id for i in accents}
+    kept = pool[0]
+    got = bank.draw_replacement(
+        role="base",
+        keep_id=kept.id,
+        seen_ids=set(),
+        picked_families=set(),
+        offered_families=set(),
+        player_offered_categories=[],
+        rng=random.Random(2),
+        candidates=pool,
+    )
+    assert got.id in {i.id for i in pool} and got.family != kept.family
+
+
+def test_candidates_narrow_the_wildcard_and_the_search() -> None:
+    accents = _accents()
+    bank = _mini(*_breads(), *accents)
+    pool = tuple(i for i in bank.ingredients if i.role == "accent")
+    for seed in range(20):
+        wild = bank.draw_wildcard(
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            basket_categories=set(),
+            rng=random.Random(seed),
+            candidates=pool,
+        )
+        assert wild.role == "accent" and wild.rarity != "everyday"
+    assert {i.role for i in bank.search("loaf", limit=40)} == {"base"}
+    assert bank.search("loaf", candidates=pool) == ()
+    assert [i.id for i in bank.search("zest cit", candidates=pool)] == [
+        "zest-citrus-0",
+        "zest-citrus-1",
+        "zest-citrus-2",
+    ]
+    assert bank.search("zest", candidates=pool, limit=2) == bank.search("zest", limit=2)[:2]
+    with pytest.raises(CookoutExhaustedError):
+        bank.draw_wildcard(
+            seen_ids=set(),
+            picked_families=set(),
+            offered_families=set(),
+            basket_categories=set(),
+            rng=random.Random(1),
+            candidates=(),
+        )
+
+
+# -- senior audit F2: a modifier word never makes a phrase shorthand ----------------------------
+
+
+def test_f2_modifier_words_do_not_cover_unpicked_condiments() -> None:
+    assert _scan("serve with brown sauce", {"brown-crab"})
+    assert _scan("a splash of hot sauce", {"hot-smoked-salmon"})
+    assert _scan("a rich white sauce", {"gluten-free-white-bread"})
+    assert _scan("render the white fat", {"gluten-free-white-bread"})
+
+
+def test_f2_intended_shorthand_still_passes() -> None:
+    assert _scan("spoon over the apple sauce", {"bramley-apple"}) == []
+    assert _scan("lamb stock", {"lamb-mince"}) == []
+    assert _scan("toast the white bread", {"gluten-free-white-bread"}) == []
+
+
+def test_f2_followups_crisps_flavours_pooled_phrases_and_specific_pastas() -> None:
+    assert _scan("serve with salt and vinegar crisps", {"spiced-vinegar-relish"})
+    assert _scan("serve with beef and onion crisps", {"bulgogi-beef", "spring-onion"})
+    assert _scan("cook until the chicken crisps", {"chicken-breast"}) == []
+    assert _scan("serve with elbow macaroni", {"angel-hair-pasta"})
+    assert _scan("a custard apple", {"egg-custard", "bramley-apple"})
+    assert _scan("rice milk", {"basmati-rice", "whole-milk"})
+    assert _scan("a pat of garlic butter", {"fresh-garlic", "salted-butter"}) == []
+
+
+# -- audit F2, class A: a bare word must be the pick's head noun --------------------------------
+
+
+def test_f2_a_leading_modifier_is_not_a_bare_word_for_the_pick() -> None:
+    assert _scan("sliced banana", {"banana-shallot"})
+    assert _scan("toasted bagel", {"everything-bagel-seasoning"})
+    assert _scan("a splash of bourbon", {"bourbon-biscuits"})
+    assert _scan("burgundy truffle shavings", {"burgundy-truffle"}) == []  # its own full name
+    assert _scan("chopped celery", {"celery-seeds"})
+    assert _scan("grated carrot", {"carrot-juice"})
+    assert _scan("an apricot glaze", {"apricot-glaze"}) == []  # the full phrase is the pick
+
+
+def test_f2_the_head_noun_or_cut_still_covers_the_pick() -> None:
+    assert _scan("slice the shallot", {"banana-shallot"}) == []
+    assert _scan("toss the squash", {"butternut-squash"}) == []
+    assert _scan("fry the onion", {"dried-onion-granules"}) == []
+    assert _scan("sear the chicken", {"chicken-breast"}) == []
+    assert _scan("add the butter", {"cultured-butter"}) == []
+
+
+def test_f2_sauce_glaze_and_salted_egg_picks_do_not_cover_the_bare_food() -> None:
+    assert _scan("fresh apricot", {"apricot-glaze"})
+    assert _scan("sliced strawberry", {"strawberry-sauce"})
+    assert _scan("a plain omelette", {"salted-duck-egg"})
+    assert _scan("an omelette", {"free-range-egg"}) == []
+
+
+def test_f2_names_whose_prefix_changes_the_food_do_not_cover_the_bare_word() -> None:
+    assert _scan("sliced cucumber", {"sea-cucumber"})
+    assert _scan("rich marrow", {"bone-marrow"})
+    assert _scan("wilted spinach", {"water-spinach"})
+    assert _scan("pepperoni pizza traybake", {"frozen-pepperoni-pizza"}) == []
+    assert _scan("pan-fry in dried chilli", {"dried-chillies-whole"}) == []
+
+
+def test_trial8_a_modifier_pick_word_can_be_a_crisps_subject_and_whole_chicken_is_not_breast() -> (
+    None
+):
+    assert _scan("enoki crisps up in the last few minutes", {"enoki-mushroom"}) == []
+    assert _scan("sprinkle enoki crisps over", {"enoki-mushroom"})
+    assert _scan("add whole chicken to the pot", {"chicken-breast"})

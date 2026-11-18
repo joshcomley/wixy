@@ -1,0 +1,140 @@
+{
+ "roleSchedule": [
+  "accent",
+  "base",
+  "produce",
+  "produce",
+  "protein"
+ ],
+ "turns": [
+  {
+   "turn": 1,
+   "offers": [
+    [
+     "preserved-lemon-paste",
+     "fresh-basil"
+    ]
+   ],
+   "choice": "preserved-lemon-paste",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 2,
+   "offers": [
+    [
+     "vanilla-sugar",
+     "sour-cream-and-chive-tortilla-chips"
+    ],
+    [
+     "mint-yoghurt",
+     "butter"
+    ]
+   ],
+   "choice": "mint-yoghurt",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 3,
+   "offers": [
+    [
+     "cavatelli",
+     "peanut-flour"
+    ]
+   ],
+   "choice": "cavatelli",
+   "replaced": [
+    "choux-paste",
+    "sweet-potato"
+   ],
+   "lucky": false
+  },
+  {
+   "turn": 4,
+   "offers": [
+    [
+     "new-potato",
+     "rye-crispbread"
+    ]
+   ],
+   "choice": "new-potato",
+   "replaced": [
+    "lentil-pasta"
+   ],
+   "lucky": false
+  },
+  {
+   "turn": 5,
+   "offers": [
+    [
+     "tinned-pears",
+     "mandarin"
+    ]
+   ],
+   "choice": "mandarin",
+   "replaced": [],
+   "lucky": true
+  },
+  {
+   "turn": 6,
+   "offers": [
+    [
+     "sauerkraut",
+     "dried-pineapple"
+    ]
+   ],
+   "choice": "sauerkraut",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 7,
+   "offers": [
+    [
+     "dried-porcini",
+     "onion-bhajis"
+    ]
+   ],
+   "choice": "dried-porcini",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 8,
+   "offers": [
+    [
+     "girolle",
+     "garlic-cloves"
+    ]
+   ],
+   "choice": "girolle",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 9,
+   "offers": [
+    [
+     "chicken-livers",
+     "perch-fillet"
+    ]
+   ],
+   "choice": "chicken-livers",
+   "replaced": [],
+   "lucky": false
+  },
+  {
+   "turn": 10,
+   "offers": [
+    [
+     "beef-shin",
+     "clams"
+    ]
+   ],
+   "choice": "beef-shin",
+   "replaced": [],
+   "lucky": false
+  }
+ ]
+}

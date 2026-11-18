@@ -4,7 +4,9 @@ import { ServerLockedError } from "../../src/server/api/http";
 import { parseRecipeBook, type BookResult } from "../../src/server/cookout/api";
 import { createRecipeBook } from "../../src/server/cookout/recipeBook";
 import type { ServerSession } from "../../src/server/types";
-import { bookBody } from "./fixtures";
+import { BEANS, TOAST, bookBody } from "./fixtures";
+import { HAM, PICKLES, SOURDOUGH, modeBookBody } from "./modeFixtures";
+import type { EncorePreset } from "../../src/server/cookout/startSheet";
 
 // The Recipe book (spec 09 §5.4): a full-height screen like the Holiday bank, newest banked first, each
 // entry a thumbnail, title, vibe, total time and "Serves 2"; a tap opens that dish's full recipe.
@@ -111,5 +113,131 @@ describe("the Recipe book", () => {
     await flush();
     expect(h.book.element.hidden).toBe(true);
     expect(h.book.element.querySelectorAll(".wx-srv-ck-book-entry")).toHaveLength(0);
+  });
+});
+
+// -- Game modes (spec/server-chat/09c-cookout-modes.md §6.4) -------------------------------------------------
+
+describe("game modes in the Recipe book", () => {
+  function modeMake(raw: Record<string, unknown> = modeBookBody()) {
+    const openEncore = vi.fn();
+    const book = createRecipeBook({
+      document,
+      hooks: { lockNow: vi.fn() },
+      getSession: () => SESSION,
+      openRecipe: vi.fn(),
+      openEncore,
+      fetchBook: async (): Promise<BookResult> => ({ ok: true, recipes: parseRecipeBook(raw) ?? [] }),
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    document.body.append(book.element);
+    return { book, openEncore };
+  }
+
+  async function modeOpened(raw?: Record<string, unknown>) {
+    const h = modeMake(raw);
+    h.book.open(0);
+    await flush();
+    return h;
+  }
+
+  /** The book item of recipe `seq`. */
+  const item = (h: { book: { element: HTMLElement } }, seq: number): HTMLElement =>
+    h.book.element.querySelector<HTMLElement>(`.wx-srv-ck-book-entry[data-recipe-seq="${seq}"]`)?.closest<HTMLElement>(".wx-srv-ck-book-item") as HTMLElement;
+
+  it("a 🥪 badge sits on a Toasted sandwich entry and on no Classic one", async () => {
+    const h = await modeOpened();
+    const toastie = item(h, 30).querySelector<HTMLElement>(".wx-srv-ck-book-mode");
+    expect(toastie?.textContent).toBe("🥪");
+    expect(toastie?.title).toBe("Toasted sandwich");
+    expect(toastie?.getAttribute("aria-label")).toBe("Toasted sandwich");
+    expect(toastie?.dataset["gameMode"]).toBe("toastie");
+    expect(item(h, 41).querySelector(".wx-srv-ck-book-mode")).toBeNull();
+    expect(h.book.element.querySelectorAll(".wx-srv-ck-book-mode")).toHaveLength(1);
+  });
+
+  it("a mode without an emoji is badged with its label", async () => {
+    const raw = modeBookBody();
+    const [first, second] = raw["recipes"] as Array<Record<string, unknown>>;
+    const h = await modeOpened({ recipes: [first, { ...second, mode: { id: "wrap", label: "Wrap" } }] });
+    expect(item(h, 30).querySelector(".wx-srv-ck-book-mode")?.textContent).toBe("Wrap");
+  });
+
+  it("Remix and Leftovers carry the entry's mode into the encore preset", async () => {
+    const h = await modeOpened();
+    (item(h, 30).querySelector(".wx-srv-ck-book-remix") as HTMLButtonElement).click();
+    expect(h.openEncore).toHaveBeenCalledTimes(1);
+    const remix = h.openEncore.mock.calls[0]?.[0] as EncorePreset;
+    expect(remix).toMatchObject({ fromSeq: 30, kind: "remix", mode: "toastie" });
+    expect(remix.candidates.map((c) => c.id)).toEqual(["sourdough-loaf", "smoked-ham"]);
+    h.book.open(0);
+    await flush();
+    (item(h, 30).querySelector(".wx-srv-ck-book-leftovers") as HTMLButtonElement).click();
+    const leftovers = h.openEncore.mock.calls[1]?.[0] as EncorePreset;
+    expect(leftovers).toMatchObject({ fromSeq: 30, kind: "leftovers", mode: "toastie" });
+    expect(leftovers.candidates.map((c) => c.id)).toEqual(["dill-pickles"]);
+  });
+
+  it("a Classic entry passes mode \"classic\"", async () => {
+    const h = await modeOpened();
+    (item(h, 41).querySelector(".wx-srv-ck-book-remix") as HTMLButtonElement).click();
+    expect(h.openEncore.mock.calls[0]?.[0]).toMatchObject({ fromSeq: 41, kind: "remix", mode: "classic" });
+    h.book.open(0);
+    await flush();
+    (item(h, 41).querySelector(".wx-srv-ck-book-leftovers") as HTMLButtonElement).click();
+    expect(h.openEncore.mock.calls[1]?.[0]).toMatchObject({ kind: "leftovers", mode: "classic" });
+  });
+
+  it("an entry from a server without modes is Classic: no badge, mode \"classic\" in its encore", async () => {
+    const h = await modeOpened({ recipes: (bookBody()["recipes"] as Array<Record<string, unknown>>).map((r) => ({ ...r, generation: 1, ingredients: [TOAST], leftovers: [BEANS] })) });
+    expect(h.book.element.querySelectorAll(".wx-srv-ck-book-mode")).toHaveLength(0);
+    (item(h, 41).querySelector(".wx-srv-ck-book-remix") as HTMLButtonElement).click();
+    expect(h.openEncore.mock.calls[0]?.[0]).toMatchObject({ mode: "classic" });
+  });
+});
+
+describe("game modes: Remix passes candidates with their kinds", () => {
+  it("a Toasted sandwich entry's Remix and Leftovers candidates carry kind", async () => {
+    const [first, second] = modeBookBody()["recipes"] as Array<Record<string, unknown>>;
+    const raw = {
+      recipes: [
+        first,
+        {
+          ...second,
+          ingredients: [{ ...SOURDOUGH, kind: "bread" }, { ...HAM, kind: "main" }],
+          leftovers: [{ ...PICKLES, kind: "produce" }, { ...HAM, id: "plain-ham", kind: null }],
+        },
+      ],
+    };
+    const openEncore = vi.fn();
+    const book = createRecipeBook({
+      document,
+      hooks: { lockNow: vi.fn() },
+      getSession: () => SESSION,
+      openRecipe: vi.fn(),
+      openEncore,
+      fetchBook: async (): Promise<BookResult> => ({ ok: true, recipes: parseRecipeBook(raw) ?? [] }),
+      setTimeout: () => 0,
+      clearTimeout: () => {},
+    });
+    document.body.append(book.element);
+    book.open(0);
+    await flush();
+    const item = book.element.querySelector<HTMLElement>('.wx-srv-ck-book-entry[data-recipe-seq="30"]')!.closest<HTMLElement>(".wx-srv-ck-book-item")!;
+    (item.querySelector(".wx-srv-ck-book-remix") as HTMLButtonElement).click();
+    const remix = openEncore.mock.calls[0]?.[0] as EncorePreset;
+    expect(remix.candidates.map((c) => [c.id, c.kind])).toEqual([
+      ["sourdough-loaf", "bread"],
+      ["smoked-ham", "main"],
+    ]);
+    book.open(0);
+    await flush();
+    (item.ownerDocument.querySelector('.wx-srv-ck-book-entry[data-recipe-seq="30"]')!.closest(".wx-srv-ck-book-item")!.querySelector(".wx-srv-ck-book-leftovers") as HTMLButtonElement).click();
+    const left = openEncore.mock.calls[1]?.[0] as EncorePreset;
+    expect(left.candidates.map((c) => [c.id, c.kind])).toEqual([
+      ["dill-pickles", "produce"],
+      ["plain-ham", null],
+    ]);
   });
 });

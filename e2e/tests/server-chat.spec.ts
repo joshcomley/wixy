@@ -23,62 +23,12 @@
 import { expect, test } from "../fixtures";
 import type { BrowserContext, Page } from "@playwright/test";
 import { trackConsoleErrors } from "./helpers";
+import { unlockTogether } from "./two-devices";
+import { unlockServer } from "./server-helpers";
 
 /** Mirrors `MULTI_TAP_INTERVAL_MS` in admin-ui/src/server/constants.ts. */
 const MULTI_TAP_INTERVAL_MS = 400;
 
-async function unlockServer(page: Page, name: string): Promise<void> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-
-  // Deep-link straight to the panel rather than loading /admin/pages and clicking
-  // the nav item: the shell re-renders the current route once its first
-  // /api/admin/state answers (shell.ts loadState → handleRoute), which tears down
-  // the panel the click just mounted — and any tap on it. On a slow or busy machine
-  // that lands after the test's first tap (measured: `MOUNT#1 | tap:decoy>revealed |
-  // TEARDOWN#1 | lock:routeAway | MOUNT#2`), leaving a fresh decoy with a hidden
-  // button. A deep link renders the route exactly once. (server-lock.spec.ts does
-  // the same; nav-click behaviour is covered there.)
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await expect(page.locator(".wx-srv-affordance")).toBeHidden();
-
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  // R2 v1.3's 400ms reveal-affordance debounce (decision #974) — a tap on
-  // the button within this window of the tap that revealed it doesn't open
-  // the pad.
-  await page.waitForTimeout(500);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-
-  const namePrompt = page.locator(".wx-srv-name-prompt");
-  await expect(page.locator(".wx-srv-name-prompt:visible, .wx-srv-thread:visible")).toBeVisible({
-    timeout: 5000,
-  });
-  if (await namePrompt.isVisible()) {
-    // Nothing may be sent before a name exists: the thread view (header, thread,
-    // composer) must stay hidden behind the prompt. Only a real browser can prove
-    // it — `[hidden]` loses to a class's own `display` (see serverChatCss.test.ts).
-    await expect(page.locator(".wx-srv-thread-view")).toBeHidden();
-    await page.locator(".wx-srv-name-prompt-input").fill(name);
-    await page.locator(".wx-srv-name-prompt-button").click();
-  }
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await expect(page.locator(".wx-srv-name-prompt")).toBeHidden();
-  // R3 (spec §6): two taps inside the chat view less than MULTI_TAP_INTERVAL_MS
-  // apart lock the panel instantly. Playwright will otherwise tap Send within a
-  // few ms of the Continue tap above — far faster than any person — and trip that
-  // panic gesture (measured live: `multiTap chat->decoy` on the Send click, ~2.5s
-  // after page load, nowhere near R7's 10s idle limit). Let the window elapse so
-  // the tests exercise a human tap cadence, not the panic gesture.
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function seed(
   page: Page,
@@ -156,8 +106,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const helloText = `${tag}: hello from Josh`;
     const replyText = `${tag}: reply from Purdy`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
 
     await pageA.locator(".wx-srv-thread-view textarea").fill(helloText);
     await pageA.locator(".wx-srv-thread-view .wx-chat-send-button").click();
@@ -232,8 +181,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const tag = `no-unread-signal-${Date.now()}`;
     try {
-      await unlockServer(pageA, "Signal A");
-      await unlockServer(pageB, "Signal B");
+      await unlockTogether(unlockServer, [[pageA, "Signal A"], [pageB, "Signal B"]]);
       await pageA.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
       await expect(pageA.locator(".wx-srv-decoy")).toBeVisible();
       const lockedSignals = await browserSignals(pageA);
@@ -418,8 +366,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const tag = `delete-wipe-${Date.now()}`;
 
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     await pageA.request.post("/test/server/seed-photo", {
       data: { sender: "Purdy", text: `${tag}: photo from Purdy` },
     });
@@ -514,8 +461,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     const pageB = await contextB.newPage();
     const label = `mobile-message-actions-${Date.now()}`;
     await seed(pageA, { count: 2, label, sender: "Purdy" });
-    await unlockServer(pageA, "Josh");
-    await unlockServer(pageB, "Purdy");
+    const stopAwake = await unlockTogether(unlockServer, [[pageA, "Josh"], [pageB, "Purdy"]]);
     const deletedBubbleA = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
     const deletedBubbleB = pageB.locator(".wx-srv-bubble").filter({ hasText: `${label} #1` });
     const lockBubble = pageA.locator(".wx-srv-bubble").filter({ hasText: `${label} #2` });
@@ -554,6 +500,7 @@ test.describe("server-chat.spec.ts (P5b)", () => {
     await pageA.locator(".wx-srv-sheet-wipe-confirm-button").click();
     await expect(pageB.locator(".wx-srv-thread-empty")).toBeVisible({ timeout: 3000 });
 
+    stopAwake();
     await contextA.close();
     await contextB.close();
   });

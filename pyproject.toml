@@ -41,6 +41,9 @@ server = [
   "pillow-heif==1.7.0",
 ]
 dev = [
+  # tooling/cookout/activate_modes.py reads other processes' working directories (it fails closed
+  # without it).
+  "psutil>=6",
   "pytest>=8.3",
   "pytest-xdist>=3.6",
   "pytest-asyncio>=0.24",

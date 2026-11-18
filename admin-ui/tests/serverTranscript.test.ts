@@ -269,6 +269,66 @@ describe("transcript block", () => {
     expect(el.querySelector(".wx-srv-transcript-spinner")).toBeNull();
   });
 
+  it("a repaint that changes nothing keeps the same elements (a reader or a selection on the text is not lost)", async () => {
+    let reply: (answer: TranscribeAnswer) => void = () => {};
+    const h = harness(new Promise<TranscribeAnswer>((resolve) => (reply = resolve)));
+    const host = wrap(block(h));
+    const el = host.querySelector<HTMLElement>(".wx-srv-transcript")!;
+    el.querySelector<HTMLButtonElement>(".wx-srv-transcript-start")!.click();
+    reply({ kind: "started", transcript: { status: "pending" } });
+    await settle();
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "hello there" } }]);
+    const text = el.querySelector(".wx-srv-transcript-text");
+    const toggle = el.querySelector(".wx-srv-transcript-toggle");
+    expect(text?.textContent).toBe("hello there");
+
+    // The same update again (the stream repeats a state), and an availability refresh.
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "hello there" } }]);
+    refreshTranscriptBlocks(host);
+    expect(el.querySelector(".wx-srv-transcript-text")).toBe(text);
+    expect(el.querySelector(".wx-srv-transcript-toggle")).toBe(toggle);
+
+    // A real change still repaints.
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "hello again" } }]);
+    expect(el.querySelector(".wx-srv-transcript-text")?.textContent).toBe("hello again");
+  });
+
+  it("an erased transcript (done, then none) takes its text off the screen, even after repeated identical repaints", () => {
+    const h = harness();
+    const host = wrap(block(h));
+    const el = host.querySelector<HTMLElement>(".wx-srv-transcript")!;
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "private words" } }]);
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "private words" } }]);
+    refreshTranscriptBlocks(host);
+    expect(el.textContent).toContain("private words");
+    patchTranscriptBlocks(host, [{ ...voice, transcript: null }]);
+    expect(el.dataset["state"]).toBe("idle");
+    expect(el.querySelector(".wx-srv-transcript-text")).toBeNull();
+    expect(host.textContent).not.toContain("private words");
+    // Hidden then erased: nothing of it comes back on Show either (the Show control is gone).
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "second secret" } }]);
+    el.querySelector<HTMLButtonElement>(".wx-srv-transcript-toggle")!.click();
+    patchTranscriptBlocks(host, [{ ...voice, transcript: null }]);
+    expect(host.textContent).not.toContain("second secret");
+    expect(el.querySelector(".wx-srv-transcript-toggle")).toBeNull();
+  });
+
+  it("a slow 202 landing after the stream's done does not replace the shown text", async () => {
+    let reply: (answer: TranscribeAnswer) => void = () => {};
+    const h = harness(new Promise<TranscribeAnswer>((resolve) => (reply = resolve)));
+    // The text is shown; Re-transcribe is tapped, the stream's done arrives, then the slow reply.
+    const host = wrap(block(h, { ...voice, transcript: { status: "done", text: "first" } }));
+    const el = host.querySelector<HTMLElement>(".wx-srv-transcript")!;
+    el.querySelector<HTMLButtonElement>(".wx-srv-transcript-retranscribe")!.click();
+    patchTranscriptBlocks(host, [{ ...voice, transcript: { status: "done", text: "second" } }]);
+    reply({ kind: "started", transcript: { status: "pending" } });
+    await settle();
+    const text = el.querySelector(".wx-srv-transcript-text");
+    expect(text?.textContent).toBe("second");
+    refreshTranscriptBlocks(host);
+    expect(el.querySelector(".wx-srv-transcript-text")).toBe(text);
+  });
+
   it("a 202 with no newer stream update still shows the spinner", async () => {
     const h = harness({ kind: "started", transcript: { status: "pending" } });
     const el = block(h);

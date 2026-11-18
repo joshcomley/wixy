@@ -17,12 +17,14 @@ import random
 from collections.abc import Mapping, Sequence
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Protocol, cast
 
 from builder.jsontypes import JsonObject, JsonValue
 from wixy_server.background import ContainedTaskGroup
 from wixy_server.livechat import cookout_twists
 from wixy_server.livechat.cookout_bank import CookoutExhaustedError, load_cookout_bank_or_empty
+from wixy_server.livechat.cookout_modes import CookoutMode, default_modes
+from wixy_server.livechat.cookout_visuals import IngredientVisuals
 from wixy_server.livechat.models import (
     AttachmentRow,
     CookoutGenerationRow,
@@ -34,6 +36,9 @@ from wixy_server.livechat.models import (
 
 TOTAL_TURNS = 10
 PICKS_PER_PLAYER = 5
+"""The Classic constants. Every use that decides round flow reads the round's game mode instead
+(`turns_of`, spec 09c §5.3); these stay as Classic's data and the fallback for an unknown mode."""
+CLASSIC_MODE_ID = "classic"
 MAX_SKIPS = 2
 """Two skips a turn: three pairs before a pick is forced."""
 MAX_OFFERS = MAX_SKIPS + 1
@@ -90,7 +95,10 @@ class StapleLike(Protocol):
 
 class BankLike(Protocol):
     """What the game needs of `cookout_bank.CookoutBank` (spec 09a Appendix A.1). A Protocol so
-    tests can drive the whole state machine with a tiny deterministic fake."""
+    tests can drive the whole state machine with a tiny deterministic fake. A Classic round calls
+    the draws exactly as before; a sequence game mode additionally passes `candidates` and `facet`
+    (and `search` a `candidates` pool) — the frozen interface A.2 — which only the real bank
+    implements (`draw_kwargs`)."""
 
     def ingredient(self, ingredient_id: str) -> IngredientLike | None: ...
     def staple(self, staple_id: str) -> StapleLike | None: ...
@@ -236,6 +244,43 @@ def role_for_turn(role_schedule: Sequence[str], turn: int) -> str:
     return role_schedule[(turn - 1) // 2]
 
 
+def round_mode(round_: CookoutRoundRow) -> CookoutMode | None:
+    """The game mode this process knows for the round, or `None` for a mode it does not know (a
+    row written by a newer release: untouchable, spec 09c §5.6)."""
+    return default_modes().mode(round_.mode)
+
+
+def turns_of(round_: CookoutRoundRow) -> int:
+    """How many turns the round has: the mode's, else (an unknown mode, read-only) the stored
+    schedule's length, else Classic's."""
+    mode = round_mode(round_)
+    if mode is not None:
+        return mode.turns
+    return len(round_.role_schedule) or TOTAL_TURNS
+
+
+def kind_of_turn(round_: CookoutRoundRow, turn: int) -> str | None:
+    """The pick kind a turn offers (Classic: the bank role), `None` for an unknown mode."""
+    mode = round_mode(round_)
+    return None if mode is None else mode.kind_for_turn(round_.role_schedule, turn)
+
+
+def draw_kwargs(mode: CookoutMode, kind_id: str) -> dict[str, Any]:
+    """The extra keyword arguments the bank's draws take for a kind: nothing for Classic (the core
+    draw, byte for byte), the kind's candidate pool and facet for a sequence mode."""
+    if mode.plan_type == "classic":
+        return {}
+    kind = mode.kinds[kind_id]
+    return {"candidates": kind.candidates, "facet": kind.facet}
+
+
+def shown_for(inputs: DrawInputs, mode: CookoutMode, kind_id: str) -> tuple[str, ...]:
+    """The shown-so-far list matching the kind's facet (categories or families)."""
+    if mode.plan_type != "classic" and mode.kinds[kind_id].facet == "family":
+        return inputs.player_offered_families
+    return inputs.player_offered_categories
+
+
 def player_of_turn(turn: int) -> Literal[1, 2]:
     """Odd turns belong to slot 1, even turns to slot 2."""
     return 1 if turn % 2 == 1 else 2
@@ -281,18 +326,20 @@ def current_turn(round_: CookoutRoundRow, turns: Sequence[CookoutTurnRow]) -> Cu
     not `picking`, or every turn is picked."""
     if round_.state != "picking":
         return None
-    if turns and turns[-1].choice_id is None:
-        last = turns[-1]
-        return CurrentTurn(last.turn, player_of_turn(last.turn), last)
-    next_turn = len(turns) + 1
-    if next_turn > TOTAL_TURNS:
+    # The first drawn turn without a choice is the live one. Normally that is the last row; a
+    # sequence mode with a turn-2 starter holds the seeded turn 2 beside the still-open turn 1.
+    unpicked = next((t for t in turns if t.choice_id is None), None)
+    if unpicked is not None:
+        return CurrentTurn(unpicked.turn, player_of_turn(unpicked.turn), unpicked)
+    next_turn = (turns[-1].turn if turns else 0) + 1
+    if next_turn > turns_of(round_):
         return None
     return CurrentTurn(next_turn, player_of_turn(next_turn), None)
 
 
 def next_turn_draws_now(round_: CookoutRoundRow, next_turn: int) -> bool:
     """Spec 09a §1.3: *a turn belonging to Player 2 is never drawn until Player 2 is bound.*"""
-    if next_turn > TOTAL_TURNS:
+    if next_turn > turns_of(round_):
         return False
     return not (player_of_turn(next_turn) == 2 and round_.player2_key is None)
 
@@ -303,6 +350,7 @@ class DrawInputs:
     picked_families: frozenset[str]
     offered_families: frozenset[str]
     player_offered_categories: tuple[str, ...]
+    player_offered_families: tuple[str, ...] = ()
 
 
 def turn_snaps(turns: Sequence[CookoutTurnRow]) -> dict[str, dict[str, str]]:
@@ -332,6 +380,7 @@ def draw_inputs(turns: Sequence[CookoutTurnRow], player: int) -> DrawInputs:
     offered_families: set[str] = set()
     picked_ids: set[str] = set()
     categories: list[str] = []
+    families: list[str] = []
     snap_family: dict[str, str] = {}
     for row in turns:
         if row.choice_id is not None:
@@ -349,6 +398,7 @@ def draw_inputs(turns: Sequence[CookoutTurnRow], player: int) -> DrawInputs:
                 offered_families.add(family)
                 if row.player == player:
                     categories.append(snap["category"])
+                    families.append(family)
         for entry in row.replaced:
             snap = entry["snap"]
             seen.add(snap["id"])
@@ -357,9 +407,14 @@ def draw_inputs(turns: Sequence[CookoutTurnRow], player: int) -> DrawInputs:
             offered_families.add(family)
             if row.player == player:
                 categories.append(snap["category"])
+                families.append(family)
     picked_families = {snap_family[i] for i in picked_ids if i in snap_family}
     return DrawInputs(
-        frozenset(seen), frozenset(picked_families), frozenset(offered_families), tuple(categories)
+        frozenset(seen),
+        frozenset(picked_families),
+        frozenset(offered_families),
+        tuple(categories),
+        tuple(families),
     )
 
 
@@ -454,18 +509,27 @@ def basket_ids(round_: CookoutRoundRow, turns: Sequence[CookoutTurnRow]) -> list
 def swap_target_role(
     round_: CookoutRoundRow, turns: Sequence[CookoutTurnRow], target_id: str, bank: BankLike
 ) -> str | None:
-    """The bank role a replacement for `target_id` must serve: the turn's role for a drafted pick,
-    the bank role for a starter or the wildcard; `None` when the id is not in the basket."""
+    """The kind a replacement for `target_id` must serve (Classic: the bank role): the turn's kind
+    for a drafted pick, the mode's classification for a starter or the wildcard; `None` when the
+    id is not in the basket (or the round's mode is unknown)."""
+    mode = round_mode(round_)
+    if mode is None:
+        return None
+
+    def classified(ingredient_id: str) -> str | None:
+        if mode.plan_type == "classic":
+            found = bank.ingredient(ingredient_id)
+            return found.role if found is not None else None
+        return mode.kind_of(ingredient_id)
+
     for row in turns:
         if row.choice_id == target_id:
             if row.seed is not None:
-                found = bank.ingredient(target_id)
-                return found.role if found is not None else None
-            return role_for_turn(round_.role_schedule, row.turn)
+                return classified(target_id)
+            return mode.kind_for_turn(round_.role_schedule, row.turn)
     if round_.wildcard == "lifted" and round_.wildcard_snap is not None:
         if round_.wildcard_snap["id"] == target_id:
-            found = bank.ingredient(target_id)
-            return found.role if found is not None else None
+            return classified(target_id)
     return None
 
 
@@ -513,19 +577,102 @@ def veto_used(turns: Sequence[CookoutTurnRow], slot: int) -> bool:
     return any(t.player != slot and t.veto_offer is not None for t in turns)
 
 
-def _snap_json(snap: dict[str, str]) -> JsonObject:
-    """The wire `IngredientSnap`: the stored snapshot minus its draw-only `family`."""
+def _snap_json(visuals: IngredientVisuals, snap: dict[str, str]) -> JsonObject:
+    """The wire `IngredientSnap`: the stored snapshot minus its draw-only `family`, plus the
+    read-time `what` and `image` looked up by id (09b E.1). The stored snapshot never changes; a
+    better picture shipped later simply shows up."""
+    extras = visuals.snap_extras(snap["id"])
     return {
         "id": snap["id"],
         "name": snap["name"],
         "category": snap["category"],
         "emoji": snap["emoji"],
         "blurb": snap["blurb"],
+        "what": cast("str | None", extras["what"]),
+        "image": cast("JsonObject | None", extras["image"]),
     }
 
 
-def _pick_json(turn: int | None, via: Via, snap: dict[str, str]) -> JsonObject:
-    return {**_snap_json(snap), "turn": turn, "via": via}
+def _facts_json(visuals: IngredientVisuals, ingredient_id: str) -> JsonValue:
+    facts = visuals.facts(ingredient_id)
+    return cast("JsonValue", facts)
+
+
+def _with_facts(
+    visuals: IngredientVisuals, out: JsonObject, ingredient_id: str, facts: bool
+) -> JsonObject:
+    if facts:
+        out["facts"] = _facts_json(visuals, ingredient_id)
+    return out
+
+
+def _pick_json(
+    visuals: IngredientVisuals,
+    turn: int | None,
+    via: Via,
+    snap: dict[str, str],
+    *,
+    facts: bool = False,
+    kind: str | None = None,
+) -> JsonObject:
+    """A `PickSnap`. `facts` is sent only once the round is past picking (09b E.1). `kind` is the
+    pick kind the ingredient served (spec 09c §5.3); it rides with the pick, so it is exactly as
+    visible as the pick."""
+    return _with_facts(
+        visuals,
+        {**_snap_json(visuals, snap), "turn": turn, "via": via, "kind": kind},
+        snap["id"],
+        facts,
+    )
+
+
+def _pick_kind(
+    round_: CookoutRoundRow,
+    mode: CookoutMode | None,
+    turn: int | None,
+    via: Via,
+    ingredient_id: str,
+) -> str | None:
+    """The kind a pick served: the turn's kind for a drafted pick (a swap serves the kind it
+    replaced), the mode's classification for a starter or the wildcard."""
+    if mode is None or mode.plan_type == "classic":
+        return None  # Classic's kind is the bank role it already sends as `current.role`
+    if turn is None or via in ("seed", "wildcard"):
+        return mode.kind_of(ingredient_id)
+    return mode.kind_for_turn(round_.role_schedule, turn)
+
+
+def mode_json(round_: CookoutRoundRow, mode: CookoutMode | None) -> JsonObject:
+    """The public `mode` block of the view (spec 09c §5.4). A round of a mode this process does
+    not know is described from what is stored, with no kinds."""
+    if mode is None:
+        total = turns_of(round_)
+        return {
+            "id": round_.mode,
+            "label": round_.mode,
+            "emoji": "",
+            "turns": total,
+            "picksPerPlayer": total // 2,
+            "kinds": [],
+            "anchorKind": None,
+        }
+    return {
+        "id": mode.id,
+        "label": mode.label,
+        "emoji": mode.emoji,
+        "turns": mode.turns,
+        "picksPerPlayer": mode.picks_per_player,
+        "kinds": [{"id": k.id, "label": k.label, "prompt": k.prompt} for k in mode.kinds.values()],
+        "anchorKind": mode.chef.anchor_kind,
+    }
+
+
+def build_ref(mode: CookoutMode | None, build_id: object) -> JsonObject | None:
+    """A concept's `build` as `{id, label}`; `None` for Classic (no builds)."""
+    if mode is None or not isinstance(build_id, str) or not build_id:
+        return None
+    found = next((b for b in mode.chef.builds if b.id == build_id), None)
+    return {"id": build_id, "label": found.label if found is not None else build_id}
 
 
 def _loads(text: str | None) -> Any:
@@ -556,7 +703,10 @@ def concept_by_id(round_: CookoutRoundRow, concept_id: str) -> dict[str, Any] | 
 
 
 def _resolver(
-    round_: CookoutRoundRow | None, turns: Sequence[CookoutTurnRow], bank: BankLike | None
+    visuals: IngredientVisuals,
+    round_: CookoutRoundRow | None,
+    turns: Sequence[CookoutTurnRow],
+    bank: BankLike | None,
 ) -> Any:
     """id -> `IngredientSnap` JSON: the round's own immutable snapshots first, then the bank."""
     by_id: dict[str, dict[str, str]] = (
@@ -566,30 +716,36 @@ def _resolver(
     def resolve(ingredient_id: str) -> JsonObject | None:
         snap = by_id.get(ingredient_id)
         if snap is not None:
-            return _snap_json(snap)
+            return _snap_json(visuals, snap)
         found = bank.ingredient(ingredient_id) if bank is not None else None
         if found is None:
             return None
-        return {
-            "id": found.id,
-            "name": found.name,
-            "category": found.category,
-            "emoji": found.emoji,
-            "blurb": found.blurb,
-        }
+        return bank_ingredient_json(visuals, found)
 
     return resolve
 
 
-def _staple_json(bank: BankLike | None, staple_id: str) -> JsonObject:
+def bank_ingredient_json(visuals: IngredientVisuals, found: IngredientLike) -> JsonObject:
+    """A bank ingredient as an `IngredientSnap` (fridge search, options, resolver fallback)."""
+    return _snap_json(visuals, snapshot(found))
+
+
+def _staple_json(visuals: IngredientVisuals, bank: BankLike | None, staple_id: str) -> JsonObject:
     staple = bank.staple(staple_id) if bank is not None else None
-    return {"id": staple_id, "name": staple.name if staple is not None else staple_id}
+    extras = visuals.snap_extras(staple_id)
+    return {
+        "id": staple_id,
+        "name": staple.name if staple is not None else staple_id,
+        "image": cast("JsonObject | None", extras["image"]),
+    }
 
 
 def _concept_cards(
+    visuals: IngredientVisuals,
     concepts: Sequence[dict[str, Any]],
     resolve: Any,
     bank: BankLike | None,
+    mode: CookoutMode | None = None,
 ) -> list[JsonValue]:
     out: list[JsonValue] = []
     for concept in concepts:
@@ -611,9 +767,10 @@ def _concept_cards(
                 "vibe": str(concept.get("vibe", "")),
                 "dishType": str(concept.get("dishType", "")),
                 "technique": str(concept.get("technique", "")),
+                "build": build_ref(mode, concept.get("build")),
                 "description": str(concept.get("description", "")),
                 "pickedIngredients": [r for i in picked_ids if (r := resolve(i)) is not None],
-                "staplesUsed": [_staple_json(bank, i) for i in staple_ids],
+                "staplesUsed": [_staple_json(visuals, bank, i) for i in staple_ids],
                 "omitted": omitted,
                 "challengeNote": note if isinstance(note, str) else None,
                 "totalMinutes": minutes
@@ -777,6 +934,7 @@ def cookout_view_json(
     all_recipes: Sequence[CookoutRecipeRow] = (),
     photo_attachments: Sequence[AttachmentRow] = (),
     encore_title: str | None = None,
+    visuals: IngredientVisuals,
 ) -> JsonObject:
     """The `GET /cookout/{seq}?as=` body (spec §4.2, 09a §4.3), personalised and — in Blind mode —
     redacted here, in Python, before it is serialised (§1.3):
@@ -792,8 +950,12 @@ def cookout_view_json(
       reveal moment.
     Open mode shows everything except those two secrets."""
     viewer_slot = slot_of(round_, viewer_key, viewer_email)
+    mode = round_mode(round_)
     blind = round_.blind
     revealed = (not blind) or round_.state == "finished"
+    # Facts ride only on picks once the round is past `picking` (09b E.1): not needed earlier, and
+    # it keeps the frequently polled view small.
+    with_facts = round_.state != "picking"
     cur = current_turn(round_, turns)
 
     players: list[JsonValue] = []
@@ -809,7 +971,18 @@ def cookout_view_json(
                 "name": name,
                 "pickCount": len(own_picks),
                 "picks": (
-                    [_pick_json(r.turn, via_of(r), s) for r, s in own_picks if s is not None]
+                    [
+                        _pick_json(
+                            visuals,
+                            r.turn,
+                            via_of(r),
+                            s,
+                            facts=with_facts,
+                            kind=_pick_kind(round_, mode, r.turn, via_of(r), s["id"]),
+                        )
+                        for r, s in own_picks
+                        if s is not None
+                    ]
                     if visible
                     else None
                 ),
@@ -819,14 +992,22 @@ def cookout_view_json(
         )
 
     starters: list[JsonValue] = [
-        _pick_json(row.turn, "seed", row.seed) for row in turns if row.seed is not None
+        _pick_json(
+            visuals,
+            row.turn,
+            "seed",
+            row.seed,
+            kind=_pick_kind(round_, mode, row.turn, "seed", row.seed["id"]),
+        )
+        for row in turns
+        if row.seed is not None
     ]
 
     current: JsonObject | None = None
     if cur is not None:
         shown = not blind or viewer_slot == cur.player
         row = cur.row
-        role = role_for_turn(round_.role_schedule, cur.turn)
+        role = kind_of_turn(round_, cur.turn)
         live_pair = row is not None and bool(row.offers)
         chaos_pair: bool | None = None
         vetoed: JsonObject | None = None
@@ -845,14 +1026,26 @@ def cookout_view_json(
                     if e.get("by") == "veto":
                         swept = e
                         break
-            vetoed = {"snap": _snap_json(swept["snap"])} if swept is not None else None
+            vetoed = {"snap": _snap_json(visuals, swept["snap"])} if swept is not None else None
             active = viewer_slot == cur.player
-            can_chaos = bool(active and live_pair and not chaos_used(turns, cur.player))
-            can_lucky = bool(active and live_pair)
+            # Chaos is a kind-level setting (the bread turn offers no weird shelf) and every
+            # in-game twist button follows the mode's twist list (spec 09c §4); an unknown mode
+            # is read-only, with no actions at all (§5.6).
+            chaos_here = (
+                mode is not None
+                and "chaos" in mode.twists
+                and (mode.plan_type == "classic" or mode.kinds[str(role)].chaos)
+            )
+            can_chaos = bool(
+                chaos_here and active and live_pair and not chaos_used(turns, cur.player)
+            )
+            can_lucky = bool(mode is not None and "lucky" in mode.twists and active and live_pair)
         can_veto: bool | None = None
         if not blind:
             can_veto = bool(
-                viewer_slot is not None
+                mode is not None
+                and "veto" in mode.twists
+                and viewer_slot is not None
                 and viewer_slot != cur.player
                 and row is not None
                 and row.offers
@@ -866,7 +1059,7 @@ def cookout_view_json(
             "waitingForJoin": cur.waiting_for_join,
             "role": role if shown and (row is not None or not blind) else None,
             "options": (
-                [_snap_json(row.offers[-1][0]), _snap_json(row.offers[-1][1])]
+                [_snap_json(visuals, row.offers[-1][0]), _snap_json(visuals, row.offers[-1][1])]
                 if shown and row is not None and row.offers
                 else None
             ),
@@ -892,13 +1085,13 @@ def cookout_view_json(
             {
                 "turn": row.turn,
                 "player": row.player,
-                "offers": [[_snap_json(a), _snap_json(b)] for a, b in row.offers],
-                "choice": _snap_json(choice) if choice is not None else None,
-                "seed": _snap_json(row.seed) if row.seed is not None else None,
+                "offers": [[_snap_json(visuals, a), _snap_json(visuals, b)] for a, b in row.offers],
+                "choice": _snap_json(visuals, choice) if choice is not None else None,
+                "seed": _snap_json(visuals, row.seed) if row.seed is not None else None,
                 "replaced": [
                     {
                         "offer": int(e["offer"]),
-                        "snap": _snap_json(e["snap"]),
+                        "snap": _snap_json(visuals, e["snap"]),
                         "by": str(e["by"]),
                     }
                     for e in row.replaced
@@ -910,7 +1103,7 @@ def cookout_view_json(
 
     finished = round_.state == "finished"
     concepts_ready = finished and round_.concepts == "ready"
-    resolve = _resolver(round_, turns, bank)
+    resolve = _resolver(visuals, round_, turns, bank)
     by_recipe = {r.concept_id: r for r in recipes if r.generation == round_.generation}
     recipe_slots: JsonObject = {
         concept_id: _recipe_slot(
@@ -921,7 +1114,10 @@ def cookout_view_json(
 
     basket: list[JsonValue] | None = None
     if revealed:
-        basket = [_pick_json(t, via, snap) for t, via, snap in basket_snaps(round_, turns)]
+        basket = [
+            _pick_json(visuals, t, via, snap, kind=_pick_kind(round_, mode, t, via, snap["id"]))
+            for t, via, snap in basket_snaps(round_, turns)
+        ]
 
     locked = stars_locked(round_)
     partner_slot = None if viewer_slot is None else (2 if viewer_slot == 1 else 1)
@@ -946,7 +1142,7 @@ def cookout_view_json(
             "match": match,
         }
 
-    snaps = _resolver(round_, turns, None)
+    snaps = _resolver(visuals, round_, turns, None)
     pending_current = any(r.state == "pending" for r in by_recipe.values())
     swap: JsonObject = {
         "state": round_.swap_state,
@@ -961,11 +1157,11 @@ def cookout_view_json(
         if round_.swap_state in ("proposed", "done")
         else None,
         "pair": (
-            [_snap_json(round_.swap_pair[0]), _snap_json(round_.swap_pair[1])]
+            [_snap_json(visuals, round_.swap_pair[0]), _snap_json(visuals, round_.swap_pair[1])]
             if round_.swap_state == "proposed" and round_.swap_pair is not None
             else None
         ),
-        "in": _snap_json(round_.swap_in)
+        "in": _snap_json(visuals, round_.swap_in)
         if round_.swap_state == "done" and round_.swap_in is not None
         else None,
     }
@@ -978,7 +1174,9 @@ def cookout_view_json(
             {
                 "generation": gen.generation,
                 "basket": [r for i in gen.basket if (r := resolve(i)) is not None],
-                "concepts": _concept_cards(concepts_from_json(gen.concepts_json), resolve, bank),
+                "concepts": _concept_cards(
+                    visuals, concepts_from_json(gen.concepts_json), resolve, bank, mode
+                ),
                 "pictures": _pictures_json(gen.pictures, attachments, signer),
                 "vote": {"votes": g_votes, "match": g_match},
                 "recipes": {
@@ -996,6 +1194,7 @@ def cookout_view_json(
         "rev": round_.rev,
         "blind": blind,
         "revealed": revealed,
+        "mode": mode_json(round_, mode),
         "setup": {
             "style": style_ref(round_.style),
             "styleSpun": round_.style_spun,
@@ -1032,7 +1231,17 @@ def cookout_view_json(
         "wildcard": {
             "state": round_.wildcard,
             "ingredient": (
-                _snap_json(round_.wildcard_snap)
+                _with_facts(
+                    visuals,
+                    {
+                        **_snap_json(visuals, round_.wildcard_snap),
+                        "kind": mode.kind_of(round_.wildcard_snap["id"])
+                        if mode is not None
+                        else None,
+                    },
+                    round_.wildcard_snap["id"],
+                    with_facts,
+                )
                 if round_.wildcard == "lifted" and round_.wildcard_snap is not None
                 else None
             ),
@@ -1040,10 +1249,14 @@ def cookout_view_json(
         "stars": stars,
         "vote": vote,
         "swap": swap,
-        "staples": [_staple_json(bank, s.id) for s in (bank.staples if bank is not None else ())],
+        "staples": [
+            _staple_json(visuals, bank, s.id) for s in (bank.staples if bank is not None else ())
+        ],
         "concepts": {
             "state": round_.concepts,
-            "data": _concept_cards(concept_list(round_), resolve, bank) if concepts_ready else None,
+            "data": _concept_cards(visuals, concept_list(round_), resolve, bank, mode)
+            if concepts_ready
+            else None,
             "error": (
                 round_.concepts_error if round_.concepts in ("failed", "unavailable") else None
             ),
@@ -1069,6 +1282,7 @@ def bank_entry_json(
     generation_row: CookoutGenerationRow | None = None,
     photo_attachments: Sequence[AttachmentRow] = (),
     bank: BankLike | None = None,
+    visuals: IngredientVisuals,
 ) -> JsonObject | None:
     """One `GET /cookout/bank` entry for a banked recipe; `None` when its concept or recipe body
     is unreadable (never expected: `banked` is only written with a validated body). A recipe of a
@@ -1090,10 +1304,26 @@ def bank_entry_json(
     if not isinstance(prep, int) or not isinstance(cook, int):
         return None
     by_id = {a.id: a for a in attachments}
-    resolve = _resolver(round_, turns, bank)
-    used = [r for i in concept.get("pickedIngredientIds", []) if (r := resolve(str(i))) is not None]
+    resolve = _resolver(visuals, round_, turns, bank)
+    mode = round_mode(round_)
+
+    def with_kind(snap: JsonObject) -> JsonObject:
+        """Spec 09c: each snap carries the pick kind it served (`null` for Classic), the same value
+        as `PickSnap.kind`, so a client can constrain a Remix seed to one bread and one filling."""
+        kind = (
+            mode.kind_of(str(snap["id"]))
+            if mode is not None and mode.plan_type != "classic"
+            else None
+        )
+        return {**snap, "kind": kind}
+
+    used = [
+        with_kind(r)
+        for i in concept.get("pickedIngredientIds", [])
+        if (r := resolve(str(i))) is not None
+    ]
     left = [
-        r
+        with_kind(r)
         for e in concept.get("omitted", [])
         if isinstance(e, dict) and (r := resolve(str(e.get("id")))) is not None
     ]
@@ -1126,6 +1356,12 @@ def bank_entry_json(
         "dinnerPick": dinner_pick(vote1, vote2, recipe.concept_id),
         "style": style_ref(round_.style),
         "challenge": challenge_ref(round_.challenge),
+        "mode": {
+            "id": mode.id if mode is not None else round_.mode,
+            "label": mode.label if mode is not None else round_.mode,
+            "emoji": mode.emoji if mode is not None else "",
+        },
+        "build": build_ref(mode, concept.get("build")),
         "ingredients": used,
         "leftovers": left,
     }

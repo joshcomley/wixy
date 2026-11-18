@@ -6,6 +6,7 @@ tail kept in memory, the 90 s no-sentence rule, the full-note pass after Stop, f
 from __future__ import annotations
 
 import io
+import time
 import wave
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -71,7 +72,10 @@ def put_all(env: LiveEnv, upload_id: str, slices: list[bytes], *, upto: int | No
 def raw_db(env: LiveEnv) -> bytes:
     db = env.store._db_path
     wal = Path(f"{db}-wal")
-    return db.read_bytes() + (wal.read_bytes() if wal.exists() else b"")
+    # WAL first, then the database file (a checkpoint between the reads moves frames from the
+    # WAL into the database; the reverse order read the old database then the emptied WAL).
+    wal_bytes = wal.read_bytes() if wal.exists() else b""
+    return wal_bytes + db.read_bytes()
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +168,28 @@ class TestLiveTranscript:
             wait_for(lambda: env.hub.notes[note.upload_id].ring_end >= 250)
             assert scripted.requests == []
             assert transcript(env, note.upload_id) is None
+
+    def test_a_reader_who_sees_the_tail_also_sees_the_text_before_it(
+        self, tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, note_slices: list[bytes]
+    ) -> None:
+        """Regression (main sync, CI): the in-memory tail used to be set BEFORE the finalised text
+        reached the store, so a read in between saw a tail with empty text. The store write is
+        slowed so that window is wide; the tail must not be visible until the text is."""
+        scripted = Scripted(texts=["Hello there. And then we"])
+        with scripted_env(tmp_path, repo, monkeypatch, scripted) as env:
+            real_record = env.store.record_live_transcript
+
+            def slow_record(*args: Any, **kwargs: Any) -> Any:
+                time.sleep(0.4)
+                return real_record(*args, **kwargs)
+
+            monkeypatch.setattr(env.store, "record_live_transcript", slow_record)
+            note = env.start_note()
+            put_all(env, note.upload_id, note_slices, upto=4)
+            wait_for(lambda: env.hub.notes[note.upload_id].ring_end >= 150)
+            env.client.post(TRANSCRIBE.format(note.upload_id), headers=env.headers)
+            wait_for(lambda: transcript(env, note.upload_id)["tail"] == "And then we")
+            assert transcript(env, note.upload_id)["text"] == "Hello there."
 
     def test_the_text_follows_the_recording_finalised_sentences_stored_and_the_tail_in_memory(
         self, tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, note_slices: list[bytes]
@@ -326,7 +352,10 @@ class TestLiveTranscript:
     def test_deleting_the_message_ends_the_transcription_and_erases_the_text(
         self, tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, note_slices: list[bytes]
     ) -> None:
-        scripted = Scripted(texts=["Erase this sentence. Tail"])
+        # The last text repeats on every later pass, so a second answer would append the sentence
+        # again and the exact text below would only be true for a moment (a starved poller missed
+        # it). Later passes say nothing new.
+        scripted = Scripted(texts=["Erase this sentence. Tail", ""])
         with scripted_env(tmp_path, repo, monkeypatch, scripted) as env:
             note = env.start_note()
             put_all(env, note.upload_id, note_slices, upto=6)
@@ -349,7 +378,7 @@ class TestLiveTranscript:
     def test_a_second_request_while_one_is_running_is_the_same_live_transcript(
         self, tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch, note_slices: list[bytes]
     ) -> None:
-        scripted = Scripted(texts=["Only once. Tail"])
+        scripted = Scripted(texts=["Only once. Tail", ""])  # later passes add nothing (see Erase)
         with scripted_env(tmp_path, repo, monkeypatch, scripted) as env:
             note = env.start_note()
             put_all(env, note.upload_id, note_slices, upto=5)

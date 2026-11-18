@@ -1,6 +1,7 @@
 import { expect, test } from "../fixtures";
 import type { Page } from "@playwright/test";
 import { fileURLToPath } from "node:url";
+import { unlockServer, unlockAgain } from "./server-helpers";
 
 const MULTI_TAP_INTERVAL_MS = 400;
 const PHOTO = fileURLToPath(new URL("../fixtures/livechat-photo-gps.jpg", import.meta.url));
@@ -13,39 +14,6 @@ test.use({
   },
 });
 test.describe.configure({ timeout: 60_000 });
-
-async function openPinPad(page: Page): Promise<string> {
-  const configResponse = await page.request.post("/test/server/config");
-  const { pin } = (await configResponse.json()) as { pin: string };
-  await page.locator(".wx-srv-panel").click();
-  await expect(page.locator(".wx-srv-affordance")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-  await page.locator(".wx-srv-affordance").click();
-  await expect(page.locator(".wx-srv-pinpad")).toBeVisible();
-  for (const digit of pin) {
-    await page.locator(`.wx-srv-pinpad-key-digit:text-is("${digit}")`).click();
-  }
-  await page.locator(".wx-srv-pinpad-key-submit").click();
-  return pin;
-}
-
-async function unlockServer(page: Page, name: string): Promise<void> {
-  await page.goto("/admin/server");
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await openPinPad(page);
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
-  await page.locator(".wx-srv-name-prompt-input").fill(name);
-  await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
-
-async function unlockAgain(page: Page): Promise<void> {
-  await expect(page.locator(".wx-srv-decoy")).toBeVisible();
-  await openPinPad(page);
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
-  await page.waitForTimeout(MULTI_TAP_INTERVAL_MS + 100);
-}
 
 async function waitForUploads(page: Page, expectedCount: number): Promise<void> {
   const chips = page.locator(".wx-chat-attachment-chip");
@@ -107,7 +75,7 @@ test.describe("server-media.spec.ts (P6b)", () => {
 
       await page.locator('.wx-srv-chat-host button[aria-label="Close"]').click();
       await expect(page.locator(".wx-srv-thread")).toHaveCount(0);
-      await unlockAgain(page);
+      await unlockAgain(page, { reload: false });
       releaseChunk();
 
       const send = page.locator(".wx-chat-send-button");

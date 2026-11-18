@@ -31,6 +31,7 @@ from wixy_server.livechat.store import (
     LiveChatStore,
 )
 from wixy_server.tests.adventure_testkit import run_concurrently
+from wixy_server.tests.no_visuals import no_visuals
 from wixy_server.tests.test_livechat_cookout import (
     FakeBank,
     _Signer,
@@ -178,6 +179,7 @@ def view(store: LiveChatStore, bank: FakeBank, seq: int, viewer: str | None) -> 
             all_recipes=data.all_recipes,
             photo_attachments=data.photo_attachments,
             encore_title=data.encore_title,
+            visuals=no_visuals(),
         )
     )
 
@@ -2164,7 +2166,7 @@ class TestErasure:
         assert "Zed" not in blob and "base-" not in blob and '"a"' not in blob
         assert set(wire) == {
             "state", "blind", "pickedCount", "concepts", "bankedCount", "rev", "generation",
-            "waiting", "swap", "dinnerDecided", "cookedCount",
+            "waiting", "swap", "dinnerDecided", "cookedCount", "mode",
         }  # fmt: skip
 
     def test_attachment_results_import_is_used(self) -> None:

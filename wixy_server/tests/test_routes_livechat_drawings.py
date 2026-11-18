@@ -1050,6 +1050,9 @@ async def _next_frame(generator: Any, *, timeout_s: float = 2.0) -> dict[str, An
     return frame
 
 
+_INJECTED_DELAY_S = 0.0  # a test raises it to prove the budget no longer covers the whole flow
+
+
 class TestStreamDrawingLiveFrame:
     """spec §4: live frames ride the SSE stream as id-less `drawing_live` events —
     never advancing the replay cursor — interleaved with the ordinary persisted
@@ -1166,13 +1169,20 @@ class TestStreamDrawingLiveFrame:
         )
         received: list[dict[str, Any]] = []
 
+        released_at: list[float] = []
+        delivered_at: list[float] = []
+
         async def consume() -> None:
-            received.append(await _next_frame(gen, timeout_s=1.0))
+            # Generous: the point is WHEN the frame arrives relative to the release (below), and a
+            # starved box makes the thread hop and the commit before it arbitrarily slow.
+            received.append(await _next_frame(gen, timeout_s=30.0))
+            delivered_at.append(time.monotonic())
 
         try:
             async with anyio.create_task_group() as tg:
                 tg.start_soon(consume)
                 await anyio.to_thread.run_sync(reading.wait, 5.0)
+                await anyio.sleep(_INJECTED_DELAY_S)
                 # Committed after this read's snapshot: the read returns nothing, and only the
                 # publish can tell the loop to look again.
                 store.create_message(
@@ -1186,11 +1196,14 @@ class TestStreamDrawingLiveFrame:
                 )
                 notifier.publish()
                 monkeypatch.setattr(store, "events_after", real_events_after)
+                released_at.append(time.monotonic())
                 release.set()
         finally:
             release.set()
             await gen.aclose()
         assert [frame["event"] for frame in received] == ["message"]
+        # On the next tick after the release, not after the 2 s cross-process re-check.
+        assert delivered_at[0] - released_at[0] < 1.5
 
     @pytest.mark.asyncio
     async def test_two_registered_connections_each_get_their_own_frames(

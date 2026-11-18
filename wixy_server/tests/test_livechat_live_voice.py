@@ -240,10 +240,10 @@ class TestStore:
         db = tmp_path / "server" / "server.db"
         store = LiveChatStore(db)
         store.pending_upload_bytes()
-        assert _LATEST_SCHEMA_VERSION == 23
+        assert _LATEST_SCHEMA_VERSION == 24  # v22+v23 live voice, v24 Cookout mode
         conn = sqlite3.connect(str(db))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
             info = {row[1]: row for row in conn.execute("PRAGMA table_info(attachments)")}
         finally:
             conn.close()
@@ -267,9 +267,11 @@ class TestStore:
         assert old is not None and (old.status, old.live_state) == ("processing", None)
         conn = sqlite3.connect(str(db))
         try:
-            assert conn.execute("PRAGMA user_version").fetchone()[0] == 23
+            assert conn.execute("PRAGMA user_version").fetchone()[0] == _LATEST_SCHEMA_VERSION
+            cols = {row[1] for row in conn.execute("PRAGMA table_info(attachments)")}
         finally:
             conn.close()
+        assert "live_state" in cols  # the v23 column is back after migrating a v22 database
 
     def test_a_live_note_is_never_claimed_nor_swept_as_an_orphan(self, tmp_path: Path) -> None:
         store = LiveChatStore(tmp_path / "server" / "server.db")
@@ -1098,3 +1100,20 @@ class TestClientContract:
         assert list(done) == base  # the ordinary shape, as before
         assert len(done["peaks"]) == 64
         assert all(isinstance(p, float) and 0.0 <= p <= 1.0 for p in done["peaks"])
+
+
+class TestHeartbeatUnderLoad:
+    def test_a_test_process_stalled_past_the_pong_window_is_not_dropped(self, env: LiveEnv) -> None:
+        """Regression (merge sync, 2026-11-18): the 6 s pong window runs on the real clock, so a
+        loaded box that starved the test client for >6 s closed its socket (code 1000) and failed
+        `test_state_and_peaks_grow_as_slices_arrive`. The kit now lifts the window; a stall is
+        simulated by ageing the last pong far past the production window."""
+        from wixy_server.livechat.live_voice import PONG_TIMEOUT_S
+
+        with env.socket() as sock:
+            sock.until(lambda: sock.messages or sock.pings or env.hub.listeners)
+            for listener in env.hub.listeners.values():
+                listener.pong_at -= 60  # far past the production 6 s window
+            time.sleep(0.6)  # a stalled client: no pump, so no pong, across several monitor ticks
+            assert env.hub.listeners  # still connected: the window is lifted in this kit
+        assert PONG_TIMEOUT_S > 6.0

@@ -410,7 +410,8 @@ clears loaded history and pending echoes; the stream remains connected. Message/
 numbers, push subscriptions, `secret.key`, `vapid.json`, and localStorage identity values stay
 intact. Delete and wipe never dispatch push notifications.
 
-Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)`. A 204 means the
+Both operations enable secure delete and use `PRAGMA wal_checkpoint(TRUNCATE)` (tried after a non-locking `PASSIVE` pass, so a stale
+reader cannot starve writers; success still needs TRUNCATE busy 0 and an empty WAL). A 204 means the
 WAL is empty, deleted text is absent from both database files, and media-file cleanup completed.
 The route gives the scrub up to 10 seconds; if a reader still blocks it, the route retains the
 database-backed `pending_scrub` row. Delete and wipe transactions record deleted storage IDs and
@@ -723,7 +724,7 @@ nothing `inline` does not already.
 | `WIXY_COMFY_URL` | `comfy_url` | `""` (images off) | would-you-rather pictures (§19): base URL of the local ComfyUI (fleet: `http://127.0.0.1:8199`); empty or `WIXY_EDITION=standalone` means text-only rounds |
 | `WIXY_COMFY_OUTPUT_DIR` | `comfy_output_dir` | `""` | the folder ComfyUI writes its output to (fleet: `E:\ImageGenLab\out-wyr`, its `--output-directory`); **required with `WIXY_COMFY_URL`** — this server deletes its own pictures there after each run (Inv 54), and without it pictures stay disabled |
 | `WIXY_WYR_POOL_SIZE` | `wyr_pool_size` | `100` | pictures for this many upcoming would-you-rather questions are painted ahead of time (§19); `0` = off (and a stale pool is removed at start), clamped to 1000, a malformed value means 100 |
-| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative) |
+| `WIXY_WYR_IMAGE_MODEL` | `wyr_image_model` | `krea2-turbo-nvfp4` | which proven model recipe in `wyr_images.IMAGE_MODELS` to drive (`boogu-turbo-nvfp4` is the fast alternative; `qwen21-base-int8` is Qwen-Image 2.1 base, 25 steps, the model the Cookout ingredient pictures were drawn with) |
 
 `ProjectPaths` (`storage.py`) gets `server_dir`/`server_db`/`server_secret`/`server_vapid`/
 `server_media`/`server_uploads`/`server_failed` — created **lazily** (like `reports_dir`),
@@ -2736,6 +2737,11 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   concepts and recipe jobs: prompts, parse and validation, the runner), `livechat/cookout_images.py` (the picture
   job and scratch folder) over `ComfyImageGenerator.generate_many` in `livechat/wyr_images.py`, and the chat-spawn
   calls in `cmdchat.py` (the ONE chokepoint to cmd, Inv 13).
+- **Game modes (schema v22, decisions/00203).** `cookout_rounds.mode` (default `'classic'`, no CHECK) selects a plan from
+  `livechat/cookout_modes.py`; `toastie` places starters by kind (bread turn 1, filling turn 2) and draws fillings with
+  `candidates`/`facet="family"`. Creation of a non-Classic round needs `WIXY_COOKOUT_MODES` (else 503 `game_unavailable`);
+  `tooling/cookout/activate_modes.py` enables it only when every spec 09c 5.6 check passes. Unknown-mode rounds are read-only (409
+  `bad_state`), skipped by background SQL, and never block a new game.
 - **Storage** (schema v21, additive; v20 is deployed and never edited — `test_livechat_cookout.py` migrates a genuine v20
   database, `fixtures/livechat_v20.db`). Three tables, all keyed to the anchor message with `ON DELETE CASCADE`
   (a wipe also deletes them explicitly, the Inv 54 pattern):
@@ -2800,7 +2806,39 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   `butter`, `plain-flour`, `cooking-oil`, `granulated-sugar`, `milk` (also ordinary pickable entries); a concept
   may add at most four unpicked non-seasoning staples. Eggs, garlic, onion, lemon, stock, soy, vinegar, cream and
   cheese are deliberately NOT staples. `stopWords` (generic cooking words such as `bread`, `sauce`, `pan`) never
-  contains a staple food name.
+  contains a staple food name. `culinaryWords` (round 2: ordinary cooking language such as `crisp`, `juices`,
+  `gravy`, `starch`, `stock`, `broth`) are never read as a food at all; the validator refuses a staple word, a stop
+  word or any ingredient's own exact name there.
+  Deliberate allowances of the prose scan (round 2): a picked generic pasta (a name ending in `pasta`, e.g. lentil
+  pasta) also allows the shapes in `PASTA_SHAPE_FAMILIES` (penne, fusilli, ...); an ingredient whose FAMILY is that of a
+  used pick is allowed (so "omelette" passes when an egg custard, family egg dish, is picked - the long-standing
+  family exemption); and `BARE_ONLY_WORDS` (`fish` for a fish pick, `sage`/`onion` for stuffing mix) are allowed only as
+  a lone word, never inside a longer food span such as "fish sauce" or "onion rings".
+  **The one rule for a multi-word bank product the chef names (round 2 audit F4, decisions/00204).** No word of a
+  span is ever dropped before it is judged. A multi-word bank product that is not a used pick passes only as (A) the
+  pick's own name written short: an order-preserving run of ONE pick or declared-staple name that may skip only
+  modifier words, holds the name's head noun (`_name_heads`: its last word, looking through pack words like
+  `pot`/`pouch` and cut words like `powder`/`breast`/`dough`; names led by sea/bone/water/chocolate have none) and may
+  end in `ring(s)`; (B) an entry of the curated `byproducts` list in the bank JSON, every source of which the dish
+  supplies (`{"mushroom sauce": ["mushroom"], "garlic butter": ["garlic", "butter"]}`; a source is a pick-run, or the
+  first word of a used meat/fish pick); (C) the same-family exemption (e.g. "omelette" with an egg custard picked); or
+  (D) a shape of a generic picked pasta. A one-word span passes if it is a head noun of a pick or a declared staple.
+  `byproducts` is validated at load (`CookoutBankError` naming the entry): at most 250 entries; the key resolves to a
+  bank ingredient that is not a staple and ends in a `BYPRODUCT_HEADS` word (sauce, stock, broth, gravy, jus, juice,
+  fat, glaze, puree, coulis, compote, salsa, pesto, syrup, jam, jelly, curd, dressing, marinade, paste, butter, oil,
+  sugar, mayonnaise, yoghurt - never cream, water, wrap, bake, pie, mix, granules, flour, milk, salt, vinegar, spread,
+  crisps, soup, starch, meal); each source is a contiguous phrase of the key (or one of sugar/butter/egg/milk/oil, the
+  kitchen co-ingredients) with a non-modifier word that some bank name supplies; a carrier head (butter, oil, sugar,
+  mayonnaise, yoghurt) must be among the sources. Curation rule: a cook makes it in the kitchen from its sources (plus
+  water, salt, pepper, pan liquids) by cooking, juicing, rendering, puréeing, reducing, infusing or mixing; sauces
+  named after what they are served with, bottled/fermented/branded condiments, pressed or milled products (nut oils,
+  nut butters, flours, starches, date/palm/icing sugar) and bottled blends are NOT listed. The list lives in
+  `tooling/cookout/src/byproducts.json` (copied into the bank by `build_bank.py`); `tooling/cookout/byproducts.py`
+  prints the generator's candidates and the diff against it. `find_contraband_ingredients(..., reasons=[...])` records
+  why each span passed (`pick`, `covered-word`, `pick-run(N)`, `byproduct(key, by)`, `family`, `pasta-shape`,
+  `ring-shape`); `tooling/cookout/f4_differential.py` classes a differential by those reasons and runs the full
+  invariant sweep (every multi-word bank name x every pick of another family must be flagged unless one of A-D).
+  Reports: `triad/cookout/r2/f4-differential.md`, `f4-trial.md`.
 - **Blind redaction** (`cookout_view_json`, in Python before serialisation). In Blind mode while `picking`: the
   partner's `picks` are `null` (only `pickCount`); `current.role/options/offerIndex/skipsRemaining` are filled only
   for the viewer whose turn it is (everyone else, a non-player included, sees only `turn`, `player`,
@@ -2822,12 +2860,16 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   non-seasoning staples; **each concept uses ≥ 7 of the ten, at least one ≥ 8, and the union covers all ten**; three
   distinct `(dishType, technique)` pairs and at least two dish types. Then the **lexical contraband scan** reads
   every prose field against the bank's names and aliases: *pass 1* rejects any bank food that is not one of the
-  concept's used picks (or their family), a free seasoning, a declared staple or a stop word (an omitted item may be
-  named only in its own `omitted[].reason`); *pass 2* is never softened by stop words or families and rejects any
+  concept's used picks (or their family), a free seasoning, a declared staple, a stop word or a culinary word. The scan
+  is **high-precision** (round 2): a span built only from words of the used picks'/declared staples' names and aliases
+  plus stop/culinary words is a cook's shorthand and passes (`oil` for vegetable oil, `onion` for dried onion granules,
+  `mushroom sauce` from dried mushrooms), while a distinct unpicked food (mango, salmon, cheese, `mango chutney`)
+  still fails. `omitted[].reason` is an explanation, never scanned as consumption (only the forbidden-id check
+  applies); *pass 2* is never softened by stop words or families and rejects any
   mention of an omitted basket item or of an undeclared non-seasoning staple in the consumption prose. Both passes
   tokenise once and judge the **longest whole-token span first**, so "peanut butter" is not read as "butter" when
-  peanut butter is a pick — but "peanut butter with extra butter" fails. A violation triggers at most ONE repair run
-  (same deadline) that is fed the exact violations; a second failure ends the round's `concepts` as `failed`
+  peanut butter is a pick — but "peanut butter with extra butter" fails. A violation triggers up to `MAX_REPAIRS` (3)
+  repair runs (same deadline), each fed the exact violations; the last failure ends the round's `concepts` as `failed`
   (retryable). There is NO second LLM checker — the bank is the food dictionary, which makes the scan reproducible
   and testable. **Honest limit:** a food that is not in the bank can slip through prose.
 - **Pictures** (`cookout_images.py`, `CookoutPictureJob`). Text first: when `concepts` goes `ready` it is published at
@@ -2857,7 +2899,7 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
   `cookMinutes 0..480` (the server computes `totalMinutes`, 1..720), 1..24 unique ingredient lines covering the whole
   manifest and adding nothing but free seasonings, each with a quantity (≤ 80 chars) and note (≤ 120), 2..20 steps
   (≤ 600 chars, optional minutes, `uses` ⊆ the recipe's ingredients, every ingredient used by some step) and ≤ 4 tips,
-  then both contraband passes over quantity, note, steps and tips; one repair run. **The row becomes `banked` only
+  then both contraband passes over quantity, note, steps and tips; up to three repair runs. **The row becomes `banked` only
   when a valid full recipe is stored** (compare-and-set on `state = 'pending' AND run_id = ?`), and only banked
   rows appear in `GET /cookout/bank`. Each concept is independently bankable by either player; a failed or
   unavailable save is retried on its card (`…/recipe/retry`).
@@ -2909,8 +2951,9 @@ positions taken are in [decisions/00199](../../decisions/00199-server-chat-cooko
 
 Twelve optional twists sit on top of the core game. **A round that uses none of them behaves exactly like §24**: same
 states, same draws, same prompts (the prompt builders emit no twist text at all), new view fields at their "off"
-values. There is no schema v22: the twist columns were folded into the still-undeployed `_SCHEMA_V21_COOKOUT`, so the
-single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION` stays 21.
+values. The twist columns were folded into the then-undeployed `_SCHEMA_V21_COOKOUT`, so the single v20 → v21 migration
+builds the final twist shape. v21 is now deployed and never edited: the game modes of §24.2/§24.4 are the separate, additive
+schema v24 (`cookout_rounds.mode`).
 
 | # | Twist | Where it lives |
 |---|---|---|
@@ -3013,6 +3056,210 @@ single v20 → v21 migration builds the final shape and `_LATEST_SCHEMA_VERSION`
   response, two-connection races, generation fencing, the swap archive, T4), `test_cookout_twists_catalogue.py` (the
   static catalogues and the no-food-in-directives scan), the twist cases in `test_cookout_bank.py`,
   `test_livechat_cookout_ai.py` and `test_livechat_cookout_images.py`, and `e2e/tests/server-cookout-twists.spec.ts`.
+
+### 24.2 Cookout game modes: the chef and the pictures (spec `spec/server-chat/09c-cookout-modes.md` §3, §8.3)
+
+The chef and picture code is mode-aware; a mode is data (`cookout_modes.json`, `CookoutMode`), Classic is byte-identical.
+
+- **Call sites state the mode.** `build_concepts_prompt`, `parse_concepts`, `build_recipe_prompt` and `parse_recipe` take `mode: CookoutMode` with no default (Classic call sites pass `default_modes().default`); `parse_concepts` also takes `bread_id`. `concept_manifest(..., mode=)` lists the mode's free staples (butter in Toasted sandwich). The runner resolves `row["mode"]` (a row with none is `classic`), checks the basket size against `mode.basket_sizes`, and for a mode it does not know **aborts without writing** (also on the `unavailable` path).
+- **Single-dish prompt** (`chef.format == "single-dish"`): the mode's `conceptText` (bread name and id, coverage numbers, build list, butter, cap of two) plus `_single_dish_rules` in `cookout_ai.py` (the Classic steering: never name an unpicked food, including what a sauce is made of, side words and comparison dishes; the exact `omitted` rule). The real-run trial showed the mode text alone under-steers (22 baskets: 7 first-try, 4 failed).
+- **Validation.** Bread in every idea (never omitted), each idea uses ≥ F−2 fillings, one uses ≥ F−1, the union is all of them, three different known builds (no `oven-baked` under no-oven), staples within the mode's free/capped sets (cap 2). `dishType` is stored `sandwich` and `technique` comes from the build; both are ignored if the model sends them. The bread's name is never required in prose (a starred bread is exempt from the naming check). Dish words in `reviewDishWords` are **signals** only (`Parsed.signals`, counted in the log, never a violation or a repair).
+- **Pictures.** `build_image_prompt(..., mode=, bread_name=, build=)` uses the mode's template; fillings only (no bread, no staples) and the style's picture phrase becomes the setting. `concept_prompts` reads `mode`, `bread_id` and each concept's `build`; an unknown mode has no prompts.
+- **Tests.** `test_livechat_cookout_ai.py` (`TestClassicIsByteIdentical` against `fixtures/cookout_chef_classic_golden.json`, recorded before modes; `TestToastie*`), `test_livechat_cookout_images.py` (`TestToastiePictures`), `fake_cmd.py` (canned Toasted sandwich answers). The real-run trial is `tooling/cookout/chef_trial.py --mode toastie` (report `triad/cookout/modes/toastie-trial.md`).
+
+### 24.3 Cookout pictures, catalogue and the picture-first table (spec `spec/server-chat/09b-cookout-visual.md`, decisions/00202, Inv 60)
+
+Round 2 of Cookout. Every ingredient on screen gets a studio photograph and a plain "what it is" line; the pick screen is
+rebuilt around two big picture cards that fit a phone without scrolling; the chef's waiting time shows each chosen
+ingredient with fun facts. All of it is **engine catalogue data**, not chat content (Inv 60): it is generated offline from
+ingredient names alone, the same for every player, and message delete / chat wipe have nothing of it to erase. The
+rules, drawing and Blind redaction of §24 and §24.1 (Inv 57) are untouched; this section is presentation plus read-only
+wire fields.
+
+**What ships in git, and what does not.** Two small files are committed next to the bank:
+
+- `livechat/cookout_catalogue.json` — per ingredient (the bank's pickable ingredients plus the three free seasonings
+  `water`, `salt`, `black-pepper`): `what` (10-60 chars, plain British English), `visual` (30-260 chars, the subject
+  sentence for the picture prompt), `presentation` (`whole|cut|heap|bunch|bowl|jar|bottle|glass|plate|portion`), `facts`
+  (at most three, 25-150 chars each), `nameKey` (first 16 hex of sha256 of `name + "\x1f" + category`, so a rename or
+  recategorisation makes the entry stale; aliases are deliberately not in it) and `source` (`author`, `factCheck`, `at` as
+  epoch seconds, plus `visualBy`/`visualAt` once the image tooling rewrote a `visual`). Top level
+  `{version: 1, bankVersion, generated, items}`.
+- `livechat/cookout_ingredient_images.json` — the **manifest**: `{packVersion, pack, renditions:{card:512, thumb:160},
+  items:{<id>:{card:<sha256>, thumb:<sha256>, attempt, acceptedBy}}}` and `pack` = `{url, sha256, bytes, objects,
+  installedBytes}` of ONE immutable tar published as a GitHub Release asset. The pictures themselves live **outside
+  git** (decisions/00202). The first manifest is `{"packVersion": 0, "pack": null, "items": {}}`: valid, and every
+  ingredient falls back to its emoji tile. (At the time of writing the committed catalogue holds no entries and the
+  committed manifest is that empty one; the generation run described in the [runbook](runbook.md) fills them. With either
+  empty the game plays exactly as before, with `what: null` / `image: null`.)
+
+**Modules** (all under `wixy_server/livechat/`).
+
+| Module | Responsibility |
+|---|---|
+| `cookout_catalogue.py` | the strict loader. `CatalogueSubject` + `subjects(bank)` is the ONE way anything enumerates catalogue entries (3,491 ingredients, then the three seasonings, whose category/role/blurb are frozen constants because the bank holds them only as `{id, name}` staples). `entry_problems()` holds every per-entry rule (length bounds, no HTML/URL/emoji, the forbidden picture words such as `brand`, `logo`, `label` except "without a label", `packet`, `tin of`, `hand`, `person`, `fork`, `knife`, `spoon`, `garnish`; the fun-fact rules: no `cure`/`prevent`/`boost`/`immune`/`detox`/`cancer`/`heal`/`superfood`/`antioxidant`/`calorie`/`vitamin`, at most one number that is not a year, no repeats) and is shared with the offline validator so the two cannot drift. `load_cookout_catalogue()` raises `CatalogueError`; `load_cookout_catalogue_or_empty()` logs and returns an empty `Catalogue`, so a damaged file can never stop the game |
+| `cookout_pack.py` | **stdlib only**, runnable as a script (the Dockerfile runs it before `pip install`). The manifest loader with its hard bounds (`MAX_PACK_BYTES` / `MAX_INSTALLED_BYTES` 400 MiB, `MAX_OBJECTS` 10,000, `MAX_ITEMS` 5,000, `MAX_OBJECT_BYTES` 2 MiB; `pack.objects` must equal the number of distinct card + thumb shas; a violation is a `PackError`, never a clamp), `PackStore` (object store, registry, pins, the one lock, install, admitted fetch, GC, status), `fetch_to_dir` (Docker build), `verify_dir`, `write_placeholders` and the CLI (`fetch`, `install`, `cancel`, `gc`, `status`, `verify`, `placeholders`) |
+| `cookout_visuals.py` | `IngredientVisuals` joins catalogue + manifest + the object search path into `snap_extras(id)` (`what`, `image`), `facts(id)` and `resolve_object(sha)`; there is NO process-wide default (decisions/00205): `create_app` keeps its visuals in `app.state.livechat_cookout_visuals`, the routes pass them to `cookout_view_json` / `bank_entry_json` / `bank_ingredient_json` (a required `visuals=` argument), and `visuals_from_environment()` builds one from the environment for a caller with no app (the image-boot proof). `CookoutVisualsService` owns the process-lifetime store work: the slot pin, its 300 s lease refresh, the self-heal fetch (retried every 6 h), the daily GC and the clean-shutdown retire; it runs as the supervised task `cookout-visuals` |
+| `cookout_game.py` | `_snap_json` (the one place every ingredient snapshot passes through on its way to the wire) adds `what` and `image`; `_pick_json` / `_with_facts` add `facts`; `_staple_json` adds a staple's `image` |
+| `app.py` | the route `GET /admin/cookout-img/{sha}.webp` (registered before the `/admin/static` mounts), the visuals / service construction and the `cookout-visuals` supervised task |
+
+**Read-time enrichment (no new JSON route).** A snapshot stored in `cookout_turns` never changes. When a view is
+serialised, `_snap_json` looks the id up in the catalogue and manifest and adds `what` (catalogue line or `null`) and
+`image` (`{card, thumb}` URLs or `null`). `image` is non-null only when the manifest names the id **and both** renditions
+exist somewhere on this server's object search path (checked at load and again after a self-heal, kept in memory), so a
+card never shows one rendition and falls back on the other. `facts` ride only on `players[].picks` (and the revealed
+wildcard) once the round has left `picking`, as `string[] | null`; they are not sent while picking, which keeps the polled
+view small. `staples[]` gain `image`. Fridge-raid search (`GET server/cookout/ingredients`) and the resolver fallback go
+through `bank_ingredient_json`, so they carry `what` / `image` too. Because the enrichment only decorates snapshots the
+redacted view already contains, it can never add a partner's ingredient in Blind (a regression test covers id, name and
+picture hash). `Message.cookout` is unchanged: counts and flags only. Wire details: [contracts.md](contracts.md).
+
+**Object search path** (first hit wins; `cookout_visuals.search_path`): (1) `WIXY_COOKOUT_IMAGES_DIR`
+(`Settings.cookout_images_dir`; tests and the e2e fixture server), (2) `<WIXY_STORAGE_ROOT>/cookout-images/objects`,
+(3) `WIXY_COOKOUT_IMAGES_BAKED_DIR` (`Settings.cookout_images_baked_dir`; the Docker image sets it to
+`/app/cookout-pack/objects`). Objects are `<2 hex>/<sha256>.webp`.
+
+**Storage registry, pins and the one lock** (`<storage>/cookout-images/`; operations in [runbook.md](runbook.md)).
+`objects/` is shared by both blue/green slots; `registry/manifests/<digest>.json` keeps a copy of every manifest ever
+registered (digest = sha256 of the manifest file's bytes, so two manifests with the same `packVersion` but different
+content differ); `registry/pins/<pin-id>.json` says who still needs which manifest; `incoming/` holds in-flight downloads;
+`.lock` is the single cross-process OS file lock (blocking acquire; the tooling waits up to 120 s, the app only 5 s so a
+busy store never delays boot, and nobody ever proceeds unlocked). A **slot pin** (`slot-<16 hex>`) is written at startup
+with a 900 s lease that the supervised task refreshes every 300 s, and is retired on clean shutdown; a crashed process's
+pin counts as retired when its lease ends. A **pending pin** (`pending-<digest>`) is written by the tooling's `install`
+before the manifest PR merges and never expires (it is removed when a slot pin for the same digest is written, or by
+`cancel`). GC keeps the objects of every manifest with a live slot pin, a pending pin, or a slot pin retired less than 72
+hours ago, never deletes an object younger than one hour, fails closed (deletes nothing) if a pin or registry copy it needs
+is unreadable, and is the only deletion path. The baked Docker directory is read-only and never collected.
+
+**Serving.** `GET /admin/cookout-img/{sha}.webp` sits under `/admin` (behind Cloudflare Access on the fleet like
+`/admin/static`) and deliberately **not** behind the chat unlock token: these are catalogue pictures, the same for every
+user. `sha` must be 64 lowercase hex **and** be a card or thumb sha of the loaded manifest **and** its file must exist,
+else `404`, so arbitrary files cannot be probed. Responses are immutable (`Cache-Control: private, max-age=31536000,
+immutable`, `ETag: "<sha>"`, `If-None-Match` gives `304`). Exact headers: [contracts.md](contracts.md).
+
+**Standalone Docker image.** `deploy/standalone/Dockerfile` copies only `cookout_pack.py` and the manifest and runs
+`cookout_pack.py fetch` at build time (before `pip install`, so the ~150 MB layer stays cached until either file
+changes), baking the pack into `/app/cookout-pack`. The fetch fails the build on any size or sha256 mismatch; `pack: null`
+makes it a no-op; the build arg `COOKOUT_PACK_URL` overrides only the URL (the sha256 still pins the content). Pictures,
+`what` and facts therefore work fully on the standalone edition with no AI at runtime. CI proves it:
+`deploy/standalone/ci/cookout_image_proof.sh` (see [testing.md](testing.md) and `deploy/standalone/README.md`).
+
+**Offline tooling** (`tooling/cookout/visual/`, [tooling/README.md](../../tooling/README.md)). Nothing in it ever sees chat
+content; it reads only the bank and the catalogue.
+
+- *Catalogue* (`catalogue.py`, `validate_catalogue.py`, `facts_waivers.json`): Haiku authors `what` / `visual` /
+  `presentation` / facts in cmd chat-spawn runs (`cmdruns.py`: at most 3 runs in flight per provider, 5 s between spawns,
+  every `run_id` journalled before polling), a second Haiku pass fact-checks every fact (doubtful or false ones are
+  dropped; an entry left with fewer than two goes back to authoring), and Sol audits a seeded sample of 150 facts (bar 146
+  upheld). The validator checks the whole file against the bank (all ids present exactly once, current `nameKey`, the vessel
+  rule for oils / sauces / drinks, no other ingredient's name after "with", no fact repeated across entries, waivers only
+  for listed ids).
+- *Pictures* (`images.py`, `prompts.py`): the fixed photographic prompt (`IMAGE_PROMPT_TEMPLATE`; only `{visual}` varies),
+  ComfyUI on the hub through the unchanged `wyr_images.ComfyImageGenerator` (one 1024x1024 picture at a time, Krea 2 Turbo
+  NVFP4), renditions `card` 512 px (WebP q82) and `thumb` 160 px (q78), an **empty-queue gate** (a picture is submitted
+  only after ComfyUI's `/queue` shows nothing running or pending on three consecutive polls one second apart, so a live
+  game's dish picture waits behind at most one batch picture), the attempt ladder (1: catalogue `visual`; 2: new seed; 3:
+  `visual` rewritten by Haiku; 4: new seed; then an Opus review queue recorded in `image_review.json` with up to two more
+  attempts, else the ingredient stays picture-less and the game shows its emoji), a resumable journal, and the
+  deterministic pack + manifest build and release (`publish`).
+- *Checking* (`check.py`, `calibrate.py`, `review.py`): batches of 10 real card renditions plus 1 decoy (a picture of an
+  ingredient from another category labelled as a third), copied under neutral names `01.webp` .. `11.webp` so the file name
+  never reveals the answer; a strict verdict schema (`correct|wrong|unclear` with problem codes); `unclear` goes to a Sol
+  tie-break; a per-model vision proof (2 right + 2 decoys) must pass before a model may check anything. **Calibration rule**
+  (stated before the run, applied mechanically): 100 random first-attempt pilot pictures (seed recorded), 50 each for Luna
+  and Haiku; Sol and Opus judge all 100 blind, then review each checker's verdict, then reconcile only where they still
+  disagree; a checker qualifies if it has at most 2 errors over its 50 (every unresolved image counts as an error), zero
+  `wrong_food` false accepts, and catches every decoy. Haiku checks the full run if it qualifies, else Luna; if neither
+  does, full-run checking pauses for the operator.
+
+**The picture-first table** (`admin-ui/src/server/cookout/`). All ingredient art goes through `pictures.ts`:
+`ingredientPicture()` builds a `.wx-srv-ck-pic` tile on the warm off-white `#F5F2EC` (the photographs' own background, so
+their edge vanishes in light and dark themes) holding an `<img>` with the ingredient name as `alt`, `width` / `height` of
+the rendition (512 / 160, no layout shift), `decoding="async"`, and `loading` eager only for the pair on the table and the
+carousel's current and next slide. `image: null` and an `<img>` `error` event both render the **same-size** tile with the
+category emoji centred (`fallbackEmoji`; the seasonings have their own), so a missing picture never changes the screen's
+fit. `decodeAll()` decodes a new pair before it swaps in (waiting at most `DECODE_WAIT_MS` = 400 ms). `api.ts` parses the
+new fields defensively: `image.card` and `image.thumb` must both match `^/admin/cookout-img/[0-9a-f]{64}\.webp$` or `image`
+becomes `null`; `what` is a non-blank string of at most 120 characters or `null`; `facts` an array of at most three strings
+of at most 200 characters or `null`; a pre-round-2 server parses to `null`s and the emoji UI.
+
+- *Intro* (`intro.ts`): a light card over the pane the first time **this device** opens **this round** while it is
+  `picking` (`localStorage` key `wx-srv-ck-intro:<seq>`, every access in try/catch, an in-memory set when storage is
+  unavailable); reopened by the title row's `?`; dismissed by **Let's cook** or the backdrop. The words differ for Open and
+  Blind, and a "Twists on:" line lists the start-sheet twists (`twistPhrases`).
+- *Picking table* (`cookoutGame.ts` and the Cookout block of `chat.css`): rows title, optional twists strip, turn banner,
+  one 44 px "Basket so far" progress button (passive thumbnails, 🔒 tiles for the Blind partner), the stage with **two
+  picture cards side by side**, the actions row (the skip button, and a **🎲 Twists** button only when a drafting twist is
+  usable) and the reserved chat row. **One tap on a card picks** (no separate "Pick this"); the tapped card shows a pressed
+  outline and "Picking…" and both are disabled until the answer. The watcher's cards are not tappable (except while
+  sweeping). A Blind partner's turn shows the cloche from counts alone, so no partner ingredient text or URL is ever in the
+  DOM. The layout budget is on the pane's own height (a container query on `container-name: ck`), not the viewport: the
+  compact table starts below `max-height: 505.98px` (no twists strip, a one-line banner, no what-line on the card) and
+  below roughly 409 px only the stage scrolls while every other row stays fixed and tappable. The basket tray and the
+  staples footer are gone from the picking view (the staples moved to the reveal).
+- *Reveal and dishes*: the reveal is a 5x2 grid of `thumb` tiles grouped by player with the staples' thumbs on a "Plus
+  cupboard staples" line; dish cards show 28 px ingredient thumbs; the full recipe shows a 24 px thumb per basket
+  ingredient; fridge-raid results and the chosen chip show the `thumb`.
+- *Chef carousel* (`carousel.ts`): while `concepts.state == "pending"`, a slide per basket ingredient (card picture, name,
+  `what`, the facts). It advances every `CAROUSEL_ADVANCE_MS` = 7 s and loops, pauses while a finger or pointer is on it
+  and for `CAROUSEL_RESUME_MS` = 10 s after, has tappable dots and desktop arrows, swipes through CSS scroll-snap with an
+  `IntersectionObserver` tracking the slide, and under reduced motion never advances or animates. Its only long-lived
+  resource is one timer, released by `stop` / `destroy`.
+- *Chat card* (`cookoutCard.ts`) is unchanged apart from sharing the status words.
+
+**Honest limits.** A picture is a photograph-style rendering of a name, not a photograph of that ingredient; ambiguous
+items (white powders, oils) can look like their lookalikes, which is why the checker accepts "consistent with" and the
+unclear tie-break exists. The catalogue's fun facts are model-written and fact-checked by a second model plus a seeded
+audit, not by a person. Pictures depend on the pack being present on the server: until it is (self-heal downloads it when
+the manifest names a `pack.url`), the game shows emoji tiles.
+
+**Tests.** `test_cookout_catalogue.py`, `test_cookout_catalogue_data.py`, `test_cookout_catalogue_tooling.py`,
+`test_cookout_pack.py`, `test_cookout_visuals.py`, `test_cookout_image_route.py`, `test_cookout_visual_tooling.py`, the
+vitest suites `apiVisual`, `intro`, `pickTable`, `carousel` and `fallback` under `admin-ui/tests/cookout/`,
+`e2e/tests/server-cookout-visual.spec.ts` and the CI image proof — see [testing.md](testing.md).
+
+### 24.4 Cookout game modes: the framework, the Toasted sandwich draft and the UI (spec `spec/server-chat/09c-cookout-modes.md` §1-§2, §4, §6)
+
+A game mode is **data** (`livechat/cookout_modes.json`, loaded and resolved against the bank once per process by
+`livechat/cookout_modes.py`; `default_modes()` like `default_bank()`), never a code path sprinkled through the game. Classic is the
+`{"plan":{"type":"classic"}}` entry and routes to the original paths unchanged (golden-tested). Adding Pizza later is one JSON entry,
+its tile picture and its tests; the only code a mode may need is a new `facet` or plan rule.
+
+- **Plan grammar.** A `sequence` plan is `opening` (kinds of the first turns, in order) + `pairs` (kinds shuffled with
+  `secrets.SystemRandom`, each serving two consecutive turns) + `closing`. Turns must be even (`picksPerPlayer = turns / 2`);
+  turn ownership is the core rule (odd = slot 1). The resolved per-turn list of kind ids is stored in `cookout_rounds.role_schedule`.
+  Toasted sandwich: `bread` | three of `cheese`, `main`, `produce` (shuffled pairs) | `finish` = 8 turns, 4 picks each; the starter
+  picks the bread + 3 fillings and the partner 4 fillings (the finishing touch last).
+- **Kinds and pools.** Each kind has a label, a banner `prompt`, a `facet`, a `chaos` flag and a `select` (ids / categories /
+  families / roles). `kind_of` classifies every bank ingredient once: bread ids first, then `fillingRules` exclusions (categories,
+  families, role+category, ids; `includeIds` re-includes `dulce-de-leche` and `garlic-butter`), then the first matching kind in
+  `kindOrder`. Excluded items are never offered, swapped in, drawn as the wildcard or used as a starter. The eight staples are in no
+  kind. `tooling/cookout/validate_modes.py` (run by `test_cookout_modes.py`) keeps every pool honest against the bank, including a
+  2,000-round maximum-skip simulation that proves no pool can be exhausted.
+- **The draw.** One engine: `CookoutBank.draw_pair`/`draw_replacement`/`draw_wildcard` take keyword-only `candidates` (replaces the
+  role pool) and `facet`. `facet="family"` needs two different families and counts families, not categories, in the least-shown
+  tie-break; everything else (hard exclusions, one everyday option, `8:3:1` rarity, immutable snapshots) is the core's. The game reads
+  `mode.kind_for_turn(role_schedule, turn)` and passes the kind's pool and facet to every draw (skip, veto, chaos, swap, wildcard).
+- **Starters by kind.** At most one bread starter (turn 1) and one filling starter (turn 2). Fridge raid = a bread you have at home
+  (`422 invalid` for a non-bread; `GET /cookout/ingredients?mode=toastie` searches breads only). Encore is offered only from a round of
+  the same game mode. A turn-2 pair-kind starter moves that pair to the front; a `finish` starter moves the finishing touch to turn 2.
+  Turn 2 is never drawn until Slot 2 is bound.
+- **Twists.** All twelve work. Rescue swap redraws from the target's kind; the wildcard comes from the filling pools only; the chaos
+  shelf is absent on the bread turn (`canChaos=false`, `409 bad_state`); veto, lucky dip and secret star work on the bread too.
+- **Wire and view.** See contracts.md ("Cookout game modes"). `current.role` is the kind id; `PickSnap.kind` rides with the pick (so
+  Blind hides the bread's kind with it); `concepts.data[].build` is `{id,label}` or `null`.
+- **UI** (`admin-ui/src/server/cookout/modes.ts` plus the start sheet, game, card and recipe book). The start sheet's "What are we
+  making?" section shows one picture tile per mode the options list (`.wx-srv-ck-mtile`, a radio group; Classic selected by default;
+  hidden when only Classic is listed, so the sheet looks as before) and Open/Blind follows under "How do we play?". The intro's first
+  line is the mode's; the banner is `"Your turn — " + kind.prompt` ("Your turn — pick the bread"; watchers see "Cupcake is picking the
+  bread…" / "…is adding a filling…", Blind only "is choosing…"); line 2 is "Bread · then 7 fillings · 2 new pairs left", then "Filling 3
+  of 7". The progress row has 4 + 4 slots, the starter's first slot being the bread slot (🍞 mark; 🔒 when hidden; label "Secret
+  bread"). The reveal gives the bread its own first row and lists butter first, marked free. Dish cards show the build pill, "On
+  <bread>" with its thumbnail and "Uses n/7 fillings"; the chef stage header reads "🥪 Toasted sandwich"; the main-chat card has a mode
+  badge and the mode's numbers ("Picking ingredients (3/8)…", "3 toasted sandwich ideas ready"); the Recipe book shows a 🥪 badge.
+- **Activation.** The mode ships switched off (runbook: "Cookout game modes"). The e2e fixture enables it with
+  `WIXY_COOKOUT_MODES=toastie`; `e2e/tests/server-cookout-toastie.spec.ts` is the end-to-end proof.
 
 ## 25. Live voice notes (spec `spec/server-chat/07-live-voice-notes.md`, decisions/00211 + 00212, Inv 59)
 

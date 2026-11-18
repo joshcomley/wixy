@@ -69,6 +69,7 @@ SAMPLES: Final = protocol.SAMPLES
 FRAME_BYTES: Final = protocol.FRAME_PCM_BYTES
 FRAMES_PER_SECOND: Final = RATE // SAMPLES  # 50
 RING_FRAMES: Final = 1500
+PONG_TIMEOUT_S: Final = 6.0  # a socket whose last pong is older than this is dropped
 """Thirty seconds of PCM kept for listeners at the live edge; a listener that falls further behind
 is fed from the stored slices instead."""
 STALL_S: Final = _STALL_S
@@ -997,7 +998,7 @@ class LiveVoiceHub:
 
     def tick_listener(self, listener: Listener) -> None:
         now = time.monotonic()
-        if not self.permitted(listener) or now - listener.pong_at > 6:
+        if not self.permitted(listener) or now - listener.pong_at > PONG_TIMEOUT_S:
             self.remove_listener(listener)
             return
         if listener.ping_ticks % 20 == 0:

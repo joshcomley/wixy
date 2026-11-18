@@ -136,6 +136,14 @@ class Settings:
     comfy_output_dir: str
     wyr_image_model: str
     wyr_pool_size: int
+    # Cookout ingredient pictures (09b B.6): optional extra object directories searched for
+    # content-addressed pictures; `None` when unset.
+    cookout_images_dir: Path | None = None
+    cookout_images_baked_dir: Path | None = None
+    # Spec 09c §5.6: the non-Classic Cookout game modes that may be CREATED (`WIXY_COOKOUT_MODES`,
+    # comma-separated). Absent/empty = Classic only; ids that are not a loaded mode are ignored with
+    # a warning where the modes are known. Existing rounds of a loaded mode never depend on it.
+    cookout_enabled_modes: frozenset[str] = frozenset()
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -242,4 +250,13 @@ def load_settings(storage_root: Path) -> Settings:
         comfy_output_dir=_get("WIXY_COMFY_OUTPUT_DIR"),
         wyr_image_model=_get("WIXY_WYR_IMAGE_MODEL", "krea2-turbo-nvfp4"),
         wyr_pool_size=wyr_pool_size,
+        cookout_images_dir=Path(images_dir)
+        if (images_dir := _get("WIXY_COOKOUT_IMAGES_DIR"))
+        else None,
+        cookout_images_baked_dir=(
+            Path(baked_dir) if (baked_dir := _get("WIXY_COOKOUT_IMAGES_BAKED_DIR")) else None
+        ),
+        cookout_enabled_modes=frozenset(
+            part.strip().lower() for part in _get("WIXY_COOKOUT_MODES").split(",") if part.strip()
+        ),
     )

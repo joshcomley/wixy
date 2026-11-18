@@ -16,11 +16,15 @@ const BUNDLE = readFileSync(join(HERE, "..", "..", "..", "wixy_server", "static"
 const SELECTORS = [
   ".wx-srv-ck",
   ".wx-srv-ck-bar",
-  ".wx-srv-ck-pill",
-  ".wx-srv-ck-opt",
+  ".wx-srv-ck-prog-slot",
+  ".wx-srv-ck-card",
+  ".wx-srv-ck-table",
   ".wx-srv-ck-skip",
   ".wx-srv-ck-cloche",
-  ".wx-srv-ck-tray",
+  ".wx-srv-ck-sheet",
+  ".wx-srv-ck-intro",
+  ".wx-srv-ck-car",
+  ".wx-srv-ck-pic",
   ".wx-srv-ck-reveal",
   ".wx-srv-ck-flip",
   ".wx-srv-ck-dish",
@@ -51,5 +55,61 @@ describe("the Cookout styles", () => {
   it("follow the dark theme both ways the shell sets it", () => {
     expect(SOURCE).toContain(':root[data-theme="dark"] .wx-srv-ck');
     expect(SOURCE).toContain(':root:not([data-theme="light"]):not([data-theme="dark"]) .wx-srv-ck');
+  });
+});
+
+
+describe("the game-mode styles (layout guards)", () => {
+  /** The declarations of the rule whose selector list is exactly `selector`. */
+  function rule(selector: string): string {
+    const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const found = new RegExp(`(?:^|\\})\\s*${escaped}\\s*\\{([^}]*)\\}`, "m").exec(SOURCE);
+    if (found === null) throw new Error(`no rule ${selector}`);
+    return found[1] ?? "";
+  }
+
+  it("the table's skip and Twists labels wrap inside their 44 px buttons, never clipped (09b §D.3: any font)", () => {
+    const buttons = rule(".wx-srv-ck-skip,\n.wx-srv-ck-twists-btn,\n.wx-srv-ck-sweep-cancel");
+    expect(buttons).toMatch(/white-space:\s*normal/);
+    expect(buttons).not.toMatch(/nowrap/);
+    expect(buttons).toMatch(/min-height:\s*44px/);
+    // Two lines of 1.15 at 15 px (34.5 px) and the 2 px borders stay inside 44 px.
+    expect(buttons).toMatch(/line-height:\s*1\.15/);
+    expect(rule(".wx-srv-ck-skip")).toMatch(/min-width:\s*180px/);
+    expect(rule(".wx-srv-ck-twists-btn")).toMatch(/max-width:\s*calc\(100% - 188px\)/);
+  });
+
+  it("the compact stage's cloche is small enough for 159 px with a wider font", () => {
+    const compact = /@container ck \(max-height: 505\.98px\) \{([\s\S]*?)\n\}/.exec(SOURCE)?.[1] ?? "";
+    const inner = (selector: string): string => {
+      const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      return new RegExp(`${escaped}\\s*\\{([^}]*)\\}`).exec(compact)?.[1] ?? "";
+    };
+    expect(inner(".wx-srv-ck-table-stage > .wx-srv-ck-cloche")).toMatch(/padding:\s*8px 12px/);
+    expect(inner(".wx-srv-ck-table-stage .wx-srv-ck-cloche-dome")).toMatch(/font-size:\s*2rem;\s*line-height:\s*1\.3/);
+    expect(inner(".wx-srv-ck-table-stage .wx-srv-ck-cloche-sub")).toMatch(/font-size:\s*0\.75rem/);
+  });
+
+  it("the turn banner's row grows when a wider font wraps its line, in every table layout", () => {
+    const rows = [...SOURCE.matchAll(/\.wx-srv-ck-table[^{]*\{[^}]*grid-template-rows:\s*([^;]+);/g)].map((m) => m[1] ?? "");
+    expect(rows).toHaveLength(4);
+    for (const r of rows) expect(r).toMatch(/^(24px )?minmax\((36|44)px, auto\) 44px minmax\(0, 1fr\) 44px$/);
+  });
+
+  it("a mode card's head wraps, and its title never does", () => {
+    expect(rule(".wx-srv-ck-mcard-head-mode")).toMatch(/flex-wrap:\s*wrap/);
+    expect(rule(".wx-srv-ck-mcard-head-mode .wx-srv-ck-mcard-title")).toMatch(/white-space:\s*nowrap/);
+  });
+
+  it("the reveal grid's columns are at least 68px and never more than one player's picks", () => {
+    const grid = rule(".wx-srv-ck-reveal-grid");
+    expect(grid).toContain("minmax(max(68px, calc((100% - (var(--ck-reveal-cols) - 1) * 3px) / var(--ck-reveal-cols))), 1fr)");
+    expect(grid).toContain("--ck-reveal-cols: 5;");
+  });
+
+  it("a reveal tile's name wraps at word breaks only, never mid-word", () => {
+    const name = rule(".wx-srv-ck-rtile-name");
+    expect(name).not.toContain("overflow-wrap: anywhere");
+    expect(name).not.toContain("word-break: break-all");
   });
 });

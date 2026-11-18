@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { LENTILS, P1_PICKS, P2_PICKS } from "./fixtures";
+import { LENTILS, P1_PICKS, P2_PICKS, imageUrl, imaged } from "./fixtures";
 import {
   DURIAN,
   NATTO,
@@ -37,46 +37,53 @@ function expectNoPartnerStrings(pane: HTMLElement, label: string): void {
     expect(html, `${label}: ${thing["name"] as string}`).not.toContain(thing["name"] as string);
     expect(html, `${label}: ${thing["id"] as string}`).not.toContain(thing["id"] as string);
   }
+  // Every partner ingredient in the leaking fixtures carries a picture (hash "b"): none of them is drawn.
+  expect(html, `${label}: a partner picture`).not.toContain(imageUrl("b"));
 }
+
+/** The viewer's own pictures (hash "a") and the partner's (hash "b"): a leak of a picture is a leak. */
+const mineImg = (s: Json): Json => imaged(s, "a");
+const theirsImg = (s: Json): Json => imaged(s, "b");
 
 /** A Blind round at `turn`, as a LEAKING server would send it to Player 1: every partner secret included. */
 function leaking(turn: number): Json {
   const mine = turn % 2 === 1;
   const p1n = Math.floor(turn / 2);
   const p2n = Math.floor((turn - 1) / 2);
-  const p2Leak = P2_PICKS.slice(0, p2n).map((s, i) => pick(s, 2 * i + 2));
+  const p2Leak = P2_PICKS.slice(0, p2n).map((s, i) => pick(theirsImg(s), 2 * i + 2));
+  const p1Own = P1_PICKS.slice(0, p1n).map((s, i) => pick(mineImg(s), 2 * i + 1));
   return twistPicking(
     {
       blind: true,
       you: 1,
       turn,
       // Their own pair on their own turns; the partner's chaos pair on the partner's.
-      options: mine ? [TOMATOES, LENTILS] : [DURIAN, NATTO],
-      p1Picks: P1_PICKS.slice(0, p1n).map((s, i) => pick(s, 2 * i + 1)),
+      options: mine ? [mineImg(TOMATOES), mineImg(LENTILS)] : [theirsImg(DURIAN), theirsImg(NATTO)],
+      p1Picks: p1Own,
       p2Picks: p2Leak,
     },
     {
       players: [
-        { slot: 1, name: "Josh", pickCount: p1n, picks: P1_PICKS.slice(0, p1n).map((s, i) => pick(s, 2 * i + 1)), chaosUsed: false, vetoUsed: false },
+        { slot: 1, name: "Josh", pickCount: p1n, picks: p1Own, chaosUsed: false, vetoUsed: false },
         { slot: 2, name: "Cupcake", pickCount: p2n, picks: p2Leak, chaosUsed: true, vetoUsed: true },
       ],
       you: { slot: 1, chaosUsed: false, vetoUsed: false },
-      basket: [...P1_PICKS.slice(0, p1n), ...P2_PICKS.slice(0, p2n)].map((s) => pick(s, null)),
+      basket: [...P1_PICKS.slice(0, p1n).map(mineImg), ...P2_PICKS.slice(0, p2n).map(theirsImg)].map((s) => pick(s, null)),
       stars: stars({ mine: null, partnerChosen: true, revealed: false, partner: PARTNER_STAR }),
       history: P2_PICKS.slice(0, p2n).map((s, i) => ({
         turn: 2 * i + 2,
         player: 2,
-        offers: [[s, DURIAN]],
-        choice: s,
+        offers: [[theirsImg(s), theirsImg(DURIAN)]],
+        choice: theirsImg(s),
         seed: null,
-        replaced: [{ offer: 0, snap: NATTO, by: "chaos" }],
+        replaced: [{ offer: 0, snap: theirsImg(NATTO), by: "chaos" }],
         chaosOffer: 0,
         lucky: true,
       })),
     },
     mine
       ? { canChaos: true, canLucky: true, canVeto: true }
-      : { chaosPair: true, vetoed: { snap: NATTO }, canChaos: true, canLucky: true, canVeto: true, role: "protein", offerIndex: 0, skipsRemaining: 2 },
+      : { chaosPair: true, vetoed: { snap: theirsImg(NATTO) }, canChaos: true, canLucky: true, canVeto: true, role: "protein", offerIndex: 0, skipsRemaining: 2 },
   );
 }
 
@@ -85,9 +92,14 @@ describe("Blind picking: nothing of the partner's, whatever the server sends", (
     const h = makeHarness();
     h.show(twistPicking({ blind: true, you: 1, turn: 4, showOptions: false, p2Picks: null, p2Count: 1 }, { stars: stars({ partnerChosen: false }) }));
     expectNoPartnerStrings(h.pane, "server-filtered");
-    expect(qa(h.pane, ".wx-srv-ck-chip-secret")).toHaveLength(1);
-    expect(h.pane.querySelector(".wx-srv-ck-chaos-note")).toBeNull();
+    expect(qa(h.pane, ".wx-srv-ck-prog-secret")).toHaveLength(1);
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Secret pick · Pick 2 of 5");
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
+    // The basket sheet counts the secret too, and names nothing.
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    expect(qa(h.pane, ".wx-srv-ck-bline-secret")).toHaveLength(1);
+    expectNoPartnerStrings(h.pane, "server-filtered, basket open");
   });
 
   it("a leaking view on the partner's turn shows the cloche and none of their pair, picks, chaos pair or star", () => {
@@ -95,18 +107,27 @@ describe("Blind picking: nothing of the partner's, whatever the server sends", (
     h.show(leaking(4));
     expectNoPartnerStrings(h.pane, "turn 4");
     expect(q(h.pane, ".wx-srv-ck-cloche-text").textContent).toBe("🕵️ Secret turn: Cupcake is choosing…");
-    expect(h.pane.querySelector(".wx-srv-ck-opt")).toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-chaos-note")).toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-opt-exotic")).toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-swept")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-card")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-card-exotic")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-pair")).toBeNull();
+    // The banner's second line is where the chaos and swept notes live now: it says only "Secret pick".
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("Secret pick · Pick 2 of 5");
+    expect(h.pane.querySelector(".wx-srv-ck-twists-btn")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-lucky")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-chaos")).toBeNull();
     expect(h.pane.querySelector(".wx-srv-ck-sweep")).toBeNull();
     // Their role is a hint at their pair: not shown either.
     expect(h.pane.textContent).not.toContain("protein");
-    expect(qa(h.pane, ".wx-srv-ck-chip-secret")).toHaveLength(1);
+    expect(qa(h.pane, ".wx-srv-ck-prog-secret")).toHaveLength(1);
     expect(h.pane.querySelector(".wx-srv-ck-star-mark")).toBeNull();
-    expect(h.pane.querySelector(".wx-srv-ck-pill-star")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-prog-star")).toBeNull();
+    // The viewer's own picks do draw their pictures; the partner's never do, even with the basket sheet open.
+    expect(h.pane.outerHTML).toContain(imageUrl("a"));
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    expectNoPartnerStrings(h.pane, "turn 4, basket open");
+    expect(qa(h.pane, ".wx-srv-ck-bline-secret")).toHaveLength(1);
+    // Stars are the viewer's own to toggle; the partner's group has none.
+    expect(h.pane.querySelector(".wx-srv-ck-bgroup[data-slot=\"2\"] .wx-srv-ck-star, .wx-srv-ck-bgroup[data-slot=\"2\"] .wx-srv-ck-star-mark")).toBeNull();
   });
 
   it("holds start to finish: every redraw of the draft, turn by turn, with the leak on", () => {
@@ -116,7 +137,10 @@ describe("Blind picking: nothing of the partner's, whatever the server sends", (
       expectNoPartnerStrings(h.pane, `turn ${turn}`);
       // The partner's flags never produce a control for the viewer.
       expect(h.pane.querySelector(".wx-srv-ck-sweep"), `sweep at turn ${turn}`).toBeNull();
-      if (turn % 2 === 0) expect(h.pane.querySelector(".wx-srv-ck-chaos-note"), `note at turn ${turn}`).toBeNull();
+      if (turn % 2 === 0) {
+        expect(h.pane.querySelector(".wx-srv-ck-turn-sub")?.textContent, `note at turn ${turn}`).toMatch(/^Secret pick/);
+        expect(h.pane.querySelector(".wx-srv-ck-twists-btn"), `twists at turn ${turn}`).toBeNull();
+      }
     }
   });
 
@@ -124,7 +148,12 @@ describe("Blind picking: nothing of the partner's, whatever the server sends", (
     const h = makeHarness();
     h.show(leaking(5));
     // It is Player 1's own table now: their own buttons come from THEIR flags only.
-    expect(q<HTMLButtonElement>(h.pane, ".wx-srv-ck-chaos").disabled).toBe(false);
+    // (The chaos shelf lives in the 🎲 Twists sheet now.)
+    q<HTMLButtonElement>(h.pane, ".wx-srv-ck-twists-btn").click();
+    const chaos = q<HTMLButtonElement>(h.pane, '.wx-srv-ck-sheet[data-sheet="twists"] .wx-srv-ck-chaos');
+    expect(chaos.disabled).toBe(false);
+    expect(chaos.textContent).toContain("Chaos shelf");
+    expect(chaos.textContent).not.toContain("(used)");
     expectNoPartnerStrings(h.pane, "turn 5");
   });
 
@@ -158,13 +187,13 @@ describe("a Blind round, finished: the picks are revealed together, the stars an
   it("the partner's star is not marked while the stars are still secret", () => {
     const h = makeHarness();
     h.show(finishedLeaking(null, {}, { gate: ["stars"] }));
-    const partnerChip = q(h.pane, `.wx-srv-ck-reveal-chip[data-picked="${PARTNER_STAR}"]`);
+    const partnerChip = q(h.pane, `.wx-srv-ck-rtile[data-picked="${PARTNER_STAR}"]`);
     // The ten picks are revealed (it is the big reveal) ...
-    expect(partnerChip.textContent).toContain("Dark brown sugar");
+    expect(q(partnerChip, ".wx-srv-ck-rtile-name").textContent).toBe("Dark brown sugar");
     // ... but which one the partner starred is not.
-    expect(partnerChip.classList.contains("wx-srv-ck-chip-starred")).toBe(false);
-    expect(partnerChip.querySelector(".wx-srv-ck-star-mark, .wx-srv-ck-star")).toBeNull();
-    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred")).toHaveLength(1);
+    expect(partnerChip.classList.contains("wx-srv-ck-rtile-starred")).toBe(false);
+    expect(partnerChip.querySelector(".wx-srv-ck-rtile-star, .wx-srv-ck-star-mark, .wx-srv-ck-star")).toBeNull();
+    expect(qa(h.pane, ".wx-srv-ck-rtile.wx-srv-ck-rtile-starred")).toHaveLength(1);
     expect(h.pane.querySelector(".wx-srv-ck-stars-revealed")).toBeNull();
     expect(q(h.pane, ".wx-srv-ck-gate-text").textContent).toBe("Waiting for Cupcake to star one");
   });
@@ -224,16 +253,17 @@ describe("a Blind round, finished: the picks are revealed together, the stars an
   it("the stars show on both sides only at their own reveal", () => {
     const h = makeHarness();
     h.show(finishedLeaking(null));
-    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred")).toHaveLength(1);
+    expect(qa(h.pane, ".wx-srv-ck-rtile.wx-srv-ck-rtile-starred")).toHaveLength(1);
     h.show(finishedLeaking(null, { revealed: true }));
-    expect(qa(h.pane, ".wx-srv-ck-reveal-chip.wx-srv-ck-chip-starred").map((c) => c.dataset["picked"]).sort()).toEqual(["dark-brown-sugar", "double-espresso"]);
+    expect(qa(h.pane, ".wx-srv-ck-rtile.wx-srv-ck-rtile-starred").map((c) => c.dataset["picked"]).sort()).toEqual(["dark-brown-sugar", "double-espresso"]);
   });
 
   it("an abandoned Blind round reveals nothing: not the partner's picks, chaos pair or star", () => {
     const h = makeHarness();
     h.show({ ...leaking(6), state: "abandoned", current: null });
     expectNoPartnerStrings(h.pane, "abandoned");
-    expect(h.pane.querySelector(".wx-srv-ck-pill-star")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-prog-star")).toBeNull();
+    expect(h.pane.querySelector(".wx-srv-ck-rtile-starred")).toBeNull();
   });
 });
 
@@ -302,9 +332,18 @@ describe("a swap after only one vote: the earlier set shows no vote at all", () 
 describe("the other direction of the same lock (Open mode keeps what is public)", () => {
   it("an Open pane still shows the partner's public picks and a chaos pair", () => {
     const h = makeHarness();
-    h.show(twistPicking({ you: 1, turn: 4, options: [DURIAN, NATTO] }, {}, { chaosPair: true }));
-    expect(h.pane.outerHTML).toContain("Fresh durian");
-    expect(h.pane.outerHTML).toContain("Ribeye steak");
-    expect(h.pane.querySelector(".wx-srv-ck-chaos-note")).not.toBeNull();
+    h.show(twistPicking({ you: 1, turn: 4, options: [theirsImg(DURIAN), theirsImg(NATTO)], p2Picks: P2_PICKS.slice(0, 1).map(theirsImg) }, {}, { chaosPair: true }));
+    // The partner's pair is on the table (names, and — the positive control for the Blind checks — pictures) ...
+    expect(qa(h.pane, ".wx-srv-ck-table-stage .wx-srv-ck-card-name").map((n) => n.textContent)).toEqual(["Fresh durian", "Fermented natto"]);
+    expect(h.pane.outerHTML).toContain(imageUrl("b"));
+    // ... their public pick is in the progress row and the basket sheet ...
+    expect(h.pane.querySelector('.wx-srv-ck-prog-group[data-slot="2"] [data-picked="ribeye-steak"]')).not.toBeNull();
+    q<HTMLButtonElement>(h.pane, "button.wx-srv-ck-progress").click();
+    expect(q(h.pane, '.wx-srv-ck-bgroup[data-slot="2"] .wx-srv-ck-bline[data-picked="ribeye-steak"] .wx-srv-ck-bline-name').textContent).toBe(
+      "Ribeye steak",
+    );
+    // ... and the chaos note is the banner's second line.
+    expect(q(h.pane, ".wx-srv-ck-turn-sub").textContent).toBe("A pair from the chaos shelf!");
+    expect(h.pane.querySelector(".wx-srv-ck-card-exotic")).not.toBeNull();
   });
 });

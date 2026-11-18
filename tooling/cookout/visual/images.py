@@ -1,0 +1,1732 @@
+"""Image generation driver (spec/server-chat/09b §B): plan, render, check, review, pack, publish.
+
+Commands (`python images.py --help`): `plan` (draw the pilot once), `run` (render and check; add
+`--render-only` for the pilot, before calibration has picked a checker), `status`, `publish`
+(build the pack, release it, download it back, write the manifest, install it under a pending pin,
+history check) and `apply-overrides`. Calibration is `calibrate.py`.
+
+Where it runs: on hub, because ComfyUI answers on hub's loopback. Hub's Grid workers only claim CI
+task classes, so the long runs go as an interactive Windows scheduled task (never session 0), not
+as a Grid task. The ComfyUI client is `wixy_server.livechat.wyr_images.ComfyImageGenerator`,
+unchanged. Everything that matters for correctness (the empty-queue gate, the attempt ladder,
+resumability, the deterministic pack, the history checks) is a small function that the unit tests
+exercise without a GPU or the network; the live commands themselves need the fleet.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import io
+import json
+import tarfile
+import time
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+CARD_PX = 512
+THUMB_PX = 160
+GATE_POLLS = 3
+GATE_POLL_GAP_S = 1.0
+STATES = ("queued", "rendered", "checked", "accepted", "regenerate", "review")
+MAX_AUTO_ATTEMPTS = 4
+MAX_REVIEW_ATTEMPTS = 6
+EMPTY_MANIFEST_RENDITIONS = {"card": CARD_PX, "thumb": THUMB_PX}
+
+
+# --- the empty-queue gate --------------------------------------------------------------------
+
+
+def queue_is_idle(queue: Mapping[str, Any]) -> bool:
+    return not queue.get("queue_running") and not queue.get("queue_pending")
+
+
+def queue_signatures(queue: Mapping[str, Any], own_prompt: str | None = None) -> list[str]:
+    """One short signature per job in ComfyUI's queue that is not ours: `client|text|prefix`.
+    A job is ours when its first text prompt equals `own_prompt` (None: every job counts, which is
+    right at the gate, where nothing of ours is submitted yet). This is how a slow stretch gets
+    a name: the journal records what the gate and the render saw sharing the queue."""
+    out: list[str] = []
+    for kind in ("queue_running", "queue_pending"):
+        for item in queue.get(kind) or []:
+            try:
+                graph = item[2]
+                extra = (item[3] if len(item) > 3 else None) or {}
+                # CLIPTextEncode calls its prompt `text`; Qwen-Image 2.1's encoder calls it `prompt`
+                texts = [
+                    str(n["inputs"][field])
+                    for n in graph.values()
+                    for field in ("text", "prompt")
+                    if n.get("class_type") in ("CLIPTextEncode", "TextEncodeQwenImage21")
+                    and isinstance(n.get("inputs", {}).get(field), str)
+                ]
+                prefixes = [
+                    str(n["inputs"].get("filename_prefix", ""))
+                    for n in graph.values()
+                    if n.get("class_type") == "SaveImage"
+                ]
+            except AttributeError, IndexError, KeyError, TypeError:
+                out.append(f"{kind}|unreadable")
+                continue
+            if own_prompt is not None and texts and texts[0] == own_prompt:
+                continue
+            client = str(extra.get("client_id", ""))[:8]
+            text = (texts[0] if texts else "")[:48]
+            prefix = (prefixes[0] if prefixes else "")[:4]
+            out.append(f"{kind[6:]}|{client}|{text}|{prefix}")
+    return out
+
+
+MIN_FREE_GB = 20.0
+MEMORY_POLL_GAP_S = 15.0
+
+
+def hub_free_gb() -> float | None:
+    """Free physical memory in GiB, or `None` where it cannot be read (not Windows). Hub runs the
+    voice and utility models next to ComfyUI; measured 31 Oct, a render pushed it into paging
+    when under ~4 GB was free and both models then stalled for 20-120 s."""
+    if sys.platform != "win32":
+        return None
+    import ctypes
+
+    class _MemoryStatus(ctypes.Structure):
+        _fields_ = [  # noqa: RUF012 - ctypes layout
+            ("length", ctypes.c_ulong),
+            ("load", ctypes.c_ulong),
+            ("total", ctypes.c_ulonglong),
+            ("avail", ctypes.c_ulonglong),
+            ("totalPage", ctypes.c_ulonglong),
+            ("availPage", ctypes.c_ulonglong),
+            ("totalVirtual", ctypes.c_ulonglong),
+            ("availVirtual", ctypes.c_ulonglong),
+            ("availExtended", ctypes.c_ulonglong),
+        ]
+
+    status = _MemoryStatus()
+    status.length = ctypes.sizeof(_MemoryStatus)
+    if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):  # type: ignore[attr-defined,unused-ignore]
+        return None
+    return float(status.avail) / 2**30
+
+
+def wait_for_memory(
+    free_gb: Callable[[], float | None],
+    *,
+    min_gb: float = MIN_FREE_GB,
+    pause_file: Path | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    gap_s: float = MEMORY_POLL_GAP_S,
+) -> tuple[bool, float | None]:
+    """Block while the machine's free memory is under `min_gb`, so a render never starts into
+    paging. Returns `(proceed, last_free_gb)`; `proceed` is False when `pause_file` appears. An
+    unreadable figure (`None`) does not block: the journal records it as unknown."""
+    while True:
+        if pause_file is not None and pause_file.exists():
+            return False, None
+        free = free_gb()
+        if free is None or free >= min_gb:
+            return True, free
+        sleep(gap_s)
+
+
+def wait_for_idle(
+    get_queue: Callable[[], Mapping[str, Any]],
+    *,
+    pause_file: Path | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    polls: int = GATE_POLLS,
+    gap_s: float = GATE_POLL_GAP_S,
+    max_wait_s: float | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool:
+    """Block until ComfyUI's `/queue` shows nothing running or pending on `polls` consecutive
+    polls `gap_s` apart. Returns False if `pause_file` exists (the batch stops between pictures)
+    or `max_wait_s` passes. A live game's picture therefore waits for at most one batch picture."""
+    started = clock()
+    calm = 0
+    while calm < polls:
+        if pause_file is not None and pause_file.exists():
+            return False
+        if max_wait_s is not None and clock() - started > max_wait_s:
+            return False
+        calm = calm + 1 if queue_is_idle(get_queue()) else 0
+        if calm < polls:
+            sleep(gap_s)
+    return True
+
+
+# --- the attempt ladder ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AttemptPlan:
+    attempt: int
+    rewrite_visual: bool  # attempt 2: Haiku rewrites `visual` first (a reseed alone passes ~33%)
+    new_seed: bool  # attempt 1 draws a random seed too; 2 and 4 are explicit "new seed"
+
+
+def plan_attempt(attempt: int) -> AttemptPlan:
+    """1 catalogue visual; 2 rewritten visual; 3 and 4 the rewritten visual with new seeds.
+    5 and 6 (after an Opus review gives a new visual) are checked normally. The rewrite moved from
+    attempt 3 to attempt 2 after measuring (17 Nov 2026): a plain reseed of a failed description
+    passed 33% (72/218), the Haiku rewrite passed 80% (32/40)."""
+    if not 1 <= attempt <= MAX_REVIEW_ATTEMPTS:
+        raise ValueError(f"attempt {attempt} is outside 1..{MAX_REVIEW_ATTEMPTS}")
+    return AttemptPlan(attempt, rewrite_visual=attempt == 2, new_seed=True)
+
+
+def needs_rewrite(attempt: int, overrides: Mapping[str, str], ident: str) -> bool:
+    """The next attempt (`attempt`) of `ident` starts from a Haiku rewrite: it is attempt 2 (or 3,
+    for an id a round already took past 2 under the old ladder) and none is stored yet."""
+    return attempt in (2, 3) and ident not in overrides
+
+
+def review_due(
+    attempts_done: int, entry: Mapping[str, Any] | None, decisions: Mapping[str, Any], ident: str
+) -> bool:
+    """A picture that failed its fourth attempt and has no Opus decision yet is waiting for its
+    review (a review that could not be read is retried next round, never skipped: attempt 5 only
+    follows a review's new description)."""
+    if entry is None or entry.get("state") != "regenerate" or entry.get("pictureless"):
+        return False
+    done = decisions.get(ident, {}).get("decision")
+    return attempts_done == MAX_AUTO_ATTEMPTS and done not in ("retry", "accepted", "pictureless")
+
+
+def after_failure(attempt: int, *, reviewed: bool) -> str:
+    """What follows a failed attempt: `retry` (next attempt), `review` (Opus), `pictureless`."""
+    if reviewed:
+        return "retry" if attempt < MAX_REVIEW_ATTEMPTS else "pictureless"
+    return "retry" if attempt < MAX_AUTO_ATTEMPTS else "review"
+
+
+# --- journal ---------------------------------------------------------------------------------
+
+
+def journal_append(path: Path, entry: Mapping[str, Any]) -> None:
+    if entry.get("state") not in STATES:
+        raise ValueError(f"unknown state {entry.get('state')!r}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps({**entry, "at": time.time()}, sort_keys=True)
+    with path.open("a", encoding="utf-8", newline="\n") as fh:
+        fh.write(line + "\n")
+
+
+def journal_state(path: Path) -> dict[str, dict[str, Any]]:
+    """Latest journal line per ingredient id (a torn final line from a crash is ignored)."""
+    latest: dict[str, dict[str, Any]] = {}
+    if not path.exists():
+        return latest
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(entry, dict) and isinstance(entry.get("id"), str):
+            latest[entry["id"]] = entry
+    return latest
+
+
+def read_only_ids(path: Path, known: Mapping[str, Any]) -> set[str]:
+    """The ids named in a `--only-ids` file (one per line, `#` comments and blanks ignored).
+    An id the catalogue does not know is an error, never silently skipped: a typo would
+    otherwise turn a targeted redraw into a no-op that looks like success."""
+    wanted = {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    }
+    unknown = sorted(wanted - set(known))
+    if unknown:
+        raise ValueError(f"--only-ids names unknown ids: {', '.join(unknown[:10])}")
+    return wanted
+
+
+def pending_work(
+    ids: Sequence[str], state: Mapping[str, Mapping[str, Any]], masters_exist: Callable[[str], bool]
+) -> list[str]:
+    """Ids still to do: accepted ones are skipped, and an attempt whose master file is missing
+    is re-rendered rather than trusted."""
+    todo: list[str] = []
+    for ident in ids:
+        entry = state.get(ident)
+        if entry is None:
+            todo.append(ident)
+        elif entry["state"] == "accepted":
+            continue
+        elif entry["state"] in ("rendered", "queued", "regenerate"):
+            # `rendered` is not done: it still needs its check (or a re-render if the master
+            # file went missing); `run_pipeline` tells those two apart
+            todo.append(ident)
+        elif entry["state"] == "checked" and not masters_exist(ident):
+            todo.append(ident)
+    return todo
+
+
+# --- renditions ------------------------------------------------------------------------------
+
+
+def encode_master(png_path: Path, dest: Path) -> None:
+    """1024 master as WebP q92, metadata stripped (disk is tight: no PNG masters)."""
+    from PIL import Image
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    with Image.open(png_path) as im:
+        im.convert("RGB").save(dest, "WEBP", quality=92, method=6, exif=b"", icc_profile=None)
+
+
+def make_renditions(master: Path) -> tuple[bytes, bytes]:
+    """(card 512 WebP q82, thumb 160 WebP q78), Lanczos, method 6."""
+    from PIL import Image
+
+    out: list[bytes] = []
+    with Image.open(master) as im:
+        rgb = im.convert("RGB")
+        for px, quality in ((CARD_PX, 82), (THUMB_PX, 78)):
+            buf = io.BytesIO()
+            rgb.resize((px, px), Image.Resampling.LANCZOS).save(
+                buf, "WEBP", quality=quality, method=6
+            )
+            out.append(buf.getvalue())
+    return out[0], out[1]
+
+
+# --- the pack and its manifest ---------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class AcceptedPicture:
+    ident: str
+    card: bytes
+    thumb: bytes
+    attempt: int
+    accepted_by: str
+
+
+def sha256_hex(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def build_pack(
+    pictures: Sequence[AcceptedPicture], tar_path: Path, *, pack_version: int, url: str
+) -> dict[str, Any]:
+    """Write the deterministic tar (sorted members, zeroed metadata) and return the manifest
+    dict. Identical pictures give an identical tar, so a re-run reproduces the same sha256."""
+    objects: dict[str, bytes] = {}
+    items: dict[str, dict[str, Any]] = {}
+    for pic in sorted(pictures, key=lambda p: p.ident):
+        card_sha, thumb_sha = sha256_hex(pic.card), sha256_hex(pic.thumb)
+        objects[card_sha] = pic.card
+        objects[thumb_sha] = pic.thumb
+        items[pic.ident] = {
+            "card": card_sha,
+            "thumb": thumb_sha,
+            "attempt": pic.attempt,
+            "acceptedBy": pic.accepted_by,
+        }
+    tar_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(tar_path, "w", format=tarfile.USTAR_FORMAT) as tar:
+        for sha in sorted(objects):
+            info = tarfile.TarInfo(f"objects/{sha[:2]}/{sha}.webp")
+            info.size = len(objects[sha])
+            info.mtime = 0
+            info.mode = 0o644
+            info.uid = info.gid = 0
+            info.uname = info.gname = ""
+            tar.addfile(info, io.BytesIO(objects[sha]))
+    data = tar_path.read_bytes()
+    return {
+        "packVersion": pack_version,
+        "pack": {
+            "url": url,
+            "sha256": sha256_hex(data),
+            "bytes": len(data),
+            "objects": len(objects),
+            "installedBytes": sum(len(b) for b in objects.values()),
+        },
+        "renditions": dict(EMPTY_MANIFEST_RENDITIONS),
+        "items": items,
+    }
+
+
+def write_manifest(path: Path, manifest: Mapping[str, Any]) -> None:
+    """Same layout as the committed empty manifest: sorted keys, indent 1, LF, newline."""
+    path.write_text(
+        json.dumps(manifest, sort_keys=True, indent=1, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+
+def release_url(owner_repo: str, pack_version: int) -> str:
+    tag = f"cookout-images-v{pack_version}"
+    return f"https://github.com/{owner_repo}/releases/download/{tag}/{tag}.tar"
+
+
+def history_check(
+    manifests: Sequence[Mapping[str, Any]], head_bytes: Callable[[str], int | None]
+) -> list[str]:
+    """For every manifest ever committed, its pack URL must answer with exactly its `bytes`.
+    Returns the problems (empty = the history is intact). Empty-pack manifests are skipped."""
+    problems: list[str] = []
+    for manifest in manifests:
+        pack = manifest.get("pack")
+        if not isinstance(pack, dict):
+            continue
+        url, expected = pack.get("url"), pack.get("bytes")
+        got = head_bytes(url) if isinstance(url, str) else None
+        if got != expected:
+            problems.append(f"{url}: answers {got}, manifest says {expected}")
+    return problems
+
+
+def status_json(
+    total: int, state: Mapping[str, Mapping[str, Any]], rate_per_s: float | None
+) -> dict[str, Any]:
+    by_state: dict[str, int] = {}
+    for entry in state.values():
+        by_state[entry["state"]] = by_state.get(entry["state"], 0) + 1
+    accepted = by_state.get("accepted", 0)
+    eta = None if not rate_per_s else (total - accepted) / rate_per_s
+    return {"total": total, "byState": by_state, "etaSeconds": eta, "at": time.time()}
+
+
+# =============================================================================================
+# Live driver: plan, render, check, regenerate, review, pack, publish.
+# Everything below needs the live fleet (hub's ComfyUI, cmd chat-spawn runs, `gh`); the pure
+# pieces above are what the unit tests cover. The driver functions take their collaborators as
+# arguments so they can be exercised with fakes (see test_cookout_visual_tooling.py).
+# =============================================================================================
+
+import asyncio  # noqa: E402
+import os  # noqa: E402
+import random  # noqa: E402
+import subprocess  # noqa: E402
+import sys  # noqa: E402
+from collections import defaultdict  # noqa: E402
+
+_REPO = Path(__file__).resolve().parents[3]
+for _p in (str(_REPO), str(Path(__file__).resolve().parent)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
+import check as _check  # noqa: E402
+import prompts as _prompts  # noqa: E402
+import review as _review  # noqa: E402
+
+PILOT_PER_CATEGORY = 40
+CHECK_TIMEOUT_S = 900
+RUN_RETRIES = 2
+RUN_RETRY_GAP_S = 15.0
+CALLER = "wixy-cookout-pictures"
+GH_EXE = r"C:\Program Files\GitHub CLI\gh.exe"
+GH_REPO = "joshcomley/wixy"
+
+
+def default_work_dir() -> Path:
+    root = Path(os.environ.get("AIM_ROOT", "D:\\"))
+    return root / "Servers" / "Wixy" / "Storage" / "cookout-images" / "work"
+
+
+def interleave(ids_by_category: Mapping[str, Sequence[str]]) -> list[str]:
+    """Round-robin over the categories so any prefix of the result is a stratified slice."""
+    queues = {c: list(v) for c, v in sorted(ids_by_category.items())}
+    out: list[str] = []
+    while any(queues.values()):
+        for c in sorted(queues):
+            if queues[c]:
+                out.append(queues[c].pop(0))
+    return out
+
+
+def make_plan(
+    category_of: Mapping[str, str], seed: int, per_category: int = PILOT_PER_CATEGORY
+) -> dict[str, Any]:
+    """The pilot is `per_category` random ids from every category (the seed is recorded); the
+    rest follow category-interleaved. The caller persists the result and never redraws it."""
+    rng = random.Random(seed)
+    by_cat: dict[str, list[str]] = defaultdict(list)
+    for ident in sorted(category_of):
+        by_cat[category_of[ident]].append(ident)
+    pilot: dict[str, list[str]] = {}
+    rest: dict[str, list[str]] = {}
+    for cat, ids in by_cat.items():
+        chosen = rng.sample(ids, min(per_category, len(ids)))
+        pilot[cat] = chosen
+        rest[cat] = [i for i in ids if i not in set(chosen)]
+    return {"seed": seed, "pilot": interleave(pilot), "rest": interleave(rest)}
+
+
+def extend_plan(plan: Mapping[str, Any], category_of: Mapping[str, str]) -> dict[str, Any]:
+    """Append catalogue ids the plan does not know yet to `rest`, category-interleaved. The pilot,
+    the seed and every id already planned keep their place: a plan is never redrawn."""
+    known = set(plan["pilot"]) | set(plan["rest"])
+    fresh: dict[str, list[str]] = defaultdict(list)
+    for ident in sorted(category_of):
+        if ident not in known:
+            fresh[category_of[ident]].append(ident)
+    return {**plan, "rest": [*plan["rest"], *interleave(fresh)]}
+
+
+@dataclass(frozen=True, slots=True)
+class Subject:
+    ident: str
+    name: str
+    category: str
+    what: str
+    visual: str
+    presentation: str
+
+
+def load_subjects(catalogue_path: Path, bank_path: Path | None = None) -> dict[str, Subject]:
+    """Accepted catalogue entries joined with the bank's name and category. Read-only."""
+    from wixy_server.livechat.cookout_bank import load_cookout_bank
+    from wixy_server.livechat.cookout_catalogue import subjects
+
+    bank = load_cookout_bank(bank_path)
+    raw = json.loads(catalogue_path.read_text(encoding="utf-8"))["items"]
+    out: dict[str, Subject] = {}
+    for s in subjects(bank):
+        entry = raw.get(s.id)
+        if entry is not None:
+            out[s.id] = Subject(
+                s.id, s.name, s.category, entry["what"], entry["visual"], entry["presentation"]
+            )
+    return out
+
+
+class WorkDir:
+    """`<work>/images/...`: journal, plan, masters, renditions, per-attempt records, overrides."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.images = root / "images"
+        self.journal = self.images / "journal.jsonl"
+        self.plan = self.images / "plan.json"
+        self.pause = root / "PAUSE"
+        self.overrides = self.images / "visual_overrides.json"
+
+    def master(self, ident: str, attempt: int) -> Path:
+        return self.root / "masters" / ident / f"{attempt}.webp"
+
+    def card(self, ident: str, attempt: int) -> Path:
+        return self.images / "renditions" / ident / f"{attempt}.card.webp"
+
+    def thumb(self, ident: str, attempt: int) -> Path:
+        return self.images / "renditions" / ident / f"{attempt}.thumb.webp"
+
+    def attempts_file(self, ident: str) -> Path:
+        return self.images / "attempts" / f"{ident}.json"
+
+    def read_attempts(self, ident: str) -> list[dict[str, Any]]:
+        path = self.attempts_file(ident)
+        return list(json.loads(path.read_text("utf-8"))) if path.exists() else []
+
+    def write_attempts(self, ident: str, attempts: list[dict[str, Any]]) -> None:
+        path = self.attempts_file(ident)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(attempts, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+
+    def read_overrides(self) -> dict[str, str]:
+        if not self.overrides.exists():
+            return {}
+        return dict(json.loads(self.overrides.read_text("utf-8")))
+
+    def write_override(self, ident: str, visual: str) -> None:
+        data = self.read_overrides()
+        data[ident] = visual
+        self.overrides.parent.mkdir(parents=True, exist_ok=True)
+        self.overrides.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", "utf-8")
+
+
+class PoolRunner:
+    """`check.Runner` over a `cmdruns.RunPool`. The batch key hashes the whole request, so
+    a restarted tool resumes the same journalled run instead of spawning another."""
+
+    def __init__(self, pool: Any, run_spec: Callable[..., Any], model_of: Callable[..., Any]):
+        self._pool, self._spec, self._model = pool, run_spec, model_of
+
+    async def run(
+        self,
+        *,
+        prompt: str,
+        model: str,
+        provider: str,
+        effort: str,
+        cwd: Path,
+        tool_profile: str,
+        timeout_secs: int,
+        fresh: bool = False,
+    ) -> str:
+        key = sha256_hex(f"{provider}|{model}|{cwd.name}|{prompt}".encode())[:24]
+        spec = self._spec(
+            caller=CALLER,
+            prompt=prompt,
+            model=self._model(provider, model),
+            effort=effort,
+            cwd=str(cwd),
+            timeout_secs=timeout_secs,
+            tool_profile=tool_profile,
+        )
+        outcome = None
+        for attempt in range(1 + RUN_RETRIES):
+            # the journal's pass is the run's batch folder (b46-recheck-1, b47-tie-<id>-1 ...), so a
+            # hung run can be tied to its pictures; the tool profile alone said nothing
+            outcome = await self._pool.run(
+                key, f"image-{cwd.name}", [cwd.name], spec, fresh=fresh and attempt == 0
+            )
+            if outcome.ok and outcome.text is not None:
+                return str(outcome.text)
+            # a run that died (`process exited before end_turn`, a timeout, a failed spawn) is
+            # journalled as not resumable, so the same key spawns a fresh one
+            if attempt < RUN_RETRIES:
+                await asyncio.sleep(RUN_RETRY_GAP_S)
+        assert outcome is not None
+        raise _check.VerdictError(f"run {outcome.status}: {outcome.error}")
+
+
+def comfy_queue_getter(base_url: str) -> Callable[[], Mapping[str, Any]]:
+    import httpx
+
+    def get() -> Mapping[str, Any]:
+        response = httpx.get(f"{base_url.rstrip('/')}/queue", timeout=10.0)
+        response.raise_for_status()
+        data = response.json()
+        return dict(data) if isinstance(data, dict) else {}
+
+    return get
+
+
+async def sample_foreign_jobs(
+    get_queue: Callable[[], Mapping[str, Any]],
+    own_prompt: str,
+    saw: dict[str, int],
+    stop: asyncio.Event,
+    *,
+    gap_s: float = 1.0,
+) -> None:
+    """While one of our pictures renders, note any other job in the queue (once per `gap_s`)."""
+    while not stop.is_set():
+        try:
+            queue = await asyncio.to_thread(get_queue)
+            for signature in queue_signatures(queue, own_prompt):
+                saw[signature] = saw.get(signature, 0) + 1
+        except Exception:  # noqa: BLE001 - a failed look must never fail the render
+            pass
+        try:
+            await asyncio.wait_for(stop.wait(), gap_s)
+        except TimeoutError:
+            continue
+
+
+def voice_probes_from_env(value: str | None) -> dict[str, str]:
+    """`name=url,name=url` -> {name: url}. These are the hub services a render must not slow down
+    (the voice model, the utility model); empty or unset means no probing."""
+    out: dict[str, str] = {}
+    for part in (value or "").split(","):
+        name, sep, url = part.strip().partition("=")
+        if sep and name and url:
+            out[name] = url
+    return out
+
+
+def probe_ms(url: str, timeout_s: float = 30.0) -> float | None:
+    """Milliseconds for one reply from the service at `url`, or `None` if it failed or timed out
+    (a stall). An Ollama server (one whose `/api/ps` answers) is asked for ONE token from the
+    model it already has loaded, which is what a voice turn feels; asking never loads another
+    model. Anything else is timed with a plain GET."""
+    import urllib.request
+
+    base = url.rstrip("/")
+    loaded = ""
+    try:
+        with urllib.request.urlopen(f"{base}/api/ps", timeout=timeout_s) as response:  # noqa: S310
+            models = json.loads(response.read()).get("models") or []
+            loaded = str(models[0].get("name", "")) if models else ""
+    except OSError, ValueError, AttributeError, IndexError:
+        loaded = ""
+    started = time.monotonic()
+    try:
+        if loaded:
+            if "embed" in loaded.lower():  # an embedding model cannot generate text
+                path, payload = "/api/embed", {"model": loaded, "input": "Hi"}
+            else:
+                path = "/api/generate"
+                payload = {
+                    "model": loaded,
+                    "prompt": "Hi",
+                    "stream": False,
+                    "options": {"num_predict": 1},
+                }
+            request = urllib.request.Request(
+                f"{base}{path}",
+                data=json.dumps(payload).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with urllib.request.urlopen(request, timeout=timeout_s) as response:  # noqa: S310
+                response.read()
+        else:
+            with urllib.request.urlopen(url, timeout=timeout_s) as response:  # noqa: S310
+                response.read(1)
+    except OSError:
+        return None
+    return (time.monotonic() - started) * 1000
+
+
+def summarise_latency(samples: Mapping[str, list[float | None]]) -> dict[str, dict[str, Any]]:
+    """Per probe: how many answers, how many failures, median and worst milliseconds."""
+    out: dict[str, dict[str, Any]] = {}
+    for name, values in samples.items():
+        ok = sorted(v for v in values if v is not None)
+        out[name] = {
+            "n": len(values),
+            "failed": len(values) - len(ok),
+            "medianMs": round(ok[len(ok) // 2], 1) if ok else None,
+            "maxMs": round(ok[-1], 1) if ok else None,
+        }
+    return out
+
+
+async def sample_latency(
+    probes: Mapping[str, str],
+    samples: dict[str, list[float | None]],
+    stop: asyncio.Event,
+    *,
+    probe: Callable[[str], float | None] = probe_ms,
+    gap_s: float = 15.0,
+) -> None:
+    """While one of our pictures renders, time each probe every `gap_s` seconds. Each probe is a
+    real one-token reply from the model that is loaded, so it adds a little load of its own (and
+    keeps that model resident); 15 s keeps that near 2% of the model's time."""
+    while not stop.is_set():
+        for name, url in probes.items():
+            try:
+                samples.setdefault(name, []).append(await asyncio.to_thread(probe, url))
+            except Exception:  # noqa: BLE001 - a failed look must never fail the render
+                samples.setdefault(name, []).append(None)
+        try:
+            await asyncio.wait_for(stop.wait(), gap_s)
+        except TimeoutError:
+            continue
+
+
+def render_one(
+    generator: Any,
+    ident: str,
+    prompt: str,
+    seed: int,
+    attempt: int,
+    work: WorkDir,
+    scratch: Path,
+) -> dict[str, float]:
+    """Render one picture, keep the 1024 master, make both renditions. Synchronous (a thread).
+    Returns where the time went, in seconds: `comfyS` (everything inside the ComfyUI client:
+    submit, wait, download, clean-up) and `encodeS` (master + both renditions + writes)."""
+    scratch.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    paths = generator.generate_many([prompt], scratch, seeds=[seed])
+    comfy_done = time.monotonic()
+    png = paths[0] if paths else None
+    if png is None:
+        raise RuntimeError(f"ComfyUI produced no picture for {ident}")
+    try:
+        encode_master(png, work.master(ident, attempt))
+    finally:
+        png.unlink(missing_ok=True)
+    card, thumb = make_renditions(work.master(ident, attempt))
+    for target, data in ((work.card(ident, attempt), card), (work.thumb(ident, attempt), thumb)):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    return {
+        "comfyS": round(comfy_done - started, 2),
+        "encodeS": round(time.monotonic() - comfy_done, 2),
+    }
+
+
+def visual_for(subject: Subject, overrides: Mapping[str, str]) -> str:
+    return overrides.get(subject.ident, subject.visual)
+
+
+def pick_decoy_factory(
+    subjects_by_id: Mapping[str, Subject],
+    rendered: Callable[[], Mapping[str, Path]],
+    rng: random.Random,
+) -> Callable[[], _check.Decoy]:
+    """A picture of one ingredient labelled as an ingredient of a *different* category, with the
+    picture's own category and the label's category also different from each other."""
+
+    def pick() -> _check.Decoy:
+        cards = rendered()
+        ids = [i for i in sorted(cards) if i in subjects_by_id]
+        categories = {subjects_by_id[i].category for i in ids}
+        if len(categories) < 2:
+            raise RuntimeError("need rendered pictures from at least 2 categories for a decoy")
+        shown = rng.choice(ids)
+        shown_cat = subjects_by_id[shown].category
+        pool = [i for i in sorted(subjects_by_id) if subjects_by_id[i].category != shown_cat]
+        label = subjects_by_id[rng.choice(pool)]
+        return _check.Decoy(cards[shown], label.name, label.what, label.presentation)
+
+    return pick
+
+
+def record_attempt(
+    work: WorkDir, ident: str, attempt: int, seed: int, visual: str, prompt: str
+) -> None:
+    attempts = [a for a in work.read_attempts(ident) if a["attempt"] != attempt]
+    attempts.append(
+        {
+            "attempt": attempt,
+            "seed": seed,
+            "visual": visual,
+            "promptHash": _prompts.prompt_hash(prompt),
+            "verdict": None,
+            "reason": "",
+        }
+    )
+    work.write_attempts(ident, sorted(attempts, key=lambda a: a["attempt"]))
+
+
+def record_verdict(
+    work: WorkDir, ident: str, attempt: int, verdict: str, reason: str, by: str
+) -> None:
+    attempts = work.read_attempts(ident)
+    for a in attempts:
+        if a["attempt"] == attempt:
+            a.update(verdict=verdict, reason=reason, by=by)
+    work.write_attempts(ident, attempts)
+
+
+def unchecked_attempt(work: WorkDir, ident: str, entry: Mapping[str, Any] | None) -> int | None:
+    """The attempt number of a picture that is rendered (card on disk) but has no verdict yet."""
+    if entry is None or entry.get("state") != "rendered":
+        return None
+    attempts = work.read_attempts(ident)
+    if not attempts or attempts[-1].get("verdict") is not None:
+        return None
+    attempt = int(attempts[-1]["attempt"])
+    return attempt if work.card(ident, attempt).exists() else None
+
+
+def next_attempt(work: WorkDir, ident: str) -> int:
+    """The attempt number the next picture of `ident` gets: one past the last attempt that made a
+    picture. An attempt that was recorded but never rendered (the run was killed mid-picture)
+    does not count against the ladder; its number is simply used again."""
+    rendered = [
+        a["attempt"] for a in work.read_attempts(ident) if work.card(ident, a["attempt"]).exists()
+    ]
+    return max(rendered, default=0) + 1
+
+
+async def check_chunk(
+    runner: _check.Runner,
+    checker: _check.CheckerModel,
+    tiebreaker: _check.CheckerModel,
+    chunk: Sequence[tuple[str, int]],
+    subjects_by_id: Mapping[str, Subject],
+    work: WorkDir,
+    pick_decoy: Callable[[], _check.Decoy],
+    rng: random.Random,
+    tag: str,
+    *,
+    recheck_accepts: bool = True,
+) -> dict[str, str]:
+    """Check up to 10 rendered pictures. Returns ident -> `accepted` | `regenerate`.
+
+    The operator's ruling (decision 2150): the first checker looks at everything, then the second
+    model (`tiebreaker`, Sol) looks again at every picture the first one alone accepted. A picture
+    is accepted only when both agree; a picture the second look rejects, or cannot give a trusted
+    verdict on, is regenerated. Pictures the second model has already seen (a tiebreak, or a batch
+    the first checker could not be trusted with) are not looked at a third time."""
+    real = [
+        _check.CheckImage(
+            i,
+            subjects_by_id[i].name,
+            subjects_by_id[i].what,
+            subjects_by_id[i].presentation,
+            work.card(i, a),
+        )
+        for i, a in chunk
+    ]
+    attempt_of = dict(chunk)
+    check_root = work.root / "check"
+    result = await _check.check_images(runner, checker, tag, real, pick_decoy, check_root, rng)
+    seen_by_second: set[str] = set()
+    if result.discarded:
+        # the decoy was marked correct twice: this checker is not trusted for these pictures,
+        # so each goes to the second checker (a different model) one at a time
+        for img in real:
+            single = await _check.check_images(
+                runner, tiebreaker, f"{tag}-alt-{img.ident}", [img], pick_decoy, check_root, rng
+            )
+            result.verdicts.update(single.verdicts)
+            seen_by_second.update(single.verdicts)
+    decided: dict[str, tuple[str, str, _check.Verdict]] = {}  # ident -> (kind, by, verdict)
+    for ident, verdict in result.verdicts.items():
+        kind = _check.classify(verdict.verdict)
+        by = tiebreaker.label if ident in seen_by_second else checker.label
+        if kind == "tiebreak":
+            img = next(r for r in real if r.ident == ident)
+            second = await _check.check_images(
+                runner, tiebreaker, f"{tag}-tie-{ident}", [img], pick_decoy, check_root, rng
+            )
+            sv = second.verdicts.get(ident)
+            if sv is not None and sv.verdict == "correct":
+                kind, by, verdict = "accepted", "sol-tiebreak", sv
+            else:
+                kind = "regenerate"
+                verdict = sv if sv is not None else verdict
+            seen_by_second.add(ident)
+        decided[ident] = (kind, by, verdict)
+    if recheck_accepts and checker != tiebreaker:
+        again = [r for r in real if decided.get(r.ident, ("",))[0] == "accepted"]
+        again = [r for r in again if r.ident not in seen_by_second]
+        for ident, verdict in (
+            await second_look(runner, tiebreaker, again, pick_decoy, check_root, rng, tag)
+        ).items():
+            if _check.classify(verdict.verdict) == "accepted":
+                decided[ident] = ("accepted", f"{checker.label}+{tiebreaker.label}", verdict)
+            else:
+                decided[ident] = ("regenerate", f"{tiebreaker.label}-recheck", verdict)
+    outcome: dict[str, str] = {}
+    for ident, (kind, by, verdict) in decided.items():
+        attempt = attempt_of[ident]
+        record_verdict(work, ident, attempt, verdict.verdict, verdict.reason, by)
+        outcome[ident] = "accepted" if kind == "accepted" else "regenerate"
+        journal_append(
+            work.journal,
+            {
+                "id": ident,
+                "attempt": attempt,
+                "state": outcome[ident],
+                "by": by if kind == "accepted" else None,
+            },
+        )
+    return outcome
+
+
+async def second_look(
+    runner: _check.Runner,
+    model: _check.CheckerModel,
+    images: Sequence[_check.CheckImage],
+    pick_decoy: Callable[[], _check.Decoy],
+    check_root: Path,
+    rng: random.Random,
+    tag: str,
+) -> dict[str, _check.Verdict]:
+    """The second model's look at pictures the first one accepted. A batch whose decoy it misses
+    twice is redone one picture at a time; a picture still without a trusted verdict comes back
+    `unclear` (so it is regenerated, never accepted on the first checker's word alone)."""
+    if not images:
+        return {}
+    result = await _check.check_images(
+        runner, model, f"{tag}-recheck", list(images), pick_decoy, check_root, rng
+    )
+    verdicts = dict(result.verdicts)
+    if result.discarded:
+        for img in images:
+            single = await _check.check_images(
+                runner, model, f"{tag}-recheck-{img.ident}", [img], pick_decoy, check_root, rng
+            )
+            verdicts.update(single.verdicts)
+    for img in images:
+        verdicts.setdefault(
+            img.ident,
+            _check.Verdict(
+                "", "", "unclear", (), f"{model.label} gave no trusted verdict on the second look"
+            ),
+        )
+    return verdicts
+
+
+async def rewrite_visuals(
+    runner: _check.Runner,
+    haiku: _check.CheckerModel,
+    ids: Sequence[str],
+    subjects_by_id: Mapping[str, Subject],
+    work: WorkDir,
+    visual_check: Callable[[str, str], Sequence[str]] | None = None,
+) -> None:
+    """Haiku rewrites `visual` given the name, `what`, the old visual and every checker reason so
+    far. The new text goes to an overrides file; the committed catalogue is updated at the end,
+    through `catalogue.set_visual`. `visual_check(id, text)` is the check `set_visual` will apply
+    (`catalogue.visual_check`): a text it refuses is not stored, the model is shown the reason."""
+    from wixy_server.livechat.cookout_catalogue import visual_problems
+
+    overrides = work.read_overrides()
+    entries = []
+    for i in ids:
+        s = subjects_by_id[i]
+        reasons = [a["reason"] for a in work.read_attempts(i) if a.get("reason")]
+        entries.append((i, s.name, s.what, visual_for(s, overrides), reasons))
+    cwd = work.root / "rewrite"
+    cwd.mkdir(parents=True, exist_ok=True)
+
+    refused: dict[str, tuple[str, list[str]]] = {}
+
+    def apply(text: str) -> None:
+        data = _check.strip_json(text)
+        if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+            raise _check.VerdictError("rewrite answer is not {items: [...]}")
+        for item in data["items"]:
+            if not (isinstance(item, dict) and item.get("id") in ids):
+                continue
+            visual = item.get("visual")
+            if not isinstance(visual, str):
+                continue
+            problems = list(visual_problems(visual))
+            if visual_check is not None:
+                problems += [p for p in visual_check(item["id"], visual) if p not in problems]
+            if problems:
+                refused[item["id"]] = (visual, problems)  # told to the model on the next ask
+            else:
+                work.write_override(item["id"], visual)
+
+    text = await runner.run(
+        prompt=_prompts.visual_rewrite_prompt(entries),
+        model=haiku.model,
+        provider=haiku.provider,
+        effort="medium",
+        cwd=cwd,
+        tool_profile="judge",
+        timeout_secs=CHECK_TIMEOUT_S,
+    )
+    apply(text)
+    # an id the answer dropped or got wrong (strozzapreti, 17 Nov 2026) is asked again on its own,
+    # as a NEW run: asking the same request again would replay the answer already refused
+    # and one that WAS answered but refused by the validator is told why (strozzapreti: the model
+    # echoed a checker's 'hand-twisted' and 'hand' is a forbidden word), up to two more asks
+    for _ in range(2):
+        missing = [e for e in entries if e[0] not in work.read_overrides()]
+        if not missing:
+            break
+        retry = await runner.run(
+            prompt=_prompts.visual_rewrite_prompt(
+                missing, {i: refused[i] for i, *_rest in missing if i in refused}
+            ),
+            model=haiku.model,
+            provider=haiku.provider,
+            effort="medium",
+            cwd=cwd,
+            tool_profile="judge",
+            timeout_secs=CHECK_TIMEOUT_S,
+            fresh=True,
+        )
+        apply(retry)
+    for e in entries:
+        if e[0] not in work.read_overrides():
+            print(f"warning: no usable rewrite for {e[0]}: {refused.get(e[0])}", file=sys.stderr)
+
+
+async def review_failures(
+    runner: _check.Runner,
+    opus: _check.CheckerModel,
+    ident: str,
+    subjects_by_id: Mapping[str, Subject],
+    work: WorkDir,
+    review_path: Path = _review.REVIEW_PATH,
+) -> str:
+    """Opus sees every attempt. Returns `accepted:<n>` or `retry` (a new visual is stored).
+    Decisions are recorded so a re-run never re-litigates them."""
+    s = subjects_by_id[ident]
+    attempts = work.read_attempts(ident)
+    cwd = work.root / "review" / ident
+    cwd.mkdir(parents=True, exist_ok=True)
+    rows = []
+    for a in attempts:
+        name = f"attempt{a['attempt']}.webp"
+        (cwd / name).write_bytes(work.card(ident, a["attempt"]).read_bytes())
+        rows.append((a["attempt"], name, f"{a.get('verdict')}: {a.get('reason')}"))
+    text = await runner.run(
+        prompt=_prompts.opus_review_prompt(ident, s.name, s.what, rows),
+        model=opus.model,
+        provider=opus.provider,
+        effort="high",
+        cwd=cwd,
+        tool_profile="replay_probe",
+        timeout_secs=CHECK_TIMEOUT_S,
+    )
+    newest = max(a["attempt"] for a in attempts)
+    try:
+        decision = _review.parse_review(text, newest)
+    except _check.VerdictError:
+        # refused: ask once more as a NEW run (the same request would replay this answer)
+        text = await runner.run(
+            prompt=_prompts.opus_review_prompt(ident, s.name, s.what, rows),
+            model=opus.model,
+            provider=opus.provider,
+            effort="high",
+            cwd=cwd,
+            tool_profile="replay_probe",
+            timeout_secs=CHECK_TIMEOUT_S,
+            fresh=True,
+        )
+        decision = _review.parse_review(text, newest)
+    if decision.choose is not None:
+        _review.record_decision(ident, "accepted", decision.choose, decision.reason, review_path)
+        return f"accepted:{decision.choose}"
+    assert decision.visual is not None
+    work.write_override(ident, decision.visual)
+    _review.record_decision(ident, "retry", None, decision.reason, review_path)
+    return "retry"
+
+
+def mark_pictureless(work: WorkDir, ident: str, reason: str, review_path: Path) -> None:
+    _review.record_decision(ident, "pictureless", None, reason, review_path)
+    journal_append(work.journal, {"id": ident, "state": "review", "pictureless": True})
+
+
+def accepted_pictures(work: WorkDir) -> list[AcceptedPicture]:
+    """Every accepted id's pictures (attempt and accepting checker from the journal)."""
+    pics: list[AcceptedPicture] = []
+    for ident, entry in sorted(journal_state(work.journal).items()):
+        if entry.get("state") != "accepted":
+            continue
+        attempt = int(entry["attempt"])
+        pics.append(
+            AcceptedPicture(
+                ident,
+                work.card(ident, attempt).read_bytes(),
+                work.thumb(ident, attempt).read_bytes(),
+                attempt,
+                str(entry.get("by") or "claude-haiku-5-5"),
+            )
+        )
+    return pics
+
+
+def gh(*args: str) -> subprocess.CompletedProcess[str]:
+    """Every `gh` call goes through the full path, with captured pipes (fleet rule)."""
+    return subprocess.run(  # noqa: S603
+        [GH_EXE, *args], capture_output=True, text=True, encoding="utf-8", timeout=600, check=False
+    )
+
+
+def head_bytes(url: str) -> int | None:
+    import urllib.request
+
+    try:
+        request = urllib.request.Request(url, method="HEAD")  # noqa: S310
+        with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310
+            length = response.headers.get("Content-Length")
+            return int(length) if length is not None else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def manifest_history(manifest_path: Path) -> list[dict[str, Any]]:
+    """Every version of the manifest ever committed."""
+    rel = manifest_path.resolve().relative_to(_REPO).as_posix()
+    revs = subprocess.run(  # noqa: S603
+        ["git", "-C", str(_REPO), "log", "--follow", "--format=%H", "--", rel],  # noqa: S607
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=60,
+    ).stdout.split()
+    out: list[dict[str, Any]] = []
+    for rev in revs:
+        shown = subprocess.run(  # noqa: S603
+            ["git", "-C", str(_REPO), "show", f"{rev}:{rel}"],  # noqa: S607
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+        )
+        if shown.returncode == 0:
+            try:
+                out.append(json.loads(shown.stdout))
+            except json.JSONDecodeError:
+                continue
+    return out
+
+
+def publish(
+    work: WorkDir, manifest_path: Path, storage: Path, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """Build the pack, release it, download it back, verify, write the manifest, install it
+    under a pending pin, run the history check. Any failure stops the publish."""
+    pics = accepted_pictures(work)
+    if not pics:
+        raise RuntimeError("no accepted pictures to publish")
+    current = json.loads(manifest_path.read_text("utf-8"))
+    version = int(current.get("packVersion", 0)) + 1
+    tar_path = work.root / "pack" / f"cookout-images-v{version}.tar"
+    manifest = build_pack(pics, tar_path, pack_version=version, url=release_url(GH_REPO, version))
+    if dry_run:
+        return manifest
+    tag = f"cookout-images-v{version}"
+    made = gh(
+        "release",
+        "create",
+        tag,
+        str(tar_path),
+        "--repo",
+        GH_REPO,
+        "--title",
+        f"Cookout ingredient pictures v{version}",
+        "--notes",
+        "Immutable picture pack. Never delete: older manifests pin it by sha256.",
+    )
+    if made.returncode != 0:
+        raise RuntimeError(f"gh release create failed: {made.stderr[:400]}")
+    back = work.root / "pack" / "verify"
+    back.mkdir(parents=True, exist_ok=True)
+    got = gh("release", "download", tag, "--repo", GH_REPO, "--dir", str(back), "--clobber")
+    downloaded = back / tar_path.name
+    if got.returncode != 0 or sha256_hex(downloaded.read_bytes()) != manifest["pack"]["sha256"]:
+        raise RuntimeError("the downloaded release asset does not match the built pack")
+    write_manifest(manifest_path, manifest)
+    from wixy_server.livechat import cookout_pack
+
+    loaded = cookout_pack.load_manifest(manifest_path)
+    store = cookout_pack.PackStore(storage / "cookout-images", min_free_bytes=0)
+    store.install(tar_path, loaded)
+    history = [*manifest_history(manifest_path), manifest]
+    problems = history_check(history, head_bytes) + clean_install_check(history, version)
+    if problems:
+        raise RuntimeError("history check failed: " + "; ".join(problems))
+    return manifest
+
+
+def clean_install_check(
+    history: Sequence[Mapping[str, Any]],
+    version: int,
+    fetch: Callable[[Any, Any], int] | None = None,
+) -> list[str]:
+    """From v2 onward (spec B.6): a clean-environment fetch of the OLDEST manifest that names a
+    pack (v1) into fresh temporary storage with no cache, all the way to a full install, so a
+    fork or an old revision that still pins v1 can always get its pictures. Returns the problems
+    (empty = fine). `fetch(manifest, store)` is injectable for tests."""
+    if version < 2:
+        return []
+    import tempfile
+
+    from wixy_server.livechat import cookout_pack
+
+    with_pack = [m for m in history if isinstance(m.get("pack"), dict)]
+    if not with_pack:
+        return ["no earlier manifest with a pack to prove a clean install against"]
+    oldest = min(with_pack, key=lambda m: int(m.get("packVersion", 0)))
+    label = f"v{oldest.get('packVersion')}"
+    try:
+        manifest = cookout_pack.parse_manifest(json.dumps(oldest).encode("utf-8"))
+        with tempfile.TemporaryDirectory(prefix="cookout-clean-") as tmp:
+            store = cookout_pack.PackStore(Path(tmp) / "cookout-images", min_free_bytes=0)
+            run_fetch = fetch or (lambda m, st: int(st.fetch(m)))
+            run_fetch(manifest, store)
+            missing = store.missing(manifest, [store.objects_dir])
+            if missing:
+                return [f"clean install of {label}: {len(missing)} objects missing afterwards"]
+    except Exception as exc:  # noqa: BLE001 - any failure here must stop the publish
+        return [f"clean install of {label} failed: {exc}"]
+    return []
+
+
+def build_status(work: WorkDir, total: int) -> dict[str, Any]:
+    state = journal_state(work.journal)
+    stamps = [e["at"] for e in state.values() if isinstance(e.get("at"), int | float)]
+    rate = None
+    if len(stamps) > 50:
+        span = max(stamps) - min(stamps)
+        rate = len(stamps) / span if span > 0 else None
+    return status_json(total, state, rate)
+
+
+async def run_pipeline(
+    ids: Sequence[str],
+    subjects_by_id: Mapping[str, Subject],
+    work: WorkDir,
+    generator: Any,
+    get_queue: Callable[[], Mapping[str, Any]],
+    runner: _check.Runner,
+    checker: _check.CheckerModel,
+    haiku: _check.CheckerModel,
+    tiebreaker: _check.CheckerModel,
+    opus: _check.CheckerModel,
+    *,
+    chunk_size: int = _check.BATCH_REAL,
+    review_path: Path = _review.REVIEW_PATH,
+    rng: random.Random | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    render_only: bool = False,
+    check_only: bool = False,
+    check_concurrency: int = 1,
+    retry_wait_s: float = 20.0,
+    free_gb: Callable[[], float | None] = hub_free_gb,
+    min_free_gb: float = MIN_FREE_GB,
+    voice_probes: Mapping[str, str] | None = None,
+    visual_check: Callable[[str, str], Sequence[str]] | None = None,
+) -> dict[str, int]:
+    """Render and check `ids` to completion: render a chunk (one picture at a time, only when
+    ComfyUI is idle and the machine has `min_free_gb` of free memory), check it, regenerate
+    failures along the attempt ladder, send persistent failures to Opus. Resumable from the
+    journal. Returns counts.
+
+    `check_only` is the other half of `render_only`: it checks what is already drawn (and does the
+    work that needs cmd: the attempt-2 rewrite, the Opus review) but never renders. A picture that
+    needs another attempt is left in state `regenerate`; a `render_only` run (on the render
+    machine) draws it, and the next `check_only` round checks it. This keeps the hub free of
+    rendering while the checks, which need cmd, stay where cmd is. With `check_only`,
+    `check_concurrency` batches are checked at the same time (the cmd run pool still caps the
+    runs in flight per provider). A batch whose model run fails to start is retried (3 tries,
+    `retry_wait_s` apart) instead of ending the round."""
+    rng = rng or random.Random()
+    decisions = _review.load_decisions(review_path)
+    rendered: dict[str, Path] = {}
+    pick_decoy = pick_decoy_factory(subjects_by_id, lambda: rendered, rng)
+    totals = {"accepted": 0, "pictureless": 0, "rendered": 0, "review_waiting": 0}
+    # accepted pictures are known-good decoys: a later round that has only a few pictures to check
+    # (a handful of redraws, maybe all one category) still has a pool of two categories to draw from
+    for ident, entry in journal_state(work.journal).items():
+        if ident in subjects_by_id and entry.get("state") == "accepted" and "attempt" in entry:
+            accepted_card = work.card(ident, int(entry["attempt"]))
+            if accepted_card.exists():
+                rendered[ident] = accepted_card
+
+    def master_exists(ident: str) -> bool:
+        return work.master(ident, max(1, next_attempt(work, ident) - 1)).exists()
+
+    state0 = journal_state(work.journal)
+    awaiting_review = [
+        i for i in ids if review_due(next_attempt(work, i) - 1, state0.get(i), decisions, i)
+    ]
+    pending = [
+        i
+        for i in pending_work(ids, state0, master_exists)
+        if decisions.get(i, {}).get("decision") != "pictureless" and i not in awaiting_review
+    ]
+    batch_no = 0
+
+    async def checked(chunk: list[tuple[str, int]], tag: str) -> dict[str, str]:
+        for attempt in range(1, 4):
+            try:
+                return await check_chunk(
+                    runner, checker, tiebreaker, chunk, subjects_by_id, work, pick_decoy, rng, tag
+                )
+            except (_check.VerdictError, RuntimeError, OSError) as exc:
+                if attempt == 3:
+                    raise
+                # a start reported "not safe to repeat" may have left a run behind: the tag names it
+                print(
+                    f"check batch {tag} failed ({exc}); try {attempt + 1} of 3 "
+                    "(an earlier run for this batch may exist)",
+                    file=sys.stderr,
+                )
+                await asyncio.sleep(retry_wait_s * attempt)
+        raise AssertionError("unreachable")
+
+    async def settle(outcome: Mapping[str, str]) -> None:
+        nonlocal decisions
+        for ident, result in outcome.items():
+            if result == "accepted":
+                totals["accepted"] += 1
+                continue
+            attempt = next_attempt(work, ident) - 1
+            reviewed = decisions.get(ident, {}).get("decision") == "retry"
+            step = after_failure(attempt, reviewed=reviewed)
+            if step == "retry":
+                pending.append(ident)
+            elif step == "review":
+                try:
+                    verdict = await review_failures(
+                        runner, opus, ident, subjects_by_id, work, review_path
+                    )
+                except _check.VerdictError as exc:
+                    # one unreadable review must not end the round for every other picture: it
+                    # stays waiting (nothing journalled) and the next round asks again
+                    totals["review_waiting"] += 1
+                    print(f"warning: review of {ident} unreadable, waits: {exc}", file=sys.stderr)
+                    continue
+                decisions = _review.load_decisions(review_path)
+                if verdict.startswith("accepted:"):
+                    n = int(verdict.split(":")[1])
+                    journal_append(
+                        work.journal,
+                        {"id": ident, "attempt": n, "state": "accepted", "by": "opus-review"},
+                    )
+                    totals["accepted"] += 1
+                else:
+                    pending.append(ident)
+            else:
+                mark_pictureless(work, ident, "failed all six attempts", review_path)
+                totals["pictureless"] += 1
+
+    def write_status() -> None:
+        work.images.mkdir(parents=True, exist_ok=True)
+        (work.images / "status.json").write_text(
+            json.dumps(build_status(work, len(ids)), indent=1) + "\n", encoding="utf-8"
+        )
+
+    if not render_only:
+        for ident in awaiting_review:  # reviews an earlier round could not read: ask again
+            await settle({ident: "wrong"})
+
+    if check_only and check_concurrency > 1:
+        # A rolling pool: `check_concurrency` workers each take the next batch the moment their
+        # last one is settled, so one slow batch (a hung run, a serial Sol re-check) never holds
+        # the other lanes idle. The old group-of-N barrier left ~36% of lane time idle (measured
+        # on the journal, 16 Nov 2026).
+        gate = asyncio.Condition()
+        active = 0
+        failure: BaseException | None = None
+
+        async def worker() -> None:
+            nonlocal batch_no, active, failure
+            while True:
+                async with gate:
+                    while not pending and active > 0 and failure is None:
+                        await gate.wait()  # a settle may still requeue a picture
+                    if failure is not None or not pending:
+                        return
+                    ids_k = pending[:chunk_size]
+                    del pending[:chunk_size]
+                    active += 1
+                try:
+                    state = journal_state(work.journal)
+                    overrides = work.read_overrides()
+                    rewrite = [
+                        i
+                        for i in ids_k
+                        if needs_rewrite(next_attempt(work, i), overrides, i)
+                        and unchecked_attempt(work, i, state.get(i)) is None
+                    ]
+                    if rewrite:
+                        await rewrite_visuals(
+                            runner, haiku, rewrite, subjects_by_id, work, visual_check
+                        )
+                    chunk_k: list[tuple[str, int]] = []
+                    for ident in ids_k:
+                        waiting = unchecked_attempt(work, ident, state.get(ident))
+                        if waiting is not None:
+                            rendered[ident] = work.card(ident, waiting)
+                            chunk_k.append((ident, waiting))
+                    if chunk_k:
+                        batch_no += 1
+                        await settle(await checked(chunk_k, f"b{batch_no}"))
+                        write_status()
+                except Exception as exc:  # noqa: BLE001 - a batch that failed for good
+                    # must not throw away the batches that finish beside it: stop taking new
+                    # batches, let the others settle, then raise the first error
+                    failure = failure or exc
+                finally:
+                    async with gate:
+                        active -= 1
+                        gate.notify_all()
+
+        await asyncio.gather(*(worker() for _ in range(check_concurrency)))
+        write_status()
+        if failure is not None:
+            raise failure
+        return totals
+
+    while pending:
+        chunk_ids, pending = pending[:chunk_size], pending[chunk_size:]
+        # attempt 2 starts from a Haiku rewrite of the description; a picture that is already
+        # drawn and only waits for its check, and a render-only run (no checker), need none
+        state = journal_state(work.journal)
+        overrides = work.read_overrides()
+        rewrite = [
+            i
+            for i in chunk_ids
+            if not render_only
+            and needs_rewrite(next_attempt(work, i), overrides, i)
+            and unchecked_attempt(work, i, state.get(i)) is None
+        ]
+        if rewrite:
+            await rewrite_visuals(runner, haiku, rewrite, subjects_by_id, work, visual_check)
+        chunk: list[tuple[str, int]] = []
+        for ident in chunk_ids:
+            waiting = unchecked_attempt(work, ident, journal_state(work.journal).get(ident))
+            if waiting is not None:
+                rendered[ident] = work.card(ident, waiting)
+                if not render_only:
+                    chunk.append((ident, waiting))  # rendered before a restart: just check it
+                continue
+            if check_only:
+                continue  # needs a picture: left for the render machine
+            picture_started = time.monotonic()
+            gate_saw: dict[str, int] = {}
+
+            def watching_queue(
+                saw: dict[str, int] = gate_saw,
+            ) -> Mapping[str, Any]:
+                queue = get_queue()
+                for signature in queue_signatures(queue):
+                    saw[signature] = saw.get(signature, 0) + 1
+                return queue
+
+            while True:
+                proceed, mem_free = wait_for_memory(
+                    free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
+                )
+                if not proceed or not wait_for_idle(
+                    watching_queue, pause_file=work.pause, sleep=sleep
+                ):
+                    return totals  # PAUSE file: stop between pictures
+                # the idle wait can be long: look at memory again right before starting, so a
+                # render never begins on a figure that went stale while the queue was busy
+                after_idle = free_gb()
+                if after_idle is None or after_idle >= min_free_gb:
+                    mem_free = mem_free if after_idle is None else after_idle
+                    break
+            gate_s = time.monotonic() - picture_started
+            attempt = next_attempt(work, ident)
+            visual = visual_for(subjects_by_id[ident], work.read_overrides())
+            prompt = _prompts.image_prompt(visual)
+            seed = random.SystemRandom().randrange(2**32)
+            record_attempt(work, ident, attempt, seed, visual, prompt)
+            prep_s = time.monotonic() - picture_started - gate_s
+            render_saw: dict[str, int] = {}
+            stop_sampling = asyncio.Event()
+            sampler = asyncio.create_task(
+                sample_foreign_jobs(get_queue, prompt, render_saw, stop_sampling)
+            )
+            latency: dict[str, list[float | None]] = {}
+            latency_sampler = asyncio.create_task(
+                sample_latency(voice_probes or {}, latency, stop_sampling)
+            )
+            try:
+                split = await asyncio.to_thread(
+                    render_one, generator, ident, prompt, seed, attempt, work, work.root / "scratch"
+                )
+            finally:
+                stop_sampling.set()
+                await sampler
+                await latency_sampler
+            rendered[ident] = work.card(ident, attempt)
+            journal_append(
+                work.journal,
+                {
+                    "id": ident,
+                    "attempt": attempt,
+                    "seed": seed,
+                    "state": "rendered",
+                    "promptHash": _prompts.prompt_hash(prompt),
+                    # where this picture's time went (the pilot ran at half the expected speed
+                    # on a CPU-saturated hub and nothing recorded why)
+                    "timing": {
+                        "gateS": round(gate_s, 2),
+                        "prepS": round(prep_s, 2),
+                        **(split or {}),
+                        "totalS": round(time.monotonic() - picture_started, 2),
+                    },
+                    # other jobs seen sharing ComfyUI: signature -> number of 1 s polls
+                    "sharedWith": {
+                        "gate": dict(sorted(gate_saw.items(), key=lambda kv: -kv[1])[:3]),
+                        "render": dict(sorted(render_saw.items(), key=lambda kv: -kv[1])[:3]),
+                    },
+                    # free memory at the start (None: unreadable) and how the hub's voice and
+                    # utility services answered while this picture rendered
+                    "memFreeGb": None if mem_free is None else round(mem_free, 1),
+                    "voice": summarise_latency(latency),
+                },
+            )
+            totals["rendered"] += 1
+            chunk.append((ident, attempt))
+        if render_only or not chunk:
+            continue
+        batch_no += 1
+        await settle(await checked(chunk, f"b{batch_no}"))
+        write_status()
+    return totals
+
+
+# --- command line ---------------------------------------------------------------------------
+
+
+def _parser() -> Any:
+    import argparse
+
+    p = argparse.ArgumentParser(prog="images.py", description="Cookout picture pipeline")
+    p.add_argument("--work-dir", default=None)
+    p.add_argument(
+        "--catalogue",
+        required=False,
+        default=str(_REPO / "wixy_server" / "livechat" / "cookout_catalogue.json"),
+        help="catalogue JSON to READ (parcel 1's file); never written",
+    )
+    sub = p.add_subparsers(dest="cmd", required=True)
+    plan = sub.add_parser("plan", help="draw the pilot (once) and write plan.json")
+    plan.add_argument("--seed", type=int, default=None)
+    plan.add_argument(
+        "--extend",
+        action="store_true",
+        help="append catalogue ids that are not planned yet (the pilot never changes)",
+    )
+    run = sub.add_parser("run", help="render and check; resumable")
+    run.add_argument("--phase", choices=["pilot", "rest", "all"], default="pilot")
+    run.add_argument("--checker", choices=["haiku", "luna"], default="haiku")
+    run.add_argument("--limit", type=int, default=None)
+    run.add_argument(
+        "--cache-device",
+        default="auto",
+        choices=["auto", "gpu", "cpu", "off"],
+        help="where Qwen-Image 2.1 keeps its prefix cache; `cpu` keeps the card's use bounded",
+    )
+    run.add_argument(
+        "--model",
+        default=None,
+        help="ComfyUI recipe in wyr_images.IMAGE_MODELS (default: the server's default)",
+    )
+    run.add_argument(
+        "--check-only",
+        action="store_true",
+        help="check what is drawn and never render (the hub); failures wait for a render round",
+    )
+    run.add_argument(
+        "--check-concurrency",
+        type=int,
+        default=3,
+        help="with --check-only: batches checked at once (the run pool caps runs per provider)",
+    )
+    run.add_argument(
+        "--only-ids",
+        default=None,
+        metavar="FILE",
+        help="work only on the ids listed in FILE (one per line): a redraw round that must not "
+        "touch pictures another round is still checking",
+    )
+    run.add_argument(
+        "--render-only",
+        action="store_true",
+        help="render and journal only; check later (the pilot, before calibration picks a checker)",
+    )
+    sub.add_parser("status")
+    pub = sub.add_parser("publish", help="build, release, verify and install a pack")
+    pub.add_argument(
+        "--manifest",
+        default=str(_REPO / "wixy_server" / "livechat" / "cookout_ingredient_images.json"),
+    )
+    pub.add_argument(
+        "--storage", default=os.environ.get("WIXY_STORAGE_ROOT", r"D:\Servers\Wixy\Storage")
+    )
+    pub.add_argument("--dry-run", action="store_true")
+    sub.add_parser("apply-overrides", help="write attempt-3 rewrites into the committed catalogue")
+    return p
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.cmd == "run" and args.check_concurrency < 1:
+        parser.error("--check-concurrency must be at least 1")
+    if args.cmd == "run" and args.render_only and args.check_only:
+        parser.error("--render-only and --check-only cannot be used together")
+    work = WorkDir(Path(args.work_dir) if args.work_dir else default_work_dir())
+    catalogue = Path(args.catalogue)
+    if args.cmd == "status":
+        plan = json.loads(work.plan.read_text("utf-8")) if work.plan.exists() else {}
+        total = len(plan.get("pilot", [])) + len(plan.get("rest", []))
+        print(json.dumps(build_status(work, total), indent=1))
+        return 0
+    if args.cmd == "plan" and args.extend:
+        subs = load_subjects(catalogue)
+        old = json.loads(work.plan.read_text("utf-8"))
+        grown = extend_plan(old, {i: s.category for i, s in subs.items()})
+        work.plan.write_text(json.dumps(grown, indent=1) + "\n", encoding="utf-8")
+        print(
+            f"pilot {len(grown['pilot'])} (unchanged), "
+            f"rest {len(old['rest'])} -> {len(grown['rest'])}"
+        )
+        return 0
+    if args.cmd == "plan":
+        if work.plan.exists():
+            print(f"plan exists (never redrawn): {work.plan}")
+            return 0
+        subs = load_subjects(catalogue)
+        seed = args.seed if args.seed is not None else random.SystemRandom().randrange(2**32)
+        plan = make_plan({i: s.category for i, s in subs.items()}, seed)
+        work.images.mkdir(parents=True, exist_ok=True)
+        work.plan.write_text(json.dumps(plan, indent=1) + "\n", encoding="utf-8")
+        print(f"pilot {len(plan['pilot'])} ids, rest {len(plan['rest'])}, seed {seed}")
+        return 0
+    if args.cmd == "apply-overrides":
+        from tooling.cookout.visual import catalogue as cat_tool
+
+        target = _REPO / "wixy_server" / "livechat" / "cookout_catalogue.json"
+        for ident, visual in work.read_overrides().items():
+            cat_tool.set_visual(target, ident, visual, "image-rewrite")
+        print("applied")
+        return 0
+    if args.cmd == "publish":
+        manifest = publish(work, Path(args.manifest), Path(args.storage), dry_run=args.dry_run)
+        print(json.dumps(manifest["pack"], indent=1))
+        return 0
+    # run
+    from tooling.cookout.visual import catalogue as cat_tool
+    from tooling.cookout.visual import cmdruns
+    from wixy_server.livechat.wyr_images import (
+        DEFAULT_IMAGE_MODEL,
+        IMAGE_MODELS,
+        ComfyImageGenerator,
+    )
+
+    model = args.model or DEFAULT_IMAGE_MODEL
+    if model not in IMAGE_MODELS:
+        print(f"unknown model {model!r}; known: {sorted(IMAGE_MODELS)}", file=sys.stderr)
+        return 2
+    env = _load_env(Path(os.environ.get("WIXY_ENV_FILE", r"D:\Servers\Wixy\Storage\.env")))
+    base_url = env.get("WIXY_COMFY_URL", "http://127.0.0.1:8199")
+    out_dir = env.get("WIXY_COMFY_OUTPUT_DIR")
+    if not out_dir:
+        print("WIXY_COMFY_OUTPUT_DIR is not set; refusing to render", file=sys.stderr)
+        return 2
+    plan = json.loads(work.plan.read_text("utf-8"))
+    subs = load_subjects(catalogue)
+    order = {"pilot": plan["pilot"], "rest": plan["rest"], "all": plan["pilot"] + plan["rest"]}[
+        args.phase
+    ]
+    ids = [i for i in order if i in subs]
+    if args.only_ids:
+        try:
+            only = read_only_ids(Path(args.only_ids), subs)
+        except (OSError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+        ids = [i for i in ids if i in only]
+    if args.limit:
+        ids = ids[: args.limit]
+    pool = cmdruns.RunPool(
+        client=cmdruns.real_client(), journal=cmdruns.Journal(work.images / "runs.jsonl")
+    )
+    runner = PoolRunner(pool, cmdruns.RunSpec, cmdruns.Model)
+    checker = _check.HAIKU if args.checker == "haiku" else _check.LUNA
+    totals = asyncio.run(
+        run_pipeline(
+            ids,
+            subs,
+            work,
+            ComfyImageGenerator(
+                base_url, model=model, output_dir=Path(out_dir), cache_device=args.cache_device
+            ),
+            comfy_queue_getter(base_url),
+            runner,
+            checker,
+            _check.HAIKU,
+            _check.SOL,
+            _check.OPUS,
+            render_only=args.render_only,
+            check_only=args.check_only,
+            check_concurrency=args.check_concurrency,
+            voice_probes=voice_probes_from_env(os.environ.get("WIXY_VOICE_PROBES")),
+            visual_check=cat_tool.visual_check(catalogue),
+        )
+    )
+    print(json.dumps(totals))
+    return 0
+
+
+def _load_env(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, _, value = line.partition("=")
+                out[key.strip()] = value.strip()
+    return out
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

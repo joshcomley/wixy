@@ -46,7 +46,7 @@ India pale ale | IPA | accent | beer | everyday | Bitter citrusy beer, bold in m
 Wheat beer | weissbier | accent | beer | uncommon | Cloudy banana-and-clove beer for mussels and batters
 Belgian ale | Belgian dubbel | accent | beer | uncommon | Dark fruity abbey beer for carbonnade
 Lambic |  | accent | beer | exotic | Sour wild-fermented Belgian beer
-Real ale | bitter | accent | beer | everyday | British cask beer for pies and rarebit
+Real ale |  | accent | beer | everyday | British cask beer for pies and rarebit
 Non-alcoholic beer | alcohol-free beer | accent | beer | uncommon | Beer flavour for batters without the alcohol
 Cider | dry cider | accent | cider | everyday | Apple-based drink for pork, sauces and sipping
 Sweet cider |  | accent | cider | everyday | Fruity, softer cider for glazes and puddings

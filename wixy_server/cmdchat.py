@@ -497,6 +497,9 @@ class CmdChatClient:
         cwd: str,
         timeout_secs: int,
         disallowed_tools: list[str],
+        provider: str | None = None,
+        tool_profile: str | None = None,
+        naked: bool | None = None,
     ) -> ChatSpawnRun:
         """`POST /api/chat-spawn/runs`: start a hidden, one-shot cmd chat run on the subscription
         and return its row at once (`queued|running`); poll it with `get_run`. The chat is
@@ -518,6 +521,13 @@ class CmdChatClient:
             "timeout_secs": timeout_secs,
             "disallowed_tools": list(disallowed_tools),
         }
+        # Additive and omitted when None, so every existing caller sends the same bytes as before.
+        if provider is not None:
+            body["provider"] = provider
+        if tool_profile is not None:
+            body["tool_profile"] = tool_profile
+        if naked is not None:
+            body["naked"] = naked
         url = f"{self._portal_base_url}/api/chat-spawn/runs"
         response = await self._request(
             "POST", url, json_body=body, timeout_s=_SPAWN_TIMEOUT_S, connect_errors_only=True
