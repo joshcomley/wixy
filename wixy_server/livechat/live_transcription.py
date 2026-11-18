@@ -312,14 +312,19 @@ class LiveTranscriber:
         if tail != state.tail:
             state.tail = tail
             changed = True
-        set_live_tail(att_id, state.tail)
         if changed:
             stored = await anyio.to_thread.run_sync(
                 lambda: self.store.record_live_transcript(att_id, text=state.final, now=time.time())
             )
             if not stored:
                 return "stop"  # the note was deleted, or the transcript is no longer pending
+            # The tail is in memory and the text is in the store: show the tail only AFTER the
+            # text it follows is stored, so a reader who sees the tail also sees the sentences
+            # before it (it used to be set first, and a read in between saw a tail with no text).
+            set_live_tail(att_id, state.tail)
             self.notifier.publish()
+        else:
+            set_live_tail(att_id, state.tail)
         return "ok"
 
     async def _transcribe(self, pcm: bytes) -> JobResult | None:
