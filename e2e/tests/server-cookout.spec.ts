@@ -779,6 +779,15 @@ test.describe("Cookout chef stage", () => {
 // Where the pane is at least 411 px both card pictures are at least 96 px. The skip and Twists buttons sit
 // side by side in the actions row, each at least 44 px high, wrapping a label rather than clipping it.
 
+/**
+ * The two names this table is measured with. The pair is dealt at random from a 3,491-ingredient bank whose names run to 36
+ * characters, and a name that wraps to FOUR lines in the wide-font stress needs more than the compact stage's 159 px: the
+ * stage then scrolls on its own (nothing is clipped) instead of fitting, which is the right behaviour for such a name but not
+ * what this test asserts at P >= 411. CI hit it when "Frozen Yorkshire pudding wraps" was dealt (a rare draw, hence a flake).
+ * Fixed moderate names make the measurement the same every run.
+ */
+const FIT_NAMES = ["Sweet potato", "Roast chicken"] as const;
+
 const WIDE_FONT_STRESS = ".wx-srv-ck, .wx-srv-ck * { letter-spacing: 0.15em !important; }";
 
 /** The view's `mode` block of a Toasted sandwich round (09c §5.4). */
@@ -919,7 +928,8 @@ test.describe("Cookout picking table with a wider font", () => {
         const response = await route.fetch();
         const json = (await response.json()) as Record<string, unknown>;
         const current = json["current"] as Record<string, unknown> | null;
-        const view = current === null ? json : { ...json, current: { ...current, canLucky: true, canChaos: true, ...(toastie ? { role: "bread" } : {}) } };
+        const options = current === null ? null : (current["options"] as Array<Record<string, unknown>>).map((o, i) => ({ ...o, name: FIT_NAMES[i] ?? o["name"] }));
+        const view = current === null ? json : { ...json, current: { ...current, ...(options === null ? {} : { options }), canLucky: true, canChaos: true, ...(toastie ? { role: "bread" } : {}) } };
         await route.fulfill({ response, json: toastie ? { ...view, mode: TOASTIE_MODE } : view });
       });
       await startCookout(page, false);

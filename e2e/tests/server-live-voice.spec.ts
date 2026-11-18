@@ -440,8 +440,12 @@ for (const [label, viewport] of [
         // It can be played (the listener may already have been carried over to the file; Play
         // on a note that has finished plays it again, so either way the position must advance).
         await l.waitForTimeout(TAP_GAP_MS);
-        const playButton = finished.getByRole("button", { name: "Play voice note" });
-        if (await playButton.isVisible()) await playButton.click();
+        // After Stop the listener is carried over onto this file at the live position and keeps PLAYING the last stretch, which
+        // ends on its own at the note's length. Whether the Play button, a position sample or the end comes first depends on
+        // timing, and a position read after the end is stuck at the duration forever (CI: stuck at 11.937). Wait for that
+        // carried-over playback to be over (or never have begun), THEN play the note, THEN require the position to advance.
+        await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).paused), { timeout: SLOW_MS }).toBe(true);
+        await finished.getByRole("button", { name: "Play voice note" }).click();
         await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).currentTime), { timeout: SLOW_MS })
           .toBeGreaterThan(0);
         const heardAt = await audio.evaluate((node) => (node as HTMLAudioElement).currentTime);
