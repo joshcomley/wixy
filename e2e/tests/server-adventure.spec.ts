@@ -77,6 +77,13 @@ async function waitFact(pages: readonly Page[], name: string, value: string, tim
   }
 }
 
+/** Waits until a pane fact has any one of `values` on every page. */
+async function waitFactAnyOf(pages: readonly Page[], name: string, values: readonly string[], timeoutMs = 20_000): Promise<void> {
+  for (const page of pages) {
+    await eventually(pages, async () => values.includes(await fact(page, name)), `data-${name} in ${values.join("|")}`, timeoutMs);
+  }
+}
+
 async function waitFactSet(pages: readonly Page[], name: string, timeoutMs = 20_000): Promise<void> {
   for (const page of pages) {
     await eventually(pages, async () => (await fact(page, name)) !== "", `data-${name} set`, timeoutMs);
@@ -286,7 +293,17 @@ async function playToChosen(
   const country = await pressStop(pages, a);
   expect(country).not.toBe("");
   await waitFact(pages, "country", country);
-  await waitFact(pages, "state", "destination");
+  // A country with exactly ONE destination left (a small island state, e.g. Tuvalu) skips the destination
+  // roulette: the round goes straight to `chosen` (stop_adventure). The roulette's country is random, so the
+  // test cannot know; it accepts either and plays the destination roulette only when there is one.
+  await waitFactAnyOf(pages, "state", ["destination", "chosen"]);
+  if ((await fact(a, "state")) === "chosen") {
+    await waitFact(pages, "state", "chosen");
+    const only = await fact(a, "place");
+    expect(only).not.toBe("");
+    await waitFact(pages, "place", only);
+    return { seq, country, place: only };
+  }
 
   // The destination roulette: Bob stops it.
   await waitFact(pages, "phase", "destination", 30_000);
