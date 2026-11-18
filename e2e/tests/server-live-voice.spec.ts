@@ -16,6 +16,7 @@
 // be a window of time.
 
 import { expect, test } from "../fixtures";
+import { LOADED_WAIT_MS } from "./server-helpers";
 import type { Browser, BrowserContext, Locator, Page } from "@playwright/test";
 
 const MULTI_TAP_INTERVAL_MS = 400;
@@ -78,10 +79,10 @@ async function unlock(page: Page, name: string): Promise<void> {
   await page.goto("/admin/server");
   await expect(page.locator(".wx-srv-decoy")).toBeVisible();
   await openPinPad(page);
-  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible();
+  await expect(page.locator(".wx-srv-name-prompt")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.locator(".wx-srv-name-prompt-input").fill(name);
   await page.locator(".wx-srv-name-prompt-button").click();
-  await expect(page.locator(".wx-srv-thread")).toBeVisible();
+  await expect(page.locator(".wx-srv-thread")).toBeVisible({ timeout: LOADED_WAIT_MS });
   await page.waitForTimeout(TAP_GAP_MS);
 }
 
@@ -440,8 +441,12 @@ for (const [label, viewport] of [
         // It can be played (the listener may already have been carried over to the file; Play
         // on a note that has finished plays it again, so either way the position must advance).
         await l.waitForTimeout(TAP_GAP_MS);
-        const playButton = finished.getByRole("button", { name: "Play voice note" });
-        if (await playButton.isVisible()) await playButton.click();
+        // After Stop the listener is carried over onto this file at the live position and keeps PLAYING the last stretch, which
+        // ends on its own at the note's length. Whether the Play button, a position sample or the end comes first depends on
+        // timing, and a position read after the end is stuck at the duration forever (CI: stuck at 11.937). Wait for that
+        // carried-over playback to be over (or never have begun), THEN play the note, THEN require the position to advance.
+        await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).paused), { timeout: SLOW_MS }).toBe(true);
+        await finished.getByRole("button", { name: "Play voice note" }).click();
         await expect.poll(() => audio.evaluate((node) => (node as HTMLAudioElement).currentTime), { timeout: SLOW_MS })
           .toBeGreaterThan(0);
         const heardAt = await audio.evaluate((node) => (node as HTMLAudioElement).currentTime);

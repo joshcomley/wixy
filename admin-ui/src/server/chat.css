@@ -7474,6 +7474,17 @@ button.wx-srv-ck-card:disabled {
   .wx-srv-ck-card-what {
     display: none;
   }
+  /* The compact stage is 159 px. A long name ("Frozen Yorkshire pudding wraps", 36-character names exist) wraps to four
+     or five lines in a wide font on a narrow phone, and the 96 px picture floor left room for three: the stage scrolled
+     instead of fitting. Here the picture may shrink to 64 px (it still grows to fill whatever the name leaves), the name
+     is 13 px on a 15 px line, and the empty "what" row no longer adds a gap: 64 + 2 + 5 lines of 15 + 10 of card = 151. */
+  .wx-srv-ck-card-in {
+    grid-template-rows: minmax(64px, min(100cqw, 300px)) auto;
+  }
+  .wx-srv-ck-card-name {
+    font-size: 0.8125rem;
+    line-height: 15px;
+  }
   .wx-srv-ck-car-slide {
     grid-template-rows: minmax(64px, 1fr) fit-content(55%);
   }
