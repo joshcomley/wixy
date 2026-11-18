@@ -42,13 +42,19 @@ def test_an_app_lifespan_leaves_no_picture_sweep_running(
 
     def slow_tick(self: CookoutVisualsService) -> None:
         entered.set()
-        finished.wait(0.5)  # the lifespan is long gone by the time this returns
+        finished.wait(30)  # held until the test releases it, after the lifespan is gone
         real_tick(self)
 
     monkeypatch.setattr(CookoutVisualsService, "tick", slow_tick)
     leak_guard.install(monkeypatch)  # re-wrap the slow tick, as the autouse fixture does
-    with live_env(tmp_path, make_wixy_repo(tmp_path / "repo"), monkeypatch):
+    with live_env(tmp_path, make_wixy_repo(_dir(tmp_path / "repo")), monkeypatch):
         assert entered.wait(10)
     assert leak_guard.inflight() == 1, "the abandoned sweep must be observably still running"
+    finished.set()  # now let it finish
     assert leak_guard.drain(30.0) is True
     assert leak_guard.inflight() == 0
+
+
+def _dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
