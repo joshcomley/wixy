@@ -1,4 +1,5 @@
-"""`/healthz`, `/internal/ready`, `/internal/warmup` (spec/04-server.md §9-10).
+"""`/healthz`, `/internal/ready`, `/internal/warmup` (spec/04-server.md §9-10) and
+`/internal/cookout/modes` (spec/server-chat/09c-cookout-modes.md §5.6).
 
 Loopback-only: the tunnel forwards EVERY path of `ca.cinnamons.uk` to this process
 (the Access app only scopes `/admin*`, spec/07 §3), so without an explicit guard here
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from builder.config import ProjectConfig
 from wixy_server.checkout import CheckoutError, ensure_checkout
 from wixy_server.live_pointer import load_live_pointer
+from wixy_server.routes_livechat_cookout import enabled_cookout_modes
 from wixy_server.storage import ProjectPaths
 from wixy_server.watcher import WatcherStatus
 
@@ -80,3 +82,15 @@ async def post_warmup(request: Request) -> dict[str, bool]:
     except CheckoutError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return {"warm": True}
+
+
+@router.get("/internal/cookout/modes")
+async def get_cookout_modes(request: Request) -> dict[str, list[str]]:
+    """The ids of the Cookout game modes this process has switched on (Classic first), for the
+    operator tooling (`tooling/cookout/activate_modes.py`): the same list `GET
+    /api/admin/server/cookout/options` shows, but loopback-only and without the in-app unlock
+    token, which no agent can mint (it needs the PIN, entered in the operator's browser). It
+    reveals nothing the options route does not and nothing about any chat; a request carrying a
+    Cloudflare edge header gets the same bare 404 as every `/internal` route (Inv 12)."""
+    _reject_edge_traffic(request)
+    return {"modes": [mode.id for mode in enabled_cookout_modes(request)]}
