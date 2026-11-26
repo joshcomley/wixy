@@ -1,0 +1,263 @@
+/* The public Adventure Time page (spec/adventure-public section 2.4): full-screen, dark, phone-first and
+   desktop-correct. It reuses the production game's own styles - the pane, the holiday pack and the Holiday
+   bank screen are the `.wx-srv-adv*`, `.wx-srv-adv-pk*` and `.wx-srv-bank*` rules of the private chat -
+   so the two can never look different, and adds only what the page itself needs: the custom properties
+   those rules read (the chat gets them from the admin shell), the page frame, and the few parts that
+   exist only here (Copy link / Share, Forget everything, a bank row's Copy link, the unknown-place screen). */
+
+@import "../server/chat.css";
+
+:root {
+  color-scheme: dark;
+  --wx-brand-blue: #3f6fcf;
+  --wx-brand-blue-text: #6fa0f5;
+  --wx-brand-blue-tint: #1e2a47;
+  --wx-ink: #e4e7ed;
+  --wx-muted: #9199aa;
+  --wx-surface: #1a1d26;
+  --wx-canvas: #14161d;
+  --wx-border: #2d3140;
+  --wx-btn-bg: #2e3446;
+  --wx-danger: #cf3a3a;
+  --wx-danger-text: #f87171;
+  --wx-danger-tint: #3a1e1e;
+  --wx-success-text: #3fb950;
+  --wx-success-tint: #1d3326;
+  --wx-success: #238636;
+  --wx-solid-dark: #0d0f14;
+  --wx-solid-dark-text: #e2e6ec;
+  --wx-radius: 6px;
+  --wx-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --wx-srv-control-h: 44px;
+  --wx-srv-gutter: 12px;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: #040f20;
+  color: var(--wx-ink);
+  font-family: "SF Pro Rounded", ui-rounded, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+#adventure-public-root {
+  height: 100%;
+}
+
+.adv-pub {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  box-sizing: border-box;
+  background: #040f20;
+}
+
+/* The pane (and the bank screen, which is absolutely placed over it) fill everything above the footer. */
+.adv-pub-main {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.adv-pub .wx-srv-game {
+  margin: 0;
+  gap: 0;
+}
+
+.adv-pub .wx-srv-adv-card {
+  border-radius: 0;
+}
+
+.adv-pub-footer {
+  flex: none;
+  box-sizing: border-box;
+  padding: 6px 12px calc(6px + env(safe-area-inset-bottom));
+  background: #040f20;
+  color: rgba(232, 241, 255, 0.72);
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
+  border-top: 1px solid rgba(190, 220, 255, 0.12);
+}
+
+@media (max-height: 520px) and (orientation: landscape) {
+  .adv-pub-footer {
+    padding-top: 3px;
+    padding-bottom: calc(3px + env(safe-area-inset-bottom));
+    font-size: 11px;
+  }
+}
+
+/* "Loading Adventure Time..." / "Couldn't load the places": the shell is painted before anything is fetched. */
+.adv-pub-status,
+.adv-pub-missing,
+.adv-pub-fatal {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  box-sizing: border-box;
+  text-align: center;
+  background: radial-gradient(120% 90% at 50% 38%, #0a2342, #040f20 72%);
+}
+
+.adv-pub-status[hidden],
+.adv-pub-missing[hidden] {
+  display: none;
+}
+
+.adv-pub-status-text,
+.adv-pub-fatal {
+  margin: 0;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.adv-pub-missing-title {
+  margin: 0;
+  font-size: 1.375rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.adv-pub-btn {
+  min-height: 48px;
+  padding: 0 24px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #ff4d6a, #ff7a59);
+  color: #fff;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Copy link / Share: beside Yay / Nay once a place is chosen. A word on a wide screen, a link glyph on a phone. */
+.wx-srv-adv-bar-share {
+  display: flex;
+  flex: 0 1 auto;
+  gap: 6px;
+}
+
+.wx-srv-adv-bar-share[hidden],
+.wx-srv-adv-share[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-copylink-glyph {
+  display: none;
+  font-size: 17px;
+  line-height: 1;
+}
+
+.adv-pub .wx-srv-adv-bar {
+  flex-wrap: wrap;
+}
+
+@media (max-width: 440px) {
+  .wx-srv-adv-bar-share {
+    gap: 3px;
+  }
+  .wx-srv-adv-copylink-text {
+    display: none;
+  }
+  .wx-srv-adv-copylink-glyph {
+    display: inline;
+  }
+  .wx-srv-adv-copylink,
+  .wx-srv-adv-share {
+    min-width: 44px;
+  }
+}
+
+/* Forget everything (Options). */
+.wx-srv-adv-forget-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.wx-srv-adv-forget-start[hidden],
+.wx-srv-adv-forget-ask[hidden] {
+  display: none;
+}
+
+.wx-srv-adv-forget-start {
+  margin-top: 8px;
+}
+
+.wx-srv-adv-chip.wx-srv-adv-forget-yes {
+  background: var(--wx-danger);
+  border-color: var(--wx-danger-text);
+  color: #fff;
+}
+
+/* The Holiday bank on this page: a bank row is the place's button with its own Copy link beside it. */
+.adv-pub .wx-srv-bank-view {
+  padding: 0 12px;
+  box-sizing: border-box;
+  z-index: 6;
+}
+
+.wx-srv-bank-trip-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.wx-srv-bank-trip-row > .wx-srv-bank-trip {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+
+.wx-srv-bank-trip-copy {
+  flex: none;
+  min-width: 96px;
+  padding: 0 12px;
+  border: 1px solid var(--wx-border);
+  border-radius: var(--wx-radius);
+  background: var(--wx-btn-bg);
+  color: var(--wx-ink);
+  font: inherit;
+  font-size: 0.8125rem;
+  cursor: pointer;
+}
+
+.wx-srv-bank-trip-date,
+.wx-srv-bank-trip-gone-note {
+  color: var(--wx-muted);
+  font-size: 0.75rem;
+}
+
+.wx-srv-bank-trip-gone {
+  opacity: 0.55;
+  cursor: default;
+}
+
+@media (max-width: 440px) {
+  .wx-srv-bank-trip-row {
+    flex-direction: column;
+  }
+  .wx-srv-bank-trip-copy {
+    min-height: 44px;
+  }
+}
