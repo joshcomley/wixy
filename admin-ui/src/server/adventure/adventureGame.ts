@@ -221,7 +221,9 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const copyLinkButton = button("wx-srv-adv-chip wx-srv-adv-copylink", "Copy the link to this place", "", () => void copyShareLink());
   copyLinkButton.append(el("span", "wx-srv-adv-copylink-text", "Copy link"), el("span", "wx-srv-adv-copylink-glyph", "\u{1F517}"));
   copyLinkButton.querySelector(".wx-srv-adv-copylink-glyph")?.setAttribute("aria-hidden", "true");
-  const shareButton = button("wx-srv-adv-chip wx-srv-adv-share", "Share this place", "Share", () => void shareShareLink());
+  const shareButton = button("wx-srv-adv-chip wx-srv-adv-share", "Share this place", "", () => void shareShareLink());
+  shareButton.append(el("span", "wx-srv-adv-share-text", "Share"), el("span", "wx-srv-adv-share-glyph", "↗"));
+  shareButton.querySelector(".wx-srv-adv-share-glyph")?.setAttribute("aria-hidden", "true");
   shareButton.hidden = !canNativeShare(win);
   const barShare = el("div", "wx-srv-adv-bar-share");
   barShare.hidden = true;

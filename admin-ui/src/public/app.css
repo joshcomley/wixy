@@ -161,7 +161,8 @@ body {
   display: none;
 }
 
-.wx-srv-adv-copylink-glyph {
+.wx-srv-adv-copylink-glyph,
+.wx-srv-adv-share-glyph {
   display: none;
   font-size: 17px;
   line-height: 1;
@@ -175,10 +176,12 @@ body {
   .wx-srv-adv-bar-share {
     gap: 3px;
   }
-  .wx-srv-adv-copylink-text {
+  .wx-srv-adv-copylink-text,
+  .wx-srv-adv-share-text {
     display: none;
   }
-  .wx-srv-adv-copylink-glyph {
+  .wx-srv-adv-copylink-glyph,
+  .wx-srv-adv-share-glyph {
     display: inline;
   }
   .wx-srv-adv-copylink,
@@ -215,6 +218,17 @@ body {
   padding: 0 12px;
   box-sizing: border-box;
   z-index: 6;
+  background: radial-gradient(120% 90% at 50% 38%, #0a2342, #040f20 72%);
+}
+
+/* A wide screen keeps the bank's rows readable: a centred column, not a row stretched across 1440 px. */
+.adv-pub .wx-srv-bank-bar,
+.adv-pub .wx-srv-bank-list {
+  width: 100%;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
 }
 
 .wx-srv-bank-trip-row {
