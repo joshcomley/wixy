@@ -2719,6 +2719,50 @@ basemap/globe.ts`, spec §3) and the shared game frame (§20).
   in its own database) is [adventure-public.md](adventure-public.md) (Inv 61). It reuses this section's prompt, parser,
   sanitiser, picture finder and job discipline unchanged and touches none of the private game's data or behaviour.
 
+### 23.3 The public client (workspace 00065; spec `spec/adventure-public/README.md` §2.4, Inv 61)
+
+The same production pane, played alone on `adventure.cinnamons.uk`. Source `admin-ui/src/public/`, a second esbuild entry
+(`main.ts` -> `wixy_server/static/adventure-public/app.js`, `app.css` -> `app.css`, with maps; committed like the admin bundle and under
+the same CI drift check). It talks to nothing private: the only requests are `GET /api/bank`, `GET|POST /api/pack/{code}` and static assets.
+
+- **The page shell** (the server's, not this repo's client): `<div id="adventure-public-root">` and
+  `<script type="application/json" id="adventure-public-boot">{"code": string|null, "origin": "https://adventure.cinnamons.uk",
+  "assets": {"world": url, "satellite": url, "atlas": url}}</script>`, loading `app.css` and `app.js`. `code` is the place a `/d/<code>` page was
+  served for; `origin` is what short links are made on; the three asset URLs must be a path or on `origin` (`boot.ts` refuses others). The world
+  map and the two map pictures are the SAME files the admin build copies into `static/admin/` (`adventure-world.json`,
+  `adventure-satellite.webp`, `adventure-atlas.webp`); the shell serves them under whatever fingerprinted URLs it puts in the boot JSON
+  (`imagery.setTextureUrls` and `loadWorld({url})` are the seams).
+- **The pane's optional dependencies** (`adventureGame.ts`): `tabs`, `float`, `hooks`, `roundMessage`, `partner` and the api's `postLive`
+  are optional. Without `tabs` the pane is STANDALONE: `open(seq)` shows it, `refresh()` redraws it (the host calls it when the model
+  changes), there is no close button and no chat overlay, `data-solo="1"`, the scene says no "Your turn" / "Their turn" (`SceneDeps.solo`), and
+  the live trail is a quiet no-op. New optional deps: `shareLink(view)` (a Copy link action, and Share where `navigator.share` exists, in the
+  title row once a place is chosen: `shareLink.ts`) and `forgetEverything()` (Options gains an inline-confirm "Forget everything on this device").
+  `PackView.notice` replaces the pending line ("Lots of people are exploring right now..."). The private Server chat passes every dependency as
+  before and `tests/adventure/*` run unedited. The Holiday bank has a data-source seam (`source`, `openPlace`, `shareLink`) beside the
+  default `GET /adventure/bank`.
+- **`localBackend.ts`** is the server's round state machine (`spin_lng -> spin_lat -> country -> destination -> chosen -> banked|rejected`;
+  idempotent repeated moves, `bad_state`, `too_early` with the 1 s tolerance, `invalid` bounds, `exhausted`, one-place-left skips to `chosen`,
+  `eligible` recomputed at read time) over one round in memory, answering the pane's calls with `AdventureView`s (`serverNow` = the local clock,
+  seeds = random uint32, `country.rouletteAt = at + duration + 5`, `destination.rouletteAt = now + 3.5`). Its model is the pane's real
+  `createAdventureModel`. The pack: `GET /api/pack/{code}` on `chosen`; `none` or a retryable `failed` -> one `POST`; poll every 5 s while the
+  pack or its pictures are pending; a 429 shows the wait line and keeps polling the GET (asking again after `Retry-After`); Try again is a POST;
+  Nay stops the wait. A **deep link** (`openPlace(code)`) builds the round directly in `chosen` (landing = the place's point in its own
+  unit, no spins or roulettes; the scene's "late joiner sees the place at once" path draws it).
+- **`bank.ts`** parses `GET /api/bank` and is the TS port of `AdventureBank` (`top_destinations` with the 40 km spacing and shortfall fill,
+  `remaining`, `is_playable`, `eligible_units`, `advised_units`). `tests/public/topDestinations.golden.json` is generated from the REAL Python
+  bank by `tests/public/gen_golden.py` (`PYTHONPATH=. python admin-ui/tests/public/gen_golden.py`) and `bank.test.ts` pins the port to it exactly
+  (it also fails, saying so, when the committed file was made from a different `adventure_destinations.json`). Regenerate it whenever the bank file
+  or `adventure_bank.py` changes.
+- **`memory.ts`**: `localStorage` `advPublic.v1.banked` (`[{code, destinationId, unitId, at}]`), `advPublic.v1.rejected` (destination ids),
+  `advPublic.v1.settings` (`{includeAdvised}`); blocked, full or corrupt storage degrades to this visit without throwing. Names are never stored (resolved
+  from the public bank at read time; a banked id no longer in the bank shows greyed "No longer on the map"). The map style stays the game's own
+  per-device `wixy.adventure.mapStyle`.
+- **`app.ts`**: `/` starts a game; `/d/<code>` shows the place at once; choosing a place puts its link in the address bar (`replaceState`), a
+  Holiday bank tap opens a place in-page (`pushState`), New / Play again / Spin the globe go to `/` (`pushState`), Back and Forward replay the History
+  API; an unknown code shows "That place isn't on the map any more" with Spin the globe. `app.css` imports the private chat's stylesheet (so the pane,
+  the pack and the bank screen can never look different) and adds the page frame and the public-only parts.
+- **Tests** `admin-ui/tests/public/*.test.ts` (+ `publicFixtures.ts`, the golden file and its generator).
+
 ## 24. Cookout: the two-player cooking game (workspace 00058; spec `spec/server-chat/09-cookout.md`, decisions/00199, Inv 57)
 
 The header's ... menu has **Cookout**: the two of them take turns picking ingredients into one shared basket — five

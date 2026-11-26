@@ -25,8 +25,20 @@ export const DEFAULT_MAP_STYLE: MapStyle = "satellite";
 declare const WIXY_ADVENTURE_SATELLITE_URL: string;
 declare const WIXY_ADVENTURE_ATLAS_URL: string;
 
+let urlOverrides: Partial<Record<ImageryStyle, string>> = {};
+
+/**
+ * Serves the map pictures from other URLs than the bundle's own (the public page learns its asset URLs
+ * from the page's boot JSON, not from build-time constants). Pass `{}` to go back to the bundle's own.
+ */
+export function setTextureUrls(urls: Readonly<Partial<Record<ImageryStyle, string>>>): void {
+  urlOverrides = { ...urls };
+}
+
 /** Where a style's picture is served from. */
 export function textureUrl(style: ImageryStyle): string {
+  const override = urlOverrides[style];
+  if (override !== undefined) return override;
   if (style === "satellite") {
     return typeof WIXY_ADVENTURE_SATELLITE_URL === "string" ? WIXY_ADVENTURE_SATELLITE_URL : "/admin/static/admin/adventure-satellite.webp";
   }

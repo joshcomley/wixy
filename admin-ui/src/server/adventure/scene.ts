@@ -111,6 +111,8 @@ export interface SceneDeps {
   viewer(): string | null;
   /** The other person's display name, when it is known. */
   partner(): string | null;
+  /** A single-player game (the public page): no "Your turn" / "Their turn" under the hint. */
+  readonly solo?: boolean;
 }
 
 export interface Hud {
@@ -963,6 +965,7 @@ export class AdventureScene {
 
   /** "Your turn" / "<name>'s turn" for the move after one made by `lastBy` (the starter makes the first). */
   private turnText(lastBy: string | null): string {
+    if (this.deps.solo === true) return "";
     const v = this.view;
     let expected: "me" | "partner" | null;
     if (lastBy === null) expected = v === null ? null : this.side(v.startedBy);

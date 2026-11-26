@@ -158,6 +158,11 @@ export interface PackView {
   /** `pending` while the server is still finding the pack's pictures; `none` for a server without them. */
   readonly images: PackImages;
   readonly pictures: PackPictures | null;
+  /**
+   * A line to show instead of "This can take a couple of minutes." while the pack is pending (the
+   * public page's "Lots of people are exploring right now..."). Never present on a server's view.
+   */
+  readonly notice?: string;
 }
 
 export interface AdventureView {
@@ -505,7 +510,8 @@ function parsePictures(value: unknown): PackPictures | null {
   return { hero, items };
 }
 
-function parsePackView(value: unknown): PackView {
+/** A pack view from the wire (a round's `pack`, or the public `GET /api/pack/{code}` answer), never null. */
+export function parsePackView(value: unknown): PackView {
   const record = asRecord(value);
   const none: PackView = { state: "none", data: null, error: null, canRetry: false, images: "none", pictures: null };
   if (record === null) return none;
@@ -723,6 +729,12 @@ export interface BankTrip {
   readonly destination: AdventureDest;
   readonly headline: string | null;
   readonly pack: PackState;
+  /** The public page's short code for the place (its link is `/d/<code>`). Never sent by the private server. */
+  readonly code?: string;
+  /** The public page: when this device banked the place, epoch seconds. */
+  readonly at?: number;
+  /** The public page: the place is no longer on the map (the bank changed). Shown greyed, not openable. */
+  readonly gone?: boolean;
 }
 
 export type BankResult =
