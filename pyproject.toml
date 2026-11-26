@@ -46,6 +46,9 @@ dev = [
   "psutil>=6",
   "pytest>=8.3",
   "pytest-xdist>=3.6",
+  # A hung test fails with every thread's stack after `timeout` (pytest ini below) instead of
+  # holding a CI job for hours (decisions/00216 addendum).
+  "pytest-timeout>=2.3",
   "pytest-asyncio>=0.24",
   "mypy>=1.13",
   "ruff>=0.7",
@@ -78,6 +81,8 @@ testpaths = ["builder/tests", "wixy_server/tests", "guide/tests", "pixelart/test
 # A passing test's tmp_path is deleted as soon as that test ends; only failed tests keep theirs (for
 # diagnosis), and only the latest run's are kept. Without this every test's files stayed on disk for
 # the last three runs (decisions/00217).
+# A test still running after 10 minutes has hung: fail it with its stacks (pytest-timeout).
+timeout = 600
 tmp_path_retention_policy = "failed"
 tmp_path_retention_count = 1
 markers = [
