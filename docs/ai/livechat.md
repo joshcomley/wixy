@@ -2715,6 +2715,9 @@ basemap/globe.ts`, spec §3) and the shared game frame (§20).
   chat-spawn endpoints in `fake_cmd.py`), and for the pictures `test_livechat_safe_fetch.py`,
   `test_livechat_adventure_pictures.py`, `test_livechat_adventure_pictures_job.py` (+ `fake_web.py`,
   `fake_open_web.py`) — see [testing.md](testing.md).
+- **The PUBLIC version of this game** (an open URL, single player, browser-only bank, a shared per-destination pack cache
+  in its own database) is [adventure-public.md](adventure-public.md) (Inv 61). It reuses this section's prompt, parser,
+  sanitiser, picture finder and job discipline unchanged and touches none of the private game's data or behaviour.
 
 ## 24. Cookout: the two-player cooking game (workspace 00058; spec `spec/server-chat/09-cookout.md`, decisions/00199, Inv 57)
 

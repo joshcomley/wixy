@@ -1,5 +1,37 @@
 # Invariants
 
+### Inv 61 — Public Adventure Time data never enters `server.db`; the public host serves only the public routes; public pictures are Commons-only
+
+The public, no-login Adventure Time (workspace 00065, `docs/ai/adventure-public.md`, decisions/00216) shares the
+wixy process with the private Server chat but none of its data or reach:
+
+1. **Public data never enters `server.db`.** The public game's only server-side state — the per-destination pack
+   cache and its picture rows (`packs`, `pictures`) and picture files — lives in
+   `Storage/<project>/adventure-public/public.db` + `pictures/`, written only by `wixy_server/adventure_public/`;
+   nothing there reads or writes `LiveChatStore`, and the private game never reads the public cache (the two have
+   separate runners, research slots (`CapacityLimiter(1)` vs the private two), cmd callers and working folders). The
+   folder is outside the backup allowlist. A visitor stores nothing on the server: the bank, "never again" list
+   and settings are `localStorage` in their own browser; the only per-visitor server state is the in-memory
+   rate-limit counters (client IP keys, never logged or persisted).
+2. **The public host serves only the public routes.** `AdventurePublicHostGate` is the outermost middleware (installed
+   only when `WIXY_ADVENTURE_PUBLIC_HOST` is set; the standalone edition refuses a value). A request whose `Host`
+   (lower-cased, port and trailing dot stripped; any of several `Host` headers) is the public host is handed to the
+   separate public application and to nothing else: admin, `/api/admin/*`, `/internal/*`, the site, the version routes
+   and every WebSocket are unreachable from it (plain `404` / refused), whatever the path trick; every response carries
+   the strict CSP, `nosniff`, the referrer policy and `X-Robots-Tag: noindex`. Any other host never sees the public
+   routes. The `Host` header is the only authority (`X-Forwarded-Host`, `Origin` change nothing).
+3. **Public pictures are Commons-only.** The public finder is `WebPictureFinder(allow_site_images=False)`: only
+   freely-licensed Wikimedia Commons files (each with its credit and licence) are fetched and published — no venue
+   page is ever requested. The private game's finder keeps its venue-page source.
+4. **Cost is bounded.** The cache is keyed by destination (one research run per bank destination), retries are
+   bounded (10 min doubling, 3 per 24 h), at most 30 research starts per rolling hour overall and 6 per client, and
+   `POST /api/pack/{code}` needs `Origin == https://<host>`.
+
+*Enforced by:* `wixy_server/tests/test_adventure_public_gate.py` (both directions of the gate, traversal, hosts, sockets,
+the setting), `test_adventure_public_runner.py` (`TestNothingEntersTheChatDatabase`, the slot, the caller),
+`test_adventure_public_store.py` (a database of its own), `test_adventure_public_limits.py`,
+`test_routes_adventure_public.py` (assets allowlist, Origin, 429s) and `test_livechat_adventure_pictures.py::TestCommonsOnly`.
+
 ### Inv 60 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
 
 The Cookout pictures (`image`), the plain "what it is" line (`what`) and the fun facts (`facts`) belong to the engine, not to

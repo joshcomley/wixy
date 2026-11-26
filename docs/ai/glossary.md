@@ -191,6 +191,18 @@ real provisioning failure (decisions/00031).
   switch". The proof is cleared on mount whenever there is no detector left able to have earned it
   (permission revoked, or no Idle Detection API at all).
 
+## Public Adventure Time (an open URL, workspace 00065, Inv 61)
+
+- **Public host** — the host name in `WIXY_ADVENTURE_PUBLIC_HOST` (`adventure.cinnamons.uk`). A request for it is handed
+  by the **host gate** to the public application only (`docs/ai/adventure-public.md`).
+- **Short code** — the 6 lower-case characters naming a destination in a link (`/d/<code>`): the first 6 base32
+  characters of `sha256(destination_id)`; lengthened to 8 for both of two colliding destinations.
+- **Public pack cache** — `adventure-public/public.db`: one `packs` row per destination, shared by every visitor; pack
+  `state` is `none` (no row) / `pending` / `ready` / `failed`, `images` is `none` / `pending` / `done` / `failed`
+  (the view shows `pending` or `done`).
+- **Commons-only** — the public picture finder never fetches a venue page (`allow_site_images=False`); only freely
+  licensed Wikimedia Commons files are published.
+
 ## Adventure Time (the globe holiday game, workspace 00056, Inv 56)
 
 - **Game-chat anchor** — the message a game's mini chat hangs off. The wire names `wyrSeq` (request)

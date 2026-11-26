@@ -518,6 +518,31 @@ Router include order in `create_app` is load-bearing: internal → version → p
 admin_api → chat → engine → ai → system → versions → (inline `/admin`, uxer) →
 static mounts → **public last**.
 
+### Public Adventure Time host (workspace 00065, Inv 61; only when `WIXY_ADVENTURE_PUBLIC_HOST` is set)
+
+A separate application behind the outermost host gate (`adventure_public/gate.py`; `docs/ai/adventure-public.md`
+§1): a request whose `Host` is the public host reaches **only** the routes below — any other path is a plain
+`404` (`text/plain`, body `Not found`), any other method on these paths a plain `405`, every WebSocket is
+refused — and every response carries `X-Robots-Tag: noindex`, the strict `Content-Security-Policy`,
+`X-Content-Type-Options: nosniff` and `Referrer-Policy: strict-origin-when-cross-origin`. On every other host
+these routes do not exist. No auth, no cookies, nothing a visitor sends is stored (the rate-limit counters are
+in memory only). Handlers: `routes_adventure_public.py`.
+
+| Method | Path | Response |
+|---|---|---|
+| GET,HEAD | `/` | `text/html` page shell (dark; `<div id="adventure-public-root">`; `<link href="/assets/app.css?v=…">`, `<script src="/assets/app.js?v=…" defer>`; one `<script type="application/json" id="adventure-public-boot">`); `Cache-Control: no-cache` |
+| GET,HEAD | `/d/{code}` | the same shell with `<title>` `<place> — Adventure Time` and Open Graph / Twitter tags (`og:title` = the place, `og:description` = `<Country> · <blurb>`, `og:url` = `https://<host>/d/<code>`, `og:image` = the pack's first hero thumbnail (absolute URL) once ready, else absent); unknown or malformed code: **404** with the shell, the message "That place isn't on the map any more" and a "Spin the globe" link already in the root, boot `"missing": true`. All text HTML-escaped. `no-cache` |
+| GET,HEAD | `/assets/{name}` | the client bundle (`app.js`, `app.css` and anything else in `wixy_server/static/adventure-public/`), the three shared imagery files `adventure-world.json` / `adventure-satellite.webp` / `adventure-atlas.webp` (from `static/admin/`) and the icons `icon-192.png` / `icon-512.png` / `apple-touch-icon.png`; any other name (hidden, dotted, a subpath, the admin bundle) `404`. `?v=<hash>` equal to the file's current content hash: `public, max-age=31536000, immutable`; else `no-cache` |
+| GET | `/api/bank` | `{"version":1,"countries":{"<unit id>":{"name":"Portugal","advice":null\|{"level":"against_all_travel","checked":"YYYY-MM-DD"},"destinations":[{"id":"PRT.lisbon","code":"c9za9p","name":"…","region":"…","lat":38.7,"lng":-9.1,"kind":"city","blurb":"…"}]}}}` — rank order, every unit, built once at start; `ETag` (`If-None-Match` → `304`), `Cache-Control: no-cache`, `Vary: Accept-Encoding`, gzip (own `-gzip` ETag) when asked |
+| GET | `/api/pack/{code}` | `{"code","destinationId","state":"none"\|"pending"\|"ready"\|"failed","data":<holiday pack JSON, as livechat.md §23>\|null,"error":str\|null,"canRetry":bool,"images":"pending"\|"done","pictures":{"hero":[Picture],"items":{"<section>:<i>":Picture}},"retryAfterS":int\|null}` with `Picture` = `{"thumbUrl":"/media/<id>/thumb.jpg","fullUrl":"/media/<id>/full.jpg","credit","page","caption":str\|null}` (same-origin URLs). `images` is `pending` only while ready-pack pictures are still being found. `canRetry`: a POST would start research now (`none`: true; `failed`: once `next_try_at` has passed; a non-cmd backend: never). `retryAfterS`: seconds a failed pack must still wait. With no researcher: `{"state":"failed","error":"Holiday packs aren't available right now","canRetry":false}`. Unknown code `404` `{"error":"not_found"}`. `Cache-Control`: `public, max-age=60` for a ready pack whose pictures are settled, else `no-store` |
+| POST | `/api/pack/{code}` | empty body; `Origin` must equal `https://<host>` (`403` `{"error":"forbidden"}`); unknown code `404` `{"error":"not_found"}`. Starts research when the pack is `none` or `failed` past `next_try_at`, else answers the current view (idempotent) — always `200` with the view above. Over the limits (30 starts / rolling hour overall, 6 / client): `429` `{"error":"rate_limited","retryAfterS":N}` + `Retry-After: N`; a request that starts nothing never uses a slot |
+| GET,HEAD | `/media/{id}/{thumb.jpg\|full.jpg}` | `id` = 32 lower-case hex; `image/jpeg`, `Cache-Control: public, max-age=31536000, immutable`; anything else `404` |
+| GET,HEAD | `/robots.txt` | `User-agent: *` / `Disallow: /` |
+| GET,HEAD | `/manifest.webmanifest` | `application/manifest+json` (name, `start_url` `/`, `display` `standalone`, the two icons) |
+
+Boot block: `{"code":"259fiy"|null,"origin":"https://<host>","assets":{"world":"/assets/adventure-world.json?v=…","satellite":"/assets/adventure-satellite.webp?v=…","atlas":"/assets/adventure-atlas.webp?v=…"}}` (plus `"missing":true`,
+`"code":null` for an unknown `/d/` code).
+
 ## 3. Error conventions
 
 - **Default envelope**: every in-handler `raise HTTPException(status, detail=...)` yields
