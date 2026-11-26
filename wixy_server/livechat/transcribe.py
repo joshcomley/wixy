@@ -31,6 +31,7 @@ import anyio
 import httpx
 
 from builder.jsontypes import JsonObject
+from wixy_server.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ class CmdTranscriber:
         self._base_url = base_url.rstrip("/")
         self._probe_ttl_s = probe_ttl_s
         self._clock = clock
-        self._client = httpx.AsyncClient(transport=transport)
+        self._client = httpx.AsyncClient(transport=transport, verify=shared_ssl_context())
         self._probe_result: bool | None = None
         self._probe_expires_at = 0.0
         self._last_good_at: float | None = None

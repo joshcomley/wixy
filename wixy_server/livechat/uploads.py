@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+from wixy_server.fileops import replace_riding_out_scanners
 from wixy_server.livechat.models import AttachmentKind, AttachmentRow, UploadRow
 from wixy_server.livechat.store import LiveChatStore
 from wixy_server.storage import ProjectPaths
@@ -337,12 +338,22 @@ def _chunk_path(upload_dir: Path, index: int) -> Path:
 def write_chunk(upload_dir: Path, index: int, data: bytes) -> None:
     """Idempotent: re-PUTting the same index overwrites it (§5.5). Writes to
     `.part` then renames, so a crash mid-write never leaves a half-written
-    chunk at the real name for `assemble()` to trip over."""
+    chunk at the real name for `assemble()` to trip over.
+
+    A replay of the SAME bytes is a true no-op (nothing renamed), and an
+    overwrite rides out a transient Windows lock on the chunk (a reader such as
+    the live decoder, Defender or the indexer holding it open makes the rename
+    fail with WinError 5; decisions/00217)."""
     upload_dir.mkdir(parents=True, exist_ok=True)
     dest = _chunk_path(upload_dir, index)
+    try:
+        if dest.stat().st_size == len(data) and dest.read_bytes() == data:
+            return
+    except FileNotFoundError:
+        pass
     tmp = dest.with_suffix(dest.suffix + ".part")
     tmp.write_bytes(data)
-    os.replace(tmp, dest)
+    replace_riding_out_scanners(tmp, dest)
 
 
 def _contiguous_chunk_sizes(upload_dir: Path) -> list[int]:

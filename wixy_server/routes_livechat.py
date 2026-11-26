@@ -30,6 +30,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt
 
 from builder.jsontypes import JsonObject
 from wixy_server.background import ContainedTaskGroup
+from wixy_server.http_tls import shared_ssl_context
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat.drawing_broker import DrawingBroker, LiveDrawingQueue
 from wixy_server.livechat.drawings import (
@@ -2206,7 +2207,7 @@ async def post_push_test(device_id: str, request: Request) -> JSONResponse:
     push_client: httpx.AsyncClient | None = getattr(request.app.state, "livechat_push_client", None)
     close_client = False
     if push_client is None:
-        push_client = httpx.AsyncClient(timeout=10.0)
+        push_client = httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context())
         close_client = True
 
     try:

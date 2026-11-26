@@ -75,6 +75,11 @@ pixelart = ["palettes/*.pal"]
 # `pytest -o addopts="" -m live_cmd <path>` / `-m live_anthropic <path>`.
 addopts = "-n 4 -m 'not live_cmd and not live_anthropic'"
 testpaths = ["builder/tests", "wixy_server/tests", "guide/tests", "pixelart/tests"]
+# A passing test's tmp_path is deleted as soon as that test ends; only failed tests keep theirs (for
+# diagnosis), and only the latest run's are kept. Without this every test's files stayed on disk for
+# the last three runs (decisions/00217).
+tmp_path_retention_policy = "failed"
+tmp_path_retention_count = 1
 markers = [
   "live_cmd: needs a real local cmd instance on 127.0.0.1:9320/9321 (spec/06 §4); excluded by default addopts",
   "live_anthropic: needs a real ANTHROPIC_API_KEY + WIXY_AI_BOT_PAT + site repo (spec/independence/05 §4); opens a real PR and spends real money; excluded by default addopts",

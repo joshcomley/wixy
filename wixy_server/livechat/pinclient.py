@@ -22,6 +22,7 @@ from typing import Literal, Protocol
 import httpx
 
 from builder.jsontypes import JsonObject
+from wixy_server.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class CmdPinVerifier:
         self._app_key = app_key
         self._base_url = base_url.rstrip("/")
         self._timeout_s = timeout_s
-        self._client = httpx.AsyncClient(transport=transport)
+        self._client = httpx.AsyncClient(transport=transport, verify=shared_ssl_context())
 
     async def aclose(self) -> None:
         await self._client.aclose()
