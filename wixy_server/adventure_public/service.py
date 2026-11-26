@@ -50,17 +50,19 @@ class PublicThreads:
     chat route, so an anonymous flood of public requests could take every thread and starve the
     private chat. Every thread call on the public side goes through `run`, which passes this
     limiter, so a flood queues behind these six tokens and the default pool stays the private
-    chat's. The limiter is created on first use, inside the running event loop (anyio primitives
-    bind to it)."""
+    chat's.
+
+    The limiter is made ONCE, here. Made outside an event loop, anyio returns an adapter that binds
+    to the loop on its first use, so this is safe at app construction. It used to be made lazily on
+    first read, and two threads reading it at the same moment each made one: work parked on one
+    limiter was never woken by tokens given back to the other (an intermittent CI hang,
+    decisions/00216 addendum)."""
 
     def __init__(self, size: int = PUBLIC_THREAD_LIMIT) -> None:
-        self._size = size
-        self._limiter: CapacityLimiter | None = None
+        self._limiter: CapacityLimiter = CapacityLimiter(size)
 
     @property
     def limiter(self) -> CapacityLimiter:
-        if self._limiter is None:
-            self._limiter = CapacityLimiter(self._size)
         return self._limiter
 
     async def run(self, fn: Callable[..., _T], *args: object) -> _T:

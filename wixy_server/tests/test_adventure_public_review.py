@@ -252,13 +252,75 @@ def default_limiter() -> anyio.CapacityLimiter:
     return anyio.to_thread.current_default_thread_limiter()
 
 
+class BackgroundCall:
+    """`call` running on its own thread. A test that lets one wait (to prove it is parked) must
+    `settle()` it before the client closes: a request still parked when the TestClient shuts down
+    keeps its event loop alive forever (the CI hang, decisions/00216 addendum)."""
+
+    def __init__(self, call: Callable[[], Any]) -> None:
+        self._box: list[Any] = []
+        self._errors: list[BaseException] = []
+        self._thread = threading.Thread(target=self._run, args=(call,), daemon=True)
+        self._thread.start()
+
+    def _run(self, call: Callable[[], Any]) -> None:
+        try:
+            self._box.append(call())
+        except BaseException as exc:  # noqa: BLE001 - re-raised by settle()
+            self._errors.append(exc)
+
+    def finished_within(self, timeout_s: float) -> bool:
+        self._thread.join(timeout_s)
+        return not self._thread.is_alive()
+
+    def settle(self, timeout_s: float = 15.0) -> Any:
+        """Wait for the call to end and return its result (re-raising its error)."""
+        assert self.finished_within(timeout_s), "the parked call never resumed"
+        if self._errors:
+            raise self._errors[0]
+        return self._box[0]
+
+
 def call_with_timeout(call: Callable[[], Any], timeout_s: float) -> tuple[bool, Any]:
-    """`(finished, result)`: run `call` on a thread and give up waiting after `timeout_s`."""
-    box: list[Any] = []
-    thread = threading.Thread(target=lambda: box.append(call()), daemon=True)
-    thread.start()
-    thread.join(timeout_s)
-    return (not thread.is_alive(), box[0] if box else None)
+    """`(finished, result)`: run `call` on a thread and give up waiting after `timeout_s`. Only
+    for calls that are EXPECTED to finish; a call meant to park uses `BackgroundCall`."""
+    background = BackgroundCall(call)
+    finished = background.finished_within(timeout_s)
+    return finished, (background.settle(0) if finished else None)
+
+
+class TestPublicThreadsHasOneLimiter:
+    def test_two_threads_reading_the_budget_at_once_see_one_limiter(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The budget is ONE limiter for the app's life. It used to be made on first use, so the
+        test thread and an app thread reading it at the same moment each made one: work parked
+        on one was never woken by tokens given back to the other (the intermittent CI hang)."""
+        from wixy_server.adventure_public import service as service_module
+
+        made: list[object] = []
+        meet = threading.Barrier(2, timeout=1.0)
+        real = anyio.CapacityLimiter
+
+        def slow_limiter(total_tokens: float) -> anyio.CapacityLimiter:
+            try:
+                meet.wait()  # two first readers at once meet here (a lone creator times out)
+            except threading.BrokenBarrierError:
+                pass
+            limiter = real(total_tokens)
+            made.append(limiter)
+            return limiter
+
+        monkeypatch.setattr("wixy_server.adventure_public.service.CapacityLimiter", slow_limiter)
+        threads = service_module.PublicThreads()
+        seen: list[object] = []
+        readers = [threading.Thread(target=lambda: seen.append(threads.limiter)) for _ in range(2)]
+        for reader in readers:
+            reader.start()
+        for reader in readers:
+            reader.join(5)
+        assert len(seen) == 2 and seen[0] is seen[1]
+        assert len(made) == 1
 
 
 class TestOwnThreadBudget:
@@ -304,12 +366,15 @@ class TestOwnThreadBudget:
         with public_client(storage_root, wixy_repo_root, monkeypatch) as client:
             pool = service(client).threads
             assert int(pool.limiter.total_tokens) == 6
+            code = code_of(client, "AAA.one")
             release = saturate(client, lambda: pool.limiter)
+            parked: BackgroundCall | None = None
             try:
-                code = code_of(client, "AAA.one")
                 # A public request is now parked on its own full budget...
-                finished, _ = call_with_timeout(lambda: client.get(f"/api/pack/{code}"), 0.6)
-                assert not finished, "the public side should be waiting for its own threads"
+                parked = BackgroundCall(lambda: client.get(f"/api/pack/{code}"))
+                assert not parked.finished_within(0.6), (
+                    "the public side should be waiting for its own threads"
+                )
 
                 # ...while a thread call on the default pool (what a private route makes) is free.
                 async def private_call() -> str:
@@ -319,6 +384,10 @@ class TestOwnThreadBudget:
                 assert result == "done"
             finally:
                 release()
+                if parked is not None:
+                    # Once the budget is back the parked request is answered (and nothing is left
+                    # running into the client's shutdown).
+                    assert parked.settle().status_code == 200
 
     def test_assets_and_pictures_keep_their_headers(
         self, storage_root: Path, wixy_repo_root: Path, monkeypatch: pytest.MonkeyPatch

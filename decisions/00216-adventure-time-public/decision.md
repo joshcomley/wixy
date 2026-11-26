@@ -90,3 +90,25 @@ the original decision where they differ (the lengthen-both code rule, the IPv6 /
 10. **The client route mirrors `is_code` exactly** (`route.ts`): any `/d/...` that is not exactly a code is the same
     "not on the map" page the server renders, never a fresh game at that address.
 11. **Re-banking keeps the existing entry** (its date and its place) in `memory.ts`.
+
+
+## Addendum: the intermittent hang on CI's Linux runner (workspace 65, delivery PR #447)
+
+**Symptom.** The delivery PR's `pytest` step ran 45+ minutes and never finished (the job has no
+timeout); the same suite passed on Windows. On Linux (WSL, the CI image's Python 3.14), 1 run in 6
+of the public-game tests hung in `TestOwnThreadBudget::test_a_saturated_public_budget_does_not_block_a_private_thread_call`,
+at the TestClient's shutdown: its event loop stayed alive for one request still parked on the
+public thread budget.
+
+**Root cause.** `PublicThreads` made its `CapacityLimiter` lazily, on first read. The test read it
+from its own thread while a startup job read it on the app's thread; both saw "not made yet" and
+each made one. The test filled one limiter, the request parked on it, and the tokens were given
+back to the other, so the parked request was never woken and shutdown waited for it forever.
+`test_two_threads_reading_the_budget_at_once_see_one_limiter` forces that interleaving (red before
+the fix). In production every read is on the one event loop, so it could not interleave there, but
+the lazy creation was a hazard with no benefit.
+
+**Decided.** The limiter is made once, in `PublicThreads.__init__` (anyio returns an adapter outside
+an event loop that binds on first use). The saturation test now holds its parked request as a
+`BackgroundCall` and, after giving the budget back, waits for it to be answered (200), so no test
+leaves a request running into the client's shutdown.
