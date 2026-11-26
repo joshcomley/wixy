@@ -1,0 +1,50 @@
+# The test suite never downloads, cleans up after itself, and starts apps cheaply
+
+## Symptom (2026-11-26, workspace 00065)
+
+A full `pytest` run on the hub was 57 % done after 63 minutes (CI's whole python job is ~35 min) and
+was writing an estimated 40-53 GiB an hour into its temp directory on hub D:, threatening the hub's
+recorders (they stop below 110 GiB free). Each app-starting test's `tmp_path` held ~38 MB.
+
+## Root cause (measured)
+
+1. **A download per test.** `create_app` starts `CookoutVisualsService`, whose first sweep self-heals
+   the Cookout picture pack: a fresh tmp storage root never holds it, so EVERY app-starting test
+   downloaded the 44 MB `cookout-images-v2.tar` from GitHub and unpacked its 6,974 pictures into its
+   own `storage/cookout-images/`. ~2,200 such tests in a run = ~84 GB written, and every outcome
+   depended on GitHub being reachable.
+2. **Nothing was cleaned up.** pytest's default retention keeps every test's `tmp_path` for the last
+   three runs.
+3. **Each sweep stat-ed every object.** `PackStore.missing` checked `is_file()` for each of the
+   ~7,000 objects in each search directory (13,948 checks), ~5 s per app start on a loaded box, even
+   when the objects directory did not exist.
+4. **Each app start re-parsed the shipped files.** The Cookout ingredient bank (twice), the picture
+   manifest and the catalogue were read and validated on every `create_app` (~3.3 s on a loaded box).
+
+cProfile of one `/api/version` test after fix 1: 5.5 s in `leak_guard.drain` (the sweep's
+`missing()`), 1.7 s `default_bank`, 1.6 s `load_visuals`.
+
+## Decided
+
+- `wixy_server/tests/conftest.py`: an autouse guard makes `cookout_pack._download` raise
+  `FetchRefused` for any http(s) URL whose host is not loopback. `FetchRefused` is the self-heal's
+  own "not now" answer, so the app keeps its emoji tiles; the pack tests' loopback test server and
+  the downloader's own scheme check are unaffected. Pinned by `test_suite_never_downloads.py`
+  (red on the old code: the lifespan test found the pack's files in storage).
+- `pyproject.toml`: `tmp_path_retention_policy = "failed"`, `tmp_path_retention_count = 1`. A
+  passing test's directory is deleted at its teardown; only failures of the latest run are kept.
+- `PackStore.missing` lists each search directory once (`os.scandir` of its `ab/` subdirectories)
+  instead of a stat per object per directory. Same answer, O(files present).
+- `load_cookout_bank`, `load_manifest`, `load_cookout_catalogue` cache the parsed file per process,
+  keyed on (path, mtime_ns, size); a failure is never cached. The returned objects are read-only
+  (frozen dataclasses of tuples/frozensets/mappings), so sharing them is safe; a changed file is read
+  again.
+
+Measured after: the Cookout + version + guard tests (756) ran in 81 s at `-n 4` on the loaded hub;
+the 22 version tests alone had taken ~135 s.
+
+## Watch for
+
+- A new background job that fetches from the internet at app start needs the same treatment: tests
+  must never reach the internet. Inject a fake, or extend the conftest guard.
+- Never mutate an object returned by those three loaders; they are shared across apps in a process.

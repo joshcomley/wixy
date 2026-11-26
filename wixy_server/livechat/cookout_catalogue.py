@@ -14,6 +14,7 @@ down (the UI falls back to the bank's `blurb`, and a picture-less tile).
 
 from __future__ import annotations
 
+import functools
 import hashlib
 import json
 import logging
@@ -378,8 +379,21 @@ def parse_cookout_catalogue(raw: object) -> Catalogue:
 
 def load_cookout_catalogue(path: Path | None = None) -> Catalogue:
     target = CATALOGUE_PATH if path is None else path
+    # The shipped file is parsed once per process (it never changes while the process runs: every
+    # app a test suite starts used to re-read and re-validate it, decisions/00217). Keyed on the
+    # file's identity, so a different path or an edited file is read again; a failure is never
+    # cached.
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        stat = target.stat()
+    except OSError as exc:
+        raise CatalogueError(f"cannot read catalogue {target}: {exc}") from exc
+    return _load_catalogue_file(str(target), stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=8)
+def _load_catalogue_file(target: str, _mtime_ns: int, _size: int) -> Catalogue:
+    try:
+        raw = json.loads(Path(target).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         raise CatalogueError(f"cannot read catalogue {target}: {exc}") from exc
     return parse_cookout_catalogue(raw)
