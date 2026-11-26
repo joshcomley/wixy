@@ -10,7 +10,7 @@ import pytest
 
 import wixy_server.app as wixy_app_module
 from wixy_server.cmdchat import CmdChatClient
-from wixy_server.livechat.adventure_pack import CmdAdventureResearcher
+from wixy_server.livechat.adventure_pack import PACK_CALLER, CmdAdventureResearcher
 from wixy_server.livechat.transcribe import CmdTranscriber
 from wixy_server.tests import leak_guard
 
@@ -47,8 +47,12 @@ def _default_adventure_researcher_never_reaches_a_real_cmd(
     def _inert(request: httpx.Request) -> httpx.Response:
         return httpx.Response(404)
 
-    def _inert_researcher(_client: CmdChatClient) -> CmdAdventureResearcher:
-        return CmdAdventureResearcher(CmdChatClient(transport=httpx.MockTransport(_inert)))
+    def _inert_researcher(
+        _client: CmdChatClient, *, caller: str = PACK_CALLER
+    ) -> CmdAdventureResearcher:
+        return CmdAdventureResearcher(
+            CmdChatClient(transport=httpx.MockTransport(_inert)), caller=caller
+        )
 
     monkeypatch.setattr(wixy_app_module, "CmdAdventureResearcher", _inert_researcher)
 

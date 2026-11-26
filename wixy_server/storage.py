@@ -105,6 +105,28 @@ class ProjectPaths:
         return self.locks_dir / "publish.lock"
 
     @property
+    def adventure_public_dir(self) -> Path:
+        """spec/adventure-public/README.md §2.2 (Inv 61): the PUBLIC Adventure Time game's own
+        storage tree — its pack cache (`public.db`) and picture files. Entirely separate from
+        `server_dir` (public data never enters `server.db`) and, like it, absent from the backup
+        allowlist (it is a rebuildable cache). Created lazily by the store."""
+        return self.root / "adventure-public"
+
+    @property
+    def adventure_public_db(self) -> Path:
+        return self.adventure_public_dir / "public.db"
+
+    @property
+    def adventure_public_pictures(self) -> Path:
+        """`pictures/<id>/full.jpg` + `thumb.jpg`, one directory per picture."""
+        return self.adventure_public_dir / "pictures"
+
+    @property
+    def adventure_public_research(self) -> Path:
+        """The empty, non-git folder cmd runs the public research in (its own cwd)."""
+        return self.adventure_public_dir / "research"
+
+    @property
     def server_dir(self) -> Path:
         """spec/server-chat/00-brief.md §4: the PIN-protected admin live-chat's own
         private storage tree — never entered into the site repo, builds, publish,
