@@ -75,6 +75,10 @@ pytest                  # full suite — bare, so the -n 4 addopts cap applies
 next to production cmd, and `-n auto` caused a real outage 2026-07-07). `-n0` for serial
 debugging only. Run an expensive suite once and grep the captured log rather than re-running.
 
+**A hung test fails, it never holds a run** (decisions/00216 addendum): `pytest-timeout` fails any test still
+running after 10 minutes (`timeout = 600` in `pyproject.toml`) with every thread's stack, and the CI `python`,
+`e2e` and `image-boot-proof` jobs carry `timeout-minutes` (30 / 45 / 30) instead of GitHub's 6-hour default.
+
 **The suite never reaches the internet and cleans up after itself** (decisions/00217). An autouse
 guard in `wixy_server/tests/conftest.py` refuses any non-loopback pack download (before it, every
 app-starting test downloaded and unpacked the 44 MB Cookout picture pack, ~38 MB written per test);
