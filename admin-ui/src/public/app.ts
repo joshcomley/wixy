@@ -240,6 +240,7 @@ export function mountPublicApp(deps: PublicAppDeps): PublicApp {
   function onPopState(): void {
     const route = parseRoute(currentPath());
     if (route.kind === "place") showPlace(route.code, "none");
+    else if (route.kind === "missing") showMissing();
     else newRound("none");
   }
 
@@ -305,6 +306,7 @@ export function mountPublicApp(deps: PublicAppDeps): PublicApp {
     const route = parseRoute(currentPath());
     const wanted = boot.code ?? (route.kind === "place" ? route.code : null);
     if (wanted !== null) showPlace(wanted, "none");
+    else if (route.kind === "missing") showMissing();
     else newRound("none");
   }
 

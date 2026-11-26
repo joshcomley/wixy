@@ -495,6 +495,12 @@ class PackTiming:
     early_retry_s: float = 150.0
     concurrency: int = 2
     max_consecutive_poll_errors: int = 30
+    stale_sweep_interval_s: float = 300.0
+    """The PUBLIC game's research sweep looks for stuck `pending` packs this often (the private game
+    ignores it: it has no such sweep)."""
+    stale_margin_s: float = 300.0
+    """...and re-claims one only once its row has been untouched for `give_up_s` plus this margin,
+    so a job that is alive, or about to give up by itself, is never taken over."""
 
 
 class PictureJob(Protocol):

@@ -196,7 +196,7 @@ real provisioning failure (decisions/00031).
 - **Public host** — the host name in `WIXY_ADVENTURE_PUBLIC_HOST` (`adventure.cinnamons.uk`). A request for it is handed
   by the **host gate** to the public application only (`docs/ai/adventure-public.md`).
 - **Short code** — the 6 lower-case characters naming a destination in a link (`/d/<code>`): the first 6 base32
-  characters of `sha256(destination_id)`; lengthened to 8 for both of two colliding destinations.
+  characters of `sha256(destination_id)`; pinned per destination in `codes_pinned.json`, and only a newcomer that clashes is lengthened (to 8, then 10, 12).
 - **Public pack cache** — `adventure-public/public.db`: one `packs` row per destination, shared by every visitor; pack
   `state` is `none` (no row) / `pending` / `ready` / `failed`, `images` is `none` / `pending` / `done` / `failed`
   (the view shows `pending` or `done`).

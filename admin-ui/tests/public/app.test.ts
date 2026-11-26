@@ -306,6 +306,20 @@ describe("public app: /d/<code>", () => {
     expect(r.paneFact("phase")).toBe("idle");
   });
 
+  it.each(["/d/ABCDEF", "/d/aaaaa4/", "/d/aaaa"])("%s is the not-on-the-map page as the server renders it, not a fresh game at that address", async (path) => {
+    window.history.replaceState(null, "", path);
+    const r = await mount();
+    expect(r.q<HTMLElement>(".adv-pub-missing").hidden).toBe(false);
+    expect(r.text(".adv-pub-missing-title")).toBe(MISSING_TITLE);
+    expect(r.q<HTMLElement>(".wx-srv-adv").hidden).toBe(true);
+    expect(r.app.backend()?.currentSeq() ?? null).toBeNull();
+    expect(window.location.pathname).toBe(path);
+    r.q(".adv-pub-spin").click();
+    await r.advance(50);
+    expect(window.location.pathname).toBe("/");
+    expect(r.paneFact("phase")).toBe("idle");
+  });
+
   it("Spin the globe / New / Play again leave a place page for / (a new history entry) and start a fresh game", async () => {
     window.history.replaceState(null, "", "/d/aaaaa4");
     const r = await mount();

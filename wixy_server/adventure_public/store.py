@@ -36,6 +36,9 @@ RETRY_BASE_S: Final = 600.0
 """A failed pack may be asked for again this long after the failure; the wait doubles per try."""
 MAX_TRIES_PER_WINDOW: Final = 3
 TRIES_WINDOW_S: Final = 24 * 3600.0
+DEFAULT_CACHE_LIMIT: Final = 4096
+"""How many settled packs the in-memory read cache holds unless told otherwise (`create_app` sets it
+to the size of the bank: the cache is keyed by destination, so it can never need more)."""
 UNAVAILABLE_RETRY_S: Final = 60.0
 """When cmd could not be reached, the pack may be asked for again after this (and the try is not
 counted: a cmd outage must not lock a destination out for a day)."""
@@ -178,11 +181,43 @@ def retry_delay_s(tries: int) -> float:
     return float(RETRY_BASE_S * (2 ** max(0, tries - 1)))
 
 
+def _settled_until(row: PackRow) -> tuple[bool, float | None]:
+    """`(settled, valid_until)`: whether a row can be served from the read cache, and until when.
+    `ready` with no picture wait pending never changes again (`valid_until` None). A `failed` row
+    cannot change before its `next_try_at` (`request_start` refuses until then, in this process and
+    in any other), so it is good until then. Anything else (`pending`, a picture wait) moves on its
+    own and is never cached."""
+    if row.state == "ready" and row.images != "pending":
+        return True, None
+    if row.state == "failed" and row.next_try_at is not None:
+        return True, row.next_try_at
+    return False, None
+
+
+@dataclass(frozen=True, slots=True)
+class _Cached:
+    value: tuple[PackRow, list[PictureRow]]
+    valid_until: float | None
+
+
 class PublicPackStore:
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, cache_limit: int = DEFAULT_CACHE_LIMIT) -> None:
         self._db_path = db_path
         self._ready = False
         self._ready_lock = threading.Lock()
+        self._cache_limit = max(1, cache_limit)
+        self._cache: dict[str, _Cached] = {}
+        self._versions: dict[str, int] = {}
+        self._cache_lock = threading.Lock()
+
+    @property
+    def cache_limit(self) -> int:
+        return self._cache_limit
+
+    @property
+    def cached_count(self) -> int:
+        with self._cache_lock:
+            return len(self._cache)
 
     @property
     def db_path(self) -> Path:
@@ -245,7 +280,9 @@ class PublicPackStore:
             return int(row["version"]) if row is not None else 0
 
     @contextmanager
-    def _write_txn(self) -> Iterator[sqlite3.Connection]:
+    def _write_txn(self, destination_id: str | None = None) -> Iterator[sqlite3.Connection]:
+        """A `BEGIN IMMEDIATE` transaction. Every write to a destination's row passes its id, so
+        the read cache drops that destination once the transaction has ended (committed or not)."""
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -257,6 +294,13 @@ class PublicPackStore:
             raise
         finally:
             conn.close()
+            if destination_id is not None:
+                self._invalidate(destination_id)
+
+    def _invalidate(self, destination_id: str) -> None:
+        with self._cache_lock:
+            self._versions[destination_id] = self._versions.get(destination_id, 0) + 1
+            self._cache.pop(destination_id, None)
 
     @contextmanager
     def _read_txn(self) -> Iterator[sqlite3.Connection]:
@@ -283,7 +327,34 @@ class PublicPackStore:
 
     def get_with_pictures(self, destination_id: str) -> tuple[PackRow, list[PictureRow]] | None:
         """The pack and its pictures from ONE snapshot (so a reader never sees `images = done`
-        without the rows)."""
+        without the rows).
+
+        A SETTLED pack (`_settled_until`) is served from an in-memory cache, one entry per
+        destination (never more than `cache_limit`, the size of the bank), dropped by any write to
+        that destination in this process and, for a `failed` pack, expiring at its `next_try_at`:
+        a visitor flood on a finished place costs no database read, and a blue/green neighbour that
+        changes a row cannot leave this process serving it stale (nothing but a settled state is
+        ever cached, and a settled state only changes through a write)."""
+        now = time.time()
+        with self._cache_lock:
+            hit = self._cache.get(destination_id)
+            if hit is not None:
+                if hit.valid_until is None or now < hit.valid_until:
+                    return hit.value
+                del self._cache[destination_id]
+            version = self._versions.get(destination_id, 0)
+        value = self._read_with_pictures(destination_id)
+        if value is not None:
+            settled, valid_until = _settled_until(value[0])
+            if settled:
+                with self._cache_lock:
+                    if self._versions.get(destination_id, 0) == version:
+                        while len(self._cache) >= self._cache_limit:
+                            del self._cache[next(iter(self._cache))]
+                        self._cache[destination_id] = _Cached(value, valid_until)
+        return value
+
+    def _read_with_pictures(self, destination_id: str) -> tuple[PackRow, list[PictureRow]] | None:
         with self._read_txn() as conn:
             row = conn.execute(
                 "SELECT * FROM packs WHERE destination_id = ?", (destination_id,)
@@ -310,6 +381,34 @@ class PublicPackStore:
                 "ORDER BY started_at, destination_id"
             ).fetchall()
             return [(str(row["destination_id"]), row["run_id"]) for row in rows]
+
+    def stale_pending(self, *, stale_before: float) -> list[str]:
+        """Packs whose research looks abandoned: `pending` and untouched since before
+        `stale_before` (every step of a live job, the start, the recorded run, the outcome,
+        rewrites `updated_at`)."""
+        with self._read_txn() as conn:
+            rows = conn.execute(
+                "SELECT destination_id FROM packs WHERE state = 'pending' AND updated_at < ? "
+                "ORDER BY updated_at, destination_id",
+                (stale_before,),
+            ).fetchall()
+            return [str(row["destination_id"]) for row in rows]
+
+    def claim_pending(
+        self, destination_id: str, *, stale_before: float, now: float | None = None
+    ) -> bool:
+        """Take over an abandoned `pending` pack: a compare-and-set on `(state = 'pending' AND
+        updated_at < stale_before)` that stamps `updated_at = now`, so two sweeps (this process's,
+        or a blue/green neighbour's) claim it once and the next claim waits a full stale age.
+        `False` = it moved on, or someone else just claimed it."""
+        with self._write_txn(destination_id) as conn:
+            now_s = time.time() if now is None else now
+            cursor = conn.execute(
+                "UPDATE packs SET updated_at = ? "
+                "WHERE destination_id = ? AND state = 'pending' AND updated_at < ?",
+                (now_s, destination_id, stale_before),
+            )
+            return cursor.rowcount == 1
 
     def pending_pictures(self) -> list[str]:
         """Startup recovery: every `ready` pack whose pictures are still `pending` (the previous
@@ -341,7 +440,7 @@ class PublicPackStore:
         restarts once 24 hours have passed since its first try, else this is one more try); a
         `failed` row that may not yet be asked for again answers `wait`; a `pending` or `ready` row
         answers `exists`. Compare-and-set under the write lock, so two requests start one run."""
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             now_s = time.time() if now is None else now
             row = conn.execute(
                 "SELECT * FROM packs WHERE destination_id = ?", (destination_id,)
@@ -391,7 +490,7 @@ class PublicPackStore:
         `(state = 'pending' AND run_id = expected_run_id)` (NULL for the first run, the dead run's
         id for the single early retry). `False` means the pack moved on (another process already
         started a run): the caller cancels its run."""
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             now_s = time.time() if now is None else now
             cursor = conn.execute(
                 "UPDATE packs SET run_id = ?, updated_at = ? "
@@ -422,7 +521,7 @@ class PublicPackStore:
         24 hour window has failed, not before that window ends. `transient` (cmd could not be
         reached) does not count the try and allows another after one minute."""
         hunt = state == "ready" and pictures_pending
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             now_s = time.time() if now is None else now
             row = conn.execute(
                 "SELECT tries, started_at FROM packs "
@@ -477,7 +576,7 @@ class PublicPackStore:
         process). A claim stamps `images_started_at = now` and counts a try; a pack already at
         `max_tries` ends as `failed` (`gave_up`). `not_due` = another process claimed it or the hunt
         is young; `gone` = the pack no longer waits."""
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             row = conn.execute(
                 "SELECT state, images, images_started_at, images_tries FROM packs "
                 "WHERE destination_id = ?",
@@ -505,7 +604,7 @@ class PublicPackStore:
     def fail_pictures(self, destination_id: str, *, now: float | None = None) -> bool:
         """The pictures are not coming (nothing found, or a failure): the wait ends. A
         compare-and-set on `images = 'pending'`; `False` = nothing was waiting."""
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             now_s = time.time() if now is None else now
             cursor = conn.execute(
                 "UPDATE packs SET images = 'failed', rev = rev + 1, updated_at = ? "
@@ -525,7 +624,7 @@ class PublicPackStore:
         `images = done`. A compare-and-set: it attaches only while the pack is `ready` with `images
         = pending`; otherwise (another process finished it, the pack is gone) it returns False and
         the caller removes the staged files."""
-        with self._write_txn() as conn:
+        with self._write_txn(destination_id) as conn:
             now_s = time.time() if now is None else now
             row = conn.execute(
                 "SELECT state, images FROM packs WHERE destination_id = ?", (destination_id,)

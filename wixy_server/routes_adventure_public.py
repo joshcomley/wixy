@@ -18,19 +18,21 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
+import stat
 import time
 from collections.abc import Callable
 from typing import Any, Final
 
-import anyio
-from fastapi import APIRouter, FastAPI, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, Response
+from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 from fastapi.types import DecoratedCallable
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from wixy_server.adventure_public.codes import PublicDestination
-from wixy_server.adventure_public.limits import client_key
+from wixy_server.adventure_public.files import PooledFileResponse
+from wixy_server.adventure_public.limits import StartTicket, client_key
 from wixy_server.adventure_public.pictures import FULL_NAME, THUMB_NAME
 from wixy_server.adventure_public.runner import PUBLIC_UNAVAILABLE_TEXT
 from wixy_server.adventure_public.service import AdventurePublicService
@@ -45,6 +47,10 @@ _PICTURE_ID_RE: Final = re.compile(r"[0-9a-f]{32}")
 _MEDIA_NAMES: Final = {THUMB_NAME: "thumb", FULL_NAME: "full"}
 _IMMUTABLE: Final = "public, max-age=31536000, immutable"
 _READY_MAX_AGE_S: Final = 60
+UNAVAILABLE_TEXT: Final = (
+    "Adventure Time isn't available right now - please try again in a little while"
+)
+"""What every public page and API route answers (503) while the public store has not prepared."""
 
 
 def _service(request: Request) -> AdventurePublicService:
@@ -170,22 +176,54 @@ def _etag_matches(header: str | None, etag: str) -> bool:
     return any(token.strip().removeprefix("W/") == wanted for token in header.split(","))
 
 
+def _once(call: Callable[[], None]) -> Callable[[], None]:
+    """`call` at most once (a start-budget refund is owed once, whichever path discovers it)."""
+    done = False
+
+    def run() -> None:
+        nonlocal done
+        if not done:
+            done = True
+            call()
+
+    return run
+
+
 def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
     """The public application: the routes above and nothing else (no docs, no OpenAPI, no slash
-    redirects). Mounted behind the host gate by `create_app`."""
+    redirects). Mounted behind the host gate by `create_app`.
+
+    Every blocking call goes through `service.threads` (the public host's own worker-thread budget,
+    never anyio's shared default pool), and every page and API route first checks that the public
+    store prepared at start: if it did not, they answer 503 and touch nothing (the static assets,
+    robots and the manifest need no store and are still served)."""
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, redirect_slashes=False)
     app.state.adventure_public = service
+    threads = service.threads
 
     @app.exception_handler(StarletteHTTPException)
     async def _plain_errors(_request: Request, exc: StarletteHTTPException) -> Response:
         """Every unknown path is the same plain 404; nothing of the main app's error shapes."""
-        text = "Not found" if exc.status_code == 404 else "Method not allowed"
+        if exc.status_code == 404:
+            text = "Not found"
+        elif exc.status_code == 503:
+            text = UNAVAILABLE_TEXT
+        else:
+            text = "Method not allowed"
         return PlainTextResponse(text, status_code=exc.status_code, headers=exc.headers)
 
-    router = APIRouter()
+    async def require_ready() -> None:
+        if not service.status.ready:
+            raise StarletteHTTPException(
+                503, headers={"Cache-Control": "no-store", "Retry-After": "30"}
+            )
 
-    def page(path: str) -> Callable[[DecoratedCallable], DecoratedCallable]:
-        return router.api_route(path, methods=["GET", "HEAD"], include_in_schema=False)
+    router = APIRouter(dependencies=[Depends(require_ready)])
+    open_router = APIRouter()  # needs no store: served even when the store did not prepare
+
+    def page(path: str, *, gated: bool = True) -> Callable[[DecoratedCallable], DecoratedCallable]:
+        target = router if gated else open_router
+        return target.api_route(path, methods=["GET", "HEAD"], include_in_schema=False)
 
     # -- the page shell --------------------------------------------------------------------------
 
@@ -202,9 +240,7 @@ def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
                 status_code=404,
                 headers={"Cache-Control": "no-cache"},
             )
-        stored = await anyio.to_thread.run_sync(
-            lambda: service.store.get_with_pictures(place.destination.id)
-        )
+        stored = await threads.run(service.store.get_with_pictures, place.destination.id)
         image: str | None = None
         if stored is not None and stored[0].state == "ready":
             heroes = sorted(
@@ -225,16 +261,30 @@ def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
 
     # -- assets ----------------------------------------------------------------------------------
 
-    @page("/assets/{name}")
+    async def regular_file(path: Any) -> os.stat_result | None:
+        """The `os.stat` of `path` when it is a regular file (taken on the public threads), else
+        `None`."""
+        try:
+            found: os.stat_result = await threads.run(os.stat, path)
+        except OSError:
+            return None
+        return found if stat.S_ISREG(found.st_mode) else None
+
+    @page("/assets/{name}", gated=False)
     async def get_asset(name: str, request: Request) -> Response:
-        path = service.assets.resolve(name)
+        path = await threads.run(service.assets.resolve, name)
         if path is None:
             return PlainTextResponse("Not found", status_code=404)
-        fingerprint = await anyio.to_thread.run_sync(service.assets.fingerprint, path)
+        found = await regular_file(path)
+        if found is None:
+            return PlainTextResponse("Not found", status_code=404)
+        fingerprint = await threads.run(service.assets.fingerprint, path)
         asked = request.query_params.get("v")
         immutable = fingerprint is not None and asked == fingerprint
-        return FileResponse(
+        return PooledFileResponse(
             path,
+            threads=threads,
+            stat_result=found,
             media_type=media_type(path),
             headers={"Cache-Control": _IMMUTABLE if immutable else "no-cache"},
         )
@@ -245,15 +295,22 @@ def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
         if rendition is None or _PICTURE_ID_RE.fullmatch(picture_id) is None:
             return PlainTextResponse("Not found", status_code=404)
         path = service.pictures_dir / picture_id / name
-        if not await anyio.to_thread.run_sync(path.is_file):
+        found = await regular_file(path)
+        if found is None:
             return PlainTextResponse("Not found", status_code=404)
-        return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": _IMMUTABLE})
+        return PooledFileResponse(
+            path,
+            threads=threads,
+            stat_result=found,
+            media_type="image/jpeg",
+            headers={"Cache-Control": _IMMUTABLE},
+        )
 
-    @page("/robots.txt")
+    @page("/robots.txt", gated=False)
     async def get_robots() -> PlainTextResponse:
         return PlainTextResponse("User-agent: *\nDisallow: /\n")
 
-    @page("/manifest.webmanifest")
+    @page("/manifest.webmanifest", gated=False)
     async def get_manifest() -> Response:
         return Response(
             manifest_json(),
@@ -283,9 +340,7 @@ def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
         place = service.bank.lookup(code)
         if place is None:
             return _json({"error": "not_found"}, status=404)
-        stored = await anyio.to_thread.run_sync(
-            lambda: service.store.get_with_pictures(place.destination.id)
-        )
+        stored = await threads.run(service.store.get_with_pictures, place.destination.id)
         view, cache = pack_view(service, place, stored, now=time.time())
         return _json(view, cache=cache)
 
@@ -299,34 +354,48 @@ def build_adventure_public_app(service: AdventurePublicService) -> FastAPI:
         destination_id = place.destination.id
 
         async def current() -> JSONResponse:
-            stored = await anyio.to_thread.run_sync(
-                lambda: service.store.get_with_pictures(destination_id)
-            )
+            stored = await threads.run(service.store.get_with_pictures, destination_id)
             view, cache = pack_view(service, place, stored, now=time.time())
             return _json(view, cache=cache)
 
         if not service.runner.available:
             return await current()
         now = time.time()
-        row = await anyio.to_thread.run_sync(lambda: service.store.get(destination_id))
+        row = await threads.run(service.store.get, destination_id)
         if row is not None and (
             row.state != "failed" or (row.next_try_at is not None and now < row.next_try_at)
         ):
             return await current()  # already researched or under way, or not yet retryable
         client = client_key(request.headers, request.client.host if request.client else None)
-        wait = service.limiter.try_acquire(client)
-        if wait is not None:
+        ticket = service.limiter.acquire(client)
+        if not isinstance(ticket, StartTicket):
+            wait = ticket
             return JSONResponse(
                 {"error": "rate_limited", "retryAfterS": wait},
                 status_code=429,
                 headers={"Retry-After": str(wait), "Cache-Control": "no-store"},
             )
-        result = await anyio.to_thread.run_sync(lambda: service.store.request_start(destination_id))
+        result = await threads.run(service.store.request_start, destination_id)
         if result.kind != "started":
-            service.limiter.release(client)  # someone else began it first
+            service.limiter.release(ticket)  # someone else began it first
             return await current()
-        service.runner.start(destination_id)
+        refund = _once(lambda: service.limiter.release(ticket))
+        if not service.runner.start(destination_id, refund):
+            # Nobody can run the job (the background group is gone): never leave a `pending` row
+            # no one is researching. It becomes a failure that may be asked for again
+            # in a minute (the cmd-unreachable rule), and the visitor's start is given back.
+            await threads.run(
+                lambda: service.store.finish(
+                    destination_id,
+                    run_id=None,
+                    state="failed",
+                    error=PUBLIC_UNAVAILABLE_TEXT,
+                    transient=True,
+                )
+            )
+            refund()
         return await current()
 
+    app.include_router(open_router)
     app.include_router(router)
     return app

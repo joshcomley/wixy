@@ -630,6 +630,9 @@ class TestFailedPacks:
                 conn.commit()
             finally:
                 conn.close()
+            # The raw update stands in for the clock moving on: a write the store did not make
+            # itself, so the settled-pack read cache is told (a real clock expires it by itself).
+            service(client).store._invalidate("AAA.one")  # noqa: SLF001
             retryable = get_pack(client, code)
             assert retryable["state"] == "failed"
             assert retryable["canRetry"] is True and retryable["retryAfterS"] is None
@@ -692,7 +695,7 @@ class TestRateLimits:
             assert get_pack(client, codes[2])["state"] == "none"
             # A different client is not held back by this one's limit.
             other = client.post(
-                f"/api/pack/{codes[2]}", headers={**headers, "CF-Connecting-IP": "203.0.113.6"}
+                f"/api/pack/{codes[2]}", headers={**headers, "CF-Connecting-IP": "203.0.114.6"}
             )
             assert other.status_code == 200
             # Asking again for a place already started is free: it counts for nothing.

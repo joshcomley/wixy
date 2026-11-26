@@ -79,11 +79,13 @@ await esbuild.build({
 // admin bundle and covered by the same CI drift check. The server's shell loads `app.js` and `app.css`; the
 // world map and the two map pictures are the SAME files the admin build copies above (the shell tells the
 // page their URLs in its boot JSON), so nothing is bundled twice.
+// NO source map on either public output: the public host serves nothing but this bundle, and a map would hand
+// every visitor the private client's source (the server also refuses any `.map` name on that host).
 await esbuild.build({
   entryPoints: ["src/public/main.ts"],
   bundle: true,
   minify: true,
-  sourcemap: true,
+  sourcemap: false,
   outfile: "../wixy_server/static/adventure-public/app.js",
   format: "iife",
   target: ["es2022"],
@@ -94,7 +96,7 @@ await esbuild.build({
   entryPoints: ["src/public/app.css"],
   bundle: true,
   minify: true,
-  sourcemap: true,
+  sourcemap: false,
   outfile: "../wixy_server/static/adventure-public/app.css",
   logLevel: "info",
 });

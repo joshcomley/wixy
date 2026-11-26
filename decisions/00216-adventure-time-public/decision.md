@@ -53,3 +53,40 @@ the cmd client) for no isolation the host gate does not already give structurall
   on a transient Commons outage is not retried automatically.
 - No Cloudflare Access app protects the host - on purpose. Nothing private may ever be routed through the public
   application.
+
+## Addendum - review rulings (workspace 00065, after the independent review)
+
+An independent review found the issues below; the rulings are decided and implemented
+(`wixy_server/tests/test_adventure_public_review.py`, `_codes.py`, `_limits.py`, `admin-ui/tests/...`). They amend
+the original decision where they differ (the lengthen-both code rule, the IPv6 /64 client key).
+
+1. **A pack stuck `pending` heals itself.** `PublicPackRunner` gains a supervised sweep
+   (`adventure-public-research-watch`, Inv 47, beside `adventure-public-pictures-watch`) that re-claims `pending`
+   rows untouched for `give_up_s + stale_margin_s` by compare-and-set (`store.claim_pending`) and reuses `run_job`
+   (poll the known run, else start one). Interval and margin are `PackTiming.stale_sweep_interval_s` /
+   `stale_margin_s` (the existing timing seam). `POST` handles `runner.start()` returning False: the row is settled
+   as a transient failure (retryable in a minute) and the start given back, never left `pending` for nobody.
+2. **The public side has its own thread budget** (`PublicThreads`, `CapacityLimiter(6)`) on every blocking call in
+   the public routes; `/assets` and `/media` are read through it (`PooledFileResponse`, same headers and ranges);
+   settled pack views are cached in memory per destination (bounded by the bank, dropped by any write in this
+   process, a failed pack expires at `next_try_at`, nothing unsettled is ever cached - so blue/green cannot serve a
+   stale state). *Scope note:* the runner's and picture job's store calls stay on the default pool (they are
+   bounded by the research budget, not by visitors).
+3. **The start budget pays for real runs only.** `ResearchUnavailableError` (cmd unreachable) gives the slot back
+   (client and global); the client key is an IPv4 /24 / IPv6 /48; `StartLimiter.release` takes the `StartTicket`
+   from `acquire` and removes the caller's own timestamp, not the newest (nit 8).
+4. **Unprepared store = 503.** `service.status.ready` is set only by a successful `prepare()`; until then every
+   public page and API route answers `503` plain text and creates nothing (assets/robots/manifest still serve).
+5. **Independent loops.** In `app.py` the startup resume, the research sweep and the picture sweep each start in
+   their own guarded, logged block.
+6. **No public source map.** The public esbuild entries emit none, the committed `.map` files are gone, and
+   `AssetTable.resolve` refuses any `.map` name.
+7. Pack links carry `rel="noopener noreferrer nofollow"` (spec 2.6; the private game's tests asserted `noopener` /
+   `noreferrer` with `toContain`, so none needed changing - a `nofollow` test was added).
+9. **Codes are pinned.** `adventure_public/codes_pinned.json` holds today's code of every shipped destination;
+   `build_public_bank` uses it, and only a newcomer is lengthened (8, 10, 12) when it clashes with a pinned code or
+   another newcomer. `python -m wixy_server.adventure_public.pin_codes` (`--check`) appends missing ids; a test fails
+   until every shipped destination is pinned to its current code.
+10. **The client route mirrors `is_code` exactly** (`route.ts`): any `/d/...` that is not exactly a code is the same
+    "not on the map" page the server renders, never a fresh game at that address.
+11. **Re-banking keeps the existing entry** (its date and its place) in `memory.ts`.

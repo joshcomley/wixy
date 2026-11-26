@@ -60,9 +60,15 @@ from the backup allowlist (a rebuildable cache).
   **unreachable** is not a try (`transient`: `tries` is given back, `next_try_at` = +60 s).
 - **Cost bound.** One research run per destination (1,412 in the shipped bank) plus bounded retries,
   and `limits.StartLimiter`: **30 starts per rolling hour overall, 6 per client per hour**; the client
-  is `CF-Connecting-IP` when it is a valid address (IPv6 counts as its /64), else the socket peer; the
-  counters are in memory only, bounded at 50,000 clients, never logged. Over a limit: `429`
-  `{"error":"rate_limited","retryAfterS":N}` + `Retry-After`.
+  is `CF-Connecting-IP` when it is a valid address, else the socket peer, and is a NETWORK: an IPv4
+  address counts as its /24 and an IPv6 address as its /48 (`limits.client_key`). The counters are in memory
+  only, bounded at 50,000 clients, never logged. Over a limit: `429` `{"error":"rate_limited","retryAfterS":N}`
+  + `Retry-After`. **The budgets pay for real research runs only**: `acquire` returns a `StartTicket` (client +
+  its own timestamp) and `release(ticket)` removes exactly that start; the route gives it back when another
+  request began the pack first, when the runner could not take the job (`start()` returned False: the pack is
+  settled `failed`, transient, retryable in a minute, never left `pending` with nobody to run it) and when the
+  researcher raises `ResearchUnavailableError` (cmd unreachable: the job calls the route's `refund`). So a cmd
+  outage cannot lock research out for an hour.
 
 ## 3. Routes (`routes_adventure_public.py`; public host only)
 
@@ -71,10 +77,15 @@ with Open Graph tags), `GET /assets/{name}`, `GET /api/bank`, `GET|POST /api/pac
 `GET /media/{id}/{thumb|full}.jpg`, `GET /robots.txt`, `GET /manifest.webmanifest`.
 
 - **Short codes** (`codes.py`): lower-case base32 (alphabet `abcdefghijkmnpqrstuvwxyz23456789`) of
-  `sha256(destination_id)`, first 6 characters — computed server-side only, stable forever. A 6-char
-  collision lengthens BOTH colliding codes to 8 (logged; then +2 per further collision); the shipped bank
-  has none (`test_adventure_public_codes.py` pins it, and pins four literal codes: they are in people's
-  bookmarks).
+  `sha256(destination_id)`, first 6 characters — computed server-side only, stable forever. **Pinned**:
+  `adventure_public/codes_pinned.json` (destination id -> code) holds the code of every destination in the
+  shipped bank, and `build_public_bank` uses the pinned code for a pinned id, always. A destination that is not
+  pinned (a newcomer) gets its 6-character code and, if that equals ANY pinned code (even a destination that has
+  left the bank) or another newcomer's, only the newcomer(s) lengthen to 8, then 10, 12... (logged); a pinned
+  code is never lengthened. After a bank update run `python -m wixy_server.adventure_public.pin_codes` (stdlib +
+  repo imports; `--check` only reports) and commit the table: it only ever APPENDS, and
+  `test_adventure_public_codes.py::TestPinnedCodes` fails until every shipped destination is pinned to the code
+  it has today. The test also pins four literal codes: they are in people's bookmarks.
 - **The shell** (`shell.py`): dark, phone-first, painted from an inline style; loads
   `/assets/app.css?v=<hash>` and `/assets/app.js?v=<hash>` (classic `<script defer>`, so the bundle is an
   IIFE like the admin's) computed from the files **at start** (a missing bundle leaves the bare URL; the
@@ -88,6 +99,23 @@ with Open Graph tags), `GET /assets/{name}`, `GET /api/bank`, `GET|POST /api/pac
   `adventure-satellite.webp`, `adventure-atlas.webp` — the same bytes as the private game) and the
   home-screen icons in `adventure_public/assets/`. A `?v=` equal to the file's current hash is
   `public, max-age=31536000, immutable`; anything else `no-cache`. The admin bundle is **never** served.
+- **Own thread budget** (`service.PublicThreads`, `CapacityLimiter(6)`): every blocking call on the public
+  routes (store reads, the asset table, file reads) goes through it, never anyio's shared default pool, so an
+  anonymous flood cannot starve the private chat. `/assets` and `/media` are served by
+  `adventure_public/files.PooledFileResponse`, a `FileResponse` (same headers: `Content-Length`,
+  `Last-Modified`, `ETag`, `Accept-Ranges`, byte ranges; no 304 handling, as before) whose file reads run on that
+  budget. (The runner's and the picture job's own store calls stay on the default pool: they are bounded by the
+  research budget, not by visitor request count.)
+- **Settled-pack cache** (`PublicPackStore.get_with_pictures`): a pack that can no longer change on its own
+  (`ready` with its pictures `done`/`failed`; or `failed` until its `next_try_at`) is read from memory, one entry
+  per destination, at most the size of the bank, dropped by every write to that row in this process
+  (`_write_txn(destination_id)`) and expiring at `next_try_at` for a failed one. `pending` packs and picture
+  waits are never cached, so a blue/green neighbour cannot leave this process serving a stale state. The view
+  (`pack_view`) is computed from the cached row at read time, so `retryAfterS` still counts down.
+- **Not ready**: `service.status.ready` flips true only when `prepare()` succeeded; until then every page and
+  API route answers `503` (`contracts.md`), assets/robots/manifest still serve.
+- **No source maps**: the public esbuild entries emit none, nothing `*.map` is committed in
+  `static/adventure-public/`, and `AssetTable.resolve` refuses any `.map` name.
 - **POST /api/pack/{code}** needs `Origin` equal to `https://<host>` (403 otherwise), starts research
   only when the pack is `none` or `failed` past `next_try_at`, takes a limiter slot first and gives it
   back if another request started the pack first; otherwise it answers the current view.
@@ -104,6 +132,13 @@ with Open Graph tags), `GET /assets/{name}`, `GET /api/bank`, `GET|POST /api/pac
   `(state='pending' AND run_id=?)`, resume at startup (poll a known run, else start one), give up after
   25 min (cancel the run), one retry for an early cmd `error`, never re-spawn a run whose answer might be
   lost. With no researcher a `pending` pack found at startup becomes `failed` (transient).
+- **Research sweep** (`PublicPackRunner.supervise_research` -> `watch_stale_forever` / `sweep_stale`, supervised
+  `adventure-public-research-watch`, Inv 47): every `PackTiming.stale_sweep_interval_s` (300 s) it looks for
+  `pending` rows untouched for `give_up_s + stale_margin_s` (25 min + 5 min), skips any this process already has a
+  job for, takes one over with the compare-and-set `store.claim_pending` (stamps `updated_at`, so two sweeps or a
+  blue/green neighbour claim it once) and runs the same `run_job`: poll the run the row knows, else start one.
+  Startup `resume()` is no longer the only recovery. In `app.py` the resume, the research sweep and the picture
+  sweep each start in their own guarded block, so one failing never leaves the others unstarted.
 - `pictures.PublicPictureJob` mirrors `AdventurePictureJob`: `plan_pictures` → the finder's 240 s hunt →
   stage `full.jpg` + `thumb.jpg` for every picture → ONE transaction inserts the rows and flips `images`
   to `done` (all or nothing; the files of a lost race are removed). Startup redo; a **supervised** sweep
@@ -127,7 +162,8 @@ with Open Graph tags), `GET /assets/{name}`, `GET /api/bank`, `GET|POST /api/pac
 ## 5. Tests
 
 `test_adventure_public_gate.py`, `_codes.py`, `_limits.py`, `_store.py`, `_runner.py`,
-`_pictures_job.py`, `test_routes_adventure_public.py` and `TestCommonsOnly` in
+`_pictures_job.py`, `_review.py` (the review fixes: research sweep, own thread budget, settled-pack cache,
+start-budget refund, 503 state, independent loops, no source maps), `test_routes_adventure_public.py` and `TestCommonsOnly` in
 `test_livechat_adventure_pictures.py`; shared helpers in `adventure_public_testkit.py` (`public_client`
 builds the whole app with the host set; `module_public_client` for module-scoped read-only apps, since
 starting the app is the expensive part).

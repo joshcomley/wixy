@@ -732,14 +732,30 @@ def create_app(
                 # side mid-hunt after this side's resume), ending a round whose hunts keep dying.
                 livechat_adventure_runner.supervise_pictures(background)
                 # The public game's own recovery, the same shape: resume a pack still `pending`,
-                # redo pictures the previous process left `pending`, keep the sweep going.
+                # redo pictures the previous process left `pending`, and keep both supervised
+                # sweeps (stuck research, stuck picture hunts) going. Each step is guarded on its
+                # own: a startup resume that fails must not leave the sweeps (the very thing that
+                # heals what the resume could not) unstarted.
                 if adventure_public is not None and public_ready:
+                    public_runner = adventure_public.runner
+                    public_log = logging.getLogger(__name__)
                     try:
-                        await adventure_public.runner.resume(background)
-                        adventure_public.runner.supervise_pictures(background)
+                        await public_runner.resume(background)
                     except Exception:
-                        logging.getLogger(__name__).exception(
+                        public_log.exception(
                             "the public Adventure Time game could not resume its work"
+                        )
+                    try:
+                        public_runner.supervise_research(background)
+                    except Exception:
+                        public_log.exception(
+                            "the public Adventure Time research sweep could not be started"
+                        )
+                    try:
+                        public_runner.supervise_pictures(background)
+                    except Exception:
+                        public_log.exception(
+                            "the public Adventure Time picture sweep could not be started"
                         )
                 # Cookout: resume any concept/recipe run the previous process left `pending`, and
                 # keep the supervised sweep (stale pictures, scratch cleanup) going.

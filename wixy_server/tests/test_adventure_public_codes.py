@@ -9,6 +9,7 @@ import gzip
 import hashlib
 import json
 import logging
+from pathlib import Path
 
 import pytest
 
@@ -16,12 +17,16 @@ from wixy_server.adventure_public.codes import (
     CODE_ALPHABET,
     CODE_LENGTH,
     LONG_CODE_LENGTH,
+    PINNED_CODES_PATH,
     PublicBank,
     assign_codes,
     build_public_bank,
     is_code,
+    load_pinned_codes,
     short_code,
 )
+from wixy_server.adventure_public.pin_codes import main as pin_codes_main
+from wixy_server.adventure_public.pin_codes import pin_missing
 from wixy_server.livechat.adventure_bank import load_bank
 from wixy_server.tests.adventure_testkit import fixture_bank
 
@@ -192,3 +197,124 @@ class TestPublicBank:
         assert built.lookup("EEE.two") is None
         assert built.lookup("") is None
         assert built.code_of("EEE.two") == code and built.code_of("nope") is None
+
+
+class TestPinnedCodes:
+    """A code is in people's bookmarks, so a bank update must never change one that exists: the
+    committed table `codes_pinned.json` holds every shipped destination's code, and only a NEWCOMER
+    is ever made longer to avoid a clash."""
+
+    def test_every_shipped_destination_is_pinned_to_the_code_it_has_today(self) -> None:
+        pinned = load_pinned_codes()
+        bank = load_bank()
+        ids = [d.id for unit in bank.units.values() for d in unit.destinations]
+        missing = [dest_id for dest_id in ids if dest_id not in pinned]
+        assert missing == [], (
+            "a destination is not in wixy_server/adventure_public/codes_pinned.json; run "
+            "`python -m wixy_server.adventure_public.pin_codes` and commit the result"
+        )
+        for dest_id in ids:
+            assert pinned[dest_id] == short_code(dest_id), dest_id
+        assert len(set(pinned.values())) == len(pinned)  # no two destinations share a code
+        assert all(is_code(code) for code in pinned.values())
+        built = build_public_bank(bank)
+        assert {dest_id: built.codes[dest_id] for dest_id in ids} == {i: pinned[i] for i in ids}
+
+    def test_the_table_is_a_flat_id_to_code_object(self) -> None:
+        raw = json.loads(PINNED_CODES_PATH.read_text(encoding="utf-8"))
+        assert isinstance(raw, dict) and raw
+        assert all(isinstance(k, str) and isinstance(v, str) for k, v in raw.items())
+
+    def test_a_pinned_destination_keeps_its_code_whatever_the_algorithm_says(self) -> None:
+        def other(destination_id: str, length: int) -> str:
+            return (
+                ("z" * length)
+                if destination_id == "AAA.one"
+                else short_code(destination_id, length)
+            )
+
+        codes = assign_codes(["AAA.one", "AAA.two"], code_fn=other, pinned={"AAA.one": "abcdef"})
+        assert codes["AAA.one"] == "abcdef"
+        assert codes["AAA.two"] == short_code("AAA.two")
+
+    def test_a_newcomer_that_clashes_with_a_pinned_code_is_lengthened_and_the_pinned_one_is_not(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def clash(destination_id: str, length: int) -> str:
+            if destination_id == "NEW.one" and length == CODE_LENGTH:
+                return "qqqqqq"  # exactly the code `OLD.one` already has
+            return short_code(destination_id, length)
+
+        with caplog.at_level(logging.WARNING, logger="wixy_server.adventure_public.codes"):
+            codes = assign_codes(
+                ["OLD.one", "NEW.one"], code_fn=clash, pinned={"OLD.one": "qqqqqq"}
+            )
+        assert codes["OLD.one"] == "qqqqqq"  # the old code never moves
+        assert codes["NEW.one"] == short_code("NEW.one", LONG_CODE_LENGTH)
+        assert "NEW.one" in caplog.text and "OLD.one" not in caplog.text
+
+    def test_a_newcomer_never_takes_the_code_of_a_destination_that_left_the_bank(self) -> None:
+        def clash(destination_id: str, length: int) -> str:
+            return (
+                "rrrrrr"
+                if (destination_id == "NEW.one" and length == CODE_LENGTH)
+                else (short_code(destination_id, length))
+            )
+
+        codes = assign_codes(["NEW.one"], code_fn=clash, pinned={"GONE.one": "rrrrrr"})
+        assert codes == {"NEW.one": short_code("NEW.one", LONG_CODE_LENGTH)}
+
+    def test_a_newcomer_lengthens_again_until_it_clashes_with_nothing(self) -> None:
+        def clash(destination_id: str, length: int) -> str:
+            if destination_id == "NEW.one" and length <= 8:
+                return "s" * length
+            return short_code(destination_id, length)
+
+        codes = assign_codes(
+            ["NEW.one"], code_fn=clash, pinned={"OLD.a": "s" * 6, "OLD.b": "s" * 8}
+        )
+        assert len(codes["NEW.one"]) == 10 and codes["NEW.one"] == short_code("NEW.one", 10)
+
+    def test_two_newcomers_that_clash_with_each_other_both_lengthen(self) -> None:
+        def clash(destination_id: str, length: int) -> str:
+            if destination_id in ("NEW.one", "NEW.two") and length == CODE_LENGTH:
+                return "tttttt"
+            return short_code(destination_id, length)
+
+        codes = assign_codes(["NEW.one", "NEW.two"], code_fn=clash, pinned={})
+        assert len(codes["NEW.one"]) == len(codes["NEW.two"]) == LONG_CODE_LENGTH
+
+    def test_the_public_bank_uses_the_pins(self) -> None:
+        pinned = {"AAA.one": "mmmmmm"}
+        built = build_public_bank(fixture_bank(), pinned=pinned)
+        assert built.codes["AAA.one"] == pinned["AAA.one"]
+        assert built.lookup(pinned["AAA.one"]) is not None
+        assert built.codes["AAA.two"] == short_code("AAA.two")
+
+
+class TestPinGenerator:
+    def test_the_committed_table_is_complete_so_the_generator_has_nothing_to_add(self) -> None:
+        pinned = load_pinned_codes()
+        assert pin_missing(load_bank(), pinned) == pinned
+
+    def test_it_only_ever_appends_and_never_changes_an_existing_entry(self) -> None:
+        pinned = {"AAA.one": "abcdef"}
+        table = pin_missing(fixture_bank(), pinned)
+        assert table["AAA.one"] == "abcdef"
+        assert set(table) == {d.id for u in fixture_bank().units.values() for d in u.destinations}
+        assert table["AAA.two"] == short_code("AAA.two")
+        again = pin_missing(fixture_bank(), table)
+        assert again == table
+
+    def test_the_command_writes_the_table_and_check_mode_reports_a_gap(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        target = tmp_path / "pins.json"
+        target.write_text(json.dumps({"AAA.one": "abcdef"}), encoding="utf-8")
+        assert pin_codes_main(["--check", "--table", str(target)], bank=fixture_bank()) == 1
+        assert json.loads(target.read_text(encoding="utf-8")) == {"AAA.one": "abcdef"}  # untouched
+        assert pin_codes_main(["--table", str(target)], bank=fixture_bank()) == 0
+        written = json.loads(target.read_text(encoding="utf-8"))
+        assert written["AAA.one"] == "abcdef" and len(written) > 1
+        assert pin_codes_main(["--check", "--table", str(target)], bank=fixture_bank()) == 0
+        assert "added" in capsys.readouterr().out

@@ -24,13 +24,24 @@ wixy process with the private Server chat but none of its data or reach:
    freely-licensed Wikimedia Commons files (each with its credit and licence) are fetched and published — no venue
    page is ever requested. The private game's finder keeps its venue-page source.
 4. **Cost is bounded.** The cache is keyed by destination (one research run per bank destination), retries are
-   bounded (10 min doubling, 3 per 24 h), at most 30 research starts per rolling hour overall and 6 per client, and
-   `POST /api/pack/{code}` needs `Origin == https://<host>`.
+   bounded (10 min doubling, 3 per 24 h), at most 30 research starts per rolling hour overall and 6 per client
+   (a client is an IPv4 /24 or an IPv6 /48), a start that never reached cmd or lost a race is given back, and
+   `POST /api/pack/{code}` needs `Origin == https://<host>`. A research that gets stuck `pending` is re-claimed
+   by a supervised sweep (no restart needed).
+5. **The public host cannot starve the private chat, and publishes no source.** Every blocking call on the public
+   routes (and every file it serves) runs on the public host's OWN `CapacityLimiter(6)`, never anyio's shared
+   default thread pool; a public store that did not prepare at start makes every public page and API route answer
+   `503` (nothing is created); the public bundle is built without source maps and `AssetTable` refuses any `.map`.
+6. **A short code never changes.** `adventure_public/codes_pinned.json` pins every shipped destination's code; a
+   bank update only ever appends (`python -m wixy_server.adventure_public.pin_codes`) and only a newcomer is
+   lengthened to avoid a clash.
 
 *Enforced by:* `wixy_server/tests/test_adventure_public_gate.py` (both directions of the gate, traversal, hosts, sockets,
 the setting), `test_adventure_public_runner.py` (`TestNothingEntersTheChatDatabase`, the slot, the caller),
 `test_adventure_public_store.py` (a database of its own), `test_adventure_public_limits.py`,
-`test_routes_adventure_public.py` (assets allowlist, Origin, 429s) and `test_livechat_adventure_pictures.py::TestCommonsOnly`.
+`test_routes_adventure_public.py` (assets allowlist, Origin, 429s), `test_adventure_public_review.py` (the research
+sweep, the own thread budget, the settled-pack cache, the start-budget refund, the 503 state, no source maps),
+`test_adventure_public_codes.py` (`TestPinnedCodes`, `TestPinGenerator`) and `test_livechat_adventure_pictures.py::TestCommonsOnly`.
 
 ### Inv 60 — Cookout ingredient pictures and catalogue text are engine catalogue data: generated from ingredient names only, never from chat content; not erased by delete or wipe; served only by content hash from the manifest; attached only to snapshots already in the viewer's redacted view
 

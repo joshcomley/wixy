@@ -14,6 +14,7 @@ from wixy_server.adventure_public.limits import (
     WINDOW_S,
     PublicLimits,
     StartLimiter,
+    StartTicket,
     client_key,
 )
 
@@ -100,43 +101,82 @@ class TestRelease:
     def test_a_released_start_frees_both_counters(self) -> None:
         clock = Clock()
         lim = limiter(clock, per_ip=1, overall=1)
-        assert lim.try_acquire("a") is None
+        ticket = lim.acquire("a")
+        assert isinstance(ticket, StartTicket)
         assert lim.try_acquire("a") is not None
-        lim.release("a")
+        lim.release(ticket)
         assert lim.try_acquire("a") is None  # the start another request had already begun
 
-    def test_releasing_with_nothing_counted_is_harmless(self) -> None:
+    def test_releasing_a_start_that_is_not_counted_is_harmless(self) -> None:
         lim = limiter(Clock())
-        lim.release("nobody")
+        lim.release(StartTicket("nobody", 5.0))
         assert lim.try_acquire("nobody") is None
+
+    def test_a_release_removes_the_callers_own_start_not_the_newest(self) -> None:
+        """Two clients start; the FIRST gives its start back. The second's start (the newest in the
+        overall window) must still count: when the first start's hour has passed, the overall
+        budget is still occupied by the second."""
+        clock = Clock()
+        lim = limiter(clock, per_ip=6, overall=1)
+        clock.now = 1000.0
+        mine = lim.acquire("a")
+        assert isinstance(mine, StartTicket)
+        lim.release(mine)  # a gives its start back...
+        clock.now = 1010.0
+        theirs = lim.acquire("b")  # ...and b takes the one overall slot
+        assert isinstance(theirs, StartTicket)
+        # A second release of a's already-returned start must not give back b's newer one.
+        lim.release(mine)
+        clock.now = 1020.0
+        wait = lim.acquire("c")
+        assert wait == 3590  # b's start (t = 1010) still holds the slot until 4610
+
+    def test_releasing_a_start_twice_never_touches_a_neighbours(self) -> None:
+        clock = Clock()
+        lim = limiter(clock, per_ip=6, overall=30)
+        first = lim.acquire("a")
+        clock.now += 1
+        second = lim.acquire("a")
+        assert isinstance(first, StartTicket) and isinstance(second, StartTicket)
+        lim.release(first)
+        lim.release(first)
+        assert list(lim._clients["a"]) == [second.at]  # noqa: SLF001
+        assert list(lim._global) == [second.at]  # noqa: SLF001
 
 
 class TestClientKey:
     def test_the_cloudflare_header_wins_over_the_peer(self) -> None:
-        assert client_key({"cf-connecting-ip": "203.0.113.7"}, "127.0.0.1") == "203.0.113.7"
+        assert client_key({"cf-connecting-ip": "203.0.113.7"}, "127.0.0.1") == "203.0.113.0/24"
 
     def test_the_peer_is_used_without_the_header(self) -> None:
-        assert client_key({}, "198.51.100.9") == "198.51.100.9"
+        assert client_key({}, "198.51.100.9") == "198.51.100.0/24"
 
     @pytest.mark.parametrize(
         "junk", ["", "   ", "not-an-ip", "1.2.3", "1.2.3.4.5", "x" * 200, "1.2.3.4,5.6.7.8"]
     )
     def test_a_header_that_is_not_an_address_is_ignored(self, junk: str) -> None:
-        assert client_key({"cf-connecting-ip": junk}, "198.51.100.9") == "198.51.100.9"
+        assert client_key({"cf-connecting-ip": junk}, "198.51.100.9") == "198.51.100.0/24"
 
     def test_with_nothing_usable_there_is_still_a_key(self) -> None:
         assert client_key({}, None) == "unknown"
         assert client_key({"cf-connecting-ip": "junk"}, "testclient") == "unknown"
 
-    def test_an_ipv6_client_counts_as_its_slash_64(self) -> None:
+    def test_an_ipv6_client_counts_as_its_slash_48(self) -> None:
         one = client_key({"cf-connecting-ip": "2001:db8:1:2:aaaa:bbbb:cccc:dddd"}, None)
-        two = client_key({"cf-connecting-ip": "2001:db8:1:2::1"}, None)
-        other = client_key({"cf-connecting-ip": "2001:db8:1:3::1"}, None)
-        assert one == two == "2001:db8:1:2::/64"
+        two = client_key({"cf-connecting-ip": "2001:db8:1:ffff::1"}, None)
+        other = client_key({"cf-connecting-ip": "2001:db8:2:2::1"}, None)
+        assert one == two == "2001:db8:1::/48"
         assert other != one
 
-    def test_an_ipv4_mapped_ipv6_address_is_the_ipv4_address(self) -> None:
-        assert client_key({"cf-connecting-ip": "::ffff:203.0.113.7"}, None) == "203.0.113.7"
+    def test_an_ipv4_client_counts_as_its_slash_24(self) -> None:
+        one = client_key({"cf-connecting-ip": "203.0.113.7"}, None)
+        two = client_key({"cf-connecting-ip": "203.0.113.250"}, None)
+        other = client_key({"cf-connecting-ip": "203.0.114.7"}, None)
+        assert one == two == "203.0.113.0/24"
+        assert other != one
+
+    def test_an_ipv4_mapped_ipv6_address_is_its_ipv4_slash_24(self) -> None:
+        assert client_key({"cf-connecting-ip": "::ffff:203.0.113.7"}, None) == "203.0.113.0/24"
 
 
 class TestBoundedMemory:

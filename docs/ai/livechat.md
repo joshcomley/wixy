@@ -2755,11 +2755,11 @@ the same CI drift check). It talks to nothing private: the only requests are `GE
   or `adventure_bank.py` changes.
 - **`memory.ts`**: `localStorage` `advPublic.v1.banked` (`[{code, destinationId, unitId, at}]`), `advPublic.v1.rejected` (destination ids),
   `advPublic.v1.settings` (`{includeAdvised}`); blocked, full or corrupt storage degrades to this visit without throwing. Names are never stored (resolved
-  from the public bank at read time; a banked id no longer in the bank shows greyed "No longer on the map"). The map style stays the game's own
+  from the public bank at read time; a banked id no longer in the bank shows greyed "No longer on the map"). Banking a place that is already banked changes nothing (its date and its place in the list stay). The map style stays the game's own
   per-device `wixy.adventure.mapStyle`.
 - **`app.ts`**: `/` starts a game; `/d/<code>` shows the place at once; choosing a place puts its link in the address bar (`replaceState`), a
   Holiday bank tap opens a place in-page (`pushState`), New / Play again / Spin the globe go to `/` (`pushState`), Back and Forward replay the History
-  API; an unknown code shows "That place isn't on the map any more" with Spin the globe. `app.css` imports the private chat's stylesheet (so the pane,
+  API; an unknown code shows "That place isn't on the map any more" with Spin the globe. `route.ts` mirrors the server's `codes.is_code` exactly (lower case, the 32-character alphabet, 6 to 40 long, no trailing slash): any `/d/...` address that is not exactly a code (upper case, trailing slash, too short) is that same "not on the map" page, never a fresh game started at that address. `app.css` imports the private chat's stylesheet (so the pane,
   the pack and the bank screen can never look different) and adds the page frame and the public-only parts.
 - **Tests** `admin-ui/tests/public/*.test.ts` (+ `publicFixtures.ts`, the golden file and its generator).
 

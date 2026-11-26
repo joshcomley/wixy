@@ -17,7 +17,11 @@ Concurrency and recovery, exactly as the private job except where noted:
 - every write is a compare-and-set on `(state = 'pending' AND run_id = <this run>)`, so a blue/green
   overlap where both processes poll one run stores it once;
 - at startup `resume` restarts the job for every `pending` pack: with a run id it resumes polling
-  that run, without one (the process died before the spawn) it starts a new run;
+  that run, without one (the process died before the spawn) it starts a new run. Startup is not
+  the only time a job can be lost (a route that could not hand its job over, a job that died with an
+  unexpected error), so a SUPERVISED sweep (`supervise_research`, Inv 47) re-claims, by
+  compare-and-set, every `pending` pack untouched for longer than the give-up budget plus a margin
+  and runs the same job for it — polling its known run, else starting one;
 - a failure lands as `failed` with a short generic error and a `next_try_at` (10 minutes, doubling,
   at most 3 tries per 24 hours — `store.PublicPackStore.finish`).
 """
@@ -78,6 +82,7 @@ class PublicPackRunner:
         timing: PackTiming | None = None,
         clock: Callable[[], float] = time.monotonic,
         pictures: PublicPictureJob | None = None,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self._store = store
         self._bank = bank
@@ -86,6 +91,10 @@ class PublicPackRunner:
         self._pictures = pictures
         self._timing = timing if timing is not None else PackTiming()
         self._clock = clock
+        self._wall_clock = wall_clock
+        self._active: set[str] = set()
+        """Packs this process has a job for (running or queued behind the research slot): the sweep
+        never takes one of those over."""
         self._background: ContainedTaskGroup | None = None
         # Created on first use, inside the running event loop (anyio primitives bind to it).
         self._limiter: CapacityLimiter | None = None
@@ -102,16 +111,35 @@ class PublicPackRunner:
         thread)."""
         self._cwd.mkdir(parents=True, exist_ok=True)
 
-    def start(self, destination_id: str) -> bool:
+    def start(self, destination_id: str, refund: Callable[[], None] | None = None) -> bool:
         """Begin the job for a pack whose row was just made `pending` (by
-        `store.request_start`). Returns False when the app's background group is not running (a
-        route cannot be served before the lifespan has started it, so this is a guard, not a path):
-        the row stays `pending` and the next start resumes it."""
+        `store.request_start`). `refund` gives back the start-budget slot the request took; the job
+        calls it if cmd turns out to be unreachable (no run was started, so nothing was spent).
+        Returns False when no job could be started (the app's background group is not running, or
+        there is no researcher): the caller settles the row — it must not be left `pending` with
+        nobody to run it (the sweep would heal it, but only after the give-up budget)."""
         background = self._background
         if background is None or self._researcher is None:
             return False
-        background.spawn("adventure-public-pack", self.run_job, destination_id)
+        self._spawn(background, destination_id, refund)
         return True
+
+    def _spawn(
+        self,
+        background: ContainedTaskGroup,
+        destination_id: str,
+        refund: Callable[[], None] | None = None,
+    ) -> None:
+        self._active.add(destination_id)
+        background.spawn("adventure-public-pack", self._tracked_job, destination_id, refund)
+
+    async def _tracked_job(
+        self, destination_id: str, refund: Callable[[], None] | None = None
+    ) -> None:
+        try:
+            await self.run_job(destination_id, refund)
+        finally:
+            self._active.discard(destination_id)
 
     async def resume(self, background: ContainedTaskGroup) -> int:
         """Startup recovery: bind the app's background group, then start the job for every `pending`
@@ -126,10 +154,65 @@ class PublicPackRunner:
                     destination_id, run_id, error=PUBLIC_UNAVAILABLE_TEXT, transient=True
                 )
             else:
-                background.spawn("adventure-public-pack", self.run_job, destination_id)
+                self._spawn(background, destination_id)
         if self._pictures is not None:
             await self._pictures.resume(background)
         return len(pending)
+
+    async def sweep_stale(self, background: ContainedTaskGroup) -> int:
+        """One pass of the research sweep: every `pending` pack untouched for longer than the
+        give-up budget plus the margin, and not one of this process's own jobs, is claimed
+        (compare-and-set, so a blue/green neighbour's sweep takes it once) and its job is run:
+        `run_job` polls the run the row knows, else starts one. Returns how many were claimed."""
+        if self._researcher is None:
+            return 0  # nothing can be researched here (startup `resume` settled what it found)
+        timing = self._timing
+        now = self._wall_clock()
+        stale_before = now - (timing.give_up_s + timing.stale_margin_s)
+        stale = await anyio.to_thread.run_sync(
+            lambda: self._store.stale_pending(stale_before=stale_before)
+        )
+        claimed = 0
+        for destination_id in stale:
+            if destination_id in self._active:
+                continue
+            taken = await anyio.to_thread.run_sync(
+                functools.partial(
+                    self._store.claim_pending,
+                    destination_id,
+                    stale_before=stale_before,
+                    now=self._wall_clock(),
+                )
+            )
+            if not taken:
+                continue
+            claimed += 1
+            _LOGGER.warning(
+                "public adventure pack %s was stuck pending; re-running it", destination_id
+            )
+            self._spawn(background, destination_id)
+        return claimed
+
+    async def watch_stale_forever(self, background: ContainedTaskGroup) -> None:
+        """The supervised loop: sweep every `stale_sweep_interval_s`. A failed sweep is logged and
+        tried again on the next tick, never fatal."""
+        while True:
+            await anyio.sleep(self._timing.stale_sweep_interval_s)
+            try:
+                await self.sweep_stale(background)
+            except Exception:
+                _LOGGER.exception("public adventure research: the sweep for stuck packs failed")
+
+    def supervise_research(self, background: ContainedTaskGroup) -> None:
+        """Start the research sweep as a supervised app-lifetime loop (Inv 47), next to the picture
+        sweep: a pack stuck `pending` heals within one give-up budget and a margin, with no
+        restart."""
+        self._background = background
+
+        async def _watch() -> None:
+            await self.watch_stale_forever(background)
+
+        background.supervise("adventure-public-research-watch", _watch)
 
     def supervise_pictures(self, background: ContainedTaskGroup) -> None:
         """Start the picture job's self-healing sweep as a supervised app-lifetime loop (Inv 47). A
@@ -143,11 +226,12 @@ class PublicPackRunner:
 
         background.supervise("adventure-public-pictures-watch", _watch)
 
-    async def run_job(self, destination_id: str) -> None:
+    async def run_job(self, destination_id: str, refund: Callable[[], None] | None = None) -> None:
         """Research the destination and land the outcome on its row; once the pack is `ready` (and
         pictures are configured) go on to find its pictures. Never raises for an ordinary failure
         (it becomes `failed`); only cancellation (shutdown) propagates, and the pack stays
-        `pending` for the next start to resume."""
+        `pending` for the next start to resume. `refund` is called (once) if cmd cannot be
+        reached to start the run."""
         researcher = self._researcher
         if researcher is None:
             return
@@ -155,7 +239,7 @@ class PublicPackRunner:
         pictures_due = False
         try:
             async with limiter:
-                pictures_due = await self._run(destination_id, researcher, spawn_lock)
+                pictures_due = await self._run(destination_id, researcher, spawn_lock, refund)
         except Exception:
             _LOGGER.exception("public adventure pack job for %s failed", destination_id)
             try:
@@ -215,6 +299,7 @@ class PublicPackRunner:
         destination_id: str,
         prompt: str,
         expected_run_id: str | None,
+        refund: Callable[[], None] | None = None,
     ) -> str | None:
         """Start a run (spawns serialised and at least `spawn_gap_s` apart) and record it on the
         pack. Returns the new run id, or `None` when the job is over: the pack no longer wanted a
@@ -234,6 +319,8 @@ class PublicPackRunner:
                 await self._finish_failed(
                     destination_id, expected_run_id, error=PUBLIC_UNAVAILABLE_TEXT, transient=True
                 )
+                if refund is not None:
+                    refund()  # cmd never saw a run: the visitor's start budget is not spent
                 return None
             except ResearchError:
                 _LOGGER.warning(
@@ -254,7 +341,11 @@ class PublicPackRunner:
         return run_id
 
     async def _run(
-        self, destination_id: str, researcher: AdventureResearcher, spawn_lock: anyio.Lock
+        self,
+        destination_id: str,
+        researcher: AdventureResearcher,
+        spawn_lock: anyio.Lock,
+        refund: Callable[[], None] | None = None,
     ) -> bool:
         """Drive the research to its outcome. Returns True exactly when THIS call stored the pack
         `ready` and its picture wait is pending (the caller then runs the picture job)."""
@@ -273,7 +364,9 @@ class PublicPackRunner:
         run_id = row.run_id
         may_retry = run_id is None  # a resumed run has no known start, so no early retry
         if run_id is None:
-            run_id = await self._start_run(researcher, spawn_lock, destination_id, prompt, None)
+            run_id = await self._start_run(
+                researcher, spawn_lock, destination_id, prompt, None, refund
+            )
             if run_id is None:
                 return False
         started = self._clock()

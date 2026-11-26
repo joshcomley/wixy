@@ -47,7 +47,6 @@ _MEDIA_TYPES: Final = {
     ".js": "text/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
     ".json": "application/json",
-    ".map": "application/json",
     ".webp": "image/webp",
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -84,8 +83,10 @@ class AssetTable:
 
     def resolve(self, name: str) -> Path | None:
         """The file `name` names, or `None`. Only a regular file directly in one of the three
-        directories (and, in the shared directory, only the three imagery names) is returned."""
-        if not is_asset_name(name):
+        directories (and, in the shared directory, only the three imagery names) is returned. A
+        source map (`*.map`) is never served: the public bundle is built without one, and a stray
+        file in the bundle directory must not publish the private client's source."""
+        if not is_asset_name(name) or name.lower().endswith(".map"):
             return None
         candidates = [self._bundle / name]
         if name in SHARED_ASSET_NAMES:

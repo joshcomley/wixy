@@ -11,8 +11,14 @@ installs the host gate in front of everything else.
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Final, TypeVar
+
+import anyio
+import anyio.to_thread
+from anyio import CapacityLimiter
 
 from wixy_server.adventure_public.codes import PublicBank, build_public_bank
 from wixy_server.adventure_public.limits import PublicLimits, StartLimiter
@@ -30,6 +36,43 @@ from wixy_server.livechat.adventure_pictures import (
 from wixy_server.storage import ProjectPaths
 
 BUILTIN_ASSETS_DIR = Path(__file__).parent / "assets"
+PUBLIC_THREAD_LIMIT: Final = 6
+"""How many worker threads the public routes may hold at once (see `PublicThreads`)."""
+
+_T = TypeVar("_T")
+
+
+class PublicThreads:
+    """The public host's OWN worker-thread budget (`CapacityLimiter(6)`).
+
+    A blocking call on the public routes (a database read, a file read, a directory look) runs on a
+    thread; anyio's default pool is ONE process-wide limiter (40 threads) shared with every private
+    chat route, so an anonymous flood of public requests could take every thread and starve the
+    private chat. Every thread call on the public side goes through `run`, which passes this
+    limiter, so a flood queues behind these six tokens and the default pool stays the private
+    chat's. The limiter is created on first use, inside the running event loop (anyio primitives
+    bind to it)."""
+
+    def __init__(self, size: int = PUBLIC_THREAD_LIMIT) -> None:
+        self._size = size
+        self._limiter: CapacityLimiter | None = None
+
+    @property
+    def limiter(self) -> CapacityLimiter:
+        if self._limiter is None:
+            self._limiter = CapacityLimiter(self._size)
+        return self._limiter
+
+    async def run(self, fn: Callable[..., _T], *args: object) -> _T:
+        return await anyio.to_thread.run_sync(fn, *args, limiter=self.limiter)
+
+
+@dataclass(slots=True)
+class PublicStatus:
+    """Whether the public store prepared at start (its folders and schema). Until it has, every
+    public page and API route answers 503 and creates nothing."""
+
+    ready: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,6 +89,8 @@ class AdventurePublicService:
     owned_finder: WebPictureFinder | None
     """The production picture finder this service built itself (closed with the app); `None` when
     one was injected or there is none."""
+    threads: PublicThreads = field(default_factory=PublicThreads)
+    status: PublicStatus = field(default_factory=PublicStatus)
 
     def prepare(self) -> None:
         """Create the folders and the database now (blocking; call from a thread): the pictures
@@ -53,6 +98,7 @@ class AdventurePublicService:
         self.pictures_dir.mkdir(parents=True, exist_ok=True)
         self.runner.prepare_directory()
         self.store.initialise()
+        self.status.ready = True
 
     async def aclose(self) -> None:
         if self.owned_finder is not None:
@@ -77,7 +123,11 @@ def build_adventure_public(
     """Assemble the service. `finder`/`researcher` are what `create_app` resolved (injected, or the
     production defaults on the fleet's cmd backend); `None` means a pack has no pictures / cannot be
     researched. Nothing here touches the disk: `prepare()` does."""
-    store = PublicPackStore(paths.adventure_public_db)
+    public_bank = build_public_bank(bank)
+    store = PublicPackStore(
+        paths.adventure_public_db,
+        cache_limit=sum(len(unit.destinations) for unit in bank.units.values()),
+    )
     pictures_dir = paths.adventure_public_pictures
 
     def _space_ok(size_bytes: int) -> bool:
@@ -109,7 +159,7 @@ def build_adventure_public(
     )
     return AdventurePublicService(
         host=host,
-        bank=build_public_bank(bank),
+        bank=public_bank,
         store=store,
         runner=runner,
         pictures=pictures,

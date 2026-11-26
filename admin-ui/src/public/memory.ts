@@ -30,7 +30,10 @@ export interface Memory {
   /** Everything out of play in a draw: the never-again ids and the banked ones. */
   taken(): ReadonlySet<string>;
   includeAdvised(): boolean;
-  /** Bank a place (idempotent per place; a place banked is no longer on the never-again list). */
+  /**
+   * Bank a place. Idempotent per place: banking one that is already banked changes nothing (its date and
+   * its place in the list stay as they were). A place banked is no longer on the never-again list.
+   */
   bank(entry: BankedEntry): void;
   /** Never show a place again (idempotent; a place rejected leaves the bank). */
   reject(destinationId: string): void;
@@ -185,9 +188,8 @@ export function createMemory(getStorage: () => Storage | null): Memory {
       return includeAdvisedMirror;
     },
     bank(entry) {
-      const banked = readBanked().filter((e) => e.destinationId !== entry.destinationId);
-      banked.push(entry);
-      saveBanked(banked);
+      const banked = readBanked();
+      if (!banked.some((e) => e.destinationId === entry.destinationId)) saveBanked([...banked, entry]);
       const rejected = readRejected();
       if (rejected.includes(entry.destinationId)) saveRejected(rejected.filter((id) => id !== entry.destinationId));
     },

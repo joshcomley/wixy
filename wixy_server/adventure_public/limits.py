@@ -8,9 +8,15 @@ in two ways, both over a rolling hour:
 - per client: at most `per_ip_per_hour` (6) research starts per client address.
 
 The client address is the `CF-Connecting-IP` header when it holds a valid address (the host is only
-reachable through Cloudflare's tunnel), else the socket peer; an IPv6 address counts as its /64 (one
-subscriber holds a whole /64). The counters live in memory ONLY: they are never logged, never
-persisted and never sent anywhere (spec §2.6), and the per-client table is bounded.
+reachable through Cloudflare's tunnel), else the socket peer. A client is a NETWORK, not one
+address: an IPv4 address counts as its /24 and an IPv6 address as its /48 (one subscriber, or one
+cheap server rental, holds far more than one address, so a per-address key is no limit at all).
+The counters live in memory ONLY: they are never logged, never persisted and never sent anywhere
+(spec §2.6), and the per-client table is bounded.
+
+A start that never reaches cmd (cmd is unreachable) or that another request began first is GIVEN
+BACK (`release` with the `StartTicket` that `acquire` returned): the budgets pay for real research
+runs only, so an outage cannot drain them and lock research out for an hour.
 """
 
 from __future__ import annotations
@@ -24,10 +30,21 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 WINDOW_S = 3600.0
+IPV4_PREFIX = 24
+IPV6_PREFIX = 48
 SWEEP_EVERY_S = 60.0
 MAX_TRACKED_CLIENTS = 50_000
 """The per-client table never holds more than this many keys: once full, the clients whose window
 ends soonest are dropped to make room (a table flooded with fake addresses cannot grow memory)."""
+
+
+@dataclass(frozen=True, slots=True)
+class StartTicket:
+    """One counted start: who it was charged to and exactly when, so giving it back removes THAT
+    start and no other."""
+
+    client: str
+    at: float
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +55,7 @@ class PublicLimits:
 
 def client_key(headers: Mapping[str, str], peer: str | None) -> str:
     """The rate-limit key of a request: `CF-Connecting-IP` when it is a valid address, else the
-    socket peer, else `"unknown"`. IPv6 is reduced to its /64. Never logged."""
+    socket peer, else `"unknown"`. IPv4 is reduced to its /24 and IPv6 to its /48. Never logged."""
     for candidate in (headers.get("cf-connecting-ip"), peer):
         key = _normalise(candidate)
         if key is not None:
@@ -54,10 +71,17 @@ def _normalise(value: str | None) -> str | None:
     except ValueError:
         return None
     if isinstance(address, ipaddress.IPv6Address):
-        if address.ipv4_mapped is not None:
-            return str(address.ipv4_mapped)
-        return str(ipaddress.ip_network(f"{address}/64", strict=False).network_address) + "/64"
-    return str(address)
+        if address.ipv4_mapped is None:
+            return str(ipaddress.ip_network(f"{address}/{IPV6_PREFIX}", strict=False))
+        address = address.ipv4_mapped
+    return str(ipaddress.ip_network(f"{address}/{IPV4_PREFIX}", strict=False))
+
+
+def _remove_one(hits: deque[float], at: float) -> None:
+    try:
+        hits.remove(at)
+    except ValueError:
+        pass  # aged out and pruned already
 
 
 class StartLimiter:
@@ -82,7 +106,9 @@ class StartLimiter:
     def limits(self) -> PublicLimits:
         return self._limits
 
-    def try_acquire(self, client: str) -> int | None:
+    def acquire(self, client: str) -> StartTicket | int:
+        """Count a start for `client`: a `StartTicket` (to give back with `release`), or the whole
+        seconds the caller should wait (`Retry-After`) when a limit is reached (nothing counted)."""
         now = self._clock()
         with self._lock:
             self._prune(now)
@@ -101,19 +127,26 @@ class StartLimiter:
                     self._evict()
                 client_hits = self._clients[client] = deque()
             client_hits.append(now)
-            return None
+            return StartTicket(client, now)
 
-    def release(self, client: str) -> None:
-        """Give back the start `try_acquire` just counted (another request had already begun the
-        same research, so nothing new was started)."""
+    def try_acquire(self, client: str) -> int | None:
+        """`None` when a start was admitted and counted, else the whole seconds to wait. The ticket
+        is dropped: use `acquire` when the start may need giving back."""
+        outcome = self.acquire(client)
+        return None if isinstance(outcome, StartTicket) else outcome
+
+    def release(self, ticket: StartTicket) -> None:
+        """Give back the start `ticket` counted (another request had already begun the same
+        research, or cmd could not be reached, so no run was started). Removes the caller's OWN
+        timestamp from both counters, never somebody else's newer one; a start that has already
+        aged out of the window is simply gone."""
         with self._lock:
-            if self._global:
-                self._global.pop()
-            hits = self._clients.get(client)
-            if hits:
-                hits.pop()
+            _remove_one(self._global, ticket.at)
+            hits = self._clients.get(ticket.client)
+            if hits is not None:
+                _remove_one(hits, ticket.at)
                 if not hits:
-                    del self._clients[client]
+                    del self._clients[ticket.client]
 
     @staticmethod
     def _wait(hits: deque[float], limit: int, now: float) -> float:

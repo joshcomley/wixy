@@ -42,12 +42,22 @@ describe("memory: the happy path", () => {
     expect(again.rejected().has("AAA.a9")).toBe(true);
   });
 
-  it("banking twice keeps one entry; a place is either banked or never-again, the latest word wins", () => {
+  it("banking a place again keeps the existing entry exactly as it was (its date and its place in the list)", () => {
     const storage = fakeStorage();
     const m = createMemory(() => storage);
     m.bank(LISBON);
+    m.bank(PORTO);
     m.bank({ ...LISBON, at: 5 });
-    expect(m.banked()).toEqual([{ ...LISBON, at: 5 }]);
+    expect(m.banked()).toEqual([PORTO, LISBON]); // newest first: LISBON was banked first and stays there
+    expect(m.banked().map((e) => e.at)).toEqual([PORTO.at, LISBON.at]);
+    // ...and the stored list is untouched too (a second tab sees the same).
+    expect(createMemory(() => storage).banked()).toEqual([PORTO, LISBON]);
+  });
+
+  it("a place is either banked or never-again, the latest word wins", () => {
+    const storage = fakeStorage();
+    const m = createMemory(() => storage);
+    m.bank(LISBON);
     m.reject("AAA.a1");
     expect(m.banked()).toEqual([]);
     expect(m.rejected().has("AAA.a1")).toBe(true);
