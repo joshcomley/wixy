@@ -36,6 +36,8 @@ from typing import Any
 
 import httpx
 
+from wixy_server.http_tls import shared_ssl_context
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -176,7 +178,9 @@ class ComfyImageGenerator:
             return removed
         cutoff = time.time() - _STALE_OUTPUT_AFTER_S
         try:
-            with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
+            with httpx.Client(
+                base_url=self._base_url, transport=self._transport, verify=shared_ssl_context()
+            ) as client:
                 orphans: list[str] = []
                 seen: set[str] = set()
                 for page in range(_SWEEP_MAX_PAGES):
@@ -291,7 +295,7 @@ class ComfyImageGenerator:
         if self._misconfigured:
             return False
         try:
-            with httpx.Client(transport=self._transport) as client:
+            with httpx.Client(transport=self._transport, verify=shared_ssl_context()) as client:
                 resp = client.get(f"{self._base_url}/system_stats", timeout=_PROBE_TIMEOUT_S)
         except httpx.HTTPError:
             return False
@@ -453,7 +457,9 @@ class ComfyImageGenerator:
             }
         wanted = SLOT_TAGS[: len(prompts)]
 
-        with httpx.Client(base_url=self._base_url, transport=self._transport) as client:
+        with httpx.Client(
+            base_url=self._base_url, transport=self._transport, verify=shared_ssl_context()
+        ) as client:
             prompt_id: str | None = None
             # A run is only left alone once ComfyUI has reported it finished; ANY other exit
             # (timeout, an unreadable answer, an unexpected error) cancels it so it cannot go

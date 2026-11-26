@@ -21,6 +21,13 @@ recorders (they stop below 110 GiB free). Each app-starting test's `tmp_path` he
 4. **Each app start re-parsed the shipped files.** The Cookout ingredient bank (twice), the picture
    manifest and the catalogue were read and validated on every `create_app` (~3.3 s on a loaded box).
 
+5. **Every HTTP client re-read the certificate bundle.** httpx builds a fresh `SSLContext` per
+   client; `create_app` built five (the picture painter one per request). A 30 s py-spy sample of a
+   full-run worker put 58 % of its time in `ssl.create_default_context` under `create_app`.
+6. **A tooling test busy-waited on the hub's real memory.** `run_pipeline` defaulted to reading the
+   machine's free memory and the tests pass a no-op `sleep`, so whenever the hub had under 20 GB free
+   a worker spun inside one test (py-spy: 100 % of a worker's samples in `wait_for_memory`).
+
 cProfile of one `/api/version` test after fix 1: 5.5 s in `leak_guard.drain` (the sweep's
 `missing()`), 1.7 s `default_bank`, 1.6 s `load_visuals`.
 
@@ -35,6 +42,16 @@ cProfile of one `/api/version` test after fix 1: 5.5 s in `leak_guard.drain` (th
   passing test's directory is deleted at its teardown; only failures of the latest run are kept.
 - `PackStore.missing` lists each search directory once (`os.scandir` of its `ab/` subdirectories)
   instead of a stat per object per directory. Same answer, O(files present).
+- The conftest guard ALSO wraps `PackStore.fetch` and refuses before it sizes the objects already
+  present (another stat of every object) or takes the store lock; the `_download` guard stays as the
+  backstop.
+- `wixy_server/http_tls.py`: `shared_ssl_context()` builds, once per process, the same context httpx's
+  `verify=True` would (`SSL_CERT_FILE` / `SSL_CERT_DIR`, else certifi), and every `httpx` client in
+  `wixy_server/` passes it as `verify=`. Verification is unchanged (`test_http_tls.py` pins
+  CERT_REQUIRED + hostname checking, and that two app builds make at most one context).
+- `tooling/cookout/visual/images.py`: `run_pipeline(free_gb=None)` resolves `hub_free_gb` when called,
+  so `test_cookout_visual_tooling.py` stubs it to "unknown" (which never blocks); the memory-gate
+  tests still pass their own readings.
 - `load_cookout_bank`, `load_manifest`, `load_cookout_catalogue` cache the parsed file per process,
   keyed on (path, mtime_ns, size); a failure is never cached. The returned objects are read-only
   (frozen dataclasses of tuples/frozensets/mappings), so sharing them is safe; a changed file is read

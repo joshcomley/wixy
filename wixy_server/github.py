@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from wixy_server.http_tls import shared_ssl_context
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_API_BASE_URL = "https://api.github.com"
@@ -111,7 +113,7 @@ class GitHubClient:
         self._api_base_url = api_base_url.rstrip("/")
         self._timeout_s = timeout_s
         self._max_attempts = max_attempts
-        self._client = httpx.AsyncClient(transport=transport)
+        self._client = httpx.AsyncClient(transport=transport, verify=shared_ssl_context())
 
     async def aclose(self) -> None:
         await self._client.aclose()

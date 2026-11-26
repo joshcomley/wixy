@@ -49,6 +49,7 @@ from websockets.asyncio.client import connect as websockets_connect
 
 from builder.jsontypes import JsonObject
 from wixy_server.chat_attachments import ChatAttachmentRef, extract_attachment_footer
+from wixy_server.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,7 @@ class CmdChatClient:
         self._max_attempts = max_attempts
         self._readiness_timeout_s = readiness_timeout_s
         self._readiness_poll_interval_s = readiness_poll_interval_s
-        self._client = httpx.AsyncClient(transport=transport)
+        self._client = httpx.AsyncClient(transport=transport, verify=shared_ssl_context())
         ws_url = _http_ws_url(self._portal_base_url, "/ws/chat-pending")
         self._ws_connect: WsConnector = (
             ws_connect

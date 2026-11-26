@@ -36,6 +36,7 @@ from wixy_server.chat_working import WorkingCache
 from wixy_server.chats import ChatRuntimeEntry
 from wixy_server.cmdchat import CmdChatClient
 from wixy_server.github import GitHubClient
+from wixy_server.http_tls import shared_ssl_context
 from wixy_server.livechat import janitor as livechat_janitor
 from wixy_server.livechat import media_queue as livechat_media_queue
 from wixy_server.livechat import processing as livechat_processing
@@ -305,7 +306,7 @@ def create_app(
     livechat_store = LiveChatStore(paths.server_db)
     livechat_secret = load_or_create_secret(paths.server_secret)
     livechat_vapid_keys = load_or_create_vapid_keys(paths.server_vapid)
-    livechat_push_client = httpx.AsyncClient(timeout=10.0)
+    livechat_push_client = httpx.AsyncClient(timeout=10.0, verify=shared_ssl_context())
     livechat_push_test_limiter = SlidingWindowRateLimiter(max_events=1, window_s=5.0)
     livechat_notifier = LiveChatNotifier()
     livechat_message_hooks: list[MessageHook] = []

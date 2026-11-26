@@ -70,8 +70,9 @@ def _cookout_pack_never_downloads_from_the_internet(monkeypatch: pytest.MonkeyPa
     (the self-heal's own "not now" answer), so the app keeps its emoji tiles; the pack tests' local
     test server on loopback still works. Tests that need pictures inject their own small pack."""
     real_download = cookout_pack._download
+    real_fetch = cookout_pack.PackStore.fetch
 
-    def _loopback_only(url: str, part: Path, **kwargs: Any) -> None:
+    def _refuse_internet(url: str) -> None:
         parts = urlsplit(url)
         # Only a web download is the guard's business; any other scheme reaches the real
         # downloader, which refuses it itself (and has its own test).
@@ -79,9 +80,25 @@ def _cookout_pack_never_downloads_from_the_internet(monkeypatch: pytest.MonkeyPa
             raise cookout_pack.FetchRefused(
                 f"the test suite must never download from the internet: {url}"
             )
+
+    def _loopback_only(url: str, part: Path, **kwargs: Any) -> None:
+        _refuse_internet(url)
         real_download(url, part, **kwargs)
 
+    def _fetch_loopback_only(
+        self: cookout_pack.PackStore,
+        manifest: cookout_pack.PackManifest,
+        *,
+        url: str | None = None,
+    ) -> int:
+        # Refused BEFORE `fetch` sizes what is already present (a stat of every object) and takes
+        # the store lock: a refused fetch costs nothing.
+        if manifest.pack is not None:
+            _refuse_internet(url or manifest.pack.url)
+        return real_fetch(self, manifest, url=url)
+
     monkeypatch.setattr(cookout_pack, "_download", _loopback_only)
+    monkeypatch.setattr(cookout_pack.PackStore, "fetch", _fetch_loopback_only)
 
 
 @pytest.fixture(autouse=True)

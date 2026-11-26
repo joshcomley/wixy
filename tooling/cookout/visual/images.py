@@ -1254,7 +1254,7 @@ async def run_pipeline(
     check_only: bool = False,
     check_concurrency: int = 1,
     retry_wait_s: float = 20.0,
-    free_gb: Callable[[], float | None] = hub_free_gb,
+    free_gb: Callable[[], float | None] | None = None,
     min_free_gb: float = MIN_FREE_GB,
     voice_probes: Mapping[str, str] | None = None,
     visual_check: Callable[[str, str], Sequence[str]] | None = None,
@@ -1272,6 +1272,8 @@ async def run_pipeline(
     `check_concurrency` batches are checked at the same time (the cmd run pool still caps the
     runs in flight per provider). A batch whose model run fails to start is retried (3 tries,
     `retry_wait_s` apart) instead of ending the round."""
+    # Looked up when called (not bound at import), so a test can stand in for the real reading.
+    read_free_gb: Callable[[], float | None] = hub_free_gb if free_gb is None else free_gb
     rng = rng or random.Random()
     decisions = _review.load_decisions(review_path)
     rendered: dict[str, Path] = {}
@@ -1459,7 +1461,7 @@ async def run_pipeline(
 
             while True:
                 proceed, mem_free = wait_for_memory(
-                    free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
+                    read_free_gb, min_gb=min_free_gb, pause_file=work.pause, sleep=sleep
                 )
                 if not proceed or not wait_for_idle(
                     watching_queue, pause_file=work.pause, sleep=sleep
@@ -1467,7 +1469,7 @@ async def run_pipeline(
                     return totals  # PAUSE file: stop between pictures
                 # the idle wait can be long: look at memory again right before starting, so a
                 # render never begins on a figure that went stale while the queue was busy
-                after_idle = free_gb()
+                after_idle = read_free_gb()
                 if after_idle is None or after_idle >= min_free_gb:
                     mem_free = mem_free if after_idle is None else after_idle
                     break
