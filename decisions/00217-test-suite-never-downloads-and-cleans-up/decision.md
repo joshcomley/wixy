@@ -60,6 +60,19 @@ cProfile of one `/api/version` test after fix 1: 5.5 s in `leak_guard.drain` (th
 Measured after: the Cookout + version + guard tests (756) ran in 81 s at `-n 4` on the loaded hub;
 the 22 version tests alone had taken ~135 s.
 
+## Addendum: the one failure the fast full run then found
+
+With the suite at ~10 minutes, the full run (5,769 passed) showed one real failure:
+`test_livechat_live_voice.py::TestListenUpload::test_slices_keep_the_spec_06_ordering_rules`. The
+idempotent re-PUT of slice 0 failed with `PermissionError: [WinError 5]` in `uploads.write_chunk`'s
+`os.replace`: on Windows a file another handle holds open (the live decoder reading the chunk,
+Defender, the indexer) cannot be replaced. Reproduced deterministically by holding the chunk open
+(`test_livechat_uploads.py::TestWriteChunk`, red before the fix). Decided: the worker transcript's
+existing `_replace_riding_out_scanners` (bounded retry, 5 x linear 50 ms) moves to
+`wixy_server/fileops.py` and `write_chunk` uses it; and a replay of the SAME bytes is now a true no-op
+(no rename at all), so the idempotent path cannot collide with a reader however long it holds the
+file.
+
 ## Watch for
 
 - A new background job that fetches from the internet at app start needs the same treatment: tests
