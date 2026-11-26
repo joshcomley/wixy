@@ -23,6 +23,7 @@ Two engines live on the bank: `draw_pair` (§2.3, the server-authoritative pair 
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
 import random
@@ -1627,8 +1628,20 @@ def parse_cookout_bank(raw: object) -> CookoutBank:
 def load_cookout_bank(path: Path | None = None) -> CookoutBank:
     """Load and strictly validate the bank at `path`; raises `CookoutBankError`."""
     target = path or BANK_PATH
+    # The shipped file is parsed once per process (it never changes while the process runs: every
+    # app a test suite starts used to re-read and re-validate it, decisions/00217). Keyed on the file's
+    # identity, so a different path or an edited file is read again; a failure is never cached.
     try:
-        raw = json.loads(target.read_text(encoding="utf-8"))
+        stat = target.stat()
+    except OSError as exc:
+        raise CookoutBankError(f"cannot read the bank {target}: {exc}") from exc
+    return _load_bank_file(str(target), stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=8)
+def _load_bank_file(target: str, _mtime_ns: int, _size: int) -> CookoutBank:
+    try:
+        raw = json.loads(Path(target).read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise CookoutBankError(f"cannot read the bank {target}: {exc}") from exc
     return parse_cookout_bank(raw)
