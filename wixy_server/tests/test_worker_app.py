@@ -676,6 +676,14 @@ class TestWorkspaceIntegration:
     def test_bad_repo_url_surfaces_as_workspace_failed(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The clone must fail WITHOUT the internet: a repository that does not exist on disk, like
+        # the sibling tests' local bare origins. (It used to clone github.com for real; on a box
+        # with a terminal, git stopped the whole run to ask for credentials. decisions/00217.)
+        monkeypatch.setattr(
+            worker_app_module,
+            "github_https_clone_url",
+            lambda _url: str(tmp_path / "does-not-exist.git"),
+        )
         _clients, agent_factory = create_fake_agent_sdk_client_factory([])
         app = create_worker_app(
             settings=_settings(
