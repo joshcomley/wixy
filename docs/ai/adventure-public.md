@@ -167,3 +167,21 @@ start-budget refund, 503 state, independent loops, no source maps), `test_routes
 `test_livechat_adventure_pictures.py`; shared helpers in `adventure_public_testkit.py` (`public_client`
 builds the whole app with the host set; `module_public_client` for module-scoped read-only apps, since
 starting the app is the expensive part).
+
+**E2E** (`e2e/tests/adventure-public.spec.ts`, desktop 1280x800 and 360 px phone): the fixture server
+(`e2e/fixture_server.py`) serves the public game on the host name **`localhost`**
+(`WIXY_ADVENTURE_PUBLIC_HOST`, `PUBLIC_HOST`) while every other spec keeps reaching it as `127.0.0.1:<port>`, a
+different `Host` for the gate, so no existing spec changes; Chromium resolves `localhost` itself (no resolver rule).
+The public researcher is a second `CmdAdventureResearcher` (caller `wixy-adventure-public-pack`) on the same fake cmd
+(canned pack after ~2 s), with NO picture finder (a public pack is text only, `images: "none"`; nothing leaves the
+box) and the start limits lifted. `POST /test/adventure-public/runs` (fixture only, on the private host) counts the
+runs the fake cmd was asked for under the public caller. The page is plain http but a research start needs
+`Origin: https://<host>`, and the browser owns `Origin`, so the spec's `publicContext` sends `POST /api/pack/*` on
+from the runner (`route.fetch` + `fulfill`) with that header; a wrong Origin stays a 403 (its own test). Covered: home
+loads with no login and every request on the public origin; a whole round (both spins, landing, both Stops, the pack),
+Yay and the Holiday bank, a reload keeping the bank, Copy link (clipboard) `https://<host>/d/<6 chars>`, that link in a
+fresh browser showing the place and pack at once with no second research run; Nay's question and "Never show again"
+(kept over a reload, and a seeded second round that ends on the one place left, never the rejected one); `/d/zzzzzz`
+and Spin the globe; the host gate (`/admin`, `/api/admin/*`, `/internal/*`, site paths, `/healthz`, `/test/*` all 404
+with `X-Robots-Tag`), the public routes' headers, and the public routes being 404 on the private host; no sideways
+overflow at either width.
