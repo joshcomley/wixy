@@ -21,7 +21,6 @@ set, so with the feature off it does not exist.
 
 from __future__ import annotations
 
-from collections.abc import MutableMapping
 from typing import Final
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -84,11 +83,13 @@ class AdventurePublicHostGate:
         await self.public_app(scope, receive, send_hardened)
 
 
-def _harden(message: MutableMapping[str, object]) -> None:
+def _harden(message: Message) -> None:
     """Set the public hardening headers on a response start, replacing any the application set."""
-    raw = message.get("headers", [])
-    headers: list[tuple[bytes, bytes]] = [(bytes(k), bytes(v)) for k, v in raw]  # type: ignore[attr-defined]
     ours = {name for name, _ in PUBLIC_HEADERS}
-    headers = [(k, v) for k, v in headers if k.lower() not in ours]
+    headers: list[tuple[bytes, bytes]] = [
+        (bytes(key), bytes(value))
+        for key, value in message.get("headers", [])
+        if bytes(key).lower() not in ours
+    ]
     headers.extend(PUBLIC_HEADERS)
     message["headers"] = headers
