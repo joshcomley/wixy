@@ -6,6 +6,7 @@ assemble (missing chunks, size mismatch, idempotent replay), cancel.
 from __future__ import annotations
 
 import os
+import threading
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -271,6 +272,33 @@ class TestWriteChunk:
     def test_no_leftover_part_file(self, tmp_path: Path) -> None:
         upload_dir = tmp_path / "upload"
         uploads.write_chunk(upload_dir, 0, b"data")
+        assert not (upload_dir / "chunk-000000.part").exists()
+
+    def test_a_replay_of_the_same_bytes_succeeds_while_a_reader_holds_the_chunk(
+        self, tmp_path: Path
+    ) -> None:
+        """On Windows a file another handle has open cannot be replaced (WinError 5); the live
+        decoder, Defender or the indexer may be reading the chunk when its slice is re-PUT. The
+        same bytes again are a true no-op, however long the reader holds it (decisions/00217)."""
+        upload_dir = tmp_path / "upload"
+        uploads.write_chunk(upload_dir, 0, b"hello")
+        with (upload_dir / "chunk-000000").open("rb"):
+            uploads.write_chunk(upload_dir, 0, b"hello")
+        assert (upload_dir / "chunk-000000").read_bytes() == b"hello"
+        assert not (upload_dir / "chunk-000000.part").exists()
+
+    def test_an_overwrite_rides_out_a_reader_that_lets_go(self, tmp_path: Path) -> None:
+        upload_dir = tmp_path / "upload"
+        uploads.write_chunk(upload_dir, 0, b"hello")
+        held = (upload_dir / "chunk-000000").open("rb")
+        releaser = threading.Timer(0.1, held.close)
+        releaser.start()
+        try:
+            uploads.write_chunk(upload_dir, 0, b"world!")
+        finally:
+            releaser.join()
+            held.close()
+        assert (upload_dir / "chunk-000000").read_bytes() == b"world!"
         assert not (upload_dir / "chunk-000000.part").exists()
 
 

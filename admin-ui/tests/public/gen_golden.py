@@ -1,23 +1,23 @@
-"""Generates `topDestinations.golden.json`: the REAL `AdventureBank` (the Python reference the private
-game's server runs) answering a deterministic set of questions over the REAL shipped bank, so that the
-public page's TypeScript port (`src/public/bank.ts`, tested by `tests/public/bank.test.ts`) can never drift
-from it.
+"""Generates `topDestinations.golden.json`: the REAL `AdventureBank` (the Python reference the
+private game's server runs) answering a deterministic set of questions over the REAL shipped bank,
+so that the public page's TypeScript port (`src/public/bank.ts`, tested by
+`tests/public/bank.test.ts`) can never drift from it.
 
 Run from the repository root (any Python with the repo importable):
 
-    PYTHONPATH=. python admin-ui/tests/public/gen_golden.py
+PYTHONPATH=. python admin-ui/tests/public/gen_golden.py
 
 It rewrites the committed JSON next to this file. Run it again whenever
 `wixy_server/livechat/adventure_destinations.json` or `adventure_bank.py` changes: the TS test also
-fails (with this instruction) when the committed file was made from a different bank than the one in the
-repo. The questions are:
+fails (with this instruction) when the committed file was made from a different bank than the one
+in the repo. The questions are:
 
-  - `top`: for every unit, `top_destinations(unit, excluded, n)` for a fixed spread of exclusion sets
-    (none; the first 1, 2, 3 places; every other place; seeded random subsets; all but one; all) and
-    n = 5 (what the game draws) plus n = 3 and n = 10. Exclusions and answers are INDICES into the unit's
-    destination list (rank order) so the file stays small.
-  - `eligible`: `eligible_units(excluded, include_advised)` where `excluded` empties a chosen set of whole
-    units (and takes the first place of a few others), with the advised switch off and on.
+  - `top`: for every unit, `top_destinations(unit, excluded, n)` for a fixed spread of exclusion
+    sets (none; the first 1, 2, 3 places; every other place; seeded random subsets; all but one;
+    all) and n = 5 (what the game draws) plus n = 3 and n = 10. Exclusions and answers are INDICES
+    into the unit's destination list (rank order) so the file stays small.
+  - `eligible`: `eligible_units(excluded, include_advised)` where `excluded` empties a chosen set
+    of whole units (and takes the first place of a few others), with the advised switch off and on.
   - `advised`: `advised_units()` ids in order.
 """
 
@@ -77,7 +77,7 @@ def main() -> None:
                 )
 
     eligible: list[dict[str, object]] = []
-    for case in range(12):
+    for _case in range(12):
         emptied = sorted(rng.sample(units, rng.randint(0, len(units) // 2)))
         firsts = sorted(rng.sample([u for u in units if u not in emptied], 8))
         excluded_ids: set[str] = set()
@@ -91,7 +91,9 @@ def main() -> None:
                     "emptied": emptied,
                     "firsts": firsts,
                     "includeAdvised": include_advised,
-                    "eligible": list(bank.eligible_units(excluded_ids, include_advised=include_advised)),
+                    "eligible": list(
+                        bank.eligible_units(excluded_ids, include_advised=include_advised)
+                    ),
                 }
             )
     # And the untouched bank, both ways.
@@ -113,7 +115,9 @@ def main() -> None:
         "eligible": eligible,
         "advised": [u.id for u in bank.advised_units()],
     }
-    OUT.write_text(json.dumps(document, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n")
+    OUT.write_text(
+        json.dumps(document, separators=(",", ":")) + "\n", encoding="utf-8", newline="\n"
+    )
     print(f"wrote {OUT} ({len(top)} top cases, {len(eligible)} eligible cases, {len(units)} units)")
 
 

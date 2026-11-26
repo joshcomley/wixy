@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import base64
 import contextlib
+import functools
 import hashlib
 import json
 import logging
@@ -117,6 +118,25 @@ class PackManifest:
 # --- manifest -------------------------------------------------------------------------------
 
 
+def _object_files(directory: Path) -> set[str]:
+    """Every regular file one level under `directory`'s subdirectories, as `ab/<name>` (the
+    `object_relpath` form). A missing or unreadable directory contributes nothing."""
+    found: set[str] = set()
+    try:
+        subdirs = [entry for entry in os.scandir(directory) if entry.is_dir()]
+    except OSError:
+        return found
+    for sub in subdirs:
+        try:
+            with os.scandir(sub.path) as entries:
+                for entry in entries:
+                    if entry.is_file():
+                        found.add(f"{sub.name}/{entry.name}")
+        except OSError:
+            continue
+    return found
+
+
 def object_relpath(sha: str) -> PurePosixPath:
     """`ab/ab…ef.webp` for a sha256 hex."""
     if not _SHA_RE.fullmatch(sha):
@@ -194,8 +214,21 @@ def parse_manifest(data: bytes) -> PackManifest:
 def load_manifest(path: Path | None = None) -> PackManifest:
     """Load and validate a manifest file (default: the committed one)."""
     target = path if path is not None else MANIFEST_PATH
+    # The shipped file is parsed once per process (it never changes while the process runs: every
+    # app a test suite starts used to re-read and re-validate it, decisions/00217). Keyed on the
+    # file's identity, so a different path or an edited file is read again; a failure is never
+    # cached.
     try:
-        data = target.read_bytes()
+        stat = target.stat()
+    except OSError as exc:
+        raise PackError(f"cannot read manifest {target}: {exc}") from exc
+    return _load_manifest_file(str(target), stat.st_mtime_ns, stat.st_size)
+
+
+@functools.lru_cache(maxsize=8)
+def _load_manifest_file(target: str, _mtime_ns: int, _size: int) -> PackManifest:
+    try:
+        data = Path(target).read_bytes()
     except OSError as exc:
         raise PackError(f"cannot read manifest {target}: {exc}") from exc
     return parse_manifest(data)
@@ -717,12 +750,13 @@ class PackStore:
             return self._gc_locked()
 
     def missing(self, manifest: PackManifest, search: Sequence[Path]) -> frozenset[str]:
-        """Manifest shas found in none of the `search` object directories."""
-        return frozenset(
-            sha
-            for sha in manifest.shas()
-            if not any((d / object_relpath(sha)).is_file() for d in search)
-        )
+        """Manifest shas found in none of the `search` object directories. Each directory is
+        listed once (its `ab/` subdirectories scanned) rather than stat-ing every object in every
+        directory: ~7,000 objects meant ~14,000 file checks per sweep (decisions/00217)."""
+        present: set[str] = set()
+        for directory in search:
+            present |= _object_files(directory)
+        return frozenset(sha for sha in manifest.shas() if str(object_relpath(sha)) not in present)
 
     def status(self) -> dict[str, Any]:
         now = self._clock()

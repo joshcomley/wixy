@@ -45,6 +45,7 @@ from wixy_server.cmdchat import (
     UploadBytes,
     UploadResult,
 )
+from wixy_server.http_tls import shared_ssl_context
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +95,7 @@ class AnthropicAIBackend:
         self._max_attempts = max_attempts
         self._readiness_timeout_s = readiness_timeout_s
         self._readiness_poll_interval_s = readiness_poll_interval_s
-        self._client = httpx.AsyncClient(transport=transport)
+        self._client = httpx.AsyncClient(transport=transport, verify=shared_ssl_context())
 
     async def aclose(self) -> None:
         await self._client.aclose()

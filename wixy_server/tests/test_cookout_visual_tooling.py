@@ -20,6 +20,17 @@ from wixy_server.livechat import cookout_pack as cp
 TOOLING = Path(__file__).resolve().parents[2] / "tooling" / "cookout" / "visual"
 
 
+@pytest.fixture(autouse=True)
+def _machine_memory_is_unknown(
+    mods: dict[str, ModuleType], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`run_pipeline` reads the REAL machine's free memory unless a test passes `free_gb`; with the
+    tests' no-op `sleep` that turned into a busy wait for as long as the hub had under 20 GB free
+    (decisions/00217). Unknown (`None`) never blocks; the memory-gate tests pass their own
+    readings."""
+    monkeypatch.setattr(mods["images"], "hub_free_gb", lambda: None)
+
+
 @pytest.fixture(scope="module")
 def mods() -> Iterator[dict[str, ModuleType]]:
     sys.path.insert(0, str(TOOLING))

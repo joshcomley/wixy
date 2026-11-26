@@ -75,6 +75,12 @@ pytest                  # full suite — bare, so the -n 4 addopts cap applies
 next to production cmd, and `-n auto` caused a real outage 2026-07-07). `-n0` for serial
 debugging only. Run an expensive suite once and grep the captured log rather than re-running.
 
+**The suite never reaches the internet and cleans up after itself** (decisions/00217). An autouse
+guard in `wixy_server/tests/conftest.py` refuses any non-loopback pack download (before it, every
+app-starting test downloaded and unpacked the 44 MB Cookout picture pack, ~38 MB written per test);
+`tmp_path_retention_policy = "failed"` deletes a passing test's `tmp_path` at its teardown, keeping
+only the latest run's failures. A test that needs Cookout pictures injects its own small pack.
+
 TypeScript (in `admin-ui/` and `editor/` independently):
 ```
 npm ci && npm run typecheck && npm test && npm run build
