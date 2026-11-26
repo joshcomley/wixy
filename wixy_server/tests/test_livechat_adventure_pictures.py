@@ -81,6 +81,7 @@ def run_find(
     budget_s: float = 60.0,
     wanted: Callable[[], bool] = lambda: True,
     fetcher_options: dict[str, Any] | None = None,
+    allow_site_images: bool = True,
 ) -> tuple[list[FoundPicture], FakeWeb, FakeOpenWeb]:
     """Run a `WebPictureFinder` over `plan` against a fake open web; returns what it found, the
     server (its recorded requests) and the fake services. The plan's item sites are written as an
@@ -99,6 +100,7 @@ def run_find(
             local_fetcher(port, **(fetcher_options or {})),
             endpoints=open_web.endpoints,
             budget_s=budget_s,
+            allow_site_images=allow_site_images,
         )
 
         async def still_wanted() -> bool:
@@ -1537,3 +1539,92 @@ class TestPoliteness:
         plan = plan_of({"food": [item("a", url="http://fast.example.com/")]})
         pictures, web, _ = run_find(configure, plan, wanted=lambda: False)
         assert pictures == [] and web.requests == []
+
+
+class TestCommonsOnly:
+    """`allow_site_images=False` (the public game, workspace 00065): only freely-licensed Wikimedia
+    Commons files are ever published, so a venue's own page is never fetched at all. The default
+    (the private game) is unchanged."""
+
+    VENUE_PLAN_ARGS = {
+        "food": [item("Grill", url="http://grill.example.com/", wikipedia=None)],
+        "stay": [item("Villa", url="http://villa.example.com/stay")],
+    }
+
+    def configure_venues(self, w: FakeOpenWeb) -> None:
+        w.add_venue(
+            "grill.example.com",
+            "/",
+            og_image="/img/hero.jpg",
+            site_name="Grill",
+            image=make_image(1200, 800, seed=11),
+        )
+        w.add_venue(
+            "villa.example.com",
+            "/stay",
+            og_image="/img/hero.jpg",
+            site_name="Villa",
+            image=make_image(1200, 800, seed=12),
+        )
+
+    def test_the_default_still_uses_the_venue_s_own_page_image(self) -> None:
+        pictures, web, _ = run_find(
+            self.configure_venues, plan_of(self.VENUE_PLAN_ARGS, wikipedia=None)
+        )
+        assert sorted(p.slot for p in pictures) == ["food:0", "stay:0"]
+        assert web.seen("grill.example.com") and web.seen("villa.example.com")
+        assert WebPictureFinder(local_fetcher(1)).allow_site_images is True
+
+    def test_with_site_images_off_no_venue_page_is_fetched_at_all(self) -> None:
+        pictures, web, _ = run_find(
+            self.configure_venues,
+            plan_of(self.VENUE_PLAN_ARGS, wikipedia=None),
+            allow_site_images=False,
+        )
+        assert pictures == []
+        assert web.seen("grill.example.com") == [] and web.seen("villa.example.com") == []
+        assert web.seen("grill.example.com", "/img/hero.jpg") == []
+        assert (
+            WebPictureFinder(local_fetcher(1), allow_site_images=False).allow_site_images is False
+        )
+
+    def test_with_site_images_off_commons_pictures_are_still_found(self) -> None:
+        lead = FakeFile("Kotor bay.jpg", 3000, 2000, seed=2)
+        dish = FakeFile("Cevapi.jpg", 3000, 2000, seed=4)
+
+        def configure(w: FakeOpenWeb) -> None:
+            w.add_file(lead)
+            w.add_file(dish)
+            w.add_article("Kotor", lead)
+            w.add_article("Cevapi", dish)
+            self.configure_venues(w)
+
+        plan = plan_of(
+            {
+                "food": [item("Cevapi", wikipedia="Cevapi", url="http://grill.example.com/")],
+                "stay": [item("Villa", url="http://villa.example.com/stay")],
+            }
+        )
+        pictures, web, _ = run_find(configure, plan, allow_site_images=False)
+        assert sorted(p.slot for p in pictures) == ["food:0", "hero:0"]
+        assert all(p.credit == "Jane Doe, CC BY-SA 4.0" for p in pictures)  # Commons credit
+        assert all(p.page.startswith("http://commons.wikimedia.test") for p in pictures)
+        assert web.seen("grill.example.com") == [] and web.seen("villa.example.com") == []
+
+    def test_site_picture_itself_fetches_nothing_when_it_is_off(self) -> None:
+        async def go() -> tuple[FoundPicture | None, int]:
+            web = FakeWeb()
+            port = await web.start()
+            open_web = FakeOpenWeb(web)
+            open_web.add_venue("villa.example.com", "/stay", og_image="/img/hero.jpg")
+            finder = WebPictureFinder(
+                local_fetcher(port), endpoints=open_web.endpoints, allow_site_images=False
+            )
+            try:
+                found = await finder.site_picture(f"http://villa.example.com:{port}/stay")
+                return found, len(web.seen("villa.example.com"))
+            finally:
+                await finder.aclose()
+                await web.stop()
+
+        assert anyio.run(go) == (None, 0)

@@ -39,8 +39,8 @@ def make_static_dir(root: Path) -> Path:
     """A stand-in for the client bundle directory, with the two files the shell references."""
     static = root / "adventure-public-static"
     static.mkdir(parents=True, exist_ok=True)
-    (static / "app.js").write_text("/* stub bundle */\n", encoding="utf-8")
-    (static / "app.css").write_text("/* stub css */\n", encoding="utf-8")
+    (static / "app.js").write_bytes(b"/* stub bundle */\n")
+    (static / "app.css").write_bytes(b"/* stub css */\n")
     return static
 
 
@@ -65,9 +65,13 @@ def public_client(
     """The app with `WIXY_ADVENTURE_PUBLIC_HOST` set, entered (so its lifespan runs), as a client
     whose requests carry `Host: <base_host or host>`. A `FakeResearcher` unless told otherwise."""
     monkeypatch.setenv("WIXY_ADVENTURE_PUBLIC_HOST", host)
-    resolved = (
-        None if no_researcher else (researcher if researcher is not None else FakeResearcher())
-    )
+    if no_researcher:
+        # No researcher is what the fleet edition on a non-cmd AI backend has: the seam's `None`
+        # means "the default", so the way to have none is a backend that is not cmd's.
+        resolved = None
+        extra = {"ai_backend": AsyncMock(), **extra}
+    else:
+        resolved = researcher if researcher is not None else FakeResearcher()
     app = create_app(
         storage_root=storage_root,
         wixy_repo_root=wixy_repo_root,
