@@ -12,13 +12,35 @@ import { ServerLockedError } from "../api/http";
 import type { Message } from "../api/messages";
 import type { LockHooks, ServerSession } from "../types";
 import { getAdventureBank, type BankResult, type BankTrip } from "./api";
+import { copyText, type ShareTarget } from "./shareLink";
+
+/**
+ * Where the trips come from when it is not the private chat's server: the public page reads them from
+ * this browser's own memory (spec/adventure-public section 2.4). Trips carry synthetic `seq`s (their position).
+ */
+export interface HolidayBankSource {
+  load(): Promise<BankResult> | BankResult;
+}
 
 export interface HolidayBankDeps {
   readonly document: Document;
-  readonly hooks: Pick<LockHooks, "lockNow">;
-  readonly getSession: () => ServerSession | null;
+  readonly hooks?: Pick<LockHooks, "lockNow">;
+  /** The private chat's session (the default data source is `GET /adventure/bank` with it). */
+  readonly getSession?: () => ServerSession | null;
+  /** Public page: read the trips from here instead of the server. */
+  readonly source?: HolidayBankSource;
   /** A trip was tapped: open it in the Adventure tab (the bank closes itself first). */
   openTrip(seq: number): void;
+  /** Public page: a trip was tapped; opens its short link in-page. Called INSTEAD of `openTrip`. */
+  openPlace?(trip: BankTrip): void;
+  /** Public page: the short link of a trip, for its Copy link button (null: no button on that row). */
+  shareLink?(trip: BankTrip): ShareTarget | null;
+  /** The window the Copy link button copies through (default: the page's). */
+  readonly win?: Window;
+  /** Text of the close button (default "Back to chat"). */
+  readonly closeLabel?: string;
+  /** Text of the empty state. */
+  readonly emptyText?: string;
   /** Injectable for tests; defaults to the real `GET /adventure/bank`. */
   readonly fetchBank?: (session: ServerSession) => Promise<BankResult>;
   setTimeout?(callback: () => void, ms: number): number;
@@ -37,6 +59,15 @@ export interface HolidayBank {
 }
 
 const REFRESH_DEBOUNCE_MS = 400;
+
+/** "12 Nov 2026" from epoch seconds, in the viewer's own locale and time zone. */
+function formatBankedDate(epochS: number): string {
+  try {
+    return new Date(epochS * 1000).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  } catch {
+    return "";
+  }
+}
 
 export function createHolidayBank(deps: HolidayBankDeps): HolidayBank {
   const doc = deps.document;
@@ -58,13 +89,13 @@ export function createHolidayBank(deps: HolidayBankDeps): HolidayBank {
 
   const bar = el("div", "wx-srv-bank-bar");
   const title = el("span", "wx-srv-bank-title", "Holiday bank");
-  const closeButton = el("button", "wx-srv-bank-close", "Back to chat");
+  const closeButton = el("button", "wx-srv-bank-close", deps.closeLabel ?? "Back to chat");
   closeButton.type = "button";
   closeButton.setAttribute("data-srv-gesture-boundary", "");
   bar.append(title, closeButton);
 
   const list = el("div", "wx-srv-bank-list");
-  const empty = el("p", "wx-srv-bank-empty", "Nothing saved yet. Bank a place with “Yay” in the Adventure Time game.");
+  const empty = el("p", "wx-srv-bank-empty", deps.emptyText ?? "Nothing saved yet. Bank a place with “Yay” in the Adventure Time game.");
   empty.hidden = true;
   const loading = el("p", "wx-srv-bank-loading", "Loading…");
   loading.hidden = true;
@@ -101,16 +132,45 @@ export function createHolidayBank(deps: HolidayBankDeps): HolidayBank {
     row.append(el("span", "wx-srv-bank-trip-name", trip.destination.name));
     row.append(el("span", "wx-srv-bank-trip-where", [trip.destination.region, trip.unitName].filter((s) => s !== "").join(", ")));
     const line = trip.headline ?? trip.destination.blurb;
-    if (line !== "") row.append(el("span", "wx-srv-bank-trip-headline", line));
+    if (trip.gone === true) row.append(el("span", "wx-srv-bank-trip-gone-note", "No longer on the map"));
+    else if (line !== "") row.append(el("span", "wx-srv-bank-trip-headline", line));
+    if (trip.at !== undefined) row.append(el("span", "wx-srv-bank-trip-date", `Banked ${formatBankedDate(trip.at)}`));
+    if (trip.gone === true) {
+      row.disabled = true;
+      row.classList.add("wx-srv-bank-trip-gone");
+    }
     row.addEventListener("click", () => {
       view.close();
-      deps.openTrip(trip.seq);
+      if (deps.openPlace !== undefined) deps.openPlace(trip);
+      else deps.openTrip(trip.seq);
     });
     return row;
   }
 
+  /** A row with a Copy link action beside it (public page): the trip button plus a sibling button. */
+  function tripRow(trip: BankTrip): HTMLElement {
+    const button = tripButton(trip);
+    const target = deps.shareLink?.(trip) ?? null;
+    if (target === null) return button;
+    const wrap = el("div", "wx-srv-bank-trip-row");
+    const copy = el("button", "wx-srv-bank-trip-copy", "Copy link");
+    copy.type = "button";
+    copy.setAttribute("data-srv-gesture-boundary", "");
+    copy.setAttribute("aria-label", `Copy the link to ${trip.destination.name}`);
+    copy.addEventListener("click", () => {
+      void copyText(deps.win ?? window, doc, target.url).then((ok) => {
+        copy.textContent = ok ? "Link copied" : "Couldn't copy";
+        setTimer(() => {
+          copy.textContent = "Copy link";
+        }, 1800);
+      });
+    });
+    wrap.append(button, copy);
+    return wrap;
+  }
+
   function draw(): void {
-    trips.replaceChildren(...current.map(tripButton));
+    trips.replaceChildren(...current.map(tripRow));
     refreshChrome();
   }
 
@@ -119,17 +179,20 @@ export function createHolidayBank(deps: HolidayBankDeps): HolidayBank {
       again = true;
       return;
     }
-    const session = deps.getSession();
-    if (session === null) return;
+    const source = deps.source;
+    const session = source === undefined ? (deps.getSession?.() ?? null) : null;
+    const read: (() => Promise<BankResult> | BankResult) | null =
+      source !== undefined ? () => source.load() : session !== null ? () => fetchBank(session) : null;
+    if (read === null) return;
     const started = generation;
     busy = true;
     error.hidden = true;
     refreshChrome();
     let result: BankResult;
     try {
-      result = await fetchBank(session);
+      result = await read();
     } catch (thrown) {
-      if (started === generation && thrown instanceof ServerLockedError) deps.hooks.lockNow("unauthorized");
+      if (started === generation && thrown instanceof ServerLockedError) deps.hooks?.lockNow("unauthorized");
       result = { ok: false, kind: "unavailable" };
     }
     if (started !== generation) return;

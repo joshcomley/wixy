@@ -51,6 +51,7 @@ import { prepareLanding } from "./land";
 import { createGlobeRenderer, type GlobeRenderer } from "./globe";
 import { createLiveReceiver, createLiveSender, type LiveReceiver, type LiveSender } from "./live";
 import type { AdventureModel } from "./model";
+import { canNativeShare, copyText, nativeShare, type ShareTarget } from "./shareLink";
 import { AdventureScene, type Hud, type SpinIntent, type StopIntent } from "./scene";
 import type { World } from "./world";
 
@@ -64,25 +65,46 @@ export interface AdventureGameApi {
   postLive(frame: AdventureLiveFrame): Promise<LivePostResult | "locked">;
 }
 
+/** What the pane calls: everything of `AdventureGameApi`, but the live trail may be absent (the public
+ * single-player page has no partner to relay a finger to: nothing is sent or received). */
+export type AdventureGamePaneApi = Omit<AdventureGameApi, "postLive"> & { readonly postLive?: AdventureGameApi["postLive"] };
+
 export interface AdventureGameDeps {
   readonly document: Document;
   readonly win: Window;
   readonly model: AdventureModel;
-  /** The shared tab bar: this pane registers itself as the game "adventure". */
-  readonly tabs: GameTabs;
-  /** The shared chat FAB / floating message / quick reply: this pane embeds one overlay of it. */
-  readonly float: GameFloat;
-  readonly hooks: Pick<LockHooks, "suspend" | "lockNow">;
-  readonly api: AdventureGameApi;
+  /**
+   * The shared tab bar: this pane registers itself as the game "adventure". ABSENT on the public
+   * single-player page (spec/adventure-public §2.4): the pane is then STANDALONE - it shows itself
+   * when `open(seq)` is called, has no close button, and is redrawn by `refresh()` when its model
+   * changes (there is no tab frame to do either).
+   */
+  readonly tabs?: GameTabs;
+  /** The shared chat FAB / floating message / quick reply: this pane embeds one overlay of it. Absent: none. */
+  readonly float?: GameFloat;
+  /** The chat's idle lock. Absent (public page): nothing to suspend and no lock to trigger. */
+  readonly hooks?: Pick<LockHooks, "suspend" | "lockNow">;
+  readonly api: AdventureGamePaneApi;
   /** The world map (loaded once, lazily); rejects when it cannot be fetched. */
   loadWorld(): Promise<World>;
   /** Test seam: the globe renderer (default `createGlobeRenderer`). */
   createRenderer?(canvas: HTMLCanvasElement, world: World): GlobeRenderer;
-  /** The round's anchor message, or undefined once it is gone (deleted, wiped). */
-  roundMessage(seq: number): Message | undefined;
-  /** This person's display name, and the other person's when it is known. */
+  /** The round's anchor message, or undefined once it is gone (deleted, wiped). Only the tab frame asks. */
+  roundMessage?(seq: number): Message | undefined;
+  /** This person's display name, and the other person's when it is known (absent: no partner). */
   viewer(): string | null;
-  partner(): string | null;
+  partner?(): string | null;
+  /**
+   * The short link to the place of the round on show (null when it has none): when supplied the title
+   * row carries a Copy link action (and Share where the browser has `navigator.share`) once a place
+   * is chosen. Public page only.
+   */
+  shareLink?(view: AdventureView): ShareTarget | null;
+  /**
+   * Clears everything this device remembers (the public page's bank and never-again list). When
+   * supplied, Options gains "Forget everything on this device", behind an inline confirm.
+   */
+  forgetEverything?(): void | Promise<void>;
   /** Starts the next adventure (the header's New, and Play again). */
   startNextRound(): void;
   /** Opens the Holiday bank screen. */
@@ -109,6 +131,8 @@ export interface AdventureGame {
   close(): void;
   /** The open round, or null. */
   gameSeq(): number | null;
+  /** Standalone pane only: the model changed, redraw the open round. A tab-hosted pane is redrawn by the tab frame. */
+  refresh(): void;
   /** An `adventure_live` stream frame (the other person's finger). */
   handleLive(frame: AdventureLiveFrame): void;
 }
@@ -119,6 +143,18 @@ export const ROULETTE_SUSPEND_CAP_MS = 90_000;
 const SPIN_POST_ATTEMPTS = 3;
 const SPIN_POST_RETRY_MS = 800;
 const STOP_DEBOUNCE_MS = 700;
+const PACK_PENDING_SUB = "This can take a couple of minutes.";
+
+/** The finger-trail sender of a pane with nowhere to post it (the public page): every call is a no-op. */
+const QUIET_SENDER: LiveSender = {
+  begin: () => "",
+  push: () => {},
+  end: () => {},
+  cancel: () => {},
+  shutdown: () => {},
+  owns: () => false,
+  busy: false,
+};
 
 export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const doc = deps.document;
@@ -149,8 +185,10 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   // -- Pane DOM -------------------------------------------------------------------------------------------
 
+  const standalone = deps.tabs === undefined;
   const pane = el("div", "wx-srv-game wx-srv-adv");
   pane.setAttribute("data-game", "adventure");
+  if (standalone) pane.dataset["solo"] = "1";
   pane.hidden = true;
 
   const card = el("div", "wx-srv-adv-card");
@@ -176,8 +214,23 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   barDecide.hidden = true;
   barDecide.append(yay, nay);
   const barActions = el("div", "wx-srv-adv-bar-actions");
-  barActions.append(optionsButton, bankButton, newButton, closeButton);
-  bar.append(barDecide, barActions);
+  barActions.append(optionsButton, bankButton, newButton);
+  // A standalone (public) pane has no chat to go back to, so no close button.
+  if (!standalone) barActions.append(closeButton);
+  // Copy link / Share (public page only): beside Yay / Nay once a place is chosen.
+  const copyLinkButton = button("wx-srv-adv-chip wx-srv-adv-copylink", "Copy the link to this place", "", () => void copyShareLink());
+  copyLinkButton.append(el("span", "wx-srv-adv-copylink-text", "Copy link"), el("span", "wx-srv-adv-copylink-glyph", "\u{1F517}"));
+  copyLinkButton.querySelector(".wx-srv-adv-copylink-glyph")?.setAttribute("aria-hidden", "true");
+  const shareButton = button("wx-srv-adv-chip wx-srv-adv-share", "Share this place", "", () => void shareShareLink());
+  shareButton.append(el("span", "wx-srv-adv-share-text", "Share"), el("span", "wx-srv-adv-share-glyph", "↗"));
+  shareButton.querySelector(".wx-srv-adv-share-glyph")?.setAttribute("aria-hidden", "true");
+  shareButton.hidden = !canNativeShare(win);
+  const barShare = el("div", "wx-srv-adv-bar-share");
+  barShare.hidden = true;
+  barShare.append(copyLinkButton, shareButton);
+  bar.append(barDecide);
+  if (deps.shareLink !== undefined) bar.append(barShare);
+  bar.append(barActions);
 
   // The stage: the globe and its overlays.
   const canvas = doc.createElement("canvas");
@@ -214,7 +267,8 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const packPending = el("div", "wx-srv-adv-pk-pending");
   const packPendingText = el("div", "wx-srv-adv-pk-pending-text");
   const packPendingTitle = el("b", "", "Preparing holiday pack… ");
-  packPendingText.append(packPendingTitle, packTimer, el("div", "wx-srv-adv-pk-pending-sub", "This can take a couple of minutes."));
+  const packPendingSub = el("div", "wx-srv-adv-pk-pending-sub", PACK_PENDING_SUB);
+  packPendingText.append(packPendingTitle, packTimer, packPendingSub);
   const spinner = el("span", "wx-srv-adv-spinner");
   spinner.setAttribute("aria-hidden", "true");
   packPending.append(spinner, packPendingText);
@@ -308,7 +362,24 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     "wx-srv-adv-opt-credit",
     "Map imagery: NASA Visible Earth, Blue Marble Next Generation (July); Natural Earth II shaded relief",
   );
-  sheetCard.append(sheetHead, advisedRow, advisedList, styleRow, imageryCredit, optionsStatus);
+  // "Forget everything on this device" (public page only): the bank and the never-again list live in this
+  // browser, so Options can clear them - behind an inline confirm (a tap can slip).
+  const forgetRow = el("div", "wx-srv-adv-opt-block wx-srv-adv-forget");
+  const forgetAsk = el("div", "wx-srv-adv-forget-ask");
+  forgetAsk.hidden = true;
+  const forgetStart = button("wx-srv-adv-chip wx-srv-adv-forget-start", "Forget everything on this device", "Forget everything on this device", () => askForget());
+  const forgetYes = button("wx-srv-adv-chip wx-srv-adv-forget-yes", "Yes, forget everything", "Yes, forget everything", () => void doForget());
+  const forgetNo = button("wx-srv-adv-chip wx-srv-adv-forget-no", "Keep everything", "Keep everything", () => cancelForget());
+  const forgetButtons = el("div", "wx-srv-adv-forget-buttons");
+  forgetButtons.append(forgetYes, forgetNo);
+  forgetAsk.append(
+    el("div", "wx-srv-adv-opt-help", "This empties your Holiday bank and your never-again list on this device, so every place can come up again. It can't be undone."),
+    forgetButtons,
+  );
+  forgetRow.append(el("div", "wx-srv-adv-opt-title", "Forget everything"), forgetStart, forgetAsk);
+  sheetCard.append(sheetHead, advisedRow, advisedList, styleRow);
+  if (deps.forgetEverything !== undefined) sheetCard.append(forgetRow);
+  sheetCard.append(imageryCredit, optionsStatus);
   optionsSheet.append(sheetCard);
   optionsSheet.addEventListener("pointerdown", (event) => {
     if (event.target === optionsSheet) closeOptions();
@@ -319,14 +390,17 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   const column = el("div", "wx-srv-adv-scroll");
   column.append(stage, packSection);
   const body = el("div", "wx-srv-adv-body");
-  body.append(
-    column,
-    deps.float.createOverlay({
-      fabLabel: "Open this destination's chat",
-      popupTitle: "Adventure chat",
-      item: () => deps.tabs.seqOf("adventure"),
-    }),
-  );
+  body.append(column);
+  const tabs = deps.tabs;
+  if (deps.float !== undefined && tabs !== undefined) {
+    body.append(
+      deps.float.createOverlay({
+        fabLabel: "Open this destination's chat",
+        popupTitle: "Adventure chat",
+        item: () => tabs.seqOf("adventure"),
+      }),
+    );
+  }
   card.append(bar, body, dock);
   pane.append(card, packPanel.viewer, optionsSheet);
 
@@ -334,6 +408,10 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   const random = deps.random ?? Math.random;
   const newId = deps.newId ?? (() => (win.crypto?.randomUUID?.() ?? `${Date.now()}-${random().toString(36).slice(2)}`));
+  /** Standalone pane only: the round on show (the tab frame holds it for a tab-hosted pane). */
+  let standaloneSeq: number | null = null;
+  /** The short link of the place on show (public page only), kept for the Copy link / Share buttons. */
+  let currentShare: ShareTarget | null = null;
   let world: World | null = null;
   let worldPromise: Promise<void> | null = null;
   let worldFailed = false;
@@ -362,14 +440,17 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   // Live trail: the sender posts this screen's own drag; the receiver turns the other screen's into a
   // turning globe and a stroke.
-  const sender: LiveSender = createLiveSender({
-    post: (frame) => deps.api.postLive(frame),
-    onLocked: () => deps.hooks.lockNow("unauthorized"),
-    setTimeout: (cb, ms) => clock.setTimeout(cb, ms),
-    clearTimeout: (id) => clock.clearTimeout(id),
-    now: () => clock.now(),
-    newId,
-  });
+  const sender: LiveSender =
+    deps.api.postLive === undefined
+      ? QUIET_SENDER
+      : createLiveSender({
+          post: (frame) => deps.api.postLive?.(frame) ?? Promise.resolve<LivePostResult>({ kind: "failed" }),
+          onLocked: () => deps.hooks?.lockNow("unauthorized"),
+          setTimeout: (cb, ms) => clock.setTimeout(cb, ms),
+          clearTimeout: (id) => clock.clearTimeout(id),
+          now: () => clock.now(),
+          newId,
+        });
   const receiver: LiveReceiver = createLiveReceiver({
     isOwn: (clientId) => sender.owns(clientId),
     context: {
@@ -437,7 +518,8 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       serverNowS: () => deps.model.serverNowS(),
       random,
       viewer: deps.viewer,
-      partner: deps.partner,
+      partner: deps.partner ?? (() => null),
+      solo: standalone,
     });
     setNote(null);
     measureStage(true);
@@ -538,7 +620,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     }
     const capped = rouletteSince !== null && nowMs - rouletteSince > ROULETTE_SUSPEND_CAP_MS;
     const wanted = visible && hud.animating && !capped;
-    if (wanted && releaseSuspend === null) releaseSuspend = deps.hooks.suspend("adventureAnimating");
+    if (wanted && releaseSuspend === null) releaseSuspend = deps.hooks?.suspend("adventureAnimating") ?? null;
     else if (!wanted && releaseSuspend !== null) {
       releaseSuspend();
       releaseSuspend = null;
@@ -593,6 +675,10 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     const action = hud.action === "decide" && rejectPending ? "ask" : hud.action;
     setAttr("action", card, "data-action", action);
     barDecide.hidden = action !== "decide";
+    if (deps.shareLink !== undefined) {
+      currentShare = hud.chosen !== null && lastView !== null ? deps.shareLink(lastView) : null;
+      barShare.hidden = currentShare === null;
+    }
     if (hud.action !== "decide" && rejectPending) rejectPending = false;
     if (hud.action === "stop") {
       setText("stopLabel", stopButton, hud.stopLive ? "Stop" : "Get ready…");
@@ -621,6 +707,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
         packSince.set(view.seq, since);
       }
       setText("timer", packTimer, formatElapsed((Date.now() - since) / 1000));
+      setText("pendingSub", packPendingSub, view.pack.notice ?? PACK_PENDING_SUB);
     }
     if (view !== null && packMode === "panel" && hud.chosen !== null) {
       packPanel.render({ seq: view.seq, place: hud.chosen.dest, unitName: hud.chosen.unitName, pack: view.pack });
@@ -763,7 +850,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     try {
       return await deps.model.run(call);
     } catch (error) {
-      if (error instanceof ServerLockedError) deps.hooks.lockNow("unauthorized");
+      if (error instanceof ServerLockedError) deps.hooks?.lockNow("unauthorized");
       return { ok: false, kind: "unavailable" };
     }
   }
@@ -900,6 +987,51 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     deps.afterChange();
   }
 
+  // -- Copy link / Share (public page) -----------------------------------------------------------------------------
+
+  async function copyShareLink(): Promise<void> {
+    const target = currentShare;
+    if (target === null) return;
+    const ok = await copyText(win, doc, target.url);
+    // When the browser refuses (a blocked clipboard) the link is shown so it can still be copied by hand.
+    notify(ok ? "Link copied" : `Copy this link: ${target.url}`);
+  }
+
+  async function shareShareLink(): Promise<void> {
+    const target = currentShare;
+    if (target === null) return;
+    const result = await nativeShare(win, target);
+    if (result === "failed") await copyShareLink();
+  }
+
+  // -- Forget everything (public page) --------------------------------------------------------------------------------
+
+  function askForget(): void {
+    forgetAsk.hidden = false;
+    forgetStart.hidden = true;
+  }
+
+  function cancelForget(): void {
+    forgetAsk.hidden = true;
+    forgetStart.hidden = false;
+  }
+
+  async function doForget(): Promise<void> {
+    const forgetEverything = deps.forgetEverything;
+    if (forgetEverything === undefined) return;
+    forgetYes.disabled = true;
+    try {
+      await forgetEverything();
+      optionsStatus.textContent = "Done: this device has forgotten your bank and your never-again list.";
+    } catch {
+      optionsStatus.textContent = "Couldn't clear that. Try again.";
+    }
+    forgetYes.disabled = false;
+    cancelForget();
+    const seq = currentSeq();
+    if (seq !== null) deps.model.refetch(seq);
+  }
+
   // -- Options -----------------------------------------------------------------------------------------------------
 
   let settings: AdventureSettings | null = null;
@@ -943,7 +1075,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
     try {
       result = await deps.api.getSettings();
     } catch (error) {
-      if (error instanceof ServerLockedError) deps.hooks.lockNow("unauthorized");
+      if (error instanceof ServerLockedError) deps.hooks?.lockNow("unauthorized");
       result = { ok: false, kind: "unavailable" };
     }
     if (started !== generation || optionsSheet.hidden) return;
@@ -959,6 +1091,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   function closeOptions(): void {
     optionsSheet.hidden = true;
+    cancelForget();
   }
 
   advisedInput.addEventListener("change", () => {
@@ -971,7 +1104,7 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
       try {
         result = await deps.api.putSettings(wanted);
       } catch (error) {
-        if (error instanceof ServerLockedError) deps.hooks.lockNow("unauthorized");
+        if (error instanceof ServerLockedError) deps.hooks?.lockNow("unauthorized");
         result = { ok: false, kind: "unavailable" };
       }
       if (started !== generation) return;
@@ -1052,15 +1185,21 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
   }
 
   function close(): void {
-    deps.tabs.close("adventure");
+    if (deps.tabs !== undefined) {
+      deps.tabs.close("adventure");
+      return;
+    }
+    standaloneSeq = null;
+    pane.hidden = true;
+    forget();
   }
 
-  deps.tabs.register({
+  deps.tabs?.register({
     key: "adventure",
     tabLabel: "Adventure",
     tabAriaLabel: "Adventure Time game",
     pane,
-    exists: (seq) => deps.roundMessage(seq) !== undefined,
+    exists: (seq) => deps.roundMessage?.(seq) !== undefined,
     refresh: refreshPane,
     onShow: () => {
       visible = true;
@@ -1080,10 +1219,22 @@ export function createAdventureGame(deps: AdventureGameDeps): AdventureGame {
 
   return {
     pane,
-    open: (seq) => deps.tabs.open("adventure", seq),
-    offer: (seq) => deps.tabs.offer("adventure", seq),
+    open(seq) {
+      if (deps.tabs !== undefined) {
+        deps.tabs.open("adventure", seq);
+        return;
+      }
+      // Standalone: there is no tab frame to show the pane, so this does it.
+      standaloneSeq = seq;
+      pane.hidden = false;
+      refreshPane(seq);
+    },
+    offer: (seq) => deps.tabs?.offer("adventure", seq),
     close,
-    gameSeq: () => deps.tabs.seqOf("adventure"),
+    gameSeq: () => (deps.tabs !== undefined ? deps.tabs.seqOf("adventure") : standaloneSeq),
+    refresh() {
+      if (deps.tabs === undefined && standaloneSeq !== null) refreshPane(standaloneSeq);
+    },
     handleLive(frame) {
       if (!visible) return;
       receiver.apply(frame, clock.now());

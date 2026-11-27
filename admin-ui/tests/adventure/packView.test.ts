@@ -53,6 +53,14 @@ describe("the holiday pack panel", () => {
     }
   });
 
+  it("every link, the photo credit and the viewer source included, is nofollow (spec/adventure-public 2.6)", () => {
+    const { panel } = make();
+    render(panel, ready());
+    const links = [...panel.element.querySelectorAll<HTMLAnchorElement>("a")];
+    expect(links.length).toBeGreaterThan(0);
+    for (const a of links) expect(a.rel.split(" ").sort()).toEqual(["nofollow", "noopener", "noreferrer"]);
+  });
+
   it("sets model-written text as text, never as markup", () => {
     const { panel } = make();
     const hostile = parsePack({

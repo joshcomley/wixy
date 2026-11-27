@@ -8,6 +8,8 @@ on:
 jobs:
   python:
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding it for GitHub's 6-hour default (~5 min when healthy).
+    timeout-minutes: 30
     steps:
       # Full history: test_cookout_modes_overlap.py loads the deployed v21 code from the
       # pinned commit 4d2b005c in git history (it fails, never skips, if absent).
@@ -115,6 +117,8 @@ jobs:
 
   e2e:
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding it for GitHub's 6-hour default (~10 min when healthy).
+    timeout-minutes: 45
     needs: [python, frontend]
     steps:
       - uses: actions/checkout@v4
@@ -156,6 +160,8 @@ jobs:
   # broken image should never merge in the first place).
   image-boot-proof:
     runs-on: ubuntu-latest
+    # A hang fails the job instead of holding it for GitHub's 6-hour default (~4 min when healthy).
+    timeout-minutes: 30
     needs: [python, frontend]
     steps:
       - uses: actions/checkout@v4
