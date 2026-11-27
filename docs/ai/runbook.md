@@ -164,8 +164,10 @@ at startup, one project in v1 but nothing assumes it — Inv 1):
 - **Env vars** (runtime, in `Storage\.env` unless noted): `WIXY_PORT`, `WIXY_ENV`,
   `WIXY_STORAGE_ROOT` (env-only, chicken/egg), `WIXY_SLOT` (set by launcher), `WIXY_DEV_NO_AUTH`
   (dev/test bypass — refuses to start if set while `WIXY_ENV=prod`, Inv 12),
-  `WIXY_CF_TEAM_DOMAIN` + `WIXY_CF_ACCESS_AUD` (consumed by the JWT middleware). `.env` values are overridden
-  by process env.
+  `WIXY_CF_TEAM_DOMAIN` + `WIXY_CF_ACCESS_AUD` (consumed by the JWT middleware),
+  `WIXY_ADVENTURE_PUBLIC_HOST` (the public Adventure Time host; off when empty — see
+  [Public Adventure Time](#public-adventure-time-at-adventurecinnamonsuk-workspace-00065-inv-61-decisions00216)).
+  `.env` values are overridden by process env.
 - **CF Access**: `/admin*` + `/api/admin*` sit behind a **dedicated, isolated** Access app
   (`Wixy Admin (Cottage Aesthetics)`), scoped to only `ca.cinnamons.uk/admin` +
   `/api/admin` — the public `/` has no Access. Its AUD differs from every other fleet app's, so
@@ -178,6 +180,33 @@ at startup, one project in v1 but nothing assumes it — Inv 1):
   tunnel=`d5e53534-66c0-4076-a695-3841826aa76f`.
 - **Git auth**: the sentinel clone URL `https://x-access-token@github.com/joshcomley/wixy.git`
   (fleet askpass). Every git subprocess passes `-c credential.helper=` + a 60s timeout.
+
+## Public Adventure Time at `adventure.cinnamons.uk` (workspace 00065, Inv 61, decisions/00216)
+
+The public, no-login Adventure Time is served by the **same wixy process** as `ca.cinnamons.uk`, on its own
+hostname, behind a host gate (`docs/ai/adventure-public.md`). It is **off unless configured**:
+
+- **Env var** (`Storage\.env`, fleet edition only; the standalone edition refuses to start with it set):
+  `WIXY_ADVENTURE_PUBLIC_HOST=adventure.cinnamons.uk` — a bare, lower-case host name (no scheme, port or path).
+  Unset/empty = the gate and the public routes do not exist. Changing it needs a restart
+  (`POST http://127.0.0.1:9999/restart/Wixy`).
+- **Hosting.** `adventure.cinnamons.uk` → the hub's cloudflared ingress → `http://127.0.0.1:9380` (the same origin
+  as `ca.cinnamons.uk`; the gate tells them apart by `Host`, which cloudflared preserves). DNS via
+  `cloudflared tunnel route dns <tunnel> adventure.cinnamons.uk`. **No Cloudflare Access app** — the host is
+  deliberately public (follow the `commission-subdomain` skill; a new hostname is public until an Access app is
+  created, so none is created here). Check: `curl -sI https://adventure.cinnamons.uk/admin` must be `404` with
+  `content-security-policy` and `x-robots-tag: noindex`; `curl -s https://adventure.cinnamons.uk/api/bank | head -c 120`.
+- **Deploy** is the normal merge-to-`main` Slots swap; the env var is deployment configuration, not code.
+- **Storage.** `Storage/projects/<slug>/adventure-public/` — `public.db` (+ `-wal`/`-shm`), `pictures/<id>/full.jpg` +
+  `thumb.jpg`, `research/` (cmd's empty working folder). A rebuildable cache: deleting the folder only means packs are
+  researched again. It is never in `server.db` and not in the backup allowlist.
+- **Cost / abuse.** At most 30 new research runs per rolling hour overall, 6 per client address, one run per
+  destination ever (plus 10-minute-doubling retries, 3 per 24 h). To see what the public game has researched:
+  `sqlite3 public.db "select state, count(*) from packs group by 1"`. To force a place to be researched again:
+  `delete from packs where destination_id = '<id>'` (its pictures cascade; remove `pictures/<id>` dirs the sweep then
+  finds orphaned within the hour).
+- **cmd calls** use `caller: wixy-adventure-public-pack` (the private game's is `wixy-adventure-pack`), so cmd's run
+  ledger tells them apart.
 
 ## Server-chat media and erasure
 

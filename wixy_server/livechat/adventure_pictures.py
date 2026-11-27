@@ -740,10 +740,16 @@ class WebPictureFinder:
         *,
         endpoints: WikimediaEndpoints | None = None,
         budget_s: float = JOB_BUDGET_S,
+        allow_site_images: bool = True,
     ) -> None:
         self._fetcher = fetcher
         self._endpoints = endpoints if endpoints is not None else WikimediaEndpoints()
         self._budget_s = budget_s
+        self.allow_site_images = allow_site_images
+        """Source 2 (a venue's own page `og:image` / `twitter:image`) is used only when true. The
+        private game keeps the default; the PUBLIC game (workspace 00065) passes `False`, so only
+        freely-licensed Wikimedia Commons files, with their credit and licence, are ever published:
+        no venue page is then fetched at all."""
         self._decode_limiter: anyio.CapacityLimiter | None = None  # made inside the event loop
 
     async def aclose(self) -> None:
@@ -973,7 +979,10 @@ class WebPictureFinder:
         for an original here: a page (or an image tag) on a Wikimedia host is not fetched
         directly — an image tag naming a Commons file goes through the same API thumbnail as
         source 1, any other Wikimedia address is skipped, and the image fetch itself refuses to
-        be redirected onto Wikimedia."""
+        be redirected onto Wikimedia. With `allow_site_images` off (the public game) this source
+        does not exist: nothing is fetched."""
+        if not self.allow_site_images:
+            return None
         if self._endpoints.is_wikimedia_host(_url_host(url)):
             return None
         page_url, meta = await self.html_get(url)
@@ -1162,7 +1171,7 @@ class _Hunt:
                     "wikipedia",
                     lambda: self._finder.wikipedia_picture(title),
                 )
-            if picture is None and slot.url is not None:
+            if picture is None and slot.url is not None and self._finder.allow_site_images:
                 url = slot.url
                 picture = await self._attempt(
                     f"{slot.key} site",

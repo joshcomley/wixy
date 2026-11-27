@@ -26,6 +26,10 @@ from fastapi.exceptions import HTTPException as FastAPIHTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from wixy_server.adventure_public.gate import AdventurePublicHostGate
+from wixy_server.adventure_public.limits import PublicLimits
+from wixy_server.adventure_public.runner import PUBLIC_PACK_CALLER
+from wixy_server.adventure_public.service import AdventurePublicService, build_adventure_public
 from wixy_server.ai.anthropic_backend import AnthropicAIBackend
 from wixy_server.ai.backend import AIBackend, CmdAIBackend
 from wixy_server.auth import JwksCache, build_admin_auth_middleware, jwks_url, verify_access_jwt
@@ -116,6 +120,7 @@ from wixy_server.redirects import load_redirects
 from wixy_server.registry import load_registry
 from wixy_server.robots_header import build_robots_header_middleware
 from wixy_server.routes_admin_api import router as admin_api_router
+from wixy_server.routes_adventure_public import build_adventure_public_app
 from wixy_server.routes_ai import router as ai_router
 from wixy_server.routes_chat import StreamTiming
 from wixy_server.routes_chat import router as chat_router
@@ -198,6 +203,12 @@ def create_app(
     adventure_pack_timing: PackTiming | None = None,
     adventure_picture_finder: AdventurePictureFinder | None = None,
     adventure_picture_timing: PictureTiming | None = None,
+    adventure_public_researcher: AdventureResearcher | None = None,
+    adventure_public_picture_finder: AdventurePictureFinder | None = None,
+    adventure_public_pack_timing: PackTiming | None = None,
+    adventure_public_picture_timing: PictureTiming | None = None,
+    adventure_public_limits: PublicLimits | None = None,
+    adventure_public_static_dir: Path | None = None,
     cookout_timing: CookoutTiming | None = None,
     cookout_bank: CookoutBankLike | None = None,
     cookout_runner: CookoutRunner | None = None,
@@ -267,6 +278,17 @@ def create_app(
     also injects a finder. Standalone / no researcher / no media pipeline: a pack has no pictures.
     `adventure_picture_timing` shortens how long a `pending` picture wait must last before the
     supervised sweep re-runs its hunt, and how often the sweep looks (tests).
+    `adventure_public_*` (workspace 00065, spec/adventure-public): the seams of the PUBLIC, no-login
+    Adventure Time host, which exists only when `WIXY_ADVENTURE_PUBLIC_HOST` is set (then the host
+    gate is installed outermost and the public routes are served on that host alone; unset, none of
+    it exists). `adventure_public_researcher` / `adventure_public_picture_finder` default to a
+    `CmdAdventureResearcher` (caller `wixy-adventure-public-pack`) and a Commons-only
+    `WebPictureFinder` ONLY on the same default path as the private game (fleet edition, cmd AI
+    backend, no researcher injected into either game); an injected researcher never reaches the
+    internet unless the test also injects a finder. `adventure_public_pack_timing` /
+    `adventure_public_picture_timing` / `adventure_public_limits` shorten the pacing, the picture
+    sweep and the rate limits (tests); `adventure_public_static_dir` points at the client bundle
+    directory (default `wixy_server/static/adventure-public`).
     """
     settings = load_settings(storage_root)
     registry = load_registry(wixy_repo_root)
@@ -404,6 +426,55 @@ def create_app(
     resolved_picture_finder: AdventurePictureFinder | None = (
         adventure_picture_finder if adventure_picture_finder is not None else owned_picture_finder
     )
+
+    # Adventure Time on an open URL (workspace 00065, Inv 61): everything public lives in its own
+    # service (own store, own research slot, own picture job) and exists only with the host set.
+    adventure_public: AdventurePublicService | None = None
+    if settings.adventure_public_host:
+        public_default_path = (
+            adventure_researcher is None
+            and adventure_public_researcher is None
+            and isinstance(resolved_ai_backend, CmdAIBackend)
+        )
+        resolved_public_researcher: AdventureResearcher | None = (
+            adventure_public_researcher
+            if adventure_public_researcher is not None
+            else (
+                CmdAdventureResearcher(chat_client, caller=PUBLIC_PACK_CALLER)
+                if public_default_path
+                else None
+            )
+        )
+        owned_public_finder: WebPictureFinder | None = None
+        if (
+            adventure_public_picture_finder is None
+            and public_default_path
+            and resolved_public_researcher is not None
+        ):
+            # Commons only: no venue page is ever fetched for a public pack (licensing).
+            owned_public_finder = WebPictureFinder(SafeFetcher(), allow_site_images=False)
+        adventure_public = build_adventure_public(
+            host=settings.adventure_public_host,
+            paths=paths,
+            bank=resolved_adventure_bank,
+            researcher=resolved_public_researcher,
+            finder=(
+                adventure_public_picture_finder
+                if adventure_public_picture_finder is not None
+                else owned_public_finder
+            ),
+            owned_finder=owned_public_finder,
+            pack_timing=adventure_public_pack_timing,
+            picture_timing=adventure_public_picture_timing,
+            limits=adventure_public_limits,
+            min_free_bytes=settings.server_min_free_bytes,
+            bundle_dir=(
+                adventure_public_static_dir
+                if adventure_public_static_dir is not None
+                else _STATIC_DIR / "adventure-public"
+            ),
+            shared_dir=_STATIC_DIR / "admin",
+        )
 
     def _picture_space_ok(size_bytes: int) -> bool:
         """Room for a pack's pictures: under the chat-media quota and above the free-space floor
@@ -566,6 +637,16 @@ def create_app(
             # The empty, non-git folder cmd runs the holiday-pack research in (it must exist
             # before cmd is asked to use it as a working directory).
             await anyio.to_thread.run_sync(livechat_adventure_runner.prepare_directory)
+        public_ready = False
+        if adventure_public is not None:
+            # A failure of the optional public game must never stop the private chat starting.
+            try:
+                await anyio.to_thread.run_sync(adventure_public.prepare)
+                public_ready = True
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "the public Adventure Time game could not prepare its storage — it is DISABLED"
+                )
 
         async def _run_watcher() -> None:
             await watch_upstream(
@@ -650,6 +731,32 @@ def create_app(
                 # pending longer than a hunt can take (a blue/green hand-off can stop the old
                 # side mid-hunt after this side's resume), ending a round whose hunts keep dying.
                 livechat_adventure_runner.supervise_pictures(background)
+                # The public game's own recovery, the same shape: resume a pack still `pending`,
+                # redo pictures the previous process left `pending`, and keep both supervised
+                # sweeps (stuck research, stuck picture hunts) going. Each step is guarded on its
+                # own: a startup resume that fails must not leave the sweeps (the very thing that
+                # heals what the resume could not) unstarted.
+                if adventure_public is not None and public_ready:
+                    public_runner = adventure_public.runner
+                    public_log = logging.getLogger(__name__)
+                    try:
+                        await public_runner.resume(background)
+                    except Exception:
+                        public_log.exception(
+                            "the public Adventure Time game could not resume its work"
+                        )
+                    try:
+                        public_runner.supervise_research(background)
+                    except Exception:
+                        public_log.exception(
+                            "the public Adventure Time research sweep could not be started"
+                        )
+                    try:
+                        public_runner.supervise_pictures(background)
+                    except Exception:
+                        public_log.exception(
+                            "the public Adventure Time picture sweep could not be started"
+                        )
                 # Cookout: resume any concept/recipe run the previous process left `pending`, and
                 # keep the supervised sweep (stale pictures, scratch cleanup) going.
                 if isinstance(resolved_cookout_runner, CmdCookoutRunner):
@@ -668,6 +775,8 @@ def create_app(
             await gh_client.aclose()
             if owned_picture_finder is not None:
                 await owned_picture_finder.aclose()
+            if adventure_public is not None:
+                await adventure_public.aclose()
             if resolved_pin_verifier is not None:
                 await resolved_pin_verifier.aclose()
             if resolved_transcriber is not None:
@@ -736,6 +845,7 @@ def create_app(
     app.state.livechat_cookout_bank = resolved_cookout_bank
     app.state.livechat_cookout_visuals = app_cookout_visuals
     app.state.livechat_cookout_runner = resolved_cookout_runner
+    app.state.adventure_public = adventure_public
 
     @app.exception_handler(FastAPIHTTPException)
     async def _http_exception_handler(_request: Request, exc: FastAPIHTTPException) -> JSONResponse:
@@ -752,6 +862,14 @@ def create_app(
 
     app.middleware("http")(admin_auth)
     app.middleware("http")(build_robots_header_middleware(indexable=project.indexable))
+    if adventure_public is not None:
+        # Registered LAST so it is the OUTERMOST middleware: a request for the public host never
+        # reaches the admin auth, the site, the internal routes or anything else (Inv 61).
+        app.add_middleware(
+            AdventurePublicHostGate,
+            host=adventure_public.host,
+            public_app=build_adventure_public_app(adventure_public),
+        )
 
     # Registration order matters: more specific routes/mounts first, the public
     # catch-all (`GET /{path:path}`) last, or it would shadow everything above it.

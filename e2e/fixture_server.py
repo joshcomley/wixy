@@ -92,6 +92,9 @@ E2E_DIR = Path(__file__).resolve().parent
 WIXY_REPO_ROOT = E2E_DIR.parent
 MINI_SITE_FIXTURE = WIXY_REPO_ROOT / "builder" / "tests" / "fixtures" / "mini-site"
 PORT = int(os.environ.get("WIXY_E2E_PORT", "8799"))
+# The host name the public Adventure Time game is served on (see `main`); adventure-public.spec.ts
+# derives the same name from the baseURL.
+PUBLIC_HOST = "localhost"
 
 # spec/server-chat/00-brief.md §11: "the fixture's FakeCmdServer registers a
 # made-up test PIN for the app key". Matches settings.py's own
@@ -106,6 +109,8 @@ sys.path.insert(0, str(WIXY_REPO_ROOT))
 
 from builder.build import build_site  # noqa: E402
 from builder.config import ProjectConfig  # noqa: E402
+from wixy_server.adventure_public.limits import PublicLimits  # noqa: E402
+from wixy_server.adventure_public.runner import PUBLIC_PACK_CALLER  # noqa: E402
 from wixy_server.chats import find_chat  # noqa: E402
 from wixy_server.checkout import current_sha, ensure_checkout  # noqa: E402
 from wixy_server.cmdchat import CmdChatClient  # noqa: E402
@@ -461,6 +466,13 @@ def main() -> None:
     # off in production (only the delivery coordinator's activation tool turns it on); only this
     # fixture enables it, so server-cookout-toastie.spec.ts can start one from the start sheet.
     os.environ["WIXY_COOKOUT_MODES"] = "toastie"
+    # spec/adventure-public (workspace 00065): the public, no-login Adventure Time is host-gated, so
+    # the fixture serves it on the host name `localhost`. Every other spec reaches this server as
+    # `127.0.0.1:<port>` (fixtures.ts's baseURL), a DIFFERENT Host for the gate: those specs keep
+    # the private app exactly as before, and only a request that names `localhost` gets the
+    # public one. Chromium resolves `localhost` to loopback with no resolver rule, and the server
+    # answers on 127.0.0.1 (a `::1` try is refused at once and Chromium falls back).
+    os.environ["WIXY_ADVENTURE_PUBLIC_HOST"] = PUBLIC_HOST
 
     cookout_visuals = _build_cookout_visuals(tmp_root)
     registry = load_registry(wixy_repo_root)
@@ -620,6 +632,17 @@ def main() -> None:
         },
     )
     fake_cmd_state.chat_spawn_response_text = json.dumps(fixture_pack)
+    # The PUBLIC game's researcher: the same fake cmd and the same canned pack after ~2 s, under the
+    # public game's own `caller`. NO public picture finder is injected: an injected researcher never
+    # reaches the internet unless a finder is injected too (create_app), so a public pack is text
+    # only here (`images: "none"`) and nothing leaves the box.
+    public_researcher = CmdAdventureResearcher(
+        CmdChatClient(
+            portal_base_url=f"http://127.0.0.1:{fake_pin_port}",
+            chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
+        ),
+        caller=PUBLIC_PACK_CALLER,
+    )
     adventure_picture_finder = WebPictureFinder(
         local_fetcher(fake_web_port), endpoints=open_web.endpoints
     )
@@ -638,6 +661,12 @@ def main() -> None:
             chats_base_url=f"http://127.0.0.1:{fake_pin_port}",
         ),
         adventure_picture_finder=adventure_picture_finder,
+        adventure_public_researcher=public_researcher,
+        adventure_public_pack_timing=PackTiming(poll_interval_s=0.5, spawn_gap_s=0.2),
+        # Rounds are cheap here and one worker's server serves the whole spec file: lift the
+        # per-visitor start limits so a visitor's 7th place of the hour is not a 429 (the limiter
+        # itself is pinned by the Python suite).
+        adventure_public_limits=PublicLimits(global_per_hour=10_000, per_ip_per_hour=10_000),
         # No E2E flow depends on the PERIODIC watcher tick (spec/04 §7) — E2E 6's
         # own simulated upstream commit fetches directly (this file's
         # `/test/simulate-upstream-commit`, decisions/00030), never waiting on
@@ -705,6 +734,19 @@ def main() -> None:
         test-only routes — measured live (a GET returned the site's "Page not
         found" page, not this handler)."""
         return {"pin": TEST_SERVER_PIN}
+
+    @app.post("/test/adventure-public/runs", include_in_schema=False)
+    async def _post_adventure_public_runs() -> dict[str, int]:
+        """adventure-public.spec.ts: how many research runs the fake cmd has been asked for under
+        the PUBLIC game's caller since the server started. A place served from the shared pack
+        cache must not add one."""
+        return {
+            "runs": sum(
+                1
+                for run in list(fake_cmd_state.chat_spawn_runs.values())
+                if run.body.get("caller") == PUBLIC_PACK_CALLER
+            )
+        }
 
     @app.post("/test/cookout/chef-delay", include_in_schema=False)
     async def _post_cookout_chef_delay(payload: dict[str, object]) -> dict[str, float]:

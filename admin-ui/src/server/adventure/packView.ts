@@ -5,7 +5,7 @@
 // picture opens a full-screen viewer with its credit.
 //
 // Everything user-visible is set via `textContent` (the pack is model-written text); a link is only ever
-// built from a URL `api.ts` already vetted as http(s) (`target=_blank rel="noopener noreferrer"`), and a
+// built from a URL `api.ts` already vetted as http(s) (`target=_blank rel="noopener noreferrer nofollow"`), and a
 // picture only from a URL on THIS origin — the server fetched every picture itself, so the browser never
 // contacts a third-party image host from a private chat. While the server is still finding pictures
 // (`images: "pending"`) placeholders hold their places; a pack without pictures lays out as plain text.
@@ -89,7 +89,7 @@ export function createPackPanel(deps: PackPanelDeps): PackPanel {
     const a = el("a", className, label);
     a.href = url;
     a.target = "_blank";
-    a.rel = "noopener noreferrer";
+    a.rel = "noopener noreferrer nofollow";
     a.setAttribute("data-srv-gesture-boundary", "");
     return a;
   }

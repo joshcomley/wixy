@@ -445,13 +445,16 @@ class CmdAdventureResearcher:
     `CmdChatClient` (`cmdchat.py` stays the only module that talks to cmd). The client is the app's
     own, so it is closed with the app."""
 
-    def __init__(self, client: CmdChatClient) -> None:
+    def __init__(self, client: CmdChatClient, *, caller: str = PACK_CALLER) -> None:
         self._client = client
+        self._caller = caller
+        """The `caller` cmd records the run under: the private game's `wixy-adventure-pack`, or the
+        public game's own (`adventure_public.runner.PUBLIC_PACK_CALLER`)."""
 
     async def start(self, *, prompt: str, cwd: Path) -> str:
         try:
             run = await self._client.spawn_run(
-                caller=PACK_CALLER,
+                caller=self._caller,
                 prompt=prompt,
                 model=PACK_MODEL,
                 effort=PACK_EFFORT,
@@ -492,6 +495,12 @@ class PackTiming:
     early_retry_s: float = 150.0
     concurrency: int = 2
     max_consecutive_poll_errors: int = 30
+    stale_sweep_interval_s: float = 300.0
+    """The PUBLIC game's research sweep looks for stuck `pending` packs this often (the private game
+    ignores it: it has no such sweep)."""
+    stale_margin_s: float = 300.0
+    """...and re-claims one only once its row has been untouched for `give_up_s` plus this margin,
+    so a job that is alive, or about to give up by itself, is never taken over."""
 
 
 class PictureJob(Protocol):

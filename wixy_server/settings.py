@@ -61,11 +61,17 @@ the chat-media quota and free-space floor, enforced at upload init.
 `WIXY_SERVER_UPLOAD_CHUNK_BYTES` (R11): the chunked-upload chunk size, clamped
 to a sane range. `WIXY_FFMPEG`/`WIXY_FFPROBE` (§7): absolute paths overriding
 `shutil.which` resolution, for a deploy where the binaries aren't on PATH.
+
+Adventure Time on an open URL (workspace 00065, spec/adventure-public/README.md §2.1):
+`WIXY_ADVENTURE_PUBLIC_HOST` — the bare host name the public, no-login game is served on
+(`adventure.cinnamons.uk` in production). Empty (the default) = the feature is off and the host
+gate is not installed at all; the standalone edition refuses a non-empty value at start.
 """
 
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -101,6 +107,9 @@ _DEFAULT_SERVER_MIN_FREE_BYTES = 1024 * _MB
 _DEFAULT_SERVER_UPLOAD_CHUNK_BYTES = 8 * _MB
 _MIN_SERVER_UPLOAD_CHUNK_BYTES = 64 * 1024
 _MAX_SERVER_UPLOAD_CHUNK_BYTES = 16 * _MB
+_PUBLIC_HOST_RE = re.compile(
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*"
+)
 _DEFAULT_WYR_POOL_SIZE = 100
 _MAX_WYR_POOL_SIZE = 1000
 
@@ -144,6 +153,29 @@ class Settings:
     # comma-separated). Absent/empty = Classic only; ids that are not a loaded mode are ignored with
     # a warning where the modes are known. Existing rounds of a loaded mode never depend on it.
     cookout_enabled_modes: frozenset[str] = frozenset()
+    # Adventure Time on an open URL (workspace 00065, spec/adventure-public/README.md §2.1): the
+    # lower-case host name the public, no-login game answers on (`WIXY_ADVENTURE_PUBLIC_HOST`).
+    # Empty = the feature is off (the default): nothing is mounted and the host gate is absent.
+    adventure_public_host: str = ""
+
+
+def parse_adventure_public_host(raw: str, *, edition: str) -> str:
+    """The validated, lower-cased `WIXY_ADVENTURE_PUBLIC_HOST` (`""` = off). A host name only: no
+    scheme, port, path or whitespace. The standalone edition refuses any non-empty value at start
+    (the public game needs cmd for its research, which only the fleet has)."""
+    host = raw.strip().lower()
+    if not host:
+        return ""
+    if edition == "standalone":
+        raise RuntimeError(
+            "WIXY_ADVENTURE_PUBLIC_HOST is set on the standalone edition — refusing to start "
+            "(the public Adventure Time game is fleet-only, spec/adventure-public §2.1)"
+        )
+    if not _PUBLIC_HOST_RE.fullmatch(host):
+        raise RuntimeError(
+            f"WIXY_ADVENTURE_PUBLIC_HOST={raw!r} is not a bare host name (no scheme, port or path)"
+        )
+    return host
 
 
 def load_settings(storage_root: Path) -> Settings:
@@ -258,5 +290,8 @@ def load_settings(storage_root: Path) -> Settings:
         ),
         cookout_enabled_modes=frozenset(
             part.strip().lower() for part in _get("WIXY_COOKOUT_MODES").split(",") if part.strip()
+        ),
+        adventure_public_host=parse_adventure_public_host(
+            _get("WIXY_ADVENTURE_PUBLIC_HOST"), edition=edition
         ),
     )
